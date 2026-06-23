@@ -1,0 +1,6 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+html, body { background: #1B1B1B; color: #f2f2f2; }
+* { -webkit-font-smoothing: antialiased; }
