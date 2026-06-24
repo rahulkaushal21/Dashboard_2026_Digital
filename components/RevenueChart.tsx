@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 export default function RevenueChart({ data }: { data: { month: string; revenue: number }[] }) {
   return (
     <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-      <div className="text-sm font-medium mb-4">Revenue trend</div>
+      <div className="text-sm font-medium mb-4">Revenue trend (last 3 months)</div>
       <ResponsiveContainer width="100%" height={260}>
         <AreaChart data={data}>
           <defs>
