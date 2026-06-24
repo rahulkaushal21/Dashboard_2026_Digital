@@ -24,9 +24,17 @@ export interface EmailSignal { id: number; company_name?: string; client_email?:
 
 async function read<T>(table: string, cols = '*'): Promise<T[] | null> {
   if (!supabase) return null
-  const { data, error } = await supabase.from(table).select(cols).limit(10000)
-  if (error || !data) return null
-  return data as T[]
+  // Paginate: Supabase caps each request at 1000 rows, so fetch in pages.
+  const PAGE = 1000
+  const all: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from(table).select(cols).range(from, from + PAGE - 1)
+    if (error) return all.length ? all : null
+    if (!data || data.length === 0) break
+    all.push(...(data as T[]))
+    if (data.length < PAGE) break
+  }
+  return all.length ? all : null
 }
 
 export async function getClients(): Promise<Client[]> {
