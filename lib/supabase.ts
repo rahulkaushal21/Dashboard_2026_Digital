@@ -30,20 +30,40 @@ async function read<T>(table: string, cols = '*'): Promise<T[] | null> {
 }
 
 export async function getClients(): Promise<Client[]> {
-  const live = await read<Client>('clients')
+  const live = await read<Client>('web_clients')
   return live && live.length ? live : (await import('./mockData')).mockClients
 }
+const isOpenQuote = (s?: string) => {
+  const v = (s || '').trim().toLowerCase()
+  return v !== '' && v !== 'confirmed' && v !== 'cancelled'
+}
 export async function getOpportunities(): Promise<Opportunity[]> {
-  const live = await read<Opportunity>('opportunities')
-  return live && live.length ? live : (await import('./mockData')).mockOpportunities
+  // Opportunities = email-sourced rows + open/pending rows from the Quotes tab.
+  const emailOpps = (await read<Opportunity>('opportunities')) || []
+  const quotes = (await read<any>('quotes',
+    'id, quote_id, subject_project, technology, added_date, agency, usd_value, status, business_type, geo, sales_person')) || []
+  const quoteOpps: Opportunity[] = quotes.filter(q => isOpenQuote(q.status)).map(q => ({
+    id: 1000000 + (q.id || 0),
+    company_name: q.agency,
+    is_new_client: /new/i.test(q.business_type || ''),
+    rfq: true,
+    rfq_status: /shared|approval/i.test(q.status || '') ? 'quoted' : 'pending',
+    geo: q.geo,
+    sales_person: q.sales_person,
+    source_subject: q.subject_project || q.technology || q.quote_id,
+    source_date: q.added_date,
+    summary: `Quote: ${q.status}${q.usd_value ? ' \u00b7 $' + Math.round(q.usd_value).toLocaleString() : ''}`,
+  }))
+  const all = [...emailOpps, ...quoteOpps]
+  return all.length ? all : (await import('./mockData')).mockOpportunities
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
-  const live = await read<{ company_name: string; booking_month: string; booking_amount: number }>('bookings',
+  const live = await read<{ company_name: string; booking_month: string; booking_amount: number }>('web_revenue',
     'company_name, booking_month, booking_amount')
   if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount }))
   return (await import('./mockData')).mockRevenue
 }
-export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('bookings', 'id, company_name, booking_month, booking_date, booking_amount, service_name, geo, sales_person, contact_email')) || [] }
+export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, geo, sales_person, contact_email')) || [] }
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
 export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
 
