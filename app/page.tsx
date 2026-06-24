@@ -74,6 +74,14 @@ export default function Dashboard() {
     return m
   }, [rev])
 
+  // Revenue trend chart always shows the trailing 3 months (current + 2 prior),
+  // independent of the KPI date filter.
+  const trendSeries = useMemo(() => {
+    const keys: string[] = []
+    for (let i = 2; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
+    return keys.map(k => ({ key: k, month: monthLabel(k), revenue: Math.round(allMonthTotals[k] || 0) }))
+  }, [allMonthTotals])
+
   const periodTotal = monthSeries.reduce((s, x) => s + x.revenue, 0)
   const latestKey = monthSeries.length ? monthSeries[monthSeries.length - 1].key : null
   const mom = useMemo(() => {
@@ -113,7 +121,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2"><RevenueChart data={monthSeries} /></div>
+        <div className="lg:col-span-2"><RevenueChart data={trendSeries} /></div>
         <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
           <div className="text-sm font-medium mb-4">Top clients</div>
           {monthSeries.length === 0 ? (
