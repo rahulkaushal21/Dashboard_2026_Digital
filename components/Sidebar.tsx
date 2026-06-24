@@ -22,7 +22,7 @@ export default function Sidebar() {
     <aside className="w-60 shrink-0 bg-mav-dark border-r border-mav-line min-h-screen p-4">
       <div className="flex items-center gap-2 px-2 py-3 mb-4">
         <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
-        <span className="font-semibold tracking-tight">Mavlers Digital Dashboard</span>
+        <span className="font-semibold tracking-tight">Digital Dashboard</span>
       </div>
       <nav className="space-y-1">
         {nav.map(({ href, label, icon: Icon }) => {
