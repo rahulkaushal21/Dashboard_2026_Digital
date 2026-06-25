@@ -15,7 +15,7 @@ export interface Client {
 export interface Opportunity {
   id: number; company_name?: string; is_new_client?: boolean; rfq?: boolean
   rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
-  source_date?: string; summary?: string; source?: string; sources?: string[]
+  source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -57,7 +57,7 @@ export async function getOpportunities(): Promise<Opportunity[]> {
   // Deduped by client: one entry per company, tagged with every source it came from.
   const emailOpps: Opportunity[] = ((await read<Opportunity>('opportunities')) || []).map(o => ({ ...o, source: 'email' }))
   const quotes = (await read<any>('quotes',
-    'id, quote_id, subject_project, technology, added_date, agency, usd_value, status, business_type, geo, sales_person')) || []
+    'id, quote_id, subject_project, technology, added_date, agency, usd_value, status, business_type, geo, sales_person, pc_sme')) || []
   const quoteOpps: Opportunity[] = quotes.filter(q => isOpenQuote(q.status)).map(q => ({
     id: 1000000 + (q.id || 0),
     company_name: q.agency,
@@ -70,6 +70,7 @@ export async function getOpportunities(): Promise<Opportunity[]> {
     source_date: q.added_date,
     summary: `Quote: ${q.status}${q.usd_value ? ' \u00b7 $' + Math.round(q.usd_value).toLocaleString() : ''}`,
     source: 'spreadsheet',
+    pm_owner: q.pc_sme,
   }))
   const m = new Map<string, Opportunity & { sources: string[] }>()
   for (const x of [...emailOpps, ...quoteOpps]) {
@@ -78,8 +79,9 @@ export async function getOpportunities(): Promise<Opportunity[]> {
     if (!cur) { m.set(key, { ...x, sources: [x.source as string] }) }
     else {
       const sources = cur.sources.includes(x.source as string) ? cur.sources : [...cur.sources, x.source as string]
-      if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources })
-      else cur.sources = sources
+      const pm_owner = cur.pm_owner || x.pm_owner
+      if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources, pm_owner })
+      else { cur.sources = sources; if (!cur.pm_owner && x.pm_owner) cur.pm_owner = x.pm_owner }
     }
   }
   const all = [...m.values()]
