@@ -41,6 +41,13 @@ export async function getClients(): Promise<Client[]> {
   const live = await read<Client>('web_clients')
   return live && live.length ? live : (await import('./mockData')).mockClients
 }
+
+export async function getLastSync(source: string): Promise<string | null> {
+  if (!supabase) return null
+  const { data } = await supabase.from('sync_runs').select('ran_at').eq('source', source).order('ran_at', { ascending: false }).limit(1)
+  return data && data.length ? (data[0] as { ran_at: string }).ran_at : null
+}
+
 const isOpenQuote = (s?: string) => {
   const v = (s || '').trim().toLowerCase()
   return v !== '' && v !== 'confirmed' && v !== 'cancelled'
