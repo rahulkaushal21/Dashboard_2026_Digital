@@ -23,12 +23,13 @@ export default function Opportunities() {
     .filter(x => !fType || (x.is_new_client ? 'New' : 'Repeat') === fType)
     .filter(x => !fGeo || (x.geo || '') === fGeo)
     .filter(x => !fOwner || (x.sales_person || '') === fOwner)
-    .filter(x => inRange(x.source_date)), [all, search, fType, fGeo, fOwner, from, to])
+    .filter(x => inRange(x.source_date))
+    .sort((a, b) => new Date(b.source_date || 0).getTime() - new Date(a.source_date || 0).getTime()), [all, search, fType, fGeo, fOwner, from, to])
   const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFrom(''); setTo('') }
 
   return (
     <div>
-      <Header title="Opportunities" subtitle="RFQs & new/repeat business from the inbox — filter by type, GEO, owner and date" />
+      <Header title="Opportunities" subtitle="Open quotes from the sheet + new business from email, newest first" />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client…" className={`${selCls} w-44`} />
         <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option><option value="New">New</option><option value="Repeat">Repeat</option></select>
