@@ -10,6 +10,9 @@ const badge = (s?: string) => {
   const map: Record<string, string> = { pending: 'bg-amber-500/15 text-amber-400', received: 'bg-blue-500/15 text-blue-400', quoted: 'bg-purple-500/15 text-purple-300', won: 'bg-green-500/15 text-green-400', lost: 'bg-red-500/15 text-red-400' }
   return map[(s || '').toLowerCase()] || 'bg-mav-line text-mav-muted'
 }
+const SRC_ORDER = ['spreadsheet', 'email']
+const srcTag = (s: string) => s === 'email' ? 'bg-blue-500/15 text-blue-400' : 'bg-green-500/15 text-green-400'
+const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
 
 export default function Opportunities() {
   const [all, setAll] = useState<Opportunity[]>([])
@@ -47,10 +50,11 @@ export default function Opportunities() {
       </div>
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Type', 'RFQ status', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
+          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Source', 'Type', 'RFQ status', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
           <tbody>{o.map(x => (
             <tr key={x.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
               <td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
+              <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
               <td className="px-4 py-3">{x.is_new_client ? 'New' : 'Repeat'}</td>
               <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${badge(x.rfq_status)}`}>{x.rfq_status || (x.rfq ? 'RFQ' : '—')}</span></td>
               <td className="px-4 py-3 text-mav-muted">{x.sales_person}</td>
