@@ -15,7 +15,7 @@ export interface Client {
 export interface Opportunity {
   id: number; company_name?: string; is_new_client?: boolean; rfq?: boolean
   rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
-  source_date?: string; summary?: string
+  source_date?: string; summary?: string; source?: string; sources?: string[]
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -54,7 +54,8 @@ const isOpenQuote = (s?: string) => {
 }
 export async function getOpportunities(): Promise<Opportunity[]> {
   // Opportunities = email-sourced rows + open/pending rows from the Quotes tab.
-  const emailOpps = (await read<Opportunity>('opportunities')) || []
+  // Deduped by client: one entry per company, tagged with every source it came from.
+  const emailOpps: Opportunity[] = ((await read<Opportunity>('opportunities')) || []).map(o => ({ ...o, source: 'email' }))
   const quotes = (await read<any>('quotes',
     'id, quote_id, subject_project, technology, added_date, agency, usd_value, status, business_type, geo, sales_person')) || []
   const quoteOpps: Opportunity[] = quotes.filter(q => isOpenQuote(q.status)).map(q => ({
@@ -68,8 +69,20 @@ export async function getOpportunities(): Promise<Opportunity[]> {
     source_subject: q.subject_project || q.technology || q.quote_id,
     source_date: q.added_date,
     summary: `Quote: ${q.status}${q.usd_value ? ' \u00b7 $' + Math.round(q.usd_value).toLocaleString() : ''}`,
+    source: 'spreadsheet',
   }))
-  const all = [...emailOpps, ...quoteOpps]
+  const m = new Map<string, Opportunity & { sources: string[] }>()
+  for (const x of [...emailOpps, ...quoteOpps]) {
+    const key = (x.company_name || '').trim().toLowerCase() || ('id:' + x.id)
+    const cur = m.get(key)
+    if (!cur) { m.set(key, { ...x, sources: [x.source as string] }) }
+    else {
+      const sources = cur.sources.includes(x.source as string) ? cur.sources : [...cur.sources, x.source as string]
+      if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources })
+      else cur.sources = sources
+    }
+  }
+  const all = [...m.values()]
   return all.length ? all : (await import('./mockData')).mockOpportunities
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
