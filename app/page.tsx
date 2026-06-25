@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, type RevenueRow, type Client, type Opportunity } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, type RevenueRow, type Client, type Opportunity } from '@/lib/supabase'
 import { fmtUsd, topClients } from '@/lib/metrics'
+import { RefreshCw } from 'lucide-react'
 
 // --- date helpers ------------------------------------------------------------
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -36,6 +37,16 @@ const PRESETS: { key: string; label: string }[] = [
 ]
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 
+const ago = (ts: string | null) => {
+  if (!ts) return '—'
+  const s = (Date.now() - new Date(ts).getTime()) / 1000
+  if (s < 60) return 'just now'
+  if (s < 3600) return Math.floor(s / 60) + 'm ago'
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago'
+  return Math.floor(s / 86400) + 'd ago'
+}
+const freshWithin = (ts: string | null, mins: number) => !!ts && (Date.now() - new Date(ts).getTime()) / 60000 < mins
+
 export default function Dashboard() {
   const [rev, setRev] = useState<RevenueRow[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -46,9 +57,18 @@ export default function Dashboard() {
   const [to, setTo] = useState(init.to)
   const [preset, setPreset] = useState('mtd')
 
-  useEffect(() => { (async () => {
-    setRev(await getRevenue()); setClients(await getClients()); setOpps(await getOpportunities())
-  })() }, [])
+  const [syncRev, setSyncRev] = useState<string | null>(null)
+  const [syncOpp, setSyncOpp] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const load = async () => {
+    setRefreshing(true)
+    const [r, c, o, sr, so] = await Promise.all([
+      getRevenue(), getClients(), getOpportunities(),
+      getLastSync('web-revenue-appscript'), getLastSync('email-opportunities-scan'),
+    ])
+    setRev(r); setClients(c); setOpps(o); setSyncRev(sr); setSyncOpp(so); setRefreshing(false)
+  }
+  useEffect(() => { load() }, [])
 
   const applyPreset = (key: string) => { const r = presetRange(key); setFrom(r.from); setTo(r.to); setPreset(key) }
   const onFrom = (v: string) => { setFrom(v); setPreset('') }
@@ -99,6 +119,22 @@ export default function Dashboard() {
   return (
     <div>
       <Header title="Dashboard" subtitle="Revenue, clients and pipeline at a glance" />
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5 text-xs">
+        <span className="uppercase tracking-wide text-mav-muted">Last sync</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full ${freshWithin(syncRev, 45) ? 'bg-green-400' : syncRev ? 'bg-amber-400' : 'bg-mav-line'}`} />
+          <span className="text-mav-muted">Web revenue</span><span className="font-medium">{ago(syncRev)}</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full ${freshWithin(syncOpp, 180) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
+          <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp)}</span>
+        </span>
+        <button onClick={load} disabled={refreshing}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white hover:border-mav-yellow disabled:opacity-50">
+          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> Refresh
+        </button>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-6">
         {PRESETS.map(p => (
