@@ -57,7 +57,7 @@ export default function Opportunities() {
               <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
               <td className="px-4 py-3">{x.is_new_client ? 'New' : 'Repeat'}</td>
               <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${badge(x.rfq_status)}`}>{x.rfq_status || (x.rfq ? 'RFQ' : '—')}</span></td>
-              <td className="px-4 py-3 text-mav-muted">{x.sales_person}</td>
+              <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
               <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
               <td className="px-4 py-3 text-mav-muted truncate max-w-xs">{x.source_subject}</td>
               <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || '').slice(0, 10)}</td>
