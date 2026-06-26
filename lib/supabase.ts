@@ -11,6 +11,7 @@ export interface Client {
   pc_sme?: string; sales_person?: string; ltv_usd?: number; sentiment?: string
   rag_status?: string; client_status?: string; email?: string
   journey?: string; action_steps?: string; last_booking_month?: string
+  website?: string; ai_focus?: boolean; industry_note?: string
 }
 export interface Opportunity {
   id: number; company_name?: string; is_new_client?: boolean; rfq?: boolean
@@ -61,6 +62,14 @@ export async function getOpportunities(): Promise<Opportunity[]> {
   const quotes = (await read<any>('quotes',
     'id, quote_id, subject_project, technology, added_date, agency, usd_value, status, business_type, geo, sales_person, pc_sme')) || []
   const norm = (s?: string) => (s || '').trim().toLowerCase()
+  // collapse GEO into 3 buckets: US (incl. Canada/N.America), AU (incl. APAC/NZ), UK (everything else)
+  const geo3 = (g?: string) => {
+    const v = (g || '').toLowerCase()
+    if (!v.trim()) return ''
+    if (/\bau\b|au\/|nz|apac|australia|new zealand|asia[\s-]?pac/.test(v)) return 'AU'
+    if (/\bus\b|us\/|usa|u\.s|united states|canada|north america/.test(v)) return 'US'
+    return 'UK'
+  }
   // companies present in the booked web_revenue sheet (= project added to revenue)
   const booked = (await read<{ company_name: string; booking_amount: number }>('web_revenue', 'company_name, booking_amount')) || []
   const bookedSet = new Set(booked.filter(b => (b.booking_amount || 0) !== 0).map(b => norm(b.company_name)).filter(Boolean))
@@ -116,6 +125,7 @@ export async function getOpportunities(): Promise<Opportunity[]> {
     }
   }
   const all = [...m.values()]
+  for (const o of all) o.geo = geo3(o.geo)
   return all.length ? all : (await import('./mockData')).mockOpportunities
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
