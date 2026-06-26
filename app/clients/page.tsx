@@ -27,7 +27,10 @@ const sigTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/risk|e
 const impactTone = (i?: string) => /critical|sev1|sev 1/i.test(i || '') ? 'bg-red-500/20 text-red-300' : /major/i.test(i || '') ? 'bg-red-500/15 text-red-400' : /minor/i.test(i || '') ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
 const dotCls = (b: string) => b === 'At risk' ? 'bg-red-500' : b === 'Watch' ? 'bg-orange-400' : b === 'Positive' ? 'bg-green-400' : b === 'Negative' ? 'bg-red-400' : b === 'Neutral' ? 'bg-amber-400' : 'bg-mav-muted'
 
-type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; negSigs: EmailSignal[] }
+type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[] }
+// the escalation report also logs positive feedback, tagged "Not An Escalation" — those must NOT count as risk
+const isPosFb = (e: Escalation) => /not an escalation/i.test(e.escalation_type || '') || /not an escalation/i.test(e.business_impact || '')
+const isJunk = (e: Escalation) => /^(source|escalation type|type of situation)$/i.test((e.escalation_type || '').trim()) || /^escalation type$/i.test((e.business_impact || '').trim())
 
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([])
@@ -58,13 +61,15 @@ export default function Clients() {
   }, [escs, clients])
 
   const riskOf = (c: Client): Risk => {
-    const list = escByClient.get(c.company_name) || []
+    const all = escByClient.get(c.company_name) || []
+    const posFb = all.filter(isPosFb)                          // positive feedback logged in the escalation report
+    const list = all.filter(e => !isPosFb(e) && !isJunk(e))    // genuine escalations only
     const byMonth: Record<string, number> = {}
     list.forEach(e => { const k = ym(e.tracking_date); if (k) byMonth[k] = (byMonth[k] || 0) + 1 })
     const maxKey = Object.keys(byMonth).sort((a, b) => byMonth[b] - byMonth[a])[0]
     const maxMonth = maxKey ? byMonth[maxKey] : 0
     const cutoff = monthsAgoYM(2)
-    const recentMajor = list.filter(e => (ym(e.tracking_date) >= cutoff) && /major|critical|sev/i.test(e.business_impact || ''))
+    const recentMajor = list.filter(e => (ym(e.tracking_date) >= cutoff) && /major|critical|high|sev/i.test(`${e.business_impact || ''} ${e.escalation_type || ''}`))
     const negSigs = (sigByCompany.get(norm(c.company_name)) || []).filter(s => sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || ''))
     const lb = ym(c.last_booking_month)
     const gap = !!lb && lb < monthsAgoYM(2) && (c.ltv_usd || 0) > 0
@@ -77,10 +82,11 @@ export default function Clients() {
       if (list.length) { level = 'Watch'; reasons.push(`${list.length} escalation${list.length > 1 ? 's' : ''} on record`) }
       if (gap) { level = 'Watch'; reasons.push(`no new booking since ${monLabel(lb)} — contract may be winding down`) }
     }
-    return { level, reasons, escs: list, negSigs }
+    return { level, reasons, escs: list, posFb, negSigs }
   }
 
-  const statusOf = (c: Client) => { const r = riskOf(c); return r.level || sentBucket(c.sentiment) }
+  // Genuine risk wins; otherwise positive feedback (with no negative signal) shows green; else the recorded sentiment
+  const statusOf = (c: Client) => { const r = riskOf(c); if (r.level) return r.level; if (r.posFb.length && !r.negSigs.length) return 'Positive'; return sentBucket(c.sentiment) }
 
   const rows = useMemo(() => clients
     .filter(c => c.company_name.toLowerCase().includes(q.toLowerCase()))
@@ -112,7 +118,7 @@ export default function Clients() {
         <span className="text-xs text-mav-muted ml-auto">{rows.length} clients</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Click a row for the full picture.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Click a row for the full picture.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
@@ -196,6 +202,20 @@ export default function Clients() {
                 </div>
               )}
 
+              {r.posFb.length > 0 && (
+                <div className="mt-6 border-t border-mav-line pt-4">
+                  <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Positive feedback</span><span className="text-xs px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium">{r.posFb.length}</span><span className="text-[11px] text-mav-muted">logged in the escalation report, tagged &ldquo;Not an escalation&rdquo;</span></div>
+                  <div className="space-y-3">
+                    {r.posFb.slice(0, 8).map(e => (
+                      <div key={e.id} className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
+                        <div className="text-sm font-medium leading-snug">{e.link || e.email_subject || e.project_name || '(positive note)'}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">{e.tracking_date && <span>{(e.tracking_date || '').slice(0, 10)}</span>}<span className="px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">Positive · not an escalation</span>{e.raised_by && <span>· {e.raised_by}</span>}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {convos.length > 0 && (
                 <div className="mt-6 border-t border-mav-line pt-4">
                   <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Open conversations</span><span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">{convos.length}</span></div>
@@ -213,7 +233,7 @@ export default function Clients() {
 
               {selC.journey && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.journey}</p></div>}
               {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
-              {!r.escs.length && !convos.length && !selC.journey && !selC.action_steps && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
+              {!r.escs.length && !r.posFb.length && !convos.length && !selC.journey && !selC.action_steps && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
             </aside>
           </div>
         )
