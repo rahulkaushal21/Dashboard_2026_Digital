@@ -17,31 +17,65 @@ const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
 
+type SortKey = 'company' | 'win' | 'source' | 'type' | 'owner' | 'geo' | 'subject' | 'date' | 'flag'
+const COLS: { key: SortKey; label: string }[] = [
+  { key: 'company', label: 'Client' }, { key: 'win', label: 'Win %' }, { key: 'source', label: 'Source' },
+  { key: 'type', label: 'Type' }, { key: 'owner', label: 'Owner' }, { key: 'geo', label: 'GEO' },
+  { key: 'subject', label: 'Subject' }, { key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
+]
+const sortVal = (x: Opportunity, k: SortKey): string | number => {
+  switch (k) {
+    case 'company': return (x.company_name || '').toLowerCase()
+    case 'win': return x.win_probability ?? -1
+    case 'source': return (x.sources || []).join(',')
+    case 'type': return x.is_new_client ? 'New' : 'Repeat'
+    case 'owner': return (x.sales_person || '').toLowerCase()
+    case 'geo': return x.geo || ''
+    case 'subject': return (x.source_subject || '').toLowerCase()
+    case 'date': return x.source_date || ''
+    case 'flag': return x.flag ? 0 : 1
+  }
+}
+
 export default function Opportunities() {
   const [all, setAll] = useState<Opportunity[]>([])
   const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
   const [fOwner, setFOwner] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const [flagOnly, setFlagOnly] = useState(false)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
   const [sel, setSel] = useState<Opportunity | null>(null)
   useEffect(() => { getOpportunities().then(setAll) }, [])
 
   const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return !from && !to; if (from && v < from) return false; if (to && v > to) return false; return true }
-  const o = useMemo(() => all
-    .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
-    .filter(x => !fType || (x.is_new_client ? 'New' : 'Repeat') === fType)
-    .filter(x => !fGeo || (x.geo || '') === fGeo)
-    .filter(x => !fOwner || (x.sales_person || '') === fOwner)
-    .filter(x => inRange(x.source_date))
-    .sort((a, b) => new Date(b.source_date || 0).getTime() - new Date(a.source_date || 0).getTime()), [all, search, fType, fGeo, fOwner, from, to])
-  const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFrom(''); setTo('') }
+  const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' ? -1 : 1 })
+
+  const o = useMemo(() => {
+    const rows = all
+      .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
+      .filter(x => !fType || (x.is_new_client ? 'New' : 'Repeat') === fType)
+      .filter(x => !fGeo || (x.geo || '') === fGeo)
+      .filter(x => !fOwner || (x.sales_person || '') === fOwner)
+      .filter(x => !flagOnly || x.flag)
+      .filter(x => inRange(x.source_date))
+    return rows.sort((a, b) => {
+      const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
+      if (av < bv) return -1 * sort.dir
+      if (av > bv) return 1 * sort.dir
+      return 0
+    })
+  }, [all, search, fType, fGeo, fOwner, flagOnly, from, to, sort])
+  const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFrom(''); setTo(''); setFlagOnly(false) }
+  const flagged = all.filter(x => x.flag).length
 
   return (
     <div>
-      <Header title="Opportunities" subtitle="Open quotes from the sheet + new business from email, newest first" />
+      <Header title="Opportunities" subtitle="Open quotes from the sheet + new business from email — sortable, with data-mismatch flags" />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client…" className={`${selCls} w-44`} />
         <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option><option value="New">New</option><option value="Repeat">Repeat</option></select>
         <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>
         <select value={fOwner} onChange={e => setFOwner(e.target.value)} className={selCls}><option value="">All owners</option>{uniq(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
+        <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
         <span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
         <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
         <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
@@ -50,22 +84,27 @@ export default function Opportunities() {
         <KPICard label="Open opps" value={String(o.filter(x => !x.won).length)} />
         <KPICard label="Won" value={String(o.filter(x => x.won).length)} />
         <KPICard label="Won value" value={money(o.filter(x => x.won).reduce((s, x) => s + (x.won_amount || 0), 0))} />
-        <KPICard label="GEOs" value={String(uniq(o.map(x => x.geo)).length)} />
+        <KPICard label="Needs review" value={String(flagged)} />
       </div>
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Win %', 'Source', 'Type', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}</tr></thead>
+          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{COLS.map(c => (
+            <th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-white">
+              {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
+            </th>
+          ))}</tr></thead>
           <tbody>{o.map(x => (
-            <tr key={x.id} onClick={() => setSel(x)} className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
+            <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${x.flag ? 'bg-amber-500/5' : ''}`}>
               <td className="px-4 py-3">{x.company_name}{x.won && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-semibold whitespace-nowrap">✓ Won · {money(x.won_amount)}</span>}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
               <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
               <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
-              <td className="px-4 py-3">{x.is_new_client ? 'New' : 'Repeat'}</td>
+              <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
               <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
               <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
               <td className="px-4 py-3 text-mav-muted truncate max-w-xs">{x.source_subject}</td>
               <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || '').slice(0, 10)}</td>
+              <td className="px-4 py-3">{x.flag ? <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title={x.flag}>⚠ Review</span> : <span className="text-xs text-mav-muted">—</span>}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -79,11 +118,15 @@ export default function Opportunities() {
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <h2 className="text-xl font-semibold">{sel.company_name}</h2>
-                <div className="mt-1 flex flex-wrap gap-1">{(sel.sources || (sel.source ? [sel.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  <span className={`text-xs px-2 py-1 rounded-full ${sel.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{sel.is_new_client ? 'New business' : 'Repeat client'}</span>
+                  {(sel.sources || (sel.source ? [sel.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}
+                </div>
               </div>
               <button onClick={() => setSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
             </div>
 
+            {sel.flag && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
             {sel.won && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount)} confirmed (booked in the revenue sheet)</div>}
 
             <div className="mb-5">
