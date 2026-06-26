@@ -17,6 +17,7 @@ export interface Opportunity {
   rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
   source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
   gist?: string; win_probability?: number; win_reason?: string; company_note?: string
+  won?: boolean; won_amount?: number
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -59,24 +60,43 @@ export async function getOpportunities(): Promise<Opportunity[]> {
   const emailOpps: Opportunity[] = ((await read<Opportunity>('opportunities')) || []).map(o => ({ ...o, source: 'email' }))
   const quotes = (await read<any>('quotes',
     'id, quote_id, subject_project, technology, added_date, agency, usd_value, status, business_type, geo, sales_person, pc_sme')) || []
-  const quoteOpps: Opportunity[] = quotes.filter(q => isOpenQuote(q.status)).map(q => ({
-    id: 1000000 + (q.id || 0),
-    company_name: q.agency,
-    is_new_client: /new/i.test(q.business_type || ''),
-    rfq: true,
-    rfq_status: /shared|approval/i.test(q.status || '') ? 'quoted' : 'pending',
-    geo: q.geo,
-    sales_person: q.sales_person,
-    source_subject: q.subject_project || q.technology || q.quote_id,
-    source_date: q.added_date,
-    summary: `Quote: ${q.status}${q.usd_value ? ' · $' + Math.round(q.usd_value).toLocaleString() : ''}`,
-    source: 'spreadsheet',
-    pm_owner: q.pc_sme,
-  }))
+  const norm = (s?: string) => (s || '').trim().toLowerCase()
+  // companies present in the booked web_revenue sheet (= project added to revenue)
+  const booked = (await read<{ company_name: string; booking_amount: number }>('web_revenue', 'company_name, booking_amount')) || []
+  const bookedSet = new Set(booked.filter(b => (b.booking_amount || 0) !== 0).map(b => norm(b.company_name)).filter(Boolean))
+  // total value the client confirmed (sum of that agency's confirmed quotes)
+  const confirmedValue = new Map<string, number>()
+  for (const q of quotes) if (norm(q.status) === 'confirmed') confirmedValue.set(norm(q.agency), (confirmedValue.get(norm(q.agency)) || 0) + (q.usd_value || 0))
+  // Open quotes -> in-progress. Confirmed quotes whose client is also booked in the
+  // web revenue sheet -> "Won" (green) with the confirmed value. Cancelled excluded.
+  const quoteOpps: Opportunity[] = quotes.filter(q => {
+    if (norm(q.status) === 'confirmed') return bookedSet.has(norm(q.agency))
+    return isOpenQuote(q.status)
+  }).map(q => {
+    const won = norm(q.status) === 'confirmed'
+    const wonAmt = won ? Math.round(confirmedValue.get(norm(q.agency)) || q.usd_value || 0) : undefined
+    const usd = q.usd_value ? ' · $' + Math.round(q.usd_value).toLocaleString() : ''
+    return {
+      id: 1000000 + (q.id || 0),
+      company_name: q.agency,
+      is_new_client: /new/i.test(q.business_type || ''),
+      rfq: true,
+      rfq_status: won ? 'won' : (/shared|approval/i.test(q.status || '') ? 'quoted' : 'pending'),
+      geo: q.geo,
+      sales_person: q.sales_person,
+      source_subject: q.subject_project || q.technology || q.quote_id,
+      source_date: q.added_date,
+      summary: won ? `Confirmed · $${(wonAmt || 0).toLocaleString()}` : `Quote: ${q.status}${usd}`,
+      source: 'spreadsheet',
+      pm_owner: q.pc_sme,
+      won,
+      won_amount: wonAmt,
+    }
+  })
   const pick = <T,>(a: T | undefined, b: T | undefined) => (a !== undefined && a !== null && a !== '' ? a : b)
   const m = new Map<string, Opportunity & { sources: string[] }>()
   for (const x of [...emailOpps, ...quoteOpps]) {
-    const key = (x.company_name || '').trim().toLowerCase() || ('id:' + x.id)
+    const key = norm(x.company_name) || ('id:' + x.id)
     const cur = m.get(key)
     if (!cur) { m.set(key, { ...x, sources: [x.source as string] }) }
     else {
@@ -88,6 +108,8 @@ export async function getOpportunities(): Promise<Opportunity[]> {
         win_probability: pick(cur.win_probability, x.win_probability),
         win_reason: pick(cur.win_reason, x.win_reason),
         company_note: pick(cur.company_note, x.company_note),
+        won: cur.won || x.won,
+        won_amount: pick(cur.won_amount, x.won_amount),
       }
       if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources, ...keep })
       else { m.set(key, { ...cur, sources, ...keep }) }
