@@ -48,9 +48,10 @@ const ago = (ts: string | null) => {
 const freshWithin = (ts: string | null, mins: number) => !!ts && (Date.now() - new Date(ts).getTime()) / 60000 < mins
 
 // --- segment (service department) bifurcation --------------------------------
-const SEG_ORDER = ['WEB-US', 'WEB-UK', 'WEB-AU', 'LP', 'HUB', 'AI & Automation']
+const SEG_ORDER = ['WEB-US', 'WEB-UK', 'WEB-AU', 'LP', 'HUB', 'Design', 'AI & Automation']
 const segOf = (s?: string) => {
   const v = (s || '').trim()
+  if (/design/i.test(v)) return 'Design'
   if (/^WEB-?US/i.test(v)) return 'WEB-US'
   if (/^WEB-?UK/i.test(v)) return 'WEB-UK'
   if (/^WEB-?AU/i.test(v)) return 'WEB-AU'
@@ -157,6 +158,9 @@ export default function Dashboard() {
       .slice().sort((a, b) => (b.added_date || '').localeCompare(a.added_date || '')), [quotes])
   const designTotal = designQuotes.reduce((s, q) => s + (q.usd_value || 0), 0)
   const designWon = designQuotes.filter(q => /confirm|won/i.test(q.status || '')).length
+  // Design entries now tagged in the web-revenue report (service column)
+  const designBookings = useMemo(() => bookingRows.filter(b => /design/i.test(b.service_name || '')), [bookingRows])
+  const designBookingsTotal = designBookings.reduce((s, b) => s + (b.booking_amount || 0), 0)
 
   const periodTotal = monthSeries.reduce((s, x) => s + x.revenue, 0)
   const latestKey = monthSeries.length ? monthSeries[monthSeries.length - 1].key : null
@@ -267,9 +271,9 @@ export default function Dashboard() {
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mt-6">
         <div className="flex items-baseline justify-between px-5 pt-5 mb-1">
           <div className="text-sm font-medium">Design projects</div>
-          <div className="text-xs text-mav-muted">{designQuotes.length} project{designQuotes.length === 1 ? '' : 's'} · {designWon} confirmed · {fmtUsd(designTotal)}</div>
+          <div className="text-xs text-mav-muted">{designBookings.length} revenue entr{designBookings.length === 1 ? 'y' : 'ies'} ({fmtUsd(designBookingsTotal)}) · {designQuotes.length} quote{designQuotes.length === 1 ? '' : 's'} ({fmtUsd(designTotal)})</div>
         </div>
-        <p className="px-5 text-xs text-mav-muted mb-3">A separate record of everything tagged <span className="text-white">Design</span> in the Quotes sheet (technology column — e.g. &ldquo;Design (Web)&rdquo;, &ldquo;LP (Design and Code only)&rdquo;). The revenue sheet has no Design segment yet, so this list comes from quotes; tag Design work in revenue column F and it will roll in here too.</p>
+        <p className="px-5 text-xs text-mav-muted mb-3">A separate record of everything tagged <span className="text-white">Design</span>. Counts <span className="text-white">{designBookings.length}</span> Design entr{designBookings.length === 1 ? 'y' : 'ies'} booked in the web-revenue report plus Design-tagged quotes (e.g. &ldquo;Design (Web)&rdquo;). Design also appears as its own row in the segment table above. If the revenue count looks low, the sheet&apos;s latest Design edits may not have synced yet — hit Refresh after the next web-revenue sync.</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line">
