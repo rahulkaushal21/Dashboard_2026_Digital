@@ -18,7 +18,7 @@ export interface Opportunity {
   rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
   source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
   gist?: string; win_probability?: number; win_reason?: string; company_note?: string
-  won?: boolean; won_amount?: number
+  won?: boolean; won_amount?: number; flag?: string
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -73,6 +73,8 @@ export async function getOpportunities(): Promise<Opportunity[]> {
   // companies present in the booked web_revenue sheet (= project added to revenue)
   const booked = (await read<{ company_name: string; booking_amount: number }>('web_revenue', 'company_name, booking_amount')) || []
   const bookedSet = new Set(booked.filter(b => (b.booking_amount || 0) !== 0).map(b => norm(b.company_name)).filter(Boolean))
+  // every company that appears anywhere in the revenue sheet = an existing/repeat client
+  const revenueSet = new Set(booked.map(b => norm(b.company_name)).filter(Boolean))
   // total value the client confirmed (sum of that agency's confirmed quotes)
   const confirmedValue = new Map<string, number>()
   for (const q of quotes) if (norm(q.status) === 'confirmed') confirmedValue.set(norm(q.agency), (confirmedValue.get(norm(q.agency)) || 0) + (q.usd_value || 0))
@@ -125,7 +127,22 @@ export async function getOpportunities(): Promise<Opportunity[]> {
     }
   }
   const all = [...m.values()]
-  for (const o of all) o.geo = geo3(o.geo)
+  // Keywords that suggest a row is actually existing/confirmed business, not a fresh opportunity
+  const confirmedLike = /(\bapproved\b|\bretainer\b|existing client|already a client|migration complete|signed off|renewed|go ?ahead given)/i
+  for (const o of all) {
+    o.geo = geo3(o.geo)
+    const key = norm(o.company_name)
+    const inRevenue = revenueSet.has(key)
+    // Repeat = already in the revenue sheet, or the scan already saw them as an existing client
+    const repeat = inRevenue || o.is_new_client === false
+    o.is_new_client = !repeat
+    // Data-quality flags so the user can fix the source sheet
+    if (!o.won) {
+      const text = `${o.summary || ''} ${o.gist || ''}`
+      if (inRevenue) o.flag = 'Already a booked client in the revenue sheet — confirm this is a genuinely new request, not existing work'
+      else if (confirmedLike.test(text)) o.flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities (e.g. Ventica-type maintenance/retainer)'
+    }
+  }
   return all.length ? all : (await import('./mockData')).mockOpportunities
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
