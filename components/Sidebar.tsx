@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Briefcase, Users, FileText, Factory, AlertTriangle, Target, TrendingUp, PieChart, Settings } from 'lucide-react'
+import { LayoutDashboard, Briefcase, Users, FileText, Factory, AlertTriangle, Target, TrendingUp, History, PieChart, Settings } from 'lucide-react'
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -12,6 +12,7 @@ const nav = [
   { href: '/escalations', label: 'Escalations', icon: AlertTriangle },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
+  { href: '/last-year', label: 'Last Year Review', icon: History },
   { href: '/pareto', label: '20 / 80 Rule', icon: PieChart },
   { href: '/admin', label: 'Settings', icon: Settings },
 ]
@@ -19,7 +20,7 @@ const nav = [
 export default function Sidebar() {
   const path = usePathname()
   return (
-    <aside className="w-60 shrink-0 bg-mav-dark border-r border-mav-line min-h-screen p-4">
+    <aside className="w-60 shrink-0 bg-mav-dark border-r border-mav-line h-screen overflow-y-auto p-4">
       <div className="flex items-center gap-2 px-2 py-3 mb-4">
         <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
         <span className="font-semibold tracking-tight">Digital Dashboard</span>
