@@ -53,8 +53,9 @@ export default function Opportunities() {
         <KPICard label="GEOs" value={String(uniq(o.map(x => x.geo)).length)} />
       </div>
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Win %', 'Source', 'Type', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
+          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Win %', 'Source', 'Type', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}</tr></thead>
           <tbody>{o.map(x => (
             <tr key={x.id} onClick={() => setSel(x)} className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
               <td className="px-4 py-3">{x.company_name}{x.won && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-semibold whitespace-nowrap">✓ Won · {money(x.won_amount)}</span>}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
@@ -68,6 +69,7 @@ export default function Opportunities() {
             </tr>
           ))}</tbody>
         </table>
+        </div>
       </div>
 
       {sel && (
