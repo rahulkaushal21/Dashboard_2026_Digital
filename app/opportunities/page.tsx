@@ -15,6 +15,7 @@ const srcTag = (s: string) => s === 'email' ? 'bg-blue-500/15 text-blue-400' : '
 const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
 const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >= 60 ? 'bg-green-500/15 text-green-400' : p >= 45 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
+const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
 
 export default function Opportunities() {
   const [all, setAll] = useState<Opportunity[]>([])
@@ -46,9 +47,9 @@ export default function Opportunities() {
         <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <KPICard label="Opportunities" value={String(o.length)} />
-        <KPICard label="New clients" value={String(o.filter(x => x.is_new_client).length)} />
-        <KPICard label="RFQs" value={String(o.filter(x => x.rfq).length)} />
+        <KPICard label="Open opps" value={String(o.filter(x => !x.won).length)} />
+        <KPICard label="Won" value={String(o.filter(x => x.won).length)} />
+        <KPICard label="Won value" value={money(o.filter(x => x.won).reduce((s, x) => s + (x.won_amount || 0), 0))} />
         <KPICard label="GEOs" value={String(uniq(o.map(x => x.geo)).length)} />
       </div>
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
@@ -56,7 +57,7 @@ export default function Opportunities() {
           <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Win %', 'Source', 'Type', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
           <tbody>{o.map(x => (
             <tr key={x.id} onClick={() => setSel(x)} className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
-              <td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
+              <td className="px-4 py-3">{x.company_name}{x.won && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-semibold whitespace-nowrap">✓ Won · {money(x.won_amount)}</span>}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
               <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
               <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
               <td className="px-4 py-3">{x.is_new_client ? 'New' : 'Repeat'}</td>
@@ -80,6 +81,8 @@ export default function Opportunities() {
               </div>
               <button onClick={() => setSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
             </div>
+
+            {sel.won && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount)} confirmed (booked in the revenue sheet)</div>}
 
             <div className="mb-5">
               <div className="flex items-baseline justify-between mb-1">
