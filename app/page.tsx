@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, getBookingsFull, getQuotes, type RevenueRow, type Client, type Opportunity, type BookingRow, type Quote } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, getBookingsFull, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { RefreshCw } from 'lucide-react'
 
@@ -48,10 +48,9 @@ const ago = (ts: string | null) => {
 const freshWithin = (ts: string | null, mins: number) => !!ts && (Date.now() - new Date(ts).getTime()) / 60000 < mins
 
 // --- segment (service department) bifurcation --------------------------------
-const SEG_ORDER = ['WEB-US', 'WEB-UK', 'WEB-AU', 'LP', 'HUB', 'Design', 'AI & Automation']
+const SEG_ORDER = ['WEB-US', 'WEB-UK', 'WEB-AU', 'LP', 'HUB', 'AI & Automation']
 const segOf = (s?: string) => {
   const v = (s || '').trim()
-  if (/design/i.test(v)) return 'Design'
   if (/^WEB-?US/i.test(v)) return 'WEB-US'
   if (/^WEB-?UK/i.test(v)) return 'WEB-UK'
   if (/^WEB-?AU/i.test(v)) return 'WEB-AU'
@@ -60,20 +59,12 @@ const segOf = (s?: string) => {
   if (/AI\s*&?\s*Auto/i.test(v)) return 'AI & Automation'
   return 'Other'
 }
-const qStatusTone = (s?: string) => {
-  const v = (s || '').toLowerCase()
-  if (/confirm|won/.test(v)) return 'bg-green-500/15 text-green-400'
-  if (/cancel|lost/.test(v)) return 'bg-red-500/15 text-red-400'
-  if (/shared|approval|pending|sent/.test(v)) return 'bg-amber-500/15 text-amber-400'
-  return 'bg-mav-line text-mav-muted'
-}
 
 export default function Dashboard() {
   const [rev, setRev] = useState<RevenueRow[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [bookingRows, setBookingRows] = useState<BookingRow[]>([])
-  const [quotes, setQuotes] = useState<Quote[]>([])
 
   const init = presetRange('mtd')
   const [from, setFrom] = useState(init.from)
@@ -87,11 +78,11 @@ export default function Dashboard() {
   const load = async () => {
     setRefreshing(true)
     try {
-      const [r, c, o, b, qs, sr, so] = await Promise.all([
-        getRevenue(), getClients(), getOpportunities(), getBookingsFull(), getQuotes(),
+      const [r, c, o, b, sr, so] = await Promise.all([
+        getRevenue(), getClients(), getOpportunities(), getBookingsFull(),
         getLastSync('web-revenue-appscript'), getLastSync('email-opportunities-scan'),
       ])
-      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setQuotes(qs); setSyncRev(sr); setSyncOpp(so); setLastRefreshed(new Date())
+      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(sr); setSyncOpp(so); setLastRefreshed(new Date())
     } finally { setRefreshing(false) }
   }
   useEffect(() => { load() }, [])
@@ -151,16 +142,6 @@ export default function Dashboard() {
   }, [segData])
   const colTotal = (k: string) => segRows.reduce((s, seg) => s + (segData[seg]?.[k] || 0), 0)
   const rowTotal = (seg: string) => segMonths.reduce((s, k) => s + (segData[seg]?.[k] || 0), 0)
-
-  // --- Design projects (tagged "Design" in the Quotes sheet technology column) ----
-  const designQuotes = useMemo(() =>
-    quotes.filter(q => /design/i.test(q.technology || ''))
-      .slice().sort((a, b) => (b.added_date || '').localeCompare(a.added_date || '')), [quotes])
-  const designTotal = designQuotes.reduce((s, q) => s + (q.usd_value || 0), 0)
-  const designWon = designQuotes.filter(q => /confirm|won/i.test(q.status || '')).length
-  // Design entries now tagged in the web-revenue report (service column)
-  const designBookings = useMemo(() => bookingRows.filter(b => /design/i.test(b.service_name || '')), [bookingRows])
-  const designBookingsTotal = designBookings.reduce((s, b) => s + (b.booking_amount || 0), 0)
 
   const periodTotal = monthSeries.reduce((s, x) => s + x.revenue, 0)
   const latestKey = monthSeries.length ? monthSeries[monthSeries.length - 1].key : null
@@ -263,36 +244,6 @@ export default function Dashboard() {
                 {segMonths.map(k => <td key={k} className="px-4 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(colTotal(k))}</td>)}
                 <td className="px-5 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
               </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mt-6">
-        <div className="flex items-baseline justify-between px-5 pt-5 mb-1">
-          <div className="text-sm font-medium">Design projects</div>
-          <div className="text-xs text-mav-muted">{designBookings.length} revenue entr{designBookings.length === 1 ? 'y' : 'ies'} ({fmtUsd(designBookingsTotal)}) · {designQuotes.length} quote{designQuotes.length === 1 ? '' : 's'} ({fmtUsd(designTotal)})</div>
-        </div>
-        <p className="px-5 text-xs text-mav-muted mb-3">A separate record of everything tagged <span className="text-white">Design</span>. Counts <span className="text-white">{designBookings.length}</span> Design entr{designBookings.length === 1 ? 'y' : 'ies'} booked in the web-revenue report plus Design-tagged quotes (e.g. &ldquo;Design (Web)&rdquo;). Design also appears as its own row in the segment table above. If the revenue count looks low, the sheet&apos;s latest Design edits may not have synced yet — hit Refresh after the next web-revenue sync.</p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-mav-muted border-b border-mav-line">
-              <tr>{['Client', 'Project', 'Type', 'GEO', 'Value', 'Status', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {designQuotes.length === 0 ? (
-                <tr><td colSpan={7} className="px-5 py-6 text-sm text-mav-muted">No Design-tagged projects found in the Quotes sheet.</td></tr>
-              ) : designQuotes.map(q => (
-                <tr key={q.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                  <td className="px-4 py-3 font-medium whitespace-nowrap">{q.agency || '—'}</td>
-                  <td className="px-4 py-3 text-mav-muted truncate max-w-xs">{(q as { subject_project?: string }).subject_project || q.technology || q.quote_id || '—'}</td>
-                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{q.technology || '—'}</td>
-                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{q.geo || '—'}</td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">{fmtUsd(q.usd_value || 0)}</td>
-                  <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${qStatusTone(q.status)}`}>{q.status || '—'}</span></td>
-                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(q.added_date || '').slice(0, 10) || '—'}</td>
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>
