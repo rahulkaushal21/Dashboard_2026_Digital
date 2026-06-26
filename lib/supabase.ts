@@ -16,6 +16,7 @@ export interface Opportunity {
   id: number; company_name?: string; is_new_client?: boolean; rfq?: boolean
   rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
   source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
+  gist?: string; win_probability?: number; win_reason?: string; company_note?: string
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -68,10 +69,11 @@ export async function getOpportunities(): Promise<Opportunity[]> {
     sales_person: q.sales_person,
     source_subject: q.subject_project || q.technology || q.quote_id,
     source_date: q.added_date,
-    summary: `Quote: ${q.status}${q.usd_value ? ' \u00b7 $' + Math.round(q.usd_value).toLocaleString() : ''}`,
+    summary: `Quote: ${q.status}${q.usd_value ? ' · $' + Math.round(q.usd_value).toLocaleString() : ''}`,
     source: 'spreadsheet',
     pm_owner: q.pc_sme,
   }))
+  const pick = <T,>(a: T | undefined, b: T | undefined) => (a !== undefined && a !== null && a !== '' ? a : b)
   const m = new Map<string, Opportunity & { sources: string[] }>()
   for (const x of [...emailOpps, ...quoteOpps]) {
     const key = (x.company_name || '').trim().toLowerCase() || ('id:' + x.id)
@@ -79,9 +81,16 @@ export async function getOpportunities(): Promise<Opportunity[]> {
     if (!cur) { m.set(key, { ...x, sources: [x.source as string] }) }
     else {
       const sources = cur.sources.includes(x.source as string) ? cur.sources : [...cur.sources, x.source as string]
-      const pm_owner = cur.pm_owner || x.pm_owner
-      if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources, pm_owner })
-      else { cur.sources = sources; if (!cur.pm_owner && x.pm_owner) cur.pm_owner = x.pm_owner }
+      // carry the richest values across the merged sources
+      const keep = {
+        pm_owner: pick(cur.pm_owner, x.pm_owner),
+        gist: pick(cur.gist, x.gist),
+        win_probability: pick(cur.win_probability, x.win_probability),
+        win_reason: pick(cur.win_reason, x.win_reason),
+        company_note: pick(cur.company_note, x.company_note),
+      }
+      if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources, ...keep })
+      else { m.set(key, { ...cur, sources, ...keep }) }
     }
   }
   const all = [...m.values()]
