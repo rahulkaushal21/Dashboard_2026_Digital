@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, type RevenueRow, type Client, type Opportunity } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, getBookingsFull, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { RefreshCw } from 'lucide-react'
 
@@ -47,10 +47,24 @@ const ago = (ts: string | null) => {
 }
 const freshWithin = (ts: string | null, mins: number) => !!ts && (Date.now() - new Date(ts).getTime()) / 60000 < mins
 
+// --- segment (service department) bifurcation --------------------------------
+const SEG_ORDER = ['WEB-US', 'WEB-UK', 'WEB-AU', 'LP', 'HUB', 'AI & Automation']
+const segOf = (s?: string) => {
+  const v = (s || '').trim()
+  if (/^WEB-?US/i.test(v)) return 'WEB-US'
+  if (/^WEB-?UK/i.test(v)) return 'WEB-UK'
+  if (/^WEB-?AU/i.test(v)) return 'WEB-AU'
+  if (/^LP/i.test(v)) return 'LP'
+  if (/^HUB/i.test(v)) return 'HUB'
+  if (/AI\s*&?\s*Auto/i.test(v)) return 'AI & Automation'
+  return 'Other'
+}
+
 export default function Dashboard() {
   const [rev, setRev] = useState<RevenueRow[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
+  const [bookingRows, setBookingRows] = useState<BookingRow[]>([])
 
   const init = presetRange('mtd')
   const [from, setFrom] = useState(init.from)
@@ -62,11 +76,11 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const load = async () => {
     setRefreshing(true)
-    const [r, c, o, sr, so] = await Promise.all([
-      getRevenue(), getClients(), getOpportunities(),
+    const [r, c, o, b, sr, so] = await Promise.all([
+      getRevenue(), getClients(), getOpportunities(), getBookingsFull(),
       getLastSync('web-revenue-appscript'), getLastSync('email-opportunities-scan'),
     ])
-    setRev(r); setClients(c); setOpps(o); setSyncRev(sr); setSyncOpp(so); setRefreshing(false)
+    setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(sr); setSyncOpp(so); setRefreshing(false)
   }
   useEffect(() => { load() }, [])
 
@@ -80,27 +94,51 @@ export default function Dashboard() {
 
   const rangeRev = useMemo(() => rev.filter(r => inMonthRange(r.month)), [rev, from, to])
 
-  // monthly totals within range (drives chart + period total)
+  // monthly totals within range (drives period total)
   const monthSeries = useMemo(() => {
     const m: Record<string, number> = {}
     rangeRev.forEach(r => { const k = (r.month || '').slice(0, 7); if (k) m[k] = (m[k] || 0) + (r.amount_usd || 0) })
     return Object.keys(m).sort().map(k => ({ key: k, month: monthLabel(k), revenue: Math.round(m[k]) }))
   }, [rangeRev])
 
-  // full-data monthly totals (for MoM of the latest in-range month vs the prior calendar month)
+  // full-data monthly totals (for MoM + trend)
   const allMonthTotals = useMemo(() => {
     const m: Record<string, number> = {}
     rev.forEach(r => { const k = (r.month || '').slice(0, 7); if (k) m[k] = (m[k] || 0) + (r.amount_usd || 0) })
     return m
   }, [rev])
 
-  // Revenue trend chart always shows the trailing 3 months (current + 2 prior),
-  // independent of the KPI date filter.
+  // Revenue trend chart always shows the trailing 3 months, independent of the KPI date filter.
   const trendSeries = useMemo(() => {
     const keys: string[] = []
     for (let i = 2; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
     return keys.map(k => ({ key: k, month: monthLabel(k), revenue: Math.round(allMonthTotals[k] || 0) }))
   }, [allMonthTotals])
+
+  // --- segment x month matrix (trailing 6 months, independent of filter) -----
+  const segMonths = useMemo(() => {
+    const keys: string[] = []
+    for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
+    return keys
+  }, [])
+  const segData = useMemo(() => {
+    const m: Record<string, Record<string, number>> = {}
+    bookingRows.forEach(b => {
+      const k = (b.booking_month || '').slice(0, 7)
+      if (!segMonths.includes(k)) return
+      const seg = segOf(b.service_name)
+      m[seg] = m[seg] || {}
+      m[seg][k] = (m[seg][k] || 0) + (b.booking_amount || 0)
+    })
+    return m
+  }, [bookingRows, segMonths])
+  const segRows = useMemo(() => {
+    const rows = [...SEG_ORDER]
+    if (segData['Other'] && Object.values(segData['Other']).some(v => v)) rows.push('Other')
+    return rows
+  }, [segData])
+  const colTotal = (k: string) => segRows.reduce((s, seg) => s + (segData[seg]?.[k] || 0), 0)
+  const rowTotal = (seg: string) => segMonths.reduce((s, k) => s + (segData[seg]?.[k] || 0), 0)
 
   const periodTotal = monthSeries.reduce((s, x) => s + x.revenue, 0)
   const latestKey = monthSeries.length ? monthSeries[monthSeries.length - 1].key : null
@@ -156,7 +194,7 @@ export default function Dashboard() {
         <KPICard label="Bookings (period)" value={String(bookings)} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className="lg:col-span-2"><RevenueChart data={trendSeries} /></div>
         <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
           <div className="text-sm font-medium mb-4">Top clients</div>
@@ -172,6 +210,38 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
+        </div>
+      </div>
+
+      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+        <div className="flex items-baseline justify-between px-5 pt-5 mb-3">
+          <div className="text-sm font-medium">Revenue by segment — month over month</div>
+          <div className="text-xs text-mav-muted">Service department · trailing 6 months · USD</div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-mav-muted border-b border-mav-line">
+              <tr>
+                <th className="px-5 py-3 font-medium">Segment</th>
+                {segMonths.map(k => <th key={k} className="px-4 py-3 font-medium text-right whitespace-nowrap">{monthLabel(k)}</th>)}
+                <th className="px-5 py-3 font-medium text-right whitespace-nowrap">6-mo total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {segRows.map(seg => (
+                <tr key={seg} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                  <td className="px-5 py-3 font-medium whitespace-nowrap">{seg}</td>
+                  {segMonths.map(k => <td key={k} className="px-4 py-3 text-right text-mav-muted whitespace-nowrap">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
+                  <td className="px-5 py-3 text-right font-medium whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-mav-line bg-mav-dark/30">
+                <td className="px-5 py-3 font-semibold">Total</td>
+                {segMonths.map(k => <td key={k} className="px-4 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(colTotal(k))}</td>)}
+                <td className="px-5 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
