@@ -16,10 +16,13 @@ const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
 const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >= 60 ? 'bg-green-500/15 text-green-400' : p >= 45 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
+// Won = booked in revenue / confirmed quote; Lost = explicit decline flagged by the scan; else Open
+const oppStatus = (x: Opportunity) => x.won ? 'Won' : (x.status || '').toLowerCase() === 'lost' ? 'Lost' : 'Open'
+const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : 'bg-mav-line text-mav-muted'
 
-type SortKey = 'company' | 'win' | 'source' | 'type' | 'owner' | 'geo' | 'subject' | 'date' | 'flag'
+type SortKey = 'company' | 'win' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'subject' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
-  { key: 'company', label: 'Client' }, { key: 'win', label: 'Win %' }, { key: 'source', label: 'Source' },
+  { key: 'company', label: 'Client' }, { key: 'win', label: 'Win %' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
   { key: 'type', label: 'Type' }, { key: 'owner', label: 'Owner' }, { key: 'geo', label: 'GEO' },
   { key: 'subject', label: 'Subject' }, { key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
 ]
@@ -27,6 +30,7 @@ const sortVal = (x: Opportunity, k: SortKey): string | number => {
   switch (k) {
     case 'company': return (x.company_name || '').toLowerCase()
     case 'win': return x.win_probability ?? -1
+    case 'status': return oppStatus(x)
     case 'source': return (x.sources || []).join(',')
     case 'type': return x.is_new_client ? 'New' : 'Repeat'
     case 'owner': return (x.sales_person || '').toLowerCase()
@@ -40,7 +44,7 @@ const sortVal = (x: Opportunity, k: SortKey): string | number => {
 export default function Opportunities() {
   const [all, setAll] = useState<Opportunity[]>([])
   const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
-  const [fOwner, setFOwner] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const [fOwner, setFOwner] = useState(''); const [fStatus, setFStatus] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [flagOnly, setFlagOnly] = useState(false)
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
   const [sel, setSel] = useState<Opportunity | null>(null)
@@ -55,6 +59,7 @@ export default function Opportunities() {
       .filter(x => !fType || (x.is_new_client ? 'New' : 'Repeat') === fType)
       .filter(x => !fGeo || (x.geo || '') === fGeo)
       .filter(x => !fOwner || (x.sales_person || '') === fOwner)
+      .filter(x => !fStatus || oppStatus(x) === fStatus)
       .filter(x => !flagOnly || x.flag)
       .filter(x => inRange(x.source_date))
     return rows.sort((a, b) => {
@@ -63,15 +68,16 @@ export default function Opportunities() {
       if (av > bv) return 1 * sort.dir
       return 0
     })
-  }, [all, search, fType, fGeo, fOwner, flagOnly, from, to, sort])
-  const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFrom(''); setTo(''); setFlagOnly(false) }
+  }, [all, search, fType, fGeo, fOwner, fStatus, flagOnly, from, to, sort])
+  const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFStatus(''); setFrom(''); setTo(''); setFlagOnly(false) }
   const flagged = all.filter(x => x.flag).length
 
   return (
     <div>
-      <Header title="Opportunities" subtitle="Open quotes from the sheet + new business from email — sortable, with data-mismatch flags" />
+      <Header title="Opportunities" subtitle="Open quotes + new business from email — sortable, with Won/Lost status (verified from the sheet & emails)" />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client…" className={`${selCls} w-44`} />
+        <select value={fStatus} onChange={e => setFStatus(e.target.value)} className={selCls}><option value="">All status</option><option value="Open">Open</option><option value="Won">Won</option><option value="Lost">Lost</option></select>
         <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option><option value="New">New</option><option value="Repeat">Repeat</option></select>
         <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>
         <select value={fOwner} onChange={e => setFOwner(e.target.value)} className={selCls}><option value="">All owners</option>{uniq(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
@@ -81,9 +87,9 @@ export default function Opportunities() {
         <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <KPICard label="Open opps" value={String(o.filter(x => !x.won).length)} />
-        <KPICard label="Won" value={String(o.filter(x => x.won).length)} />
-        <KPICard label="Won value" value={money(o.filter(x => x.won).reduce((s, x) => s + (x.won_amount || 0), 0))} />
+        <KPICard label="Open" value={String(o.filter(x => oppStatus(x) === 'Open').length)} />
+        <KPICard label="Won" value={String(o.filter(x => oppStatus(x) === 'Won').length)} />
+        <KPICard label="Lost" value={String(o.filter(x => oppStatus(x) === 'Lost').length)} />
         <KPICard label="Needs review" value={String(flagged)} />
       </div>
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
@@ -94,10 +100,13 @@ export default function Opportunities() {
               {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
             </th>
           ))}</tr></thead>
-          <tbody>{o.map(x => (
-            <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${x.flag ? 'bg-amber-500/5' : ''}`}>
-              <td className="px-4 py-3">{x.company_name}{x.won && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-semibold whitespace-nowrap">✓ Won · {money(x.won_amount)}</span>}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
+          <tbody>{o.map(x => {
+            const st = oppStatus(x)
+            return (
+            <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.flag ? 'bg-amber-500/5' : ''}`}>
+              <td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
               <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+              <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : 'Open'}</span></td>
               <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
               <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
               <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
@@ -106,7 +115,7 @@ export default function Opportunities() {
               <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || '').slice(0, 10)}</td>
               <td className="px-4 py-3">{x.flag ? <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title={x.flag}>⚠ Review</span> : <span className="text-xs text-mav-muted">—</span>}</td>
             </tr>
-          ))}</tbody>
+          )})}</tbody>
         </table>
         </div>
       </div>
@@ -119,6 +128,7 @@ export default function Opportunities() {
               <div>
                 <h2 className="text-xl font-semibold">{sel.company_name}</h2>
                 <div className="mt-1 flex flex-wrap gap-1">
+                  <span className={`text-xs px-2 py-1 rounded-full ${statusTone(oppStatus(sel))}`}>{oppStatus(sel)}</span>
                   <span className={`text-xs px-2 py-1 rounded-full ${sel.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{sel.is_new_client ? 'New business' : 'Repeat client'}</span>
                   {(sel.sources || (sel.source ? [sel.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}
                 </div>
@@ -127,7 +137,8 @@ export default function Opportunities() {
             </div>
 
             {sel.flag && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
-            {sel.won && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount)} confirmed (booked in the revenue sheet)</div>}
+            {oppStatus(sel) === 'Won' && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount)} confirmed (booked in the revenue sheet)</div>}
+            {oppStatus(sel) === 'Lost' && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">✗ Lost — marked from an explicit decline in email. Won always overrides if the client later books.</div>}
 
             <div className="mb-5">
               <div className="flex items-baseline justify-between mb-1">
