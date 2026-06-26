@@ -18,7 +18,7 @@ export interface Opportunity {
   rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
   source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
   gist?: string; win_probability?: number; win_reason?: string; company_note?: string
-  won?: boolean; won_amount?: number; flag?: string
+  won?: boolean; won_amount?: number; flag?: string; status?: string
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -121,6 +121,7 @@ export async function getOpportunities(): Promise<Opportunity[]> {
         company_note: pick(cur.company_note, x.company_note),
         won: cur.won || x.won,
         won_amount: pick(cur.won_amount, x.won_amount),
+        status: pick(cur.status, x.status),
       }
       if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources, ...keep })
       else { m.set(key, { ...cur, sources, ...keep }) }
