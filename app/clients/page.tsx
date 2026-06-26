@@ -1,13 +1,18 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClients, getEmailSignals, type Client, type EmailSignal } from '@/lib/supabase'
+import { getClients, getEmailSignals, getEscalations, type Client, type EmailSignal, type Escalation } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
-const dot = (rag?: string) => rag === 'Red' ? 'bg-red-400' : rag === 'Amber' ? 'bg-amber-400' : 'bg-green-400'
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const norm = (s?: string) => (s || '').trim().toLowerCase()
+const akey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+const ym = (s?: string) => (s || '').slice(0, 7)
+const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const now = new Date()
+const monthsAgoYM = (n: number) => { const d = new Date(now); d.setMonth(d.getMonth() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0]}` : (y || '') }
 
 const sentBucket = (s?: string) => {
   const v = (s || '').toLowerCase()
@@ -16,96 +21,116 @@ const sentBucket = (s?: string) => {
   if (/(neutral|stable|ok|mixed)/.test(v)) return 'Neutral'
   return ''
 }
-const sentTone = (s?: string) => {
-  const b = sentBucket(s)
-  return b === 'Positive' ? 'bg-green-500/15 text-green-400' : b === 'Negative' ? 'bg-red-500/15 text-red-400' : b === 'Neutral' ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
-}
-const ragTone = (r?: string) => r === 'Red' ? 'bg-red-500/15 text-red-400' : r === 'Amber' ? 'bg-amber-500/15 text-amber-400' : r === 'Green' ? 'bg-green-500/15 text-green-400' : 'bg-mav-line text-mav-muted'
-const sigTone = (t?: string) => {
-  const v = (t || '').toLowerCase()
-  if (/risk|escalat|churn/.test(v)) return 'bg-red-500/15 text-red-400'
-  if (/oppo|lead|upsell|cross/.test(v)) return 'bg-blue-500/15 text-blue-400'
-  if (/positive|win|prais/.test(v)) return 'bg-green-500/15 text-green-400'
-  return 'bg-mav-line text-mav-muted'
-}
+const tone = (b: string) => b === 'Positive' ? 'bg-green-500/15 text-green-400' : b === 'Negative' ? 'bg-red-500/15 text-red-400' : b === 'Neutral' ? 'bg-amber-500/15 text-amber-400'
+  : b === 'At risk' ? 'bg-red-500/20 text-red-300' : b === 'Watch' ? 'bg-orange-500/20 text-orange-300' : 'bg-mav-line text-mav-muted'
+const sigTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/risk|escalat|churn/.test(v)) return 'bg-red-500/15 text-red-400'; if (/oppo|lead|upsell|cross/.test(v)) return 'bg-blue-500/15 text-blue-400'; if (/positive|win|prais/.test(v)) return 'bg-green-500/15 text-green-400'; return 'bg-mav-line text-mav-muted' }
+const impactTone = (i?: string) => /critical|sev1|sev 1/i.test(i || '') ? 'bg-red-500/20 text-red-300' : /major/i.test(i || '') ? 'bg-red-500/15 text-red-400' : /minor/i.test(i || '') ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
+const dotCls = (b: string) => b === 'At risk' ? 'bg-red-500' : b === 'Watch' ? 'bg-orange-400' : b === 'Positive' ? 'bg-green-400' : b === 'Negative' ? 'bg-red-400' : b === 'Neutral' ? 'bg-amber-400' : 'bg-mav-muted'
+
+type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; negSigs: EmailSignal[] }
 
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([])
   const [signals, setSignals] = useState<EmailSignal[]>([])
-  const [q, setQ] = useState('')
-  const [ind, setInd] = useState('')
-  const [sent, setSent] = useState('')
-  const [aiOnly, setAiOnly] = useState(false)
+  const [escs, setEscs] = useState<Escalation[]>([])
+  const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
-  useEffect(() => { getClients().then(setClients); getEmailSignals().then(setSignals) }, [])
+  useEffect(() => { getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs) }, [])
 
   const sigByCompany = useMemo(() => {
     const m = new Map<string, EmailSignal[]>()
-    for (const s of signals) {
-      const k = norm(s.company_name)
-      if (!k) continue
-      const a = m.get(k) || []; a.push(s); m.set(k, a)
-    }
+    for (const s of signals) { const k = norm(s.company_name); if (!k) continue; (m.get(k) || m.set(k, []).get(k))!.push(s) }
     for (const a of m.values()) a.sort((x, y) => (y.source_date || '').localeCompare(x.source_date || ''))
     return m
   }, [signals])
 
+  // escalations carry the client name in the `geo` field (sheet column drift); match on alphanumeric key
+  const escByClient = useMemo(() => {
+    const tagged = escs.map(e => ({ e, k: akey(e.geo) || akey(e.company_name) }))
+    const map = new Map<string, Escalation[]>()
+    for (const c of clients) {
+      const ck = akey(c.company_name); if (ck.length < 4) { map.set(c.company_name, []); continue }
+      const list = tagged.filter(t => t.k && (t.k === ck || (t.k.length >= 4 && (t.k.startsWith(ck) || ck.startsWith(t.k))))).map(t => t.e)
+        .sort((a, b) => (b.tracking_date || '').localeCompare(a.tracking_date || ''))
+      map.set(c.company_name, list)
+    }
+    return map
+  }, [escs, clients])
+
+  const riskOf = (c: Client): Risk => {
+    const list = escByClient.get(c.company_name) || []
+    const byMonth: Record<string, number> = {}
+    list.forEach(e => { const k = ym(e.tracking_date); if (k) byMonth[k] = (byMonth[k] || 0) + 1 })
+    const maxKey = Object.keys(byMonth).sort((a, b) => byMonth[b] - byMonth[a])[0]
+    const maxMonth = maxKey ? byMonth[maxKey] : 0
+    const cutoff = monthsAgoYM(2)
+    const recentMajor = list.filter(e => (ym(e.tracking_date) >= cutoff) && /major|critical|sev/i.test(e.business_impact || ''))
+    const negSigs = (sigByCompany.get(norm(c.company_name)) || []).filter(s => sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || ''))
+    const lb = ym(c.last_booking_month)
+    const gap = !!lb && lb < monthsAgoYM(2) && (c.ltv_usd || 0) > 0
+    const reasons: string[] = []
+    let level: Risk['level'] = ''
+    if (maxMonth > 2) { level = 'At risk'; reasons.push(`${maxMonth} escalations in ${monLabel(maxKey)}`) }
+    if (recentMajor.length) { level = 'At risk'; reasons.push(`${recentMajor.length} major escalation${recentMajor.length > 1 ? 's' : ''} in the last 2 months`) }
+    if (!level) {
+      if (negSigs.length) { level = 'Watch'; reasons.push('client sounding frustrated over email') }
+      if (list.length) { level = 'Watch'; reasons.push(`${list.length} escalation${list.length > 1 ? 's' : ''} on record`) }
+      if (gap) { level = 'Watch'; reasons.push(`no new booking since ${monLabel(lb)} — contract may be winding down`) }
+    }
+    return { level, reasons, escs: list, negSigs }
+  }
+
+  const statusOf = (c: Client) => { const r = riskOf(c); return r.level || sentBucket(c.sentiment) }
+
   const rows = useMemo(() => clients
     .filter(c => c.company_name.toLowerCase().includes(q.toLowerCase()))
     .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
-    .filter(c => !sent || sentBucket(c.sentiment) === sent)
+    .filter(c => !stat || statusOf(c) === stat)
     .filter(c => !aiOnly || c.ai_focus)
-    .sort((a, b) => (b.ltv_usd || 0) - (a.ltv_usd || 0)), [clients, q, ind, sent, aiOnly])
+    .sort((a, b) => (b.ltv_usd || 0) - (a.ltv_usd || 0)), [clients, q, ind, stat, aiOnly, escByClient, sigByCompany])
 
   const industries = uniq(clients.map(c => c.industry))
   const aiCount = clients.filter(c => c.ai_focus).length
-  const sentCount = (b: string) => clients.filter(c => sentBucket(c.sentiment) === b).length
-  const convCount = (c?: Client | null) => c ? (sigByCompany.get(norm(c.company_name)) || []).length : 0
+  const statCount = (b: string) => clients.filter(c => statusOf(c) === b).length
 
   return (
     <div>
-      <Header title="Clients" subtitle="Portfolio by industry & sentiment — click a client for full detail and open conversations" />
+      <Header title="Clients" subtitle="Health, sentiment & escalations — At risk / Watch flags from triggers and email signals" />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-56`} />
-        <select value={ind} onChange={e => setInd(e.target.value)} className={sel}>
-          <option value="">All industries</option>
-          {industries.map(i => <option key={i} value={i}>{i}</option>)}
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
+        <select value={ind} onChange={e => setInd(e.target.value)} className={sel}><option value="">All industries</option>{industries.map(i => <option key={i} value={i}>{i}</option>)}</select>
+        <select value={stat} onChange={e => setStat(e.target.value)} className={sel}>
+          <option value="">All health</option>
+          <option value="At risk">🔴 At risk ({statCount('At risk')})</option>
+          <option value="Watch">🟠 Watch ({statCount('Watch')})</option>
+          <option value="Positive">🟢 Positive ({statCount('Positive')})</option>
+          <option value="Neutral">🟡 Neutral ({statCount('Neutral')})</option>
+          <option value="Negative">🔴 Negative ({statCount('Negative')})</option>
         </select>
-        <select value={sent} onChange={e => setSent(e.target.value)} className={sel}>
-          <option value="">All sentiments</option>
-          <option value="Positive">🟢 Positive ({sentCount('Positive')})</option>
-          <option value="Neutral">🟡 Neutral ({sentCount('Neutral')})</option>
-          <option value="Negative">🔴 Negative ({sentCount('Negative')})</option>
-        </select>
-        <button onClick={() => setAiOnly(v => !v)}
-          className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>
-          ⚡ AI &amp; Automation{aiCount ? ` (${aiCount})` : ''}
-        </button>
+        <button onClick={() => setAiOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI &amp; Automation{aiCount ? ` (${aiCount})` : ''}</button>
         <span className="text-xs text-mav-muted ml-auto">{rows.length} clients</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4">Filter by industry or sentiment, or click a sentiment badge to filter by it. Click any row to see status, journey, next steps &amp; open email conversations.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Click a row for the full picture.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-mav-muted border-b border-mav-line">
-              <tr>{['', 'Client', 'Industry', 'GEO', 'Owner', 'Sentiment', 'Convos', 'LTV'].map(h => <th key={h} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}</tr>
-            </thead>
+            <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['', 'Client', 'Industry', 'GEO', 'Owner', 'Health', 'Escal.', 'Convos', 'LTV'].map(h => <th key={h} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
               {rows.map(c => {
-                const nc = (sigByCompany.get(norm(c.company_name)) || []).length
+                const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByCompany.get(norm(c.company_name)) || []).length
+                const rowBg = r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
                 return (
-                  <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${c.ai_focus ? 'bg-mav-yellow/5' : ''}`}>
-                    <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${dot(c.rag_status)}`} /></td>
-                    <td className="px-4 py-3">{c.company_name}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI &amp; Automation</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                  <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
+                    <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${dotCls(st)}`} /></td>
+                    <td className="px-4 py-3">{c.company_name}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
-                    <td className="px-4 py-3">{c.sentiment
-                      ? <button onClick={e => { e.stopPropagation(); setSent(b => b === sentBucket(c.sentiment) ? '' : sentBucket(c.sentiment)) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${sentTone(c.sentiment)}`}>{c.sentiment}</button>
-                      : <span className="text-xs text-mav-muted">—</span>}</td>
+                    <td className="px-4 py-3"><button onClick={e => { e.stopPropagation(); setStat(b => b === st ? '' : st) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${tone(st)}`}>{st || '—'}</button></td>
+                    <td className="px-4 py-3">{r.escs.length ? <span className="text-xs px-2 py-1 rounded-full bg-red-500/15 text-red-400 font-medium">⚠ {r.escs.length}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{nc ? <span className="text-xs px-2 py-1 rounded-full bg-blue-500/15 text-blue-400 font-medium">💬 {nc}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{c.ltv_usd ? fmtUsd(c.ltv_usd) : '—'}</td>
                   </tr>
@@ -116,71 +141,83 @@ export default function Clients() {
         </div>
       </div>
 
-      {selC && (
-        <div className="fixed inset-0 z-40" onClick={() => setSelC(null)}>
-          <div className="absolute inset-0 bg-black/50" />
-          <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${dot(selC.rag_status)}`} />
-                  <h2 className="text-xl font-semibold">{selC.company_name}</h2>
+      {selC && (() => {
+        const r = riskOf(selC); const convos = sigByCompany.get(norm(selC.company_name)) || []
+        return (
+          <div className="fixed inset-0 z-40" onClick={() => setSelC(null)}>
+            <div className="absolute inset-0 bg-black/50" />
+            <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap"><span className={`inline-block w-2.5 h-2.5 rounded-full ${dotCls(r.level || sentBucket(selC.sentiment))}`} /><h2 className="text-xl font-semibold">{selC.company_name}</h2></div>
+                  {selC.ai_focus && <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">⚡ AI &amp; Automation</span>}
+                  {selC.website && <div className="text-xs text-mav-muted mt-1">{selC.website}</div>}
                 </div>
-                {selC.ai_focus && <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">⚡ AI &amp; Automation</span>}
-                {selC.website && <div className="text-xs text-mav-muted mt-1">{selC.website}</div>}
+                <button onClick={() => setSelC(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
               </div>
-              <button onClick={() => setSelC(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
-            </div>
 
-            <div className="flex flex-wrap gap-2 mb-5">
-              {selC.sentiment && <span className={`text-xs px-2 py-1 rounded-full ${sentTone(selC.sentiment)}`}>Sentiment: {selC.sentiment}</span>}
-              {selC.rag_status && <span className={`text-xs px-2 py-1 rounded-full ${ragTone(selC.rag_status)}`}>RAG: {selC.rag_status}</span>}
-              {selC.client_status && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{selC.client_status}</span>}
-            </div>
+              {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.level === 'At risk' ? '🔴 At risk' : '🟠 Watch'}:</span> {r.reasons.join(' · ')}</div>}
 
-            <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
-              <div><div className="text-xs text-mav-muted">Industry</div>{selC.industry || '—'}</div>
-              <div><div className="text-xs text-mav-muted">Type</div>{selC.client_type || '—'}</div>
-              <div><div className="text-xs text-mav-muted">GEO</div>{selC.geo || '—'}</div>
-              <div><div className="text-xs text-mav-muted">Owner</div>{selC.pc_sme || selC.sales_person || '—'}</div>
-              <div><div className="text-xs text-mav-muted">Lifetime value</div>{selC.ltv_usd ? fmtUsd(selC.ltv_usd) : '—'}</div>
-              <div><div className="text-xs text-mav-muted">Last booking</div>{(selC.last_booking_month || '').slice(0, 7) || '—'}</div>
-              {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
-            </div>
+              <div className="flex flex-wrap gap-2 mb-5">
+                {selC.sentiment && <span className={`text-xs px-2 py-1 rounded-full ${tone(sentBucket(selC.sentiment))}`}>Sentiment: {selC.sentiment}</span>}
+                {selC.rag_status && <span className={`text-xs px-2 py-1 rounded-full ${tone(sentBucket(selC.rag_status) || (selC.rag_status === 'Green' ? 'Positive' : selC.rag_status === 'Red' ? 'Negative' : 'Neutral'))}`}>RAG: {selC.rag_status}</span>}
+                {selC.client_status && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{selC.client_status}</span>}
+              </div>
 
-            {(() => {
-              const convos = sigByCompany.get(norm(selC.company_name)) || []
-              if (!convos.length) return null
-              return (
+              <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
+                <div><div className="text-xs text-mav-muted">Industry</div>{selC.industry || '—'}</div>
+                <div><div className="text-xs text-mav-muted">Type</div>{selC.client_type || '—'}</div>
+                <div><div className="text-xs text-mav-muted">GEO</div>{selC.geo || '—'}</div>
+                <div><div className="text-xs text-mav-muted">Owner</div>{selC.pc_sme || selC.sales_person || '—'}</div>
+                <div><div className="text-xs text-mav-muted">Lifetime value</div>{selC.ltv_usd ? fmtUsd(selC.ltv_usd) : '—'}</div>
+                <div><div className="text-xs text-mav-muted">Last booking</div>{ym(selC.last_booking_month) || '—'}</div>
+                {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
+              </div>
+
+              {r.escs.length > 0 && (
+                <div className="mt-6 border-t border-mav-line pt-4">
+                  <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Escalations &amp; triggers</span><span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">{r.escs.length}</span></div>
+                  <div className="space-y-3">
+                    {r.escs.slice(0, 12).map(e => (
+                      <div key={e.id} className="rounded-lg border border-mav-line bg-mav-dark/40 p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-sm font-medium leading-snug">{e.link || e.email_subject || e.project_name || '(escalation)'}</div>
+                          {e.business_impact && <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${impactTone(e.business_impact)}`}>{e.business_impact}</span>}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">
+                          {e.tracking_date && <span>{(e.tracking_date || '').slice(0, 10)}</span>}
+                          {e.source && <span className="px-1.5 py-0.5 rounded-full bg-mav-line">{e.source}</span>}
+                          {e.escalation_type && <span>{e.escalation_type}</span>}
+                          {e.raised_by && <span>· {e.raised_by}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {convos.length > 0 && (
                 <div className="mt-6 border-t border-mav-line pt-4">
                   <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Open conversations</span><span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">{convos.length}</span></div>
                   <div className="space-y-3">
                     {convos.map(s => (
                       <div key={s.id} className="rounded-lg border border-mav-line bg-mav-dark/40 p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="text-sm font-medium leading-snug">{s.source_subject || '(no subject)'}</div>
-                          {s.sentiment && <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${sentTone(s.sentiment)}`}>{s.sentiment}</span>}
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">
-                          {s.signal_type && <span className={`px-1.5 py-0.5 rounded-full ${sigTone(s.signal_type)}`}>{s.signal_type.replace(/_/g, ' ')}</span>}
-                          {s.source_date && <span>{(s.source_date || '').slice(0, 10)}</span>}
-                          {s.client_email && <span className="truncate max-w-[180px]">{s.client_email}</span>}
-                        </div>
+                        <div className="flex items-start justify-between gap-2"><div className="text-sm font-medium leading-snug">{s.source_subject || '(no subject)'}</div>{s.sentiment && <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${tone(sentBucket(s.sentiment))}`}>{s.sentiment}</span>}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">{s.signal_type && <span className={`px-1.5 py-0.5 rounded-full ${sigTone(s.signal_type)}`}>{s.signal_type.replace(/_/g, ' ')}</span>}{s.source_date && <span>{(s.source_date || '').slice(0, 10)}</span>}</div>
                         {s.summary && <p className="mt-2 text-xs leading-relaxed text-mav-muted">{s.summary}</p>}
                       </div>
                     ))}
                   </div>
                 </div>
-              )
-            })()}
+              )}
 
-            {selC.industry_note && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Industry note</div><p className="text-sm leading-relaxed text-mav-muted">{selC.industry_note}</p></div>}
-            {selC.journey && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.journey}</p></div>}
-            {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
-            {!selC.journey && !selC.action_steps && !selC.industry_note && !convCount(selC) && <p className="text-sm text-mav-muted mt-5">No journey, next-step notes or open conversations recorded for this client yet.</p>}
-          </aside>
-        </div>
-      )}
+              {selC.journey && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.journey}</p></div>}
+              {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
+              {!r.escs.length && !convos.length && !selC.journey && !selC.action_steps && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
+            </aside>
+          </div>
+        )
+      })()}
     </div>
   )
 }
