@@ -1,9 +1,7 @@
 import type { RevenueRow } from './supabase'
 
-export const fmtUsd = (n: number) => {
-  const v = Number(n) || 0
-  return v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`
-}
+// Full exact dollar value with thousands separators, e.g. $180,345 (no "k" abbreviation).
+export const fmtUsd = (n: number) => `$${Math.round(Number(n) || 0).toLocaleString('en-US')}`
 
 export function revenueByMonth(rows: RevenueRow[]) {
   const m: Record<string, number> = {}
