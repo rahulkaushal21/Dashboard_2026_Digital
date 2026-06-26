@@ -13,6 +13,7 @@ const curMM = pad(curM)
 // fiscal year (Apr–Mar) that the current month falls in
 const tyStart = curM >= 4 ? now.getFullYear() : now.getFullYear() - 1
 const lyStart = tyStart - 1
+const curMonthKey = `${now.getFullYear()}-${curMM}`   // cap "to date" at the current calendar month
 const spLabel = (yr: number) => `Apr–${SHORT[curM]} '${String(yr).slice(2)}`
 
 // --- fiscal quarters (Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar) ---------
@@ -32,7 +33,7 @@ const QS: FQ[] = (() => { const cur = fqOf(now.getFullYear(), curM); const a = [
 const LAST_I = QS.length - 1            // this quarter
 const PREV_I = QS.length - 2            // last quarter
 
-type Row = { client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[] }
+type Row = { client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[]; upcoming: number }
 
 export default function LastYearReview() {
   const [rows, setRows] = useState<BookingRow[]>([])
@@ -48,9 +49,11 @@ export default function LastYearReview() {
       if (!c) return
       const k = (r.booking_month || '').slice(0, 7)
       const amt = r.booking_amount || 0
-      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0) }
+      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0), upcoming: 0 }
       if (between(k, `${lyStart}-04`, `${tyStart}-03`)) cur.fyLast += amt
-      if (k >= `${tyStart}-04`) cur.fyTd += amt
+      // "to date" = current fiscal year up to (and including) the current month only
+      if (k >= `${tyStart}-04` && k <= curMonthKey) cur.fyTd += amt
+      else if (k > curMonthKey) cur.upcoming += amt   // future-dated/scheduled bookings, shown separately
       if (between(k, `${lyStart}-04`, `${lyStart}-${curMM}`)) cur.spLy += amt
       if (between(k, `${tyStart}-04`, `${tyStart}-${curMM}`)) cur.spTy += amt
       QS.forEach((fq, i) => { const [a, b] = qRange(fq); if (between(k, a, b)) cur.qv[i] += amt })
@@ -82,6 +85,7 @@ export default function LastYearReview() {
   const qoqPct = aggLq > 0 ? Math.round(((aggTq - aggLq) / aggLq) * 100) : null
   const dropped = data.filter(r => qStatus(r) === 'Dropped').length
   const newq = data.filter(r => qStatus(r) === 'New').length
+  const upcoming = data.reduce((s, r) => s + r.upcoming, 0)
 
   const badge = (s: string) => ({
     Up: 'bg-green-500/15 text-green-400', New: 'bg-green-500/15 text-green-400',
@@ -95,7 +99,8 @@ export default function LastYearReview() {
       <Header title="Last Year Review" subtitle={`Year-on-year + quarter-over-quarter — who's growing, slipping or dropped off`} />
 
       <div className="mb-4 text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
-        Revenue data starts April 2025, so early quarters may be partial. <span className="text-white">Dropped</span> = had revenue last quarter ({qLabel(QS[PREV_I])}) but none this quarter ({qLabel(QS[LAST_I])}). The current quarter fills as new months are booked.
+        Revenue data starts April 2025, so early quarters may be partial. <span className="text-white">&ldquo;To date&rdquo;</span> counts Apr&nbsp;{tyStart} through {SHORT[curM]}&nbsp;{tyStart} only — future-dated bookings are held out. <span className="text-white">Dropped</span> = had revenue last quarter ({qLabel(QS[PREV_I])}) but none this quarter ({qLabel(QS[LAST_I])}).
+        {upcoming > 0 && <span> Excludes <span className="text-mav-yellow">{money(upcoming)}</span> in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</span>}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
