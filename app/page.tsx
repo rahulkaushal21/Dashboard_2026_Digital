@@ -37,15 +37,27 @@ const PRESETS: { key: string; label: string }[] = [
 ]
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 
-const ago = (ts: string | null) => {
-  if (!ts) return '—'
-  const s = (Date.now() - new Date(ts).getTime()) / 1000
+// Supabase returns timestamps like "2026-06-26 21:44:18.160673+00" — normalise so every browser parses it.
+const parseTs = (ts: string | null) => {
+  if (!ts) return NaN
+  let s = ts.trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1')
+  if (/[+-]\d{2}$/.test(s)) s += ':00'                 // "+00" -> "+00:00"
+  else if (!/[zZ]|[+-]\d{2}:\d{2}$/.test(s)) s += 'Z'  // assume UTC if no zone
+  return new Date(s).getTime()
+}
+const ago = (ts: string | null, nowMs: number) => {
+  const t = parseTs(ts)
+  if (!ts || isNaN(t)) return '—'
+  const s = (nowMs - t) / 1000
   if (s < 60) return 'just now'
   if (s < 3600) return Math.floor(s / 60) + 'm ago'
   if (s < 86400) return Math.floor(s / 3600) + 'h ago'
   return Math.floor(s / 86400) + 'd ago'
 }
-const freshWithin = (ts: string | null, mins: number) => !!ts && (Date.now() - new Date(ts).getTime()) / 60000 < mins
+const freshWithin = (ts: string | null, mins: number, nowMs: number) => { const t = parseTs(ts); return !isNaN(t) && (nowMs - t) / 60000 < mins }
+const later = (a: string | null, b: string | null) => { const ta = parseTs(a), tb = parseTs(b); if (isNaN(ta)) return b; if (isNaN(tb)) return a; return ta >= tb ? a : b }
+const FN_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '') + '/functions/v1/sync-web-revenue'
+const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 // --- segment (service department) bifurcation --------------------------------
 const SEG_ORDER = ['WEB-US', 'WEB-UK', 'WEB-AU', 'LP', 'HUB', 'AI & Automation']
@@ -75,15 +87,30 @@ export default function Dashboard() {
   const [syncOpp, setSyncOpp] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const [nowMs, setNowMs] = useState(Date.now())
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
+  useEffect(() => { const id = setInterval(() => setNowMs(Date.now()), 30000); return () => clearInterval(id) }, [])
   const load = async () => {
     setRefreshing(true)
     try {
-      const [r, c, o, b, sr, so] = await Promise.all([
+      const [r, c, o, b, srA, srB, so] = await Promise.all([
         getRevenue(), getClients(), getOpportunities(), getBookingsFull(),
-        getLastSync('web-revenue-appscript'), getLastSync('email-opportunities-scan'),
+        getLastSync('web-revenue-appscript'), getLastSync('web-revenue-sync'), getLastSync('email-opportunities-scan'),
       ])
-      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(sr); setSyncOpp(so); setLastRefreshed(new Date())
+      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(later(srA, srB)); setSyncOpp(so); setLastRefreshed(new Date()); setNowMs(Date.now())
     } finally { setRefreshing(false) }
+  }
+  // "Sync now" actually re-pulls the revenue sheet (via a Supabase edge function) THEN reloads the data.
+  const refreshAll = async () => {
+    setSyncing(true); setSyncResult(null)
+    try {
+      const res = await fetch(FN_URL, { method: 'POST', headers: ANON ? { apikey: ANON, Authorization: 'Bearer ' + ANON } : {} })
+      const j = await res.json().catch(() => null)
+      setSyncResult(j && j.ok ? `Sheet synced · ${j.rows} rows · ${j.agencies} agencies` : 'Sheet sync did not complete — showing last data')
+    } catch { setSyncResult('Sheet sync unreachable — showing last data') }
+    await load()
+    setSyncing(false)
   }
   useEffect(() => { load() }, [])
 
@@ -164,17 +191,17 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5 text-xs">
         <span className="uppercase tracking-wide text-mav-muted">Last sync</span>
         <span className="inline-flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full ${freshWithin(syncRev, 45) ? 'bg-green-400' : syncRev ? 'bg-amber-400' : 'bg-mav-line'}`} />
-          <span className="text-mav-muted">Web revenue</span><span className="font-medium">{ago(syncRev)}</span>
+          <span className={`w-2 h-2 rounded-full ${freshWithin(syncRev, 45, nowMs) ? 'bg-green-400' : syncRev ? 'bg-amber-400' : 'bg-mav-line'}`} />
+          <span className="text-mav-muted">Web revenue</span><span className="font-medium">{ago(syncRev, nowMs)}</span>
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full ${freshWithin(syncOpp, 180) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
-          <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp)}</span>
+          <span className={`w-2 h-2 rounded-full ${freshWithin(syncOpp, 45, nowMs) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
+          <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp, nowMs)}</span><span className="text-mav-muted">· auto every 30m</span>
         </span>
-        <span className="ml-auto text-mav-muted">{refreshing ? 'Refreshing…' : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
-        <button onClick={load} disabled={refreshing}
+        <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
+        <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white hover:border-mav-yellow disabled:opacity-50">
-          <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> Refresh
+          <RefreshCw size={13} className={(syncing || refreshing) ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
         </button>
       </div>
 
