@@ -1,6 +1,6 @@
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
-export const metadata = { title: 'Mavlers CRM Dashboard', description: 'CRM revenue, clients & opportunities' }
+export const metadata = { title: 'Digital Dashboard', description: 'Digital dashboard — revenue, clients & opportunities' }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
