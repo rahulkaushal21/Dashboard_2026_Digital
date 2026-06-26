@@ -13,11 +13,14 @@ const badge = (s?: string) => {
 const SRC_ORDER = ['spreadsheet', 'email']
 const srcTag = (s: string) => s === 'email' ? 'bg-blue-500/15 text-blue-400' : 'bg-green-500/15 text-green-400'
 const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
+const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >= 60 ? 'bg-green-500/15 text-green-400' : p >= 45 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
+const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 
 export default function Opportunities() {
   const [all, setAll] = useState<Opportunity[]>([])
   const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
   const [fOwner, setFOwner] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const [sel, setSel] = useState<Opportunity | null>(null)
   useEffect(() => { getOpportunities().then(setAll) }, [])
 
   const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return !from && !to; if (from && v < from) return false; if (to && v > to) return false; return true }
@@ -50,13 +53,13 @@ export default function Opportunities() {
       </div>
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Source', 'Type', 'RFQ status', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
+          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Client', 'Win %', 'Source', 'Type', 'Owner', 'GEO', 'Subject', 'Date'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
           <tbody>{o.map(x => (
-            <tr key={x.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+            <tr key={x.id} onClick={() => setSel(x)} className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
               <td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
+              <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
               <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
               <td className="px-4 py-3">{x.is_new_client ? 'New' : 'Repeat'}</td>
-              <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${badge(x.rfq_status)}`}>{x.rfq_status || (x.rfq ? 'RFQ' : '—')}</span></td>
               <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
               <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
               <td className="px-4 py-3 text-mav-muted truncate max-w-xs">{x.source_subject}</td>
@@ -65,6 +68,44 @@ export default function Opportunities() {
           ))}</tbody>
         </table>
       </div>
+
+      {sel && (
+        <div className="fixed inset-0 z-40" onClick={() => setSel(null)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-xl font-semibold">{sel.company_name}</h2>
+                <div className="mt-1 flex flex-wrap gap-1">{(sel.sources || (sel.source ? [sel.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</div>
+              </div>
+              <button onClick={() => setSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+            </div>
+
+            <div className="mb-5">
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-xs uppercase tracking-wide text-mav-muted">Conversion probability</span>
+                <span className={`text-2xl font-bold ${sel.win_probability == null ? 'text-mav-muted' : sel.win_probability >= 60 ? 'text-green-400' : sel.win_probability >= 45 ? 'text-amber-400' : 'text-red-400'}`}>{sel.win_probability != null ? sel.win_probability + '%' : '—'}</span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-mav-dark overflow-hidden"><div className={`h-full ${probBar(sel.win_probability)}`} style={{ width: (sel.win_probability ?? 0) + '%' }} /></div>
+            </div>
+
+            {sel.gist && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">What&apos;s happening</div><p className="text-sm leading-relaxed">{sel.gist}</p></div>}
+            {sel.win_reason && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Why this probability</div><p className="text-sm leading-relaxed text-mav-muted">{sel.win_reason}</p></div>}
+            {sel.company_note && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Company</div><p className="text-sm leading-relaxed italic text-mav-muted">{sel.company_note}</p></div>}
+            {!sel.gist && <p className="text-sm text-mav-muted mb-5">No email-thread analysis yet for this lead — it currently comes from an open quote in the sheet. {sel.summary}</p>}
+
+            <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
+              <div><div className="text-xs text-mav-muted">Owner</div>{sel.sales_person || '—'}</div>
+              <div><div className="text-xs text-mav-muted">PM looped in</div>{sel.pm_owner || '—'}</div>
+              <div><div className="text-xs text-mav-muted">Type</div>{sel.is_new_client ? 'New' : 'Repeat'}</div>
+              <div><div className="text-xs text-mav-muted">RFQ status</div><span className={`text-xs px-2 py-1 rounded-full ${badge(sel.rfq_status)}`}>{sel.rfq_status || (sel.rfq ? 'RFQ' : '—')}</span></div>
+              <div><div className="text-xs text-mav-muted">GEO</div>{sel.geo || '—'}</div>
+              <div><div className="text-xs text-mav-muted">Date</div>{(sel.source_date || '').slice(0, 10) || '—'}</div>
+              <div className="col-span-2"><div className="text-xs text-mav-muted">Subject</div>{sel.source_subject || '—'}</div>
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   )
 }
