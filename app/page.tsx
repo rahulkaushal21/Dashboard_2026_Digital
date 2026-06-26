@@ -74,13 +74,16 @@ export default function Dashboard() {
   const [syncRev, setSyncRev] = useState<string | null>(null)
   const [syncOpp, setSyncOpp] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const load = async () => {
     setRefreshing(true)
-    const [r, c, o, b, sr, so] = await Promise.all([
-      getRevenue(), getClients(), getOpportunities(), getBookingsFull(),
-      getLastSync('web-revenue-appscript'), getLastSync('email-opportunities-scan'),
-    ])
-    setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(sr); setSyncOpp(so); setRefreshing(false)
+    try {
+      const [r, c, o, b, sr, so] = await Promise.all([
+        getRevenue(), getClients(), getOpportunities(), getBookingsFull(),
+        getLastSync('web-revenue-appscript'), getLastSync('email-opportunities-scan'),
+      ])
+      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(sr); setSyncOpp(so); setLastRefreshed(new Date())
+    } finally { setRefreshing(false) }
   }
   useEffect(() => { load() }, [])
 
@@ -168,8 +171,9 @@ export default function Dashboard() {
           <span className={`w-2 h-2 rounded-full ${freshWithin(syncOpp, 180) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
           <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp)}</span>
         </span>
+        <span className="ml-auto text-mav-muted">{refreshing ? 'Refreshing…' : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
         <button onClick={load} disabled={refreshing}
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white hover:border-mav-yellow disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white hover:border-mav-yellow disabled:opacity-50">
           <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> Refresh
         </button>
       </div>
