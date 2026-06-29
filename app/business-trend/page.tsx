@@ -200,14 +200,18 @@ export default function BusinessTrendPage() {
               {last6Mo.length > 0 ? last6Mo.map((item, idx) => {
                 const prev = idx > 0 ? last6Mo[idx - 1].revenue : item.revenue
                 const growth = prev > 0 ? Math.round(((item.revenue - prev) / prev) * 1000) / 10 : 0
+                const monthKey = ym(item.month)
+                const monthQuotes = quotes.filter(q => ym(q.added_date) === monthKey)
+                const confirmed = monthQuotes.filter(q => (q.status || '').toLowerCase() === 'confirmed').length
+                const confirmRate = monthQuotes.length > 0 ? Math.round((confirmed / monthQuotes.length) * 100) : 0
                 return (
                   <tr key={item.month} className="hover:bg-gray-100 border-b border-gray-200">
                     <td className="border border-gray-300 px-4 py-2 text-gray-900">{item.monthLabel}</td>
                     <td className="border border-gray-300 px-4 py-2 text-right font-semibold text-gray-900">{fmtUsd(item.revenue)}</td>
                     <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{growth > 0 ? '+' : ''}{growth}%</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">0</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">0</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">—</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{monthQuotes.length}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{confirmed}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{monthQuotes.length > 0 ? confirmRate + '%' : '—'}</td>
                   </tr>
                 )
               }) : (
@@ -220,7 +224,7 @@ export default function BusinessTrendPage() {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-300 rounded-lg p-6">
+      <div className="bg-gray-50 border border-gray-300 rounded-lg p-6">
         <h3 className="text-lg font-bold text-gray-900 mb-4">FY 2026-27 Forecast (Apr 2026 - Mar 2027)</h3>
 
         <div className="mb-4 text-xs text-gray-700 space-y-1">
