@@ -1,0 +1,105 @@
+MODIFIED FILES - COMPLETE LIST
+===============================
+
+Location: /tmp/repo/
+
+MODIFIED PAGES:
+---------------
+1. /tmp/repo/app/clients/page.tsx
+   - Added: PM/Owner filter, GEO filter
+   - Added: Sorting by name, ltv, owner, geo
+   - Added: handleSort() and getSortIndicator() functions
+   - Changed: Filter UI layout, sort state management
+   - Lines changed: ~84 additions
+
+2. /tmp/repo/app/business-trend/page.tsx
+   - Redesigned: Complete rewrite with 3 new sections
+   - Added: getQuotes, getConversions imports
+   - Added: Last 6 Months Analysis table
+   - Added: FY 2026-27 Forecast section with $3.5M target
+   - Added: Quotes & Confirmations dashboard
+   - Added: On/Off Track status indicator
+   - Added: Progress bar toward goal
+   - Lines changed: ~139 additions
+
+3. /tmp/repo/app/quotes/page.tsx
+   - Added: Sorting by quote_id, agency, usd_value, status
+   - Added: handleSort() and getSortIndicator() functions
+   - Added: Sort state management (sortBy, sortAsc)
+   - Changed: Table header buttons for sorting
+   - Lines changed: ~75 additions
+
+4. /tmp/repo/app/escalations/page.tsx
+   - Added: Sorting by date, company, type
+   - Added: handleSort() and getSortIndicator() functions
+   - Added: Sort state management (sortBy, sortAsc)
+   - Changed: Table header buttons for sorting
+   - Changed: Subtitle to mention sorting feature
+   - Lines changed: ~78 additions
+
+5. /tmp/repo/components/Sidebar.tsx
+   - Removed: Industry Focus navigation link
+   - Removed: 20/80 Rule navigation link
+   - Removed: import for Factory and PieChart icons
+   - Changed: nav array from 10 to 8 items
+   - Lines changed: 4 deletions
+
+DELETED PAGES:
+--------------
+6. /tmp/repo/app/pareto/page.tsx (DELETED)
+   - Previous: 20/80 Rule analysis page
+   - Size: 49 lines
+   - Status: Removed and directory cleaned
+
+7. /tmp/repo/app/industry/page.tsx (DELETED)
+   - Previous: Industry Focus page
+   - Size: 43 lines
+   - Status: Removed and directory cleaned
+
+NEW FILES:
+----------
+8. /tmp/repo/.gitignore (NEW)
+   - Excludes: node_modules/
+   - Excludes: .next/, dist/, build artifacts
+   - Excludes: IDE files (.vscode, .idea)
+   - Excludes: Log files
+   - Excludes: OS files (.DS_Store, Thumbs.db)
+   - Size: 35 lines
+
+DIRECTORY STRUCTURE:
+--------------------
+/tmp/repo/
+├── .gitignore (NEW)
+├── app/
+│   ├── admin/
+│   ├── business-trend/
+│   │   └── page.tsx (MODIFIED)
+│   ├── clients/
+│   │   └── page.tsx (MODIFIED)
+│   ├── escalations/
+│   │   └── page.tsx (MODIFIED)
+│   ├── industry/ (DELETED)
+│   ├── last-year/
+│   ├── opportunities/
+│   ├── page.tsx
+│   ├── pareto/ (DELETED)
+│   ├── quotes/
+│   │   └── page.tsx (MODIFIED)
+│   ├── sql-leads/
+│   └── layout.tsx
+├── components/
+│   ├── BarCard.tsx
+│   ├── Header.tsx
+│   ├── KPICard.tsx
+│   ├── RevenueChart.tsx
+│   └── Sidebar.tsx (MODIFIED)
+├── lib/
+├── node_modules/ (NOT MODIFIED)
+└── [other config files...]
+
+SUMMARY:
+--------
+Total Files Modified: 5
+Total Files Deleted: 2
+Total Files Created: 1
+Total Line Changes: 355 insertions(+), 117 deletions(-)

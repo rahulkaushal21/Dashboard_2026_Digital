@@ -1,20 +1,77 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import { getQuotes, getConversions, type Quote, type QuoteConversion } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
+type SortField = 'quote_id' | 'agency' | 'usd_value' | 'status'
+
 export default function Quotes() {
   const [q, setQ] = useState<Quote[]>([]); const [c, setC] = useState<QuoteConversion[]>([])
   const [designOnly, setDesignOnly] = useState(false)
+  const [sortBy, setSortBy] = useState<SortField>('quote_id')
+  const [sortAsc, setSortAsc] = useState(false)
+  
   useEffect(() => { getQuotes().then(setQ); getConversions().then(setC) }, [])
+  
   const won = c.filter(x => x.outcome === 'won'); const lost = c.filter(x => x.outcome === 'lost')
   const decided = won.length + lost.length
   const conv = decided ? (won.length / decided) * 100 : 0
   const isDesign = (x: Quote) => /design/i.test((x as { technology?: string }).technology || '')
   const designCount = q.filter(isDesign).length
-  const rows = designOnly ? q.filter(isDesign) : q
+  
+  const rows = useMemo(() => {
+    let result = designOnly ? q.filter(isDesign) : q
+    
+    // Apply sorting
+    result = [...result].sort((a, b) => {
+      let aVal: string | number, bVal: string | number
+      
+      switch (sortBy) {
+        case 'quote_id':
+          aVal = (a.quote_id || '').toLowerCase()
+          bVal = (b.quote_id || '').toLowerCase()
+          break
+        case 'agency':
+          aVal = (a.agency || '').toLowerCase()
+          bVal = (b.agency || '').toLowerCase()
+          break
+        case 'usd_value':
+          aVal = a.usd_value || 0
+          bVal = b.usd_value || 0
+          break
+        case 'status':
+          aVal = (a.status || '').toLowerCase()
+          bVal = (b.status || '').toLowerCase()
+          break
+        default:
+          aVal = 0
+          bVal = 0
+      }
+      
+      if (aVal < bVal) return sortAsc ? -1 : 1
+      if (aVal > bVal) return sortAsc ? 1 : -1
+      return 0
+    })
+    
+    return result
+  }, [q, designOnly, sortBy, sortAsc])
+  
+  const handleSort = (field: SortField) => {
+    if (sortBy === field) {
+      setSortAsc(!sortAsc)
+    } else {
+      setSortBy(field)
+      setSortAsc(false)
+    }
+  }
+
+  const getSortIndicator = (field: string) => {
+    if (sortBy !== field) return ' ↕'
+    return sortAsc ? ' ↑' : ' ↓'
+  }
+  
   return (
     <div>
       <Header title="Quotes" subtitle="Pipeline from the sheet · won/lost from email · Design and every other technology tagged" />
@@ -35,7 +92,19 @@ export default function Quotes() {
         <div className="lg:col-span-2 bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Quote', 'Agency', 'Value', 'Tech', 'Status', 'Type', 'Owner'].map(h => <th key={h} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="text-left text-mav-muted border-b border-mav-line">
+              <tr>
+                {[
+                  <button key="quote_id" onClick={() => handleSort('quote_id')} className="hover:text-white cursor-pointer">Quote{getSortIndicator('quote_id')}</button>,
+                  <button key="agency" onClick={() => handleSort('agency')} className="hover:text-white cursor-pointer">Agency{getSortIndicator('agency')}</button>,
+                  <button key="usd_value" onClick={() => handleSort('usd_value')} className="hover:text-white cursor-pointer">Value{getSortIndicator('usd_value')}</button>,
+                  'Tech',
+                  <button key="status" onClick={() => handleSort('status')} className="hover:text-white cursor-pointer">Status{getSortIndicator('status')}</button>,
+                  'Type',
+                  'Owner'
+                ].map((h, i) => <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}
+              </tr>
+            </thead>
             <tbody>{rows.map(x => {
               const tech = (x as { technology?: string }).technology
               return (

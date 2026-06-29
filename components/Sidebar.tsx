@@ -1,19 +1,17 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Briefcase, Users, FileText, Factory, AlertTriangle, Target, TrendingUp, History, PieChart, Settings } from 'lucide-react'
+import { LayoutDashboard, Briefcase, Users, FileText, AlertTriangle, Target, TrendingUp, History, Settings } from 'lucide-react'
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/quotes', label: 'Quotes', icon: FileText },
-  { href: '/industry', label: 'Industry Focus', icon: Factory },
   { href: '/escalations', label: 'Escalations', icon: AlertTriangle },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
   { href: '/last-year', label: 'Last Year Review', icon: History },
-  { href: '/pareto', label: '20 / 80 Rule', icon: PieChart },
   { href: '/admin', label: 'Settings', icon: Settings },
 ]
 

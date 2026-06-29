@@ -37,6 +37,8 @@ export default function Clients() {
   const [signals, setSignals] = useState<EmailSignal[]>([])
   const [escs, setEscs] = useState<Escalation[]>([])
   const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
+  const [owner, setOwner] = useState(''); const [geo, setGeo] = useState('')
+  const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo'>('ltv'); const [sortAsc, setSortAsc] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
   useEffect(() => { getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs) }, [])
 
@@ -88,16 +90,67 @@ export default function Clients() {
   // Genuine risk wins; otherwise positive feedback (with no negative signal) shows green; else the recorded sentiment
   const statusOf = (c: Client) => { const r = riskOf(c); if (r.level) return r.level; if (r.posFb.length && !r.negSigs.length) return 'Positive'; return sentBucket(c.sentiment) }
 
-  const rows = useMemo(() => clients
-    .filter(c => c.company_name.toLowerCase().includes(q.toLowerCase()))
-    .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
-    .filter(c => !stat || statusOf(c) === stat)
-    .filter(c => !aiOnly || c.ai_focus)
-    .sort((a, b) => (b.ltv_usd || 0) - (a.ltv_usd || 0)), [clients, q, ind, stat, aiOnly, escByClient, sigByCompany])
-
+  const owners = uniq(clients.map(c => c.pc_sme))
+  const geos = uniq(clients.map(c => c.geo))
   const industries = uniq(clients.map(c => c.industry))
   const aiCount = clients.filter(c => c.ai_focus).length
   const statCount = (b: string) => clients.filter(c => statusOf(c) === b).length
+
+  const rows = useMemo(() => {
+    let result = clients
+      .filter(c => c.company_name.toLowerCase().includes(q.toLowerCase()))
+      .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
+      .filter(c => !stat || statusOf(c) === stat)
+      .filter(c => !aiOnly || c.ai_focus)
+      .filter(c => !owner || c.pc_sme === owner)
+      .filter(c => !geo || c.geo === geo)
+    
+    // Apply sorting
+    result.sort((a, b) => {
+      let aVal: string | number, bVal: string | number
+      switch (sortBy) {
+        case 'name':
+          aVal = a.company_name.toLowerCase()
+          bVal = b.company_name.toLowerCase()
+          break
+        case 'ltv':
+          aVal = a.ltv_usd || 0
+          bVal = b.ltv_usd || 0
+          break
+        case 'owner':
+          aVal = (a.pc_sme || '').toLowerCase()
+          bVal = (b.pc_sme || '').toLowerCase()
+          break
+        case 'geo':
+          aVal = (a.geo || '').toLowerCase()
+          bVal = (b.geo || '').toLowerCase()
+          break
+        default:
+          aVal = 0
+          bVal = 0
+      }
+      
+      if (aVal < bVal) return sortAsc ? -1 : 1
+      if (aVal > bVal) return sortAsc ? 1 : -1
+      return 0
+    })
+    
+    return result
+  }, [clients, q, ind, stat, aiOnly, owner, geo, sortBy, sortAsc, escByClient, sigByCompany])
+
+  const handleSort = (field: 'name' | 'ltv' | 'owner' | 'geo') => {
+    if (sortBy === field) {
+      setSortAsc(!sortAsc)
+    } else {
+      setSortBy(field)
+      setSortAsc(false)
+    }
+  }
+
+  const getSortIndicator = (field: string) => {
+    if (sortBy !== field) return ' ↕'
+    return sortAsc ? ' ↑' : ' ↓'
+  }
 
   return (
     <div>
@@ -106,6 +159,8 @@ export default function Clients() {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
         <select value={ind} onChange={e => setInd(e.target.value)} className={sel}><option value="">All industries</option>{industries.map(i => <option key={i} value={i}>{i}</option>)}</select>
+        <select value={owner} onChange={e => setOwner(e.target.value)} className={sel}><option value="">All owners</option>{owners.map(o => <option key={o} value={o}>{o}</option>)}</select>
+        <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}><option value="">All GEOs</option>{geos.map(g => <option key={g} value={g}>{g}</option>)}</select>
         <select value={stat} onChange={e => setStat(e.target.value)} className={sel}>
           <option value="">All health</option>
           <option value="At risk">🔴 At risk ({statCount('At risk')})</option>
@@ -118,12 +173,23 @@ export default function Clients() {
         <span className="text-xs text-mav-muted ml-auto">{rows.length} clients</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Click a row for the full picture.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Click a row for the full picture. Click column headers to sort.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['', 'Client', 'Industry', 'GEO', 'Owner', 'Health', 'Escal.', 'Convos', 'LTV'].map(h => <th key={h} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
+              {['', 
+                <button key="client" onClick={() => handleSort('name')} className="hover:text-white cursor-pointer">Client{getSortIndicator('name')}</button>,
+                'Industry',
+                <button key="geo" onClick={() => handleSort('geo')} className="hover:text-white cursor-pointer">GEO{getSortIndicator('geo')}</button>,
+                <button key="owner" onClick={() => handleSort('owner')} className="hover:text-white cursor-pointer">Owner{getSortIndicator('owner')}</button>,
+                'Health',
+                'Escal.',
+                'Convos',
+                <button key="ltv" onClick={() => handleSort('ltv')} className="hover:text-white cursor-pointer">LTV{getSortIndicator('ltv')}</button>
+              ].map((h, i) => <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}
+            </tr></thead>
             <tbody>
               {rows.map(c => {
                 const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByCompany.get(norm(c.company_name)) || []).length
