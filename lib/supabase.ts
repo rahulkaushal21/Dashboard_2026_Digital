@@ -55,6 +55,33 @@ const isOpenQuote = (s?: string) => {
   const v = (s || '').trim().toLowerCase()
   return v !== '' && v !== 'confirmed' && v !== 'cancelled'
 }
+
+// Levenshtein distance similarity: returns 0-1 score (1 = identical)
+const similarity = (a: string, b: string): number => {
+  const s1 = (a || '').trim().toLowerCase()
+  const s2 = (b || '').trim().toLowerCase()
+  if (s1 === s2) return 1
+  if (!s1 || !s2) return 0
+  
+  const matrix: number[][] = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(0))
+  for (let i = 0; i <= s1.length; i++) matrix[0][i] = i
+  for (let j = 0; j <= s2.length; j++) matrix[j][0] = j
+  
+  for (let j = 1; j <= s2.length; j++) {
+    for (let i = 1; i <= s1.length; i++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,
+        matrix[j - 1][i] + 1,
+        matrix[j - 1][i - 1] + cost
+      )
+    }
+  }
+  
+  const maxLen = Math.max(s1.length, s2.length)
+  return maxLen === 0 ? 1 : 1 - (matrix[s2.length][s1.length] / maxLen)
+}
+
 export async function getOpportunities(): Promise<Opportunity[]> {
   // Opportunities = email-sourced rows + open/pending rows from the Quotes tab.
   // Deduped by client: one entry per company, tagged with every source it came from.
@@ -108,9 +135,23 @@ export async function getOpportunities(): Promise<Opportunity[]> {
   const m = new Map<string, Opportunity & { sources: string[] }>()
   for (const x of [...emailOpps, ...quoteOpps]) {
     const key = norm(x.company_name) || ('id:' + x.id)
-    const cur = m.get(key)
-    if (!cur) { m.set(key, { ...x, sources: [x.source as string] }) }
-    else {
+    let cur = m.get(key)
+    
+    // If no exact match, look for fuzzy match (similarity > 0.85)
+    if (!cur && x.company_name) {
+      let bestMatch: { key: string; score: number } | null = null
+      for (const [existingKey, existingOpp] of m.entries()) {
+        const score = similarity(x.company_name, existingOpp.company_name)
+        if (score > 0.85 && (!bestMatch || score > bestMatch.score)) {
+          bestMatch = { key: existingKey, score }
+        }
+      }
+      if (bestMatch) cur = m.get(bestMatch.key)
+    }
+    
+    if (!cur) { 
+      m.set(key, { ...x, sources: [x.source as string] }) 
+    } else {
       const sources = cur.sources.includes(x.source as string) ? cur.sources : [...cur.sources, x.source as string]
       // carry the richest values across the merged sources
       const keep = {
@@ -123,8 +164,13 @@ export async function getOpportunities(): Promise<Opportunity[]> {
         won_amount: pick(cur.won_amount, x.won_amount),
         status: pick(cur.status, x.status),
       }
-      if ((x.source_date || '') > (cur.source_date || '')) m.set(key, { ...x, sources, ...keep })
-      else { m.set(key, { ...cur, sources, ...keep }) }
+      // Use spreadsheet data as canonical source of truth (clean normalized name)
+      const canonicalName = x.source === 'spreadsheet' ? x.company_name : cur.company_name
+      if ((x.source_date || '') > (cur.source_date || '')) {
+        m.set(key, { ...x, company_name: canonicalName, sources, ...keep })
+      } else {
+        m.set(key, { ...cur, company_name: canonicalName, sources, ...keep })
+      }
     }
   }
   const all = [...m.values()]
