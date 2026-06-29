@@ -14,7 +14,10 @@ const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.leng
 // Convert revenue rows to month+year keyed data, preserving month-year for accurate filtering
 function revenueByMonthYear(rows: RevenueRow[]) {
   const m: Record<string, number> = {}
-  rows.forEach(r => { m[r.month] = (m[r.month] || 0) + (r.amount_usd || 0) })
+  rows.forEach(r => {
+    const monthKey = ym(r.month)  // Extract YYYY-MM from the date
+    m[monthKey] = (m[monthKey] || 0) + (r.amount_usd || 0)
+  })
   return Object.keys(m).sort().map(month => ({
     month,
     monthLabel: monLabel(month),
@@ -26,8 +29,8 @@ function revenueByMonthYear(rows: RevenueRow[]) {
 function getFY26Months(): string[] {
   const months: string[] = []
   for (let year = 2026; year <= 2027; year++) {
-    const startMonth = year === 2026 ? 4 : 1  // April for 2026, Jan for 2027
-    const endMonth = year === 2026 ? 12 : 3   // Dec for 2026, Mar for 2027
+    const startMonth = year === 2026 ? 4 : 1
+    const endMonth = year === 2026 ? 12 : 3
     for (let month = startMonth; month <= endMonth; month++) {
       months.push(`${year}-${String(month).padStart(2, '0')}`)
     }
@@ -51,338 +54,300 @@ function bookingsToQuotes(bookings: BookingRow[]): Quote[] {
     agency: b.company_name,
     usd_value: b.booking_amount,
     status: 'confirmed',
-    business_type: 'existing',
-    geo: b.geo,
-    sales_person: b.sales_person,
   }))
 }
 
-// Convert bookings to conversion-like data (all bookings are treated as "won")
-function bookingsToConversions(bookings: BookingRow[]): QuoteConversion[] {
-  return bookings.map((b, idx) => ({
-    id: 200000 + (b.id || idx),
-    company_name: b.company_name,
-    outcome: 'won',
-    amount_usd: b.booking_amount,
-    decided_at: b.booking_date,
-  }))
-}
-
-export default function BusinessTrend() {
-  const [r, setR] = useState<RevenueRow[]>([])
+export default function BusinessTrendPage() {
+  const [fromMonth, setFromMonth] = useState('')
+  const [toMonth, setToMonth] = useState('')
+  const [revenue, setRevenue] = useState<RevenueRow[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [conversions, setConversions] = useState<QuoteConversion[]>([])
   const [bookings, setBookings] = useState<BookingRow[]>([])
-  const [from, setFrom] = useState(''); const [to, setTo] = useState('')
-  const [usingBookingsAsFallback, setUsingBookingsAsFallback] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([
-      getRevenue().then(setR),
-      getBookingsFull().then(setBookings),
-      getQuotes().then(q => {
-        if (!q || q.length === 0) {
-          setUsingBookingsAsFallback(true)
-          getBookingsFull().then(b => setQuotes(bookingsToQuotes(b)))
-        } else {
-          setQuotes(q)
-        }
-      }),
-      getConversions().then(c => {
-        if (!c || c.length === 0) {
-          getBookingsFull().then(b => setConversions(bookingsToConversions(b)))
-        } else {
-          setConversions(c)
-        }
-      }),
-    ])
+    (async () => {
+      try {
+        const [rev, q, c, b] = await Promise.all([
+          getRevenue(),
+          getQuotes(),
+          getConversions(),
+          getBookingsFull(),
+        ])
+        setRevenue(rev || [])
+        setQuotes(q && q.length > 0 ? q : (b ? bookingsToQuotes(b) : []))
+        setConversions(c || [])
+        setBookings(b || [])
+        setLoading(false)
+      } catch (e) {
+        console.error('Error loading business trend data:', e)
+        setLoading(false)
+      }
+    })()
   }, [])
 
-  const inRange = (d?: string) => { if (!d) return !from && !to; if (from && d < from) return false; if (to && d > to) return false; return true }
-  const filtered = useMemo(() => r.filter(x => inRange(x.month)), [r, from, to])
-  const series = useMemo(() => revenueByMonthYear(filtered), [filtered])
+  // Last 6 months: identify latest month, go back 6, show all data in range
+  const last6Mo = useMemo(() => {
+    const byMonth = revenueByMonthYear(revenue)
+    if (byMonth.length === 0) return []
 
-  // Get last 6 months data (including current month if we're in it)
-  const last6Months = useMemo(() => {
-    const all = revenueByMonthYear(r)
-    return all.slice(Math.max(0, all.length - 6))
-  }, [r])
+    const [lastMonthStr] = byMonth[byMonth.length - 1].month.split('-')
+    const lastYear = +lastMonthStr
+    const lastMo = +byMonth[byMonth.length - 1].month.split('-')[1]
 
-  // Current month is the last month in series; prior is second-to-last
-  const cur = series.length > 0 ? series[series.length - 1]?.revenue ?? 0 : 0
-  const prev = series.length > 1 ? series[series.length - 2]?.revenue ?? 0 : 0
-  const total = series.reduce((s, x) => s + (x.revenue || 0), 0)
-  const delta = prev > 0 ? ((cur - prev) / prev) * 100 : 0
+    let year = lastYear, mo = lastMo
+    const sixMonthsBack: string[] = []
+    for (let i = 0; i < 6; i++) {
+      sixMonthsBack.unshift(`${year}-${String(mo).padStart(2, '0')}`)
+      mo--
+      if (mo < 1) {
+        mo = 12
+        year--
+      }
+    }
 
-  // FY 2026-27 calculations (April 2026 to March 2027)
-  const fy26RevenueData = useMemo(() => {
-    return revenueByMonthYear(r.filter(x => isInFY26(x.month)))
-  }, [r])
+    return byMonth.filter(item => {
+      const itemMonth = ym(item.month)
+      return sixMonthsBack.includes(itemMonth)
+    })
+  }, [revenue])
 
-  const fy26CompletedMonths = fy26RevenueData.filter(m => {
-    // Compare month strings directly (YYYY-MM format)
-    const now = new Date()
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    return (m.month || '') <= currentMonth
-  })
+  // FY 2026-27 analysis: Apr 2026 - Mar 2027
+  const fy26Analysis = useMemo(() => {
+    const fy26Months = getFY26Months()
+    const fy26Rev = revenueByMonthYear(revenue).filter(r => isInFY26(ym(r.month)))
 
-  const fy26ActualRevenue = fy26CompletedMonths.reduce((s, x) => s + (x.revenue || 0), 0)
+    const totalRev = fy26Rev.reduce((sum, r) => sum + r.revenue, 0)
+    const completedMonths = fy26Rev.length
+    const monthsRemaining = Math.max(0, 12 - completedMonths)
+    const avgMonthly = completedMonths > 0 ? totalRev / completedMonths : 0
+    const projected = totalRev + (avgMonthly * monthsRemaining)
 
-  // Average of completed months (or last 3 months if in early FY)
-  const avgMonthlyRev = fy26CompletedMonths.length > 0
-    ? fy26CompletedMonths.reduce((s, x) => s + (x.revenue || 0), 0) / fy26CompletedMonths.length
-    : 0
+    const target = 3500000
+    const onTrack = projected >= target
 
-  // Calculate remaining months until March 2027
-  const now = new Date()
-  const marchEnd = new Date(2027, 2, 31)
-  const monthsRemaining = Math.ceil((marchEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30.44))
+    return {
+      completedMonths,
+      totalRevenue: totalRev,
+      avgMonthly,
+      projected: Math.round(projected),
+      monthsRemaining,
+      targetProgress: Math.round((totalRev / target) * 100),
+      onTrack,
+      data: fy26Rev,
+    }
+  }, [revenue])
 
-  // Projected total for full FY 2026-27
-  const fy26Target = 3500000
-  const projectedTotal = fy26ActualRevenue + (avgMonthlyRev * Math.max(0, monthsRemaining))
-  const onTrack = projectedTotal >= fy26Target
-  const progressPct = Math.min((fy26ActualRevenue / fy26Target) * 100, 100)
+  // Quotes and confirmations: last 6 months
+  const quotesAnalysis = useMemo(() => {
+    const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
+    const sixMonthsAgo = lastMonthStr
+      ? (() => {
+          const [y, m] = lastMonthStr.split('-')
+          let year = +y, mo = +m - 6
+          if (mo < 1) { mo += 12; year-- }
+          return `${year}-${String(mo).padStart(2, '0')}`
+        })()
+      : ''
 
-  // Calculate quotes and confirmations for last 6 months
-  const last6MonthsKeys = useMemo(() => {
-    return last6Months.map(m => m.month)
-  }, [last6Months])
+    const relevant = quotes.filter(q => {
+      const qm = ym(q.added_date)
+      return !sixMonthsAgo || (qm >= sixMonthsAgo && qm <= lastMonthStr)
+    })
 
-  const quotesInPeriod = useMemo(() => {
-    return quotes.filter(q => q.added_date && last6MonthsKeys.includes(ym(q.added_date)))
-  }, [quotes, last6MonthsKeys])
+    const confirmed = relevant.filter(q => (q.status || '').toLowerCase() === 'confirmed').length
+    return {
+      total: relevant.length,
+      confirmed,
+      rate: relevant.length > 0 ? Math.round((confirmed / relevant.length) * 100) : 0,
+    }
+  }, [quotes, last6Mo])
 
-  const conversionsInPeriod = useMemo(() => {
-    return conversions.filter(c => c.decided_at && last6MonthsKeys.includes(ym(c.decided_at)))
-  }, [conversions, last6MonthsKeys])
-
-  const confirmedQuotes = conversionsInPeriod.filter(c => c.outcome === 'won').length
-  const conversionRate = quotesInPeriod.length > 0 ? (confirmedQuotes / quotesInPeriod.length) * 100 : 0
-
-  const reset = () => { setFrom(''); setTo('') }
-
-  const dataSourceNote = usingBookingsAsFallback 
-    ? ' (Using Confirmed Bookings as data source)' 
-    : ' (From Quote Tables)'
+  if (loading) return <div className="p-6">Loading business trend data...</div>
 
   return (
-    <div>
+    <main className="flex flex-col gap-8 p-6">
       <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes/confirmations tracking, and FY 2026-27 forecast" />
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <span className="text-xs text-mav-muted">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
-        <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
-        <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
-        <span className="text-xs text-mav-muted ml-2">{series.length} month(s) in view</span>
+      {/* Date range selector for manual exploration */}
+      <div className="flex gap-4 items-center">
+        <label>
+          <span className="text-xs font-semibold text-gray-600 mr-2">From</span>
+          <input type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)} className={selCls} />
+        </label>
+        <label>
+          <span className="text-xs font-semibold text-gray-600 mr-2">To</span>
+          <input type="month" value={toMonth} onChange={e => setToMonth(e.target.value)} className={selCls} />
+        </label>
+        <button onClick={() => { setFromMonth(''); setToMonth('') }} className="text-xs px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">
+          Reset
+        </button>
+        <span className="text-xs text-gray-500 ml-4">
+          {revenue.length} month(s) in view
+        </span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="relative group">
-          <KPICard
-            label="Latest month"
-            value={fmtUsd(cur)}
-            change={delta}
-          />
-          <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-            Latest month revenue
-          </div>
-        </div>
-        <div className="relative group">
-          <KPICard
-            label="Prior month"
-            value={fmtUsd(prev)}
-          />
-          <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-            Previous month revenue
-          </div>
-        </div>
-        <div className="relative group">
-          <KPICard
-            label="Delta"
-            value={fmtUsd(cur - prev)}
-          />
-          <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-            Month-over-Month growth %: {delta > 0 ? '+' : ''}{delta.toFixed(1)}%
-          </div>
-        </div>
-        <div className="relative group">
-          <KPICard
-            label="Total in range"
-            value={fmtUsd(total)}
-          />
-          <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-            Sum of all months in selected range
-          </div>
-        </div>
-      </div>
+      {/* Revenue trend chart */}
+      <RevenueChart data={revenueByMonthYear(revenue)} from={fromMonth} to={toMonth} />
 
-      <RevenueChart data={series} />
-
-      {/* 6-Month Analysis Section */}
-      <div className="mt-8 mb-6">
-        <h3 className="text-lg font-semibold mb-4">Last 6 Months Analysis</h3>
-        <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-mav-muted border-b border-mav-line">
+      {/* Last 6 months analysis table */}
+      <div>
+        <h3 className="text-lg font-bold text-gray-900 mb-3">Last 6 Months Analysis</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm bg-gray-50 rounded-lg overflow-hidden">
+            <thead>
+              <tr className="bg-gray-200 text-gray-900">
+                <th className="border border-gray-300 px-4 py-2 text-left">Month</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Revenue</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Growth %</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Quotes</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Confirmations</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Confirm Rate %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {last6Mo.length > 0 ? last6Mo.map((item, idx) => {
+                const prev = idx > 0 ? last6Mo[idx - 1].revenue : item.revenue
+                const growth = prev > 0 ? Math.round(((item.revenue - prev) / prev) * 1000) / 10 : 0
+                return (
+                  <tr key={item.month} className="hover:bg-gray-100">
+                    <td className="border border-gray-300 px-4 py-2">{item.monthLabel}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right font-semibold">{fmtUsd(item.revenue)}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right">{growth > 0 ? '+' : ''}{growth}%</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right">0</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right">0</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right">—</td>
+                  </tr>
+                )
+              }) : (
                 <tr>
-                  <th className="px-4 py-3 font-medium">Month</th>
-                  <th className="px-4 py-3 font-medium text-right">Revenue</th>
-                  <th className="px-4 py-3 font-medium text-right">Growth %</th>
-                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Deals Booked' : 'Quotes'}</th>
-                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Confirmed Deals' : 'Confirmations'}</th>
-                  <th className="px-4 py-3 font-medium text-right">Confirm Rate %</th>
+                  <td colSpan={6} className="border border-gray-300 px-4 py-2 text-center text-gray-500">No data available</td>
                 </tr>
-              </thead>
-              <tbody>
-                {last6Months.map((month, idx) => {
-                  const prevMonth = idx > 0 ? last6Months[idx - 1]?.revenue : null
-                  const growthPct = prevMonth ? (((month.revenue || 0) - prevMonth) / prevMonth) * 100 : 0
-                  const monthQuotes = quotesInPeriod.filter(q => ym(q.added_date) === month.month).length
-                  const monthConfirmed = conversionsInPeriod.filter(c => c.outcome === 'won' && ym(c.decided_at) === month.month).length
-                  const confirmRate = monthQuotes > 0 ? (monthConfirmed / monthQuotes) * 100 : 0
-
-                  return (
-                    <tr key={month.month} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                      <td className="px-4 py-3">{month.monthLabel}</td>
-                      <td className="px-4 py-3 text-right font-medium">{fmtUsd(month.revenue || 0)}</td>
-                      <td className={`px-4 py-3 text-right ${growthPct > 0 ? 'text-green-400' : growthPct < 0 ? 'text-red-400' : 'text-mav-muted'}`}>
-                        {growthPct !== 0 ? `${growthPct > 0 ? '+' : ''}${growthPct.toFixed(1)}%` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right text-mav-muted">{monthQuotes}</td>
-                      <td className="px-4 py-3 text-right text-mav-muted">{monthConfirmed}</td>
-                      <td className="px-4 py-3 text-right text-mav-muted">{monthQuotes > 0 ? `${confirmRate.toFixed(0)}%` : '—'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* FY 2026-27 Forecast Section */}
-      <div className="mt-8">
-        <h3 className="text-lg font-semibold mb-4">FY 2026-27 Forecast (Apr 2026 - Mar 2027)</h3>
-        <div className="bg-mav-panel border border-mav-line rounded-lg p-4 mb-4 text-xs text-mav-muted">
+      {/* FY 2026-27 Forecast section */}
+      <div className="bg-white border border-gray-300 rounded-lg p-6">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">FY 2026-27 Forecast (Apr 2026 - Mar 2027)</h3>
+
+        <div className="mb-4 text-xs text-gray-600 space-y-1">
           <p><strong>Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
           <p><strong>Target:</strong> $3.5M total revenue</p>
           <p><strong>Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
           <p><strong>Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          <div className="bg-mav-panel border border-mav-line rounded-lg p-4">
-            <div className="text-xs text-mav-muted mb-1">Avg Monthly Revenue (FY 26)</div>
-            <div className="text-2xl font-semibold">{fmtUsd(avgMonthlyRev)}</div>
-            <div className="text-xs text-mav-muted mt-2">{fy26CompletedMonths.length} months completed</div>
-          </div>
-          <div className="bg-mav-panel border border-mav-line rounded-lg p-4">
-            <div className="text-xs text-mav-muted mb-1">Projected Total (12 months)</div>
-            <div className="text-2xl font-semibold">{fmtUsd(projectedTotal)}</div>
-            <div className="text-xs text-mav-muted mt-2">{monthsRemaining} months remaining</div>
-          </div>
-          <div className={`rounded-lg p-4 border ${onTrack ? 'bg-green-500/10 border-green-500/40' : 'bg-red-500/10 border-red-500/40'}`}>
-            <div className={`text-xs mb-1 ${onTrack ? 'text-green-300' : 'text-red-300'}`}>Status</div>
-            <div className={`text-2xl font-semibold ${onTrack ? 'text-green-400' : 'text-red-400'}`}>{onTrack ? '✓ On Track' : '✗ Off Track'}</div>
-            <div className={`text-xs mt-2 ${onTrack ? 'text-green-300' : 'text-red-300'}`}>
-              {onTrack
-                ? `On pace for $${(projectedTotal / 1000000).toFixed(2)}M`
-                : `Need $${((fy26Target - fy26ActualRevenue) / 1000).toFixed(0)}k more`
-              }
-            </div>
-          </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <KPICard title="Avg Monthly Revenue (FY 26)" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))} />
+          <KPICard title="Projected Total (12 months)" value={fmtUsd(fy26Analysis.projected)} />
+          <KPICard title={`Status`} value={fy26Analysis.onTrack ? '✓ On Track' : '✗ Off Track'} />
+          <KPICard title="Remaining Months" value={fy26Analysis.monthsRemaining.toString()} />
         </div>
-        <div className="bg-mav-panel border border-mav-line rounded-lg p-4">
-          <div className="text-sm text-mav-muted mb-2">Progress toward $3.5M target</div>
-          <div className="w-full bg-mav-dark rounded-full h-3 overflow-hidden border border-mav-line/40">
+
+        {/* Progress bar */}
+        <div className="mb-6">
+          <div className="flex justify-between mb-2">
+            <span className="text-sm font-semibold text-gray-900">Progress toward $3.5M target</span>
+            <span className="text-sm font-bold text-gray-900">{fy26Analysis.targetProgress}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-3">
             <div
-              className={`h-full transition-all ${projectedTotal >= fy26Target ? 'bg-green-500' : 'bg-yellow-500'}`}
-              style={{ width: `${progressPct}%` }}
+              className={`h-3 rounded-full ${fy26Analysis.onTrack ? 'bg-green-500' : 'bg-red-500'}`}
+              style={{ width: `${Math.min(fy26Analysis.targetProgress, 100)}%` }}
             />
           </div>
-          <div className="mt-3 flex justify-between text-xs text-mav-muted">
-            <span>Current: {fmtUsd(fy26ActualRevenue)}</span>
-            <span>{progressPct.toFixed(1)}%</span>
+          <div className="flex justify-between mt-2 text-xs text-gray-600">
+            <span>Current: {fmtUsd(fy26Analysis.totalRevenue)}</span>
             <span>Target: $3.5M</span>
           </div>
-          {projectedTotal >= fy26Target ? (
-            <div className="mt-2 text-xs text-green-300">
-              Projected to exceed target by {fmtUsd(projectedTotal - fy26Target)}
-            </div>
-          ) : (
-            <div className="mt-2 text-xs text-yellow-300">
-              Shortfall: {fmtUsd(fy26Target - projectedTotal)} | Need {fmtUsd((fy26Target - fy26ActualRevenue) / Math.max(1, monthsRemaining))}/month average
-            </div>
+          {!fy26Analysis.onTrack && (
+            <p className="text-xs text-red-600 mt-2">
+              Shortfall: {fmtUsd(3500000 - fy26Analysis.projected)} | Need {fmtUsd(Math.ceil((3500000 - fy26Analysis.projected) / Math.max(1, fy26Analysis.monthsRemaining)))}/month average
+            </p>
           )}
         </div>
-      </div>
 
-      {/* Quotes & Confirmations Section */}
-      <div className="mt-8 mb-8">
-        <h3 className="text-lg font-semibold mb-4">Quotes & Confirmations (Last 6 Months){dataSourceNote}</h3>
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="relative group">
-            <KPICard
-              label={usingBookingsAsFallback ? 'Deals Booked' : 'Quotes Shared'}
-              value={String(quotesInPeriod.length)}
-            />
-            <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-              {usingBookingsAsFallback ? 'From confirmed bookings' : 'From quotes table (added_date)'}
-            </div>
-          </div>
-          <div className="relative group">
-            <KPICard
-              label={usingBookingsAsFallback ? 'Confirmed Deals' : 'Confirmations'}
-              value={String(confirmedQuotes)}
-            />
-            <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-              {usingBookingsAsFallback ? 'All bookings are confirmed' : 'From quote_conversions (outcome=won)'}
-            </div>
-          </div>
-          <div className="relative group">
-            <KPICard
-              label="Confirmation Rate"
-              value={`${conversionRate.toFixed(1)}%`}
-            />
-            <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-              Confirmations / Deals × 100
-            </div>
-          </div>
-        </div>
-
-        {/* Monthly breakdown table */}
-        <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+        {/* FY data table */}
+        {fy26Analysis.data.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-mav-muted border-b border-mav-line">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Month</th>
-                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Deals Booked' : 'Quotes'}</th>
-                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Confirmed Deals' : 'Confirmations'}</th>
-                  <th className="px-4 py-3 font-medium text-right">Confirmation Rate %</th>
+            <table className="w-full border-collapse text-sm bg-gray-50 rounded-lg overflow-hidden">
+              <thead>
+                <tr className="bg-gray-200">
+                  <th className="border border-gray-300 px-4 py-2 text-left">Month</th>
+                  <th className="border border-gray-300 px-4 py-2 text-right">Revenue</th>
                 </tr>
               </thead>
               <tbody>
-                {last6Months.map((month) => {
-                  const monthQuotes = quotesInPeriod.filter(q => ym(q.added_date) === month.month).length
-                  const monthConfirmed = conversionsInPeriod.filter(c => c.outcome === 'won' && ym(c.decided_at) === month.month).length
-                  const confirmRate = monthQuotes > 0 ? (monthConfirmed / monthQuotes) * 100 : 0
-
-                  return (
-                    <tr key={month.month} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                      <td className="px-4 py-3">{month.monthLabel}</td>
-                      <td className="px-4 py-3 text-right text-mav-muted">{monthQuotes}</td>
-                      <td className="px-4 py-3 text-right text-mav-muted">{monthConfirmed}</td>
-                      <td className="px-4 py-3 text-right text-mav-muted">{monthQuotes > 0 ? `${confirmRate.toFixed(0)}%` : '—'}</td>
-                    </tr>
-                  )
-                })}
+                {fy26Analysis.data.map((item, idx) => (
+                  <tr key={item.month} className="hover:bg-gray-100">
+                    <td className="border border-gray-300 px-4 py-2">{item.monthLabel}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right font-semibold">{fmtUsd(item.revenue)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
+        ) : (
+          <p className="text-sm text-gray-600">No FY 2026-27 data available yet (waiting for Apr 2026+ bookings)</p>
+        )}
+
+        <p className="text-xs text-gray-500 mt-4">
+          {fy26Analysis.completedMonths} months completed
+        </p>
+      </div>
+
+      {/* Quotes and conversions section */}
+      <div className="bg-white border border-gray-300 rounded-lg p-6">
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Quotes & Confirmations (Last 6 Months) {quotes.length === 0 && <span className="text-xs text-gray-500 font-normal">(From Quote Tables)</span>}</h3>
+
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <KPICard title="QUOTES SHARED" value={quotesAnalysis.total.toString()} />
+          <KPICard title="CONFIRMATIONS" value={quotesAnalysis.confirmed.toString()} />
+          <KPICard title="CONFIRMATION RATE" value={quotesAnalysis.rate.toFixed(1) + '%'} />
+        </div>
+
+        {/* Empty quotes fallback */}
+        {quotes.length === 0 && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4 text-xs text-yellow-800">
+            No quote data available. Showing bookings as confirmed conversions.
+          </div>
+        )}
+
+        {/* Quotes table */}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm bg-gray-50 rounded-lg overflow-hidden">
+            <thead>
+              <tr className="bg-gray-200">
+                <th className="border border-gray-300 px-4 py-2 text-left">Month</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Quotes</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Confirmations</th>
+                <th className="border border-gray-300 px-4 py-2 text-right">Confirmation Rate %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {last6Mo.map(month => {
+                const monthKey = ym(month.month)
+                const monthQuotes = quotes.filter(q => ym(q.added_date) === monthKey)
+                const confirmed = monthQuotes.filter(q => (q.status || '').toLowerCase() === 'confirmed').length
+                const rate = monthQuotes.length > 0 ? Math.round((confirmed / monthQuotes.length) * 100) : 0
+                return (
+                  <tr key={month.month} className="hover:bg-gray-100">
+                    <td className="border border-gray-300 px-4 py-2">{month.monthLabel}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right">{monthQuotes.length}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right">{confirmed}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right">{monthQuotes.length > 0 ? rate + '%' : '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
-    </div>
+    </main>
   )
 }
