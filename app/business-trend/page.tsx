@@ -6,16 +6,15 @@ import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getQuotes, getConversions, getBookingsFull, type RevenueRow, type Quote, type QuoteConversion, type BookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
-const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow text-gray-900'
 const ym = (s?: string) => (s || '').slice(0, 7)
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0]}` : (y || '') }
 
-// Convert revenue rows to month+year keyed data, preserving month-year for accurate filtering
 function revenueByMonthYear(rows: RevenueRow[]) {
   const m: Record<string, number> = {}
   rows.forEach(r => {
-    const monthKey = ym(r.month)  // Extract YYYY-MM from the date
+    const monthKey = ym(r.month)
     m[monthKey] = (m[monthKey] || 0) + (r.amount_usd || 0)
   })
   return Object.keys(m).sort().map(month => ({
@@ -25,7 +24,6 @@ function revenueByMonthYear(rows: RevenueRow[]) {
   }))
 }
 
-// Get months in FY 2026-27 (April 2026 to March 2027)
 function getFY26Months(): string[] {
   const months: string[] = []
   for (let year = 2026; year <= 2027; year++) {
@@ -38,14 +36,12 @@ function getFY26Months(): string[] {
   return months
 }
 
-// Check if a month is in FY 2026-27
 function isInFY26(monthStr?: string): boolean {
   if (!monthStr) return false
   const fy26Months = getFY26Months()
   return fy26Months.includes(monthStr)
 }
 
-// Convert bookings to quote-like data for fallback display
 function bookingsToQuotes(bookings: BookingRow[]): Quote[] {
   return bookings.map((b, idx) => ({
     id: 100000 + (b.id || idx),
@@ -87,7 +83,6 @@ export default function BusinessTrendPage() {
     })()
   }, [])
 
-  // Last 6 months: identify latest month, go back 6, show all data in range
   const last6Mo = useMemo(() => {
     const byMonth = revenueByMonthYear(revenue)
     if (byMonth.length === 0) return []
@@ -113,7 +108,6 @@ export default function BusinessTrendPage() {
     })
   }, [revenue])
 
-  // FY 2026-27 analysis: Apr 2026 - Mar 2027
   const fy26Analysis = useMemo(() => {
     const fy26Months = getFY26Months()
     const fy26Rev = revenueByMonthYear(revenue).filter(r => isInFY26(ym(r.month)))
@@ -139,7 +133,6 @@ export default function BusinessTrendPage() {
     }
   }, [revenue])
 
-  // Quotes and confirmations: last 6 months
   const quotesAnalysis = useMemo(() => {
     const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
     const sixMonthsAgo = lastMonthStr
@@ -164,46 +157,43 @@ export default function BusinessTrendPage() {
     }
   }, [quotes, last6Mo])
 
-  if (loading) return <div className="p-6">Loading business trend data...</div>
+  if (loading) return <div className="p-6 text-gray-900">Loading business trend data...</div>
 
   return (
-    <main className="flex flex-col gap-8 p-6">
+    <main className="flex flex-col gap-8 p-6 text-gray-900 bg-gray-50">
       <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes/confirmations tracking, and FY 2026-27 forecast" />
 
-      {/* Date range selector for manual exploration */}
-      <div className="flex gap-4 items-center">
+      <div className="flex gap-4 items-center text-gray-900">
         <label>
-          <span className="text-xs font-semibold text-gray-600 mr-2">From</span>
+          <span className="text-xs font-semibold text-gray-700 mr-2">From</span>
           <input type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)} className={selCls} />
         </label>
         <label>
-          <span className="text-xs font-semibold text-gray-600 mr-2">To</span>
+          <span className="text-xs font-semibold text-gray-700 mr-2">To</span>
           <input type="month" value={toMonth} onChange={e => setToMonth(e.target.value)} className={selCls} />
         </label>
         <button onClick={() => { setFromMonth(''); setToMonth('') }} className="text-xs px-3 py-2 bg-gray-700 text-white rounded hover:bg-gray-600">
           Reset
         </button>
-        <span className="text-xs text-gray-500 ml-4">
+        <span className="text-xs text-gray-700 ml-4">
           {revenue.length} month(s) in view
         </span>
       </div>
 
-      {/* Revenue trend chart */}
       <RevenueChart data={revenueByMonthYear(revenue)} from={fromMonth} to={toMonth} />
 
-      {/* Last 6 months analysis table */}
-      <div>
+      <div className="bg-white rounded-lg p-6">
         <h3 className="text-lg font-bold text-gray-900 mb-3">Last 6 Months Analysis</h3>
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm bg-gray-50 rounded-lg overflow-hidden">
+          <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="bg-gray-200 text-gray-900">
-                <th className="border border-gray-300 px-4 py-2 text-left">Month</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Revenue</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Growth %</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Quotes</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Confirmations</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Confirm Rate %</th>
+              <tr className="bg-gray-200">
+                <th className="border border-gray-300 px-4 py-2 text-left text-gray-900 font-semibold">Month</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Revenue</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Growth %</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Quotes</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Confirmations</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Confirm Rate %</th>
               </tr>
             </thead>
             <tbody>
@@ -211,18 +201,18 @@ export default function BusinessTrendPage() {
                 const prev = idx > 0 ? last6Mo[idx - 1].revenue : item.revenue
                 const growth = prev > 0 ? Math.round(((item.revenue - prev) / prev) * 1000) / 10 : 0
                 return (
-                  <tr key={item.month} className="hover:bg-gray-100">
-                    <td className="border border-gray-300 px-4 py-2">{item.monthLabel}</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right font-semibold">{fmtUsd(item.revenue)}</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right">{growth > 0 ? '+' : ''}{growth}%</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right">0</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right">0</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right">—</td>
+                  <tr key={item.month} className="hover:bg-gray-100 border-b border-gray-200">
+                    <td className="border border-gray-300 px-4 py-2 text-gray-900">{item.monthLabel}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right font-semibold text-gray-900">{fmtUsd(item.revenue)}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{growth > 0 ? '+' : ''}{growth}%</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">0</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">0</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">—</td>
                   </tr>
                 )
               }) : (
                 <tr>
-                  <td colSpan={6} className="border border-gray-300 px-4 py-2 text-center text-gray-500">No data available</td>
+                  <td colSpan={6} className="border border-gray-300 px-4 py-2 text-center text-gray-600">No data available</td>
                 </tr>
               )}
             </tbody>
@@ -230,18 +220,16 @@ export default function BusinessTrendPage() {
         </div>
       </div>
 
-      {/* FY 2026-27 Forecast section */}
       <div className="bg-white border border-gray-300 rounded-lg p-6">
         <h3 className="text-lg font-bold text-gray-900 mb-4">FY 2026-27 Forecast (Apr 2026 - Mar 2027)</h3>
 
-        <div className="mb-4 text-xs text-gray-600 space-y-1">
-          <p><strong>Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
-          <p><strong>Target:</strong> $3.5M total revenue</p>
-          <p><strong>Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
-          <p><strong>Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
+        <div className="mb-4 text-xs text-gray-700 space-y-1">
+          <p><strong className="text-gray-900">Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
+          <p><strong className="text-gray-900">Target:</strong> $3.5M total revenue</p>
+          <p><strong className="text-gray-900">Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
+          <p><strong className="text-gray-900">Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
         </div>
 
-        {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <KPICard title="Avg Monthly Revenue (FY 26)" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))} />
           <KPICard title="Projected Total (12 months)" value={fmtUsd(fy26Analysis.projected)} />
@@ -249,7 +237,6 @@ export default function BusinessTrendPage() {
           <KPICard title="Remaining Months" value={fy26Analysis.monthsRemaining.toString()} />
         </div>
 
-        {/* Progress bar */}
         <div className="mb-6">
           <div className="flex justify-between mb-2">
             <span className="text-sm font-semibold text-gray-900">Progress toward $3.5M target</span>
@@ -261,7 +248,7 @@ export default function BusinessTrendPage() {
               style={{ width: `${Math.min(fy26Analysis.targetProgress, 100)}%` }}
             />
           </div>
-          <div className="flex justify-between mt-2 text-xs text-gray-600">
+          <div className="flex justify-between mt-2 text-xs text-gray-700">
             <span>Current: {fmtUsd(fy26Analysis.totalRevenue)}</span>
             <span>Target: $3.5M</span>
           </div>
@@ -272,21 +259,20 @@ export default function BusinessTrendPage() {
           )}
         </div>
 
-        {/* FY data table */}
         {fy26Analysis.data.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm bg-gray-50 rounded-lg overflow-hidden">
+            <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-gray-200">
-                  <th className="border border-gray-300 px-4 py-2 text-left">Month</th>
-                  <th className="border border-gray-300 px-4 py-2 text-right">Revenue</th>
+                  <th className="border border-gray-300 px-4 py-2 text-left text-gray-900 font-semibold">Month</th>
+                  <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Revenue</th>
                 </tr>
               </thead>
               <tbody>
                 {fy26Analysis.data.map((item, idx) => (
-                  <tr key={item.month} className="hover:bg-gray-100">
-                    <td className="border border-gray-300 px-4 py-2">{item.monthLabel}</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right font-semibold">{fmtUsd(item.revenue)}</td>
+                  <tr key={item.month} className="hover:bg-gray-100 border-b border-gray-200">
+                    <td className="border border-gray-300 px-4 py-2 text-gray-900">{item.monthLabel}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right font-semibold text-gray-900">{fmtUsd(item.revenue)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -296,14 +282,13 @@ export default function BusinessTrendPage() {
           <p className="text-sm text-gray-600">No FY 2026-27 data available yet (waiting for Apr 2026+ bookings)</p>
         )}
 
-        <p className="text-xs text-gray-500 mt-4">
+        <p className="text-xs text-gray-700 mt-4">
           {fy26Analysis.completedMonths} months completed
         </p>
       </div>
 
-      {/* Quotes and conversions section */}
       <div className="bg-white border border-gray-300 rounded-lg p-6">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Quotes & Confirmations (Last 6 Months) {quotes.length === 0 && <span className="text-xs text-gray-500 font-normal">(From Quote Tables)</span>}</h3>
+        <h3 className="text-lg font-bold text-gray-900 mb-4">Quotes & Confirmations (Last 6 Months) {quotes.length === 0 && <span className="text-xs text-gray-600 font-normal">(From Quote Tables)</span>}</h3>
 
         <div className="grid grid-cols-3 gap-4 mb-6">
           <KPICard title="QUOTES SHARED" value={quotesAnalysis.total.toString()} />
@@ -311,22 +296,20 @@ export default function BusinessTrendPage() {
           <KPICard title="CONFIRMATION RATE" value={quotesAnalysis.rate.toFixed(1) + '%'} />
         </div>
 
-        {/* Empty quotes fallback */}
         {quotes.length === 0 && (
           <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4 text-xs text-yellow-800">
             No quote data available. Showing bookings as confirmed conversions.
           </div>
         )}
 
-        {/* Quotes table */}
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm bg-gray-50 rounded-lg overflow-hidden">
+          <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="bg-gray-200">
-                <th className="border border-gray-300 px-4 py-2 text-left">Month</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Quotes</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Confirmations</th>
-                <th className="border border-gray-300 px-4 py-2 text-right">Confirmation Rate %</th>
+                <th className="border border-gray-300 px-4 py-2 text-left text-gray-900 font-semibold">Month</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Quotes</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Confirmations</th>
+                <th className="border border-gray-300 px-4 py-2 text-right text-gray-900 font-semibold">Confirmation Rate %</th>
               </tr>
             </thead>
             <tbody>
@@ -336,11 +319,11 @@ export default function BusinessTrendPage() {
                 const confirmed = monthQuotes.filter(q => (q.status || '').toLowerCase() === 'confirmed').length
                 const rate = monthQuotes.length > 0 ? Math.round((confirmed / monthQuotes.length) * 100) : 0
                 return (
-                  <tr key={month.month} className="hover:bg-gray-100">
-                    <td className="border border-gray-300 px-4 py-2">{month.monthLabel}</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right">{monthQuotes.length}</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right">{confirmed}</td>
-                    <td className="border border-gray-300 px-4 py-2 text-right">{monthQuotes.length > 0 ? rate + '%' : '—'}</td>
+                  <tr key={month.month} className="hover:bg-gray-100 border-b border-gray-200">
+                    <td className="border border-gray-300 px-4 py-2 text-gray-900">{month.monthLabel}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{monthQuotes.length}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{confirmed}</td>
+                    <td className="border border-gray-300 px-4 py-2 text-right text-gray-900">{monthQuotes.length > 0 ? rate + '%' : '—'}</td>
                   </tr>
                 )
               })}
