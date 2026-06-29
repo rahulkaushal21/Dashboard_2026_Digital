@@ -11,11 +11,10 @@ const ym = (s?: string) => (s || '').slice(0, 7)
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0]}` : (y || '') }
 
-// Convert revenue rows to month+year keyed data, preserving month-year for accurate filtering
 function revenueByMonthYear(rows: RevenueRow[]) {
   const m: Record<string, number> = {}
   rows.forEach(r => {
-    const monthKey = ym(r.month)  // Extract YYYY-MM from the date
+    const monthKey = ym(r.month)
     m[monthKey] = (m[monthKey] || 0) + (r.amount_usd || 0)
   })
   return Object.keys(m).sort().map(month => ({
@@ -25,7 +24,6 @@ function revenueByMonthYear(rows: RevenueRow[]) {
   }))
 }
 
-// Get months in FY 2026-27 (April 2026 to March 2027)
 function getFY26Months(): string[] {
   const months: string[] = []
   for (let year = 2026; year <= 2027; year++) {
@@ -38,14 +36,12 @@ function getFY26Months(): string[] {
   return months
 }
 
-// Check if a month is in FY 2026-27
 function isInFY26(monthStr?: string): boolean {
   if (!monthStr) return false
   const fy26Months = getFY26Months()
   return fy26Months.includes(monthStr)
 }
 
-// Convert bookings to quote-like data for fallback display
 function bookingsToQuotes(bookings: BookingRow[]): Quote[] {
   return bookings.map((b, idx) => ({
     id: 100000 + (b.id || idx),
@@ -87,7 +83,6 @@ export default function BusinessTrendPage() {
     })()
   }, [])
 
-  // Last 6 months: identify latest month, go back 6, show all data in range
   const last6Mo = useMemo(() => {
     const byMonth = revenueByMonthYear(revenue)
     if (byMonth.length === 0) return []
@@ -113,7 +108,6 @@ export default function BusinessTrendPage() {
     })
   }, [revenue])
 
-  // FY 2026-27 analysis: Apr 2026 - Mar 2027
   const fy26Analysis = useMemo(() => {
     const fy26Months = getFY26Months()
     const fy26Rev = revenueByMonthYear(revenue).filter(r => isInFY26(ym(r.month)))
@@ -139,7 +133,6 @@ export default function BusinessTrendPage() {
     }
   }, [revenue])
 
-  // Quotes and confirmations: last 6 months
   const quotesAnalysis = useMemo(() => {
     const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
     const sixMonthsAgo = lastMonthStr
@@ -170,7 +163,6 @@ export default function BusinessTrendPage() {
     <main className="flex flex-col gap-8 p-6 bg-gradient-to-br from-white to-gray-50 min-h-screen text-gray-900">
       <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes/confirmations tracking, and FY 2026-27 forecast" />
 
-      {/* Date range selector for manual exploration */}
       <div className="flex flex-wrap gap-6 items-center bg-white border border-gray-300 rounded-lg p-5 shadow-sm">
         <label className="flex flex-col gap-1">
           <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">From</span>
@@ -188,10 +180,8 @@ export default function BusinessTrendPage() {
         </span>
       </div>
 
-      {/* Revenue trend chart */}
       <RevenueChart data={revenueByMonthYear(revenue)} from={fromMonth} to={toMonth} />
 
-      {/* Last 6 months analysis table */}
       <div className="bg-white rounded-lg border border-gray-300 overflow-hidden shadow-sm">
         <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-gray-50 border-b border-gray-300">
           <h3 className="text-lg font-bold text-gray-900">Last 6 Months Analysis</h3>
@@ -236,7 +226,6 @@ export default function BusinessTrendPage() {
         </div>
       </div>
 
-      {/* FY 2026-27 Forecast section */}
       <div className="bg-white border border-gray-300 rounded-lg overflow-hidden shadow-sm">
         <div className="px-6 py-4 bg-gradient-to-r from-emerald-50 to-gray-50 border-b border-gray-300">
           <h3 className="text-lg font-bold text-gray-900">FY 2026-27 Forecast (Apr 2026 - Mar 2027)</h3>
@@ -250,7 +239,6 @@ export default function BusinessTrendPage() {
             <p><strong className="text-gray-900">Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
           </div>
 
-          {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <KPICard title="Avg Monthly Revenue (FY 26)" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))} />
             <KPICard title="Projected Total (12 months)" value={fmtUsd(fy26Analysis.projected)} />
@@ -258,7 +246,6 @@ export default function BusinessTrendPage() {
             <KPICard title="Remaining Months" value={fy26Analysis.monthsRemaining.toString()} />
           </div>
 
-          {/* Progress bar */}
           <div className="mb-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
             <div className="flex justify-between mb-3">
               <span className="text-sm font-bold text-gray-900">Progress toward $3.5M target</span>
@@ -281,7 +268,6 @@ export default function BusinessTrendPage() {
             )}
           </div>
 
-          {/* FY data table */}
           {fy26Analysis.data.length > 0 ? (
             <div className="overflow-x-auto border border-gray-200 rounded-lg">
               <table className="w-full border-collapse text-sm">
@@ -311,7 +297,6 @@ export default function BusinessTrendPage() {
         </div>
       </div>
 
-      {/* Quotes and conversions section */}
       <div className="bg-white border border-gray-300 rounded-lg overflow-hidden shadow-sm">
         <div className="px-6 py-4 bg-gradient-to-r from-purple-50 to-gray-50 border-b border-gray-300">
           <h3 className="text-lg font-bold text-gray-900">Quotes & Confirmations (Last 6 Months) {quotes.length === 0 && <span className="text-xs text-gray-600 font-normal ml-2">(From Quote Tables)</span>}</h3>
@@ -324,14 +309,12 @@ export default function BusinessTrendPage() {
             <KPICard title="CONFIRMATION RATE" value={quotesAnalysis.rate.toFixed(1) + '%'} />
           </div>
 
-          {/* Empty quotes fallback */}
           {quotes.length === 0 && (
             <div className="bg-amber-50 border-l-4 border-amber-500 rounded p-4 mb-4 text-xs text-amber-900 font-medium">
               ℹ️ No quote data available. Showing bookings as confirmed conversions.
             </div>
           )}
 
-          {/* Quotes table */}
           <div className="overflow-x-auto border border-gray-200 rounded-lg">
             <table className="w-full border-collapse text-sm">
               <thead>
