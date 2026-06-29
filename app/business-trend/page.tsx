@@ -25,13 +25,12 @@ function revenueByMonthYear(rows: RevenueRow[]) {
 // Get months in FY 2026-27 (April 2026 to March 2027)
 function getFY26Months(): string[] {
   const months: string[] = []
-  const fy26Start = new Date(2026, 3, 1) // April 2026
-  const fy26End = new Date(2027, 2, 31) // March 2027
-
-  for (let d = new Date(fy26Start); d <= fy26End; d.setMonth(d.getMonth() + 1)) {
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    months.push(`${year}-${month}`)
+  for (let year = 2026; year <= 2027; year++) {
+    const startMonth = year === 2026 ? 4 : 1  // April for 2026, Jan for 2027
+    const endMonth = year === 2026 ? 12 : 3   // Dec for 2026, Mar for 2027
+    for (let month = startMonth; month <= endMonth; month++) {
+      months.push(`${year}-${String(month).padStart(2, '0')}`)
+    }
   }
   return months
 }
