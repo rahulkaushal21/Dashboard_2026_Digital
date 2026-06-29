@@ -121,8 +121,10 @@ export default function BusinessTrend() {
   }, [r])
 
   const fy26CompletedMonths = fy26RevenueData.filter(m => {
-    const mDate = new Date(m.month + '-01')
-    return mDate <= new Date()
+    // Compare month strings directly (YYYY-MM format)
+    const now = new Date()
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    return (m.month || '') <= currentMonth
   })
 
   const fy26ActualRevenue = fy26CompletedMonths.reduce((s, x) => s + (x.revenue || 0), 0)
