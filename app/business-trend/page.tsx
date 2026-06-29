@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getQuotes, getConversions, type RevenueRow, type Quote, type QuoteConversion } from '@/lib/supabase'
+import { getRevenue, getQuotes, getConversions, getBookingsFull, type RevenueRow, type Quote, type QuoteConversion, type BookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -43,16 +43,60 @@ function isInFY26(monthStr?: string): boolean {
   return fy26Months.includes(monthStr)
 }
 
+// Convert bookings to quote-like data for fallback display
+function bookingsToQuotes(bookings: BookingRow[]): Quote[] {
+  return bookings.map((b, idx) => ({
+    id: 100000 + (b.id || idx),
+    quote_id: b.id?.toString(),
+    added_date: b.booking_date,
+    agency: b.company_name,
+    usd_value: b.booking_amount,
+    status: 'confirmed',
+    business_type: 'existing',
+    geo: b.geo,
+    sales_person: b.sales_person,
+  }))
+}
+
+// Convert bookings to conversion-like data (all bookings are treated as "won")
+function bookingsToConversions(bookings: BookingRow[]): QuoteConversion[] {
+  return bookings.map((b, idx) => ({
+    id: 200000 + (b.id || idx),
+    company_name: b.company_name,
+    outcome: 'won',
+    amount_usd: b.booking_amount,
+    decided_at: b.booking_date,
+  }))
+}
+
 export default function BusinessTrend() {
   const [r, setR] = useState<RevenueRow[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [conversions, setConversions] = useState<QuoteConversion[]>([])
+  const [bookings, setBookings] = useState<BookingRow[]>([])
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+  const [usingBookingsAsFallback, setUsingBookingsAsFallback] = useState(false)
 
   useEffect(() => {
-    getRevenue().then(setR)
-    getQuotes().then(setQuotes)
-    getConversions().then(setConversions)
+    Promise.all([
+      getRevenue().then(setR),
+      getBookingsFull().then(setBookings),
+      getQuotes().then(q => {
+        if (!q || q.length === 0) {
+          setUsingBookingsAsFallback(true)
+          getBookingsFull().then(b => setQuotes(bookingsToQuotes(b)))
+        } else {
+          setQuotes(q)
+        }
+      }),
+      getConversions().then(c => {
+        if (!c || c.length === 0) {
+          getBookingsFull().then(b => setConversions(bookingsToConversions(b)))
+        } else {
+          setConversions(c)
+        }
+      }),
+    ])
   }, [])
 
   const inRange = (d?: string) => { if (!d) return !from && !to; if (from && d < from) return false; if (to && d > to) return false; return true }
@@ -117,6 +161,10 @@ export default function BusinessTrend() {
 
   const reset = () => { setFrom(''); setTo('') }
 
+  const dataSourceNote = usingBookingsAsFallback 
+    ? ' (Using Confirmed Bookings as data source)' 
+    : ' (From Quote Tables)'
+
   return (
     <div>
       <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes/confirmations tracking, and FY 2026-27 forecast" />
@@ -134,7 +182,6 @@ export default function BusinessTrend() {
             label="Latest month"
             value={fmtUsd(cur)}
             change={delta}
-            description="Most recent month in current view"
           />
           <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
             Latest month revenue
@@ -144,7 +191,6 @@ export default function BusinessTrend() {
           <KPICard
             label="Prior month"
             value={fmtUsd(prev)}
-            description="Previous month in current view"
           />
           <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
             Previous month revenue
@@ -154,7 +200,6 @@ export default function BusinessTrend() {
           <KPICard
             label="Delta"
             value={fmtUsd(cur - prev)}
-            description="Month-over-Month growth (absolute)"
           />
           <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
             Month-over-Month growth %: {delta > 0 ? '+' : ''}{delta.toFixed(1)}%
@@ -164,7 +209,6 @@ export default function BusinessTrend() {
           <KPICard
             label="Total in range"
             value={fmtUsd(total)}
-            description="Total revenue for entire date range"
           />
           <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
             Sum of all months in selected range
@@ -185,8 +229,8 @@ export default function BusinessTrend() {
                   <th className="px-4 py-3 font-medium">Month</th>
                   <th className="px-4 py-3 font-medium text-right">Revenue</th>
                   <th className="px-4 py-3 font-medium text-right">Growth %</th>
-                  <th className="px-4 py-3 font-medium text-right">Quotes</th>
-                  <th className="px-4 py-3 font-medium text-right">Confirmations</th>
+                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Deals Booked' : 'Quotes'}</th>
+                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Confirmed Deals' : 'Confirmations'}</th>
                   <th className="px-4 py-3 font-medium text-right">Confirm Rate %</th>
                 </tr>
               </thead>
@@ -275,36 +319,33 @@ export default function BusinessTrend() {
 
       {/* Quotes & Confirmations Section */}
       <div className="mt-8 mb-8">
-        <h3 className="text-lg font-semibold mb-4">Quotes & Confirmations (Last 6 Months)</h3>
+        <h3 className="text-lg font-semibold mb-4">Quotes & Confirmations (Last 6 Months){dataSourceNote}</h3>
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="relative group">
             <KPICard
-              label="Quotes Shared"
+              label={usingBookingsAsFallback ? 'Deals Booked' : 'Quotes Shared'}
               value={String(quotesInPeriod.length)}
-              description="Total quotes submitted in last 6 months"
             />
             <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-              From quotes table (added_date)
+              {usingBookingsAsFallback ? 'From confirmed bookings' : 'From quotes table (added_date)'}
             </div>
           </div>
           <div className="relative group">
             <KPICard
-              label="Confirmations"
+              label={usingBookingsAsFallback ? 'Confirmed Deals' : 'Confirmations'}
               value={String(confirmedQuotes)}
-              description="Deals confirmed (won) from those quotes"
             />
             <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-              From quote_conversions (outcome=won)
+              {usingBookingsAsFallback ? 'All bookings are confirmed' : 'From quote_conversions (outcome=won)'}
             </div>
           </div>
           <div className="relative group">
             <KPICard
               label="Confirmation Rate"
               value={`${conversionRate.toFixed(1)}%`}
-              description="Percentage of quotes that converted to wins"
             />
             <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-mav-dark border border-mav-line rounded px-2 py-1 text-xs text-mav-muted whitespace-nowrap z-10">
-              Confirmations / Quotes × 100
+              Confirmations / Deals × 100
             </div>
           </div>
         </div>
@@ -316,8 +357,8 @@ export default function BusinessTrend() {
               <thead className="text-left text-mav-muted border-b border-mav-line">
                 <tr>
                   <th className="px-4 py-3 font-medium">Month</th>
-                  <th className="px-4 py-3 font-medium text-right">Quotes</th>
-                  <th className="px-4 py-3 font-medium text-right">Confirmations</th>
+                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Deals Booked' : 'Quotes'}</th>
+                  <th className="px-4 py-3 font-medium text-right">{usingBookingsAsFallback ? 'Confirmed Deals' : 'Confirmations'}</th>
                   <th className="px-4 py-3 font-medium text-right">Confirmation Rate %</th>
                 </tr>
               </thead>
