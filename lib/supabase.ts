@@ -136,7 +136,8 @@ export async function getOpportunities(): Promise<Opportunity[]> {
   for (const x of [...emailOpps, ...quoteOpps]) {
     const key = norm(x.company_name) || ('id:' + x.id)
     let cur = m.get(key)
-    
+    let matchedKey = key
+
     // If no exact match, look for fuzzy match (similarity > 0.85)
     if (!cur && x.company_name) {
       let bestMatch: { key: string; score: number } | null = null
@@ -146,11 +147,14 @@ export async function getOpportunities(): Promise<Opportunity[]> {
           bestMatch = { key: existingKey, score }
         }
       }
-      if (bestMatch) cur = m.get(bestMatch.key)
+      if (bestMatch) {
+        cur = m.get(bestMatch.key)
+        matchedKey = bestMatch.key
+      }
     }
-    
-    if (!cur) { 
-      m.set(key, { ...x, sources: [x.source as string] }) 
+
+    if (!cur) {
+      m.set(key, { ...x, sources: [x.source as string] })
     } else {
       const sources = cur.sources.includes(x.source as string) ? cur.sources : [...cur.sources, x.source as string]
       // carry the richest values across the merged sources
@@ -167,9 +171,9 @@ export async function getOpportunities(): Promise<Opportunity[]> {
       // Use spreadsheet data as canonical source of truth (clean normalized name)
       const canonicalName = x.source === 'spreadsheet' ? x.company_name : cur.company_name
       if ((x.source_date || '') > (cur.source_date || '')) {
-        m.set(key, { ...x, company_name: canonicalName, sources, ...keep })
+        m.set(matchedKey, { ...x, company_name: canonicalName, sources, ...keep })
       } else {
-        m.set(key, { ...cur, company_name: canonicalName, sources, ...keep })
+        m.set(matchedKey, { ...cur, company_name: canonicalName, sources, ...keep })
       }
     }
   }
