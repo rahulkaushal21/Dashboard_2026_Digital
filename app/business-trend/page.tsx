@@ -40,11 +40,11 @@ export default function BusinessTrend() {
   
   // Calculate quotes and confirmations for last 6 months
   const quotesInPeriod = useMemo(() => {
-    const 6mAgo = new Date()
-    6mAgo.setMonth(6mAgo.getMonth() - 6)
+    const sixMonthsAgo = new Date()
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
     return quotes.filter(q => {
       const qDate = q.quote_date ? new Date(q.quote_date) : new Date()
-      return qDate >= 6mAgo
+      return qDate >= sixMonthsAgo
     })
   }, [quotes])
   
