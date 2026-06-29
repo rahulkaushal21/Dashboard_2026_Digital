@@ -6,7 +6,7 @@ import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getQuotes, getConversions, getBookingsFull, type RevenueRow, type Quote, type QuoteConversion, type BookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
-const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow text-gray-900'
+const selCls = 'bg-white border border-gray-300 rounded-md px-3 py-3 text-sm outline-none focus:border-blue-400 text-gray-900 font-medium'
 const ym = (s?: string) => (s || '').slice(0, 7)
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0]}` : (y || '') }
