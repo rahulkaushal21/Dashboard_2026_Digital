@@ -43,20 +43,25 @@ function isInFY26(monthStr?: string): boolean {
   return fy26Months.includes(monthStr)
 }
 
+// A "confirmed" opportunity is one that booked (won). getOpportunities() never
+// sets rfq_status to 'confirmed' — it flags wins via `won`/rfq_status 'won'.
+const isWon = (opp: Opportunity) => opp.won === true || (opp.rfq_status || '').toLowerCase() === 'won'
+
 function deduplicateOpportunities(opps: Opportunity[]): Opportunity[] {
   const dedupMap: Record<string, Opportunity> = {}
   opps.forEach(opp => {
-    const name = (opp.opportunity_name || '').trim().toLowerCase()
+    const name = (opp.company_name || '').trim().toLowerCase()
     if (!name) return
     const existing = dedupMap[name]
     if (!existing) {
       dedupMap[name] = opp
     } else {
-      const isConfirmed = (opp.rfq_status || '').toLowerCase() === 'confirmed'
-      const existingConfirmed = (existing.rfq_status || '').toLowerCase() === 'confirmed'
-      if (isConfirmed && !existingConfirmed) {
+      const won = isWon(opp)
+      const existingWon = isWon(existing)
+      if (won && !existingWon) {
         dedupMap[name] = opp
-      } else if (isConfirmed && existingConfirmed) {
+      } else if (won === existingWon) {
+        // same status → keep the most recent
         const oppDate = new Date(opp.source_date || 0).getTime()
         const existingDate = new Date(existing.source_date || 0).getTime()
         if (oppDate > existingDate) {
@@ -93,6 +98,15 @@ export default function BusinessTrendPage() {
   }, [])
 
   const opportunities = useMemo(() => deduplicateOpportunities(opportunitiesRaw), [opportunitiesRaw])
+
+  // Full monthly revenue series; the chart filters it by the From/To month pickers.
+  const revenueSeries = useMemo(() => revenueByMonthYear(revenue), [revenue])
+  const monthsInView = useMemo(() => revenueSeries.filter(r => {
+    const k = ym(r.month)
+    if (fromMonth && k < fromMonth) return false
+    if (toMonth && k > toMonth) return false
+    return true
+  }).length, [revenueSeries, fromMonth, toMonth])
 
   const last6Mo = useMemo(() => {
     const byMonth = revenueByMonthYear(revenue)
@@ -154,7 +168,7 @@ export default function BusinessTrendPage() {
       const oppDate = ymd(opp.source_date)
       return oppDate && oppDate >= (sixMonthsAgo + '-01') && oppDate <= (lastMonthStr + '-31')
     })
-    const confirmed = relevant.filter(opp => (opp.rfq_status || '').toLowerCase() === 'confirmed').length
+    const confirmed = relevant.filter(isWon).length
     return {
       total: relevant.length,
       confirmed,
@@ -167,7 +181,7 @@ export default function BusinessTrendPage() {
       const oppMonth = ym(opp.source_date)
       return oppMonth === monthStr
     })
-    const confirmed = monthQuotes.filter(opp => (opp.rfq_status || '').toLowerCase() === 'confirmed').length
+    const confirmed = monthQuotes.filter(isWon).length
     return {
       total: monthQuotes.length,
       confirmed,
@@ -193,10 +207,10 @@ export default function BusinessTrendPage() {
           Reset
         </button>
         <span className="text-xs text-mav-muted ml-4">
-          {revenue.length} month(s) in view
+          {monthsInView} month(s) in view
         </span>
       </div>
-      <RevenueChart data={revenueByMonthYear(revenue)} from={fromMonth} to={toMonth} />
+      <RevenueChart data={revenueSeries} title="Revenue trend" from={fromMonth} to={toMonth} />
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
         <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
           <div className="text-sm font-medium">Last 6 Months Analysis</div>
@@ -257,19 +271,19 @@ export default function BusinessTrendPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
                 <div className="text-xs text-mav-muted mb-1">Avg Monthly Revenue</div>
-                <KPICard title="" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))} />
+                <KPICard label="" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))} />
               </div>
               <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
                 <div className="text-xs text-mav-muted mb-1">Projected Total (12 mo)</div>
-                <KPICard title="" value={fmtUsd(fy26Analysis.projected)} />
+                <KPICard label="" value={fmtUsd(fy26Analysis.projected)} />
               </div>
               <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
                 <div className="text-xs text-mav-muted mb-1">FY Status</div>
-                <KPICard title="" value={fy26Analysis.onTrack ? '✓ On Track' : '✗ Off Track'} />
+                <KPICard label="" value={fy26Analysis.onTrack ? '✓ On Track' : '✗ Off Track'} />
               </div>
               <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
                 <div className="text-xs text-mav-muted mb-1">Remaining Months</div>
-                <KPICard title="" value={fy26Analysis.monthsRemaining.toString()} />
+                <KPICard label="" value={fy26Analysis.monthsRemaining.toString()} />
               </div>
             </div>
           </div>
