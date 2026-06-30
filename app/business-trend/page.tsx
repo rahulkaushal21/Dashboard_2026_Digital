@@ -12,7 +12,6 @@ const ymd = (s?: string) => (s || '').slice(0, 10)
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0]}` : (y || '') }
 
-// Convert revenue rows to month+year keyed data
 function revenueByMonthYear(rows: RevenueRow[]) {
   const m: Record<string, number> = {}
   rows.forEach(r => {
@@ -26,7 +25,6 @@ function revenueByMonthYear(rows: RevenueRow[]) {
   }))
 }
 
-// Get months in FY 2026-27 (April 2026 to March 2027)
 function getFY26Months(): string[] {
   const months: string[] = []
   for (let year = 2026; year <= 2027; year++) {
@@ -39,18 +37,42 @@ function getFY26Months(): string[] {
   return months
 }
 
-// Check if a month is in FY 2026-27
 function isInFY26(monthStr?: string): boolean {
   if (!monthStr) return false
   const fy26Months = getFY26Months()
   return fy26Months.includes(monthStr)
 }
 
+function deduplicateOpportunities(opps: Opportunity[]): Opportunity[] {
+  const dedupMap: Record<string, Opportunity> = {}
+  opps.forEach(opp => {
+    const name = (opp.opportunity_name || '').trim().toLowerCase()
+    if (!name) return
+    const existing = dedupMap[name]
+    if (!existing) {
+      dedupMap[name] = opp
+    } else {
+      const isConfirmed = (opp.rfq_status || '').toLowerCase() === 'confirmed'
+      const existingConfirmed = (existing.rfq_status || '').toLowerCase() === 'confirmed'
+      if (isConfirmed && !existingConfirmed) {
+        dedupMap[name] = opp
+      } else if (isConfirmed && existingConfirmed) {
+        const oppDate = new Date(opp.source_date || 0).getTime()
+        const existingDate = new Date(existing.source_date || 0).getTime()
+        if (oppDate > existingDate) {
+          dedupMap[name] = opp
+        }
+      }
+    }
+  })
+  return Object.values(dedupMap)
+}
+
 export default function BusinessTrendPage() {
   const [fromMonth, setFromMonth] = useState('')
   const [toMonth, setToMonth] = useState('')
   const [revenue, setRevenue] = useState<RevenueRow[]>([])
-  const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [opportunitiesRaw, setOpportunitiesRaw] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -61,7 +83,7 @@ export default function BusinessTrendPage() {
           getOpportunities(),
         ])
         setRevenue(rev || [])
-        setOpportunities(opp || [])
+        setOpportunitiesRaw(opp || [])
         setLoading(false)
       } catch (e) {
         console.error('Error loading business trend data:', e)
@@ -70,15 +92,14 @@ export default function BusinessTrendPage() {
     })()
   }, [])
 
-  // Last 6 months: identify latest month, go back 6, show all data in range
+  const opportunities = useMemo(() => deduplicateOpportunities(opportunitiesRaw), [opportunitiesRaw])
+
   const last6Mo = useMemo(() => {
     const byMonth = revenueByMonthYear(revenue)
     if (byMonth.length === 0) return []
-
     const [lastMonthStr] = byMonth[byMonth.length - 1].month.split('-')
     const lastYear = +lastMonthStr
     const lastMo = +byMonth[byMonth.length - 1].month.split('-')[1]
-
     let year = lastYear, mo = lastMo
     const sixMonthsBack: string[] = []
     for (let i = 0; i < 6; i++) {
@@ -89,28 +110,23 @@ export default function BusinessTrendPage() {
         year--
       }
     }
-
     return byMonth.filter(item => {
       const itemMonth = ym(item.month)
       return sixMonthsBack.includes(itemMonth)
     })
   }, [revenue])
 
-  // FY 2026-27 analysis: Apr 2026 - Mar 2027
   const fy26Analysis = useMemo(() => {
     const fy26Months = getFY26Months()
     const fy26Rev = revenueByMonthYear(revenue).filter(r => isInFY26(ym(r.month)))
-
     const totalRev = fy26Rev.reduce((sum, r) => sum + r.revenue, 0)
     const completedMonths = fy26Rev.length
     const monthsRemaining = Math.max(0, 12 - completedMonths)
     const avgMonthly = completedMonths > 0 ? totalRev / completedMonths : 0
     const projected = totalRev + (avgMonthly * monthsRemaining)
-
     const target = 3500000
     const onTrack = projected >= target
     const projectedPercent = Math.round((projected / target) * 100)
-
     return {
       completedMonths,
       totalRevenue: totalRev,
@@ -124,7 +140,6 @@ export default function BusinessTrendPage() {
     }
   }, [revenue])
 
-  // Quotes and confirmations from opportunities
   const quotesAnalysis = useMemo(() => {
     const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
     const sixMonthsAgo = lastMonthStr
@@ -135,16 +150,11 @@ export default function BusinessTrendPage() {
           return `${year}-${String(mo).padStart(2, '0')}`
         })()
       : ''
-
-    // Filter opportunities by date range
     const relevant = opportunities.filter(opp => {
       const oppDate = ymd(opp.source_date)
       return oppDate && oppDate >= (sixMonthsAgo + '-01') && oppDate <= (lastMonthStr + '-31')
     })
-
-    // Count confirmed opportunities
     const confirmed = relevant.filter(opp => (opp.rfq_status || '').toLowerCase() === 'confirmed').length
-
     return {
       total: relevant.length,
       confirmed,
@@ -152,7 +162,6 @@ export default function BusinessTrendPage() {
     }
   }, [opportunities, last6Mo])
 
-  // Get quotes by month for Last 6 Months table
   const getMonthQuotes = (monthStr: string) => {
     const monthQuotes = opportunities.filter(opp => {
       const oppMonth = ym(opp.source_date)
@@ -171,8 +180,6 @@ export default function BusinessTrendPage() {
   return (
     <div>
       <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes/confirmations tracking, and FY 2026-27 forecast" />
-
-      {/* Date range selector for manual exploration */}
       <div className="flex gap-4 items-center mb-6 text-xs">
         <label className="flex flex-col gap-1">
           <span className="uppercase tracking-wide text-mav-muted">From</span>
@@ -189,11 +196,7 @@ export default function BusinessTrendPage() {
           {revenue.length} month(s) in view
         </span>
       </div>
-
-      {/* Revenue trend chart */}
       <RevenueChart data={revenueByMonthYear(revenue)} from={fromMonth} to={toMonth} />
-
-      {/* Last 6 months analysis table */}
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
         <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
           <div className="text-sm font-medium">Last 6 Months Analysis</div>
@@ -235,15 +238,11 @@ export default function BusinessTrendPage() {
           </table>
         </div>
       </div>
-
-      {/* FY 2026-27 Forecast section */}
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
         <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
           <div className="text-sm font-medium">FY 2026-27 Forecast (Apr 2026 - Mar 2027)</div>
         </div>
-
         <div className="p-5 space-y-6">
-          {/* Definitions section */}
           <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-4">
             <div className="text-xs font-medium text-mav-yellow mb-3">Definitions</div>
             <div className="text-xs text-mav-muted space-y-1">
@@ -253,8 +252,6 @@ export default function BusinessTrendPage() {
               <p><strong className="text-white">Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
             </div>
           </div>
-
-          {/* Key Metrics section */}
           <div>
             <div className="text-xs font-medium text-mav-yellow mb-3">Key Metrics</div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -276,8 +273,6 @@ export default function BusinessTrendPage() {
               </div>
             </div>
           </div>
-
-          {/* Progress section */}
           <div>
             <div className="text-xs font-medium text-mav-yellow mb-3">Progress Toward $3.5M Target</div>
             <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-4">
@@ -302,8 +297,6 @@ export default function BusinessTrendPage() {
               )}
             </div>
           </div>
-
-          {/* Monthly Breakdown section */}
           <div>
             <div className="text-xs font-medium text-mav-yellow mb-3">Monthly Breakdown (FY 2026-27)</div>
             {fy26Analysis.data.length > 0 ? (
@@ -334,15 +327,11 @@ export default function BusinessTrendPage() {
           </div>
         </div>
       </div>
-
-      {/* Quotes and conversions section */}
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
           <div className="text-sm font-medium">Quotes & Confirmations (Last 6 Months)</div>
         </div>
-
         <div className="p-5 space-y-5">
-          {/* Summary KPIs */}
           <div>
             <div className="text-xs font-medium text-mav-yellow mb-3">Summary</div>
             <div className="grid grid-cols-3 gap-4">
@@ -360,8 +349,6 @@ export default function BusinessTrendPage() {
               </div>
             </div>
           </div>
-
-          {/* Monthly Details */}
           <div>
             <div className="text-xs font-medium text-mav-yellow mb-3">Monthly Details</div>
             <div className="overflow-x-auto">
