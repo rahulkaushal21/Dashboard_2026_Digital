@@ -18,7 +18,7 @@ id: number; company_name?: string; is_new_client?: boolean; rfq?: boolean
 rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
 source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
 gist?: string; win_probability?: number; win_reason?: string; company_note?: string
-won?: boolean; won_amount?: number; flag?: string; status?: string
+won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -89,8 +89,8 @@ const emailOpps: Opportunity[] = ((await read<Opportunity>('opportunities')) || 
 // FIX: Read from bookings table (has 2595 rows) instead of quotes table (empty)
 // Map bookings columns to quote schema:
 // service_name → quote_id, booking_date → added_date, company_name → agency, booking_amount → usd_value, engagement_model → status
-const quotes = (await read<any>('bookings',
-'id, service_name as quote_id, booking_date as added_date, company_name as agency, booking_amount as usd_value, engagement_model as status, geo, sales_person')) || []
+const quotes = (await read<any>('quotes',
+'id, quote_id, added_date, agency, usd_value, status, geo, sales_person')) || []
 const norm = (s?: string) => (s || '').trim().toLowerCase()
 // collapse GEO into 3 buckets: US (incl. Canada/N.America), AU (incl. APAC/NZ), UK (everything else)
 const geo3 = (g?: string) => {
@@ -108,10 +108,10 @@ const revenueSet = new Set(booked.map(b => norm(b.company_name)).filter(Boolean)
 // total value the client confirmed (sum of that agency's confirmed quotes)
 const confirmedValue = new Map<string, number>()
 for (const q of quotes) if (norm(q.status) === 'confirmed') confirmedValue.set(norm(q.agency), (confirmedValue.get(norm(q.agency)) || 0) + (q.usd_value || 0))
-// Open quotes -> in-progress. Confirmed quotes whose client is also booked in the
-// web revenue sheet -> "Won" (green) with the confirmed value. Cancelled excluded.
+// Open quotes -> in-progress. All confirmed quotes (whether booked or not) -> "Won" or "Confirmed".
+// Cancelled excluded.
 const quoteOpps: Opportunity[] = quotes.filter(q => {
-if (norm(q.status) === 'confirmed') return bookedSet.has(norm(q.agency))
+if (norm(q.status) === 'confirmed') return true
 return isOpenQuote(q.status)
 }).map(q => {
 const won = norm(q.status) === 'confirmed'
@@ -190,6 +190,8 @@ const inRevenue = revenueSet.has(key)
 // Repeat = already in the revenue sheet, or the scan already saw them as an existing client
 const repeat = inRevenue || o.is_new_client === false
 o.is_new_client = !repeat
+// Add source tags for UI display
+o.source_tags = (o as any).sources || [o.source]
 // Data-quality flags so the user can fix the source sheet
 if (!o.won) {
 const text = `${o.summary || ''} ${o.gist || ''}`
