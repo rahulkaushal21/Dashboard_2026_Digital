@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClients, getEmailSignals, getEscalations, type Client, type EmailSignal, type Escalation } from '@/lib/supabase'
+import { getClients, getEmailSignals, getEscalations, getBookingsFull, type Client, type EmailSignal, type Escalation, type BookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -13,6 +13,13 @@ const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'
 const now = new Date()
 const monthsAgoYM = (n: number) => { const d = new Date(now); d.setMonth(d.getMonth() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0]}` : (y || '') }
+// month key 'YYYY-MM' -> absolute month index (year*12 + month) for span/recency math
+const ymIdx = (k?: string) => { const p = (k || '').slice(0, 7).split('-'); return p.length >= 2 && p[0] && p[1] ? +p[0] * 12 + (+p[1] - 1) : null }
+const nowIdx = now.getFullYear() * 12 + now.getMonth()
+const plural = (n: number, w: string) => `${n} ${w}${Math.abs(n) === 1 ? '' : 's'}`
+
+// Derived engagement history for a client, computed from the revenue/bookings rows.
+type Tenure = { first?: string; last?: string; activeMonths: number; spanMonths: number; total: number; avgActive: number; sinceLast: number | null; services: string[] }
 
 const sentBucket = (s?: string) => {
   const v = (s || '').toLowerCase()
@@ -40,7 +47,8 @@ export default function Clients() {
   const [owner, setOwner] = useState(''); const [geo, setGeo] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo'>('ltv'); const [sortAsc, setSortAsc] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
-  useEffect(() => { getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs) }, [])
+  const [bookings, setBookings] = useState<BookingRow[]>([])
+  useEffect(() => { getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings) }, [])
 
   const sigByCompany = useMemo(() => {
     const m = new Map<string, EmailSignal[]>()
@@ -61,6 +69,25 @@ export default function Clients() {
     }
     return map
   }, [escs, clients])
+
+  // bookings grouped by client (normalised name), for the tenure summary in the detail panel
+  const bookingsByClient = useMemo(() => {
+    const m = new Map<string, BookingRow[]>()
+    for (const b of bookings) { const k = norm(b.company_name); if (!k) continue; (m.get(k) || m.set(k, []).get(k))!.push(b) }
+    return m
+  }, [bookings])
+
+  const tenureOf = (c: Client): Tenure | null => {
+    const list = (bookingsByClient.get(norm(c.company_name)) || []).filter(b => (b.booking_amount || 0) !== 0)
+    if (!list.length) return null
+    const months = list.map(b => ym(b.booking_month)).filter(Boolean).sort()
+    const first = months[0], last = months[months.length - 1]
+    const fi = ymIdx(first), li = ymIdx(last)
+    const activeMonths = new Set(months).size
+    const spanMonths = fi != null && li != null ? li - fi + 1 : activeMonths
+    const total = list.reduce((s, b) => s + (b.booking_amount || 0), 0)
+    return { first, last, activeMonths, spanMonths, total, avgActive: activeMonths ? total / activeMonths : 0, sinceLast: li != null ? nowIdx - li : null, services: uniq(list.map(b => b.service_name)) }
+  }
 
   const riskOf = (c: Client): Risk => {
     const all = escByClient.get(c.company_name) || []
@@ -214,7 +241,7 @@ export default function Clients() {
       </div>
 
       {selC && (() => {
-        const r = riskOf(selC); const convos = sigByCompany.get(norm(selC.company_name)) || []
+        const r = riskOf(selC); const convos = sigByCompany.get(norm(selC.company_name)) || []; const ten = tenureOf(selC)
         return (
           <div className="fixed inset-0 z-40" onClick={() => setSelC(null)}>
             <div className="absolute inset-0 bg-black/50" />
@@ -297,9 +324,28 @@ export default function Clients() {
                 </div>
               )}
 
+              {ten && (
+                <div className="mt-6 border-t border-mav-line pt-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xs uppercase tracking-wide text-mav-muted">Tenure &amp; engagement</span>
+                    {ten.sinceLast != null && ten.sinceLast >= 3
+                      ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">dormant {plural(ten.sinceLast, 'mo')}</span>
+                      : ten.sinceLast != null && ten.sinceLast <= 0 && <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-500/15 text-green-400">active this month</span>}
+                  </div>
+                  <ul className="space-y-2 text-sm">
+                    <li className="flex justify-between gap-3"><span className="text-mav-muted">Client since</span><span className="font-medium">{monLabel(ten.first)} · {plural(ten.spanMonths, 'month')}</span></li>
+                    <li className="flex justify-between gap-3"><span className="text-mav-muted">Active months</span><span className="font-medium">{ten.activeMonths} of {ten.spanMonths}{ten.spanMonths > 0 ? ` · ${Math.round(ten.activeMonths / ten.spanMonths * 100)}% billed` : ''}</span></li>
+                    <li className="flex justify-between gap-3"><span className="text-mav-muted">Last booking</span><span className="font-medium">{monLabel(ten.last)}{ten.sinceLast != null ? ` · ${ten.sinceLast <= 0 ? 'this month' : plural(ten.sinceLast, 'mo') + ' ago'}` : ''}</span></li>
+                    <li className="flex justify-between gap-3"><span className="text-mav-muted">Total billed</span><span className="font-medium">{fmtUsd(ten.total)}</span></li>
+                    <li className="flex justify-between gap-3"><span className="text-mav-muted">Avg / active month</span><span className="font-medium">{fmtUsd(ten.avgActive)}</span></li>
+                    {ten.services.length > 0 && <li className="flex justify-between gap-3"><span className="text-mav-muted shrink-0">Services</span><span className="font-medium text-right">{ten.services.join(', ')}</span></li>}
+                  </ul>
+                </div>
+              )}
+
               {selC.journey && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.journey}</p></div>}
               {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
-              {!r.escs.length && !r.posFb.length && !convos.length && !selC.journey && !selC.action_steps && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
+              {!r.escs.length && !r.posFb.length && !convos.length && !selC.journey && !selC.action_steps && !ten && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
             </aside>
           </div>
         )
