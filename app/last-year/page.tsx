@@ -50,9 +50,14 @@ export default function LastYearReview() {
   const [q, setQ] = useState('')
   const [mv, setMv] = useState('')      // quarter movement filter
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')   // 'YYYY-MM' month range
+  const [fGeo, setFGeo] = useState(''); const [fService, setFService] = useState('')
   const [qCur, setQCur] = useState(DEF_CUR)     // index of the quarter being compared
   const [qBase, setQBase] = useState(DEF_BASE)  // index of the quarter compared against
   useEffect(() => { getBookingsFull().then(setRows) }, [])
+
+  const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
+  const geos = useMemo(() => uniq(rows.map(r => r.geo)), [rows])
+  const services = useMemo(() => uniq(rows.map(r => r.service_name)), [rows])
 
   const data = useMemo(() => {
     const m = new Map<string, Row>()
@@ -60,6 +65,8 @@ export default function LastYearReview() {
     rows.forEach(r => {
       const c = (r.company_name || '').trim()
       if (!c) return
+      if (fGeo && (r.geo || '').trim() !== fGeo) return            // GEO filter
+      if (fService && (r.service_name || '').trim() !== fService) return  // Service filter
       const k = (r.booking_month || '').slice(0, 7)
       if (from && k < from) return        // From/To month range narrows the whole analysis
       if (to && k > to) return
@@ -75,7 +82,7 @@ export default function LastYearReview() {
       m.set(c, cur)
     })
     return [...m.values()]
-  }, [rows, from, to])
+  }, [rows, from, to, fGeo, fService])
 
   // compare the two user-selected quarters (qCur vs qBase)
   const qStatus = (r: Row) => {
@@ -144,11 +151,13 @@ export default function LastYearReview() {
         <select value={qBase} onChange={e => setQBase(+e.target.value)} className={sel} title="Quarter to compare against">
           {QS.map((f, i) => <option key={i} value={i}>{qLabel(f)}{i === CUR_I ? ' · current' : ''}</option>)}
         </select>
+        <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={sel}><option value="">All GEO</option>{geos.map(g => <option key={g} value={g}>{g}</option>)}</select>
+        <select value={fService} onChange={e => setFService(e.target.value)} className={sel}><option value="">All services</option>{services.map(s => <option key={s} value={s}>{s}</option>)}</select>
         <span className="text-xs text-mav-muted ml-1">From</span>
         <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">To</span>
         <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>}
+        {(from || to || fGeo || fService) && <button onClick={() => { setFrom(''); setTo(''); setFGeo(''); setFService('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>}
         <span className="text-xs text-mav-muted ml-auto">{view.length} clients · scroll right for all quarters →</span>
       </div>
 
