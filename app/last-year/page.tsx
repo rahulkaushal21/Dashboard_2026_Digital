@@ -33,12 +33,25 @@ const QS: FQ[] = (() => { const cur = fqOf(now.getFullYear(), curM); const a = [
 const LAST_I = QS.length - 1            // this quarter
 const PREV_I = QS.length - 2            // last quarter
 
-type Row = { client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[]; upcoming: number }
+// months elapsed so far in the current fiscal quarter (1..3) — drives the
+// like-for-like "same period to date" comparison so a just-started quarter
+// isn't unfairly flagged as Dropped against a full prior quarter.
+const curQ = fqOf(now.getFullYear(), curM)
+const elapsedQM = curM - qStartMonth(curQ.q) + 1
+// the first `elapsedQM` months of a quarter (same elapsed window as this quarter)
+const qSPRange = (f: FQ): [string, string] => {
+  const sm = qStartMonth(f.q); const y = qCalYear(f)
+  return [`${y}-${pad(sm)}`, `${y}-${pad(sm + elapsedQM - 1)}`]
+}
+
+type Row = { client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[]; qvSP: number[]; upcoming: number }
 
 export default function LastYearReview() {
   const [rows, setRows] = useState<BookingRow[]>([])
   const [q, setQ] = useState('')
   const [mv, setMv] = useState('')      // quarter movement filter
+  const [from, setFrom] = useState(''); const [to, setTo] = useState('')   // 'YYYY-MM' month range
+  const [samePeriod, setSamePeriod] = useState(true)                       // like-for-like to-date compare
   useEffect(() => { getBookingsFull().then(setRows) }, [])
 
   const data = useMemo(() => {
@@ -48,8 +61,10 @@ export default function LastYearReview() {
       const c = (r.company_name || '').trim()
       if (!c) return
       const k = (r.booking_month || '').slice(0, 7)
+      if (from && k < from) return        // From/To month range narrows the whole analysis
+      if (to && k > to) return
       const amt = r.booking_amount || 0
-      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0), upcoming: 0 }
+      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0), qvSP: QS.map(() => 0), upcoming: 0 }
       if (between(k, `${lyStart}-04`, `${tyStart}-03`)) cur.fyLast += amt
       // "to date" = current fiscal year up to (and including) the current month only
       if (k >= `${tyStart}-04` && k <= curMonthKey) cur.fyTd += amt
@@ -57,31 +72,34 @@ export default function LastYearReview() {
       if (between(k, `${lyStart}-04`, `${lyStart}-${curMM}`)) cur.spLy += amt
       if (between(k, `${tyStart}-04`, `${tyStart}-${curMM}`)) cur.spTy += amt
       QS.forEach((fq, i) => { const [a, b] = qRange(fq); if (between(k, a, b)) cur.qv[i] += amt })
+      QS.forEach((fq, i) => { const [a, b] = qSPRange(fq); if (between(k, a, b)) cur.qvSP[i] += amt })
       m.set(c, cur)
     })
     return [...m.values()]
-  }, [rows])
+  }, [rows, from, to])
 
+  // compare full quarters, or only the same elapsed window of each (to-date)
+  const qa = (r: Row) => samePeriod ? r.qvSP : r.qv
   const qStatus = (r: Row) => {
-    const tq = r.qv[LAST_I], lq = r.qv[PREV_I]
+    const tq = qa(r)[LAST_I], lq = qa(r)[PREV_I]
     if (lq > 0 && tq <= 0) return 'Dropped'
     if (lq <= 0 && tq > 0) return 'New'
     if (tq > lq) return 'Up'
     if (tq < lq) return 'Down'
     return 'Flat'
   }
-  const qDelta = (r: Row) => r.qv[LAST_I] - r.qv[PREV_I]
-  const qPct = (r: Row) => r.qv[PREV_I] > 0 ? Math.round((qDelta(r) / r.qv[PREV_I]) * 100) : null
+  const qDelta = (r: Row) => qa(r)[LAST_I] - qa(r)[PREV_I]
+  const qPct = (r: Row) => qa(r)[PREV_I] > 0 ? Math.round((qDelta(r) / qa(r)[PREV_I]) * 100) : null
 
   const view = useMemo(() => data
     .filter(r => r.client.toLowerCase().includes(q.toLowerCase()))
     .filter(r => !mv || qStatus(r) === mv)
     .filter(r => r.fyLast || r.fyTd || r.qv.some(v => v))
-    .sort((a, b) => b.fyTd - a.fyTd || b.fyLast - a.fyLast), [data, q, mv])
+    .sort((a, b) => b.fyTd - a.fyTd || b.fyLast - a.fyLast), [data, q, mv, samePeriod])
 
   const tot = (sel: (r: Row) => number) => view.reduce((s, r) => s + sel(r), 0)
-  const aggTq = data.reduce((s, r) => s + r.qv[LAST_I], 0)
-  const aggLq = data.reduce((s, r) => s + r.qv[PREV_I], 0)
+  const aggTq = data.reduce((s, r) => s + qa(r)[LAST_I], 0)
+  const aggLq = data.reduce((s, r) => s + qa(r)[PREV_I], 0)
   const qoqPct = aggLq > 0 ? Math.round(((aggTq - aggLq) / aggLq) * 100) : null
   const dropped = data.filter(r => qStatus(r) === 'Dropped').length
   const newq = data.filter(r => qStatus(r) === 'New').length
@@ -100,14 +118,15 @@ export default function LastYearReview() {
 
       <div className="mb-4 text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
         Revenue data starts April 2025, so early quarters may be partial. <span className="text-white">&ldquo;To date&rdquo;</span> counts Apr&nbsp;{tyStart} through {SHORT[curM]}&nbsp;{tyStart} only — future-dated bookings are held out. <span className="text-white">Dropped</span> = had revenue last quarter ({qLabel(QS[PREV_I])}) but none this quarter ({qLabel(QS[LAST_I])}).
+        {samePeriod && <span> <span className="text-white">Same period to date</span> is on: movement (status &amp; QoQ&nbsp;Δ) compares each quarter only up to the same point — the first {elapsedQM}&nbsp;month{elapsedQM > 1 ? 's' : ''} — so a just-started quarter isn&rsquo;t flagged Dropped on day one. The $ columns still show full-quarter totals.</span>}
         {upcoming > 0 && <span> Excludes <span className="text-mav-yellow">{money(upcoming)}</span> in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</span>}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <KPICard label={`FY ${lyStart}-${String(tyStart).slice(2)} (Apr–Mar)`} value={money(tot(r => r.fyLast))} />
         <KPICard label={`FY ${tyStart}-${String(tyStart + 1).slice(2)} to date`} value={money(tot(r => r.fyTd))} />
-        <KPICard label={`${qLabel(QS[PREV_I])} → ${qLabel(QS[LAST_I])}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct} />
-        <KPICard label="Dropped / New this Qtr" value={`${dropped} / ${newq}`} />
+        <KPICard label={`${qLabel(QS[PREV_I])} → ${qLabel(QS[LAST_I])}${samePeriod ? ' · to date' : ''}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct} />
+        <KPICard label={`Dropped / New this Qtr${samePeriod ? ' (to date)' : ''}`} value={`${dropped} / ${newq}`} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -120,6 +139,13 @@ export default function LastYearReview() {
           <option value="Down">Down vs last quarter</option>
           <option value="Flat">Flat</option>
         </select>
+        <button onClick={() => setSamePeriod(v => !v)} title="Compare this quarter and last quarter only up to the same point in the quarter"
+          className={`text-sm px-3 py-2 rounded-md border transition-colors ${samePeriod ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⏱ Same period to date</button>
+        <span className="text-xs text-mav-muted ml-1">From</span>
+        <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
+        <span className="text-xs text-mav-muted">To</span>
+        <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} />
+        {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>}
         <span className="text-xs text-mav-muted ml-auto">{view.length} clients · scroll right for all quarters →</span>
       </div>
 
