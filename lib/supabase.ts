@@ -25,13 +25,19 @@ export interface BookingRow { id: number; company_name?: string; booking_month?:
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
 export interface EmailSignal { id: number; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
 
-async function read<T>(table: string, cols = '*'): Promise<T[] | null> {
+async function read<T>(table: string, cols = '*', orderBy?: string): Promise<T[] | null> {
 if (!supabase) return null
 // Paginate: Supabase caps each request at 1000 rows, so fetch in pages.
+// IMPORTANT: pass a stable `orderBy` (a unique column) for any table over
+// 1000 rows. Without an ORDER BY, Postgres may return rows in a different
+// order on each page request — and while the revenue sync is writing, that
+// drops or duplicates boundary rows, making totals slightly off and flaky.
 const PAGE = 1000
 const all: T[] = []
 for (let from = 0; ; from += PAGE) {
-const { data, error } = await supabase.from(table).select(cols).range(from, from + PAGE - 1)
+let q = supabase.from(table).select(cols).range(from, from + PAGE - 1)
+if (orderBy) q = q.order(orderBy, { ascending: true })
+const { data, error } = await q
 if (error) return all.length ? all : null
 if (!data || data.length === 0) break
 all.push(...(data as T[]))
@@ -101,7 +107,7 @@ if (/\bus\b|us\/|usa|u\.s|united states|canada|north america/.test(v)) return 'U
 return 'UK'
 }
 // companies present in the booked web_revenue sheet (= project added to revenue)
-const booked = (await read<{ company_name: string; booking_amount: number }>('web_revenue', 'company_name, booking_amount')) || []
+const booked = (await read<{ company_name: string; booking_amount: number }>('web_revenue', 'company_name, booking_amount', 'id')) || []
 const bookedSet = new Set(booked.filter(b => (b.booking_amount || 0) !== 0).map(b => norm(b.company_name)).filter(Boolean))
 // every company that appears anywhere in the revenue sheet = an existing/repeat client
 const revenueSet = new Set(booked.map(b => norm(b.company_name)).filter(Boolean))
@@ -203,11 +209,11 @@ return all.length ? all : (await import('./mockData')).mockOpportunities
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
 const live = await read<{ company_name: string; booking_month: string; booking_amount: number }>('web_revenue',
-'company_name, booking_month, booking_amount')
+'company_name, booking_month, booking_amount', 'id')
 if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount }))
 return (await import('./mockData')).mockRevenue
 }
-export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, geo, sales_person, contact_email')) || [] }
+export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, geo, sales_person, contact_email', 'id')) || [] }
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
 export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
 
