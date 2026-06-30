@@ -56,7 +56,16 @@ classification. When unsure, DO NOT write a row.
   else null). Do not infer won/lost from silence.
 - Feedback -> writeFeedback : ONLY an explicit client statement of satisfaction
   or dissatisfaction. Record nature (Positive|Negative|Neutral), agency/company,
-  geo, client_email, project_names, comments, evidence. Ignore internal chatter.
+  geo, client_email, project_names, comments, evidence. Set feedback_type='Email'
+  and DO NOT set src_row_hash (leave null) — that keeps these rows safe from the
+  sheet-sync replace, which only deletes rows where src_row_hash is not null.
+  Dedup on thread_id. Ignore internal chatter.
+  High-precision shortcut: the standardized log mails
+  "Well done team! We have received a positive feedback from - <Client> - Ref: MEM…"
+  (from *.uplers.in senders) are canonical POSITIVE feedback — map agency=<Client>,
+  nature=Positive, evidence="Ref: MEM…", comments=the appreciation summary.
+  Note: subjects like "<Client> - Client Feedback - Major Impact" are NEGATIVE
+  experience situations — route those to writeEscalations, NOT as positive feedback.
 - Escalations -> writeEscalations : ONLY a real client escalation (not a routine
   question or internal note). Record company_name, geo, situation_type
   (Functional|Technical), escalation_type, business_impact (Low|Medium|High),
