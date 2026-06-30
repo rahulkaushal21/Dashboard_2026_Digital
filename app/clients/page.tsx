@@ -309,20 +309,38 @@ export default function Clients() {
                 </div>
               )}
 
-              {convos.length > 0 && (
-                <div className="mt-6 border-t border-mav-line pt-4">
-                  <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Open conversations</span><span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">{convos.length}</span></div>
-                  <div className="space-y-3">
-                    {convos.map(s => (
-                      <div key={s.id} className="rounded-lg border border-mav-line bg-mav-dark/40 p-3">
-                        <div className="flex items-start justify-between gap-2"><div className="text-sm font-medium leading-snug">{s.source_subject || '(no subject)'}</div>{s.sentiment && <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${tone(sentBucket(s.sentiment))}`}>{s.sentiment}</span>}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">{s.signal_type && <span className={`px-1.5 py-0.5 rounded-full ${sigTone(s.signal_type)}`}>{s.signal_type.replace(/_/g, ' ')}</span>}{s.source_date && <span>{(s.source_date || '').slice(0, 10)}</span>}</div>
-                        {s.summary && <p className="mt-2 text-xs leading-relaxed text-mav-muted">{s.summary}</p>}
-                      </div>
-                    ))}
+              {convos.length > 0 && (() => {
+                // The email scan stores one signal per thread; show the most recent 20 with a sentiment summary.
+                const emails = convos.slice(0, 20)
+                const pos = emails.filter(s => sentBucket(s.sentiment) === 'Positive').length
+                const neg = emails.filter(s => sentBucket(s.sentiment) === 'Negative').length
+                const neu = emails.filter(s => sentBucket(s.sentiment) === 'Neutral').length
+                const latest = (emails[0]?.source_date || '').slice(0, 10)
+                const oldest = (emails[emails.length - 1]?.source_date || '').slice(0, 10)
+                return (
+                  <div className="mt-6 border-t border-mav-line pt-4">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className="text-xs uppercase tracking-wide text-mav-muted">Email review</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">last {emails.length}{convos.length > emails.length ? ` of ${convos.length}` : ''}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5 mb-3 text-[11px]">
+                      {pos > 0 && <span className="px-2 py-0.5 rounded-full bg-green-500/15 text-green-400">{pos} positive</span>}
+                      {neg > 0 && <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">{neg} negative</span>}
+                      {neu > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400">{neu} neutral</span>}
+                      {latest && <span className="text-mav-muted ml-1">{oldest && oldest !== latest ? `${oldest} → ${latest}` : latest}</span>}
+                    </div>
+                    <div className="space-y-3">
+                      {emails.map(s => (
+                        <div key={s.id} className="rounded-lg border border-mav-line bg-mav-dark/40 p-3">
+                          <div className="flex items-start justify-between gap-2"><div className="text-sm font-medium leading-snug">{s.source_subject || '(no subject)'}</div>{s.sentiment && <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${tone(sentBucket(s.sentiment))}`}>{s.sentiment}</span>}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">{s.signal_type && <span className={`px-1.5 py-0.5 rounded-full ${sigTone(s.signal_type)}`}>{s.signal_type.replace(/_/g, ' ')}</span>}{s.source_date && <span>{(s.source_date || '').slice(0, 10)}</span>}{s.client_email && <span>· {s.client_email}</span>}</div>
+                          {s.summary && <p className="mt-2 text-xs leading-relaxed text-mav-muted">{s.summary}</p>}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
 
               {ten && (
                 <div className="mt-6 border-t border-mav-line pt-4">
