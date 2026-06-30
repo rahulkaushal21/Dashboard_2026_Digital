@@ -16,9 +16,34 @@ const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
 const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >= 60 ? 'bg-green-500/15 text-green-400' : p >= 45 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
-// Won = booked in revenue / confirmed quote; Lost = explicit decline flagged by the scan; else Open
 const oppStatus = (x: Opportunity) => x.won ? 'Won' : (x.status || '').toLowerCase() === 'lost' ? 'Lost' : 'Open'
 const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : 'bg-mav-line text-mav-muted'
+
+// Deduplicate opportunities by company name, preferring confirmed status
+function deduplicateOpportunities(opps: Opportunity[]): Opportunity[] {
+  const dedupMap: Record<string, Opportunity> = {}
+  opps.forEach(opp => {
+    const name = (opp.company_name || '').trim().toLowerCase()
+    if (!name) return
+    const existing = dedupMap[name]
+    if (!existing) {
+      dedupMap[name] = opp
+    } else {
+      const isConfirmed = (opp.rfq_status || '').toLowerCase() === 'confirmed'
+      const existingConfirmed = (existing.rfq_status || '').toLowerCase() === 'confirmed'
+      if (isConfirmed && !existingConfirmed) {
+        dedupMap[name] = opp
+      } else if (isConfirmed && existingConfirmed) {
+        const oppDate = new Date(opp.source_date || 0).getTime()
+        const existingDate = new Date(existing.source_date || 0).getTime()
+        if (oppDate > existingDate) {
+          dedupMap[name] = opp
+        }
+      }
+    }
+  })
+  return Object.values(dedupMap)
+}
 
 type SortKey = 'company' | 'win' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'subject' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
@@ -42,13 +67,17 @@ const sortVal = (x: Opportunity, k: SortKey): string | number => {
 }
 
 export default function Opportunities() {
-  const [all, setAll] = useState<Opportunity[]>([])
+  const [allRaw, setAllRaw] = useState<Opportunity[]>([])
   const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
   const [fOwner, setFOwner] = useState(''); const [fStatus, setFStatus] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [flagOnly, setFlagOnly] = useState(false)
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
   const [sel, setSel] = useState<Opportunity | null>(null)
-  useEffect(() => { getOpportunities().then(setAll) }, [])
+
+  useEffect(() => { getOpportunities().then(setAllRaw) }, [])
+
+  // Deduplicate opportunities
+  const all = useMemo(() => deduplicateOpportunities(allRaw), [allRaw])
 
   const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return !from && !to; if (from && v < from) return false; if (to && v > to) return false; return true }
   const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' ? -1 : 1 })
@@ -69,6 +98,7 @@ export default function Opportunities() {
       return 0
     })
   }, [all, search, fType, fGeo, fOwner, fStatus, flagOnly, from, to, sort])
+
   const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFStatus(''); setFrom(''); setTo(''); setFlagOnly(false) }
   const flagged = all.filter(x => x.flag).length
 
@@ -94,29 +124,30 @@ export default function Opportunities() {
       </div>
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{COLS.map(c => (
-            <th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-white">
-              {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
-            </th>
-          ))}</tr></thead>
-          <tbody>{o.map(x => {
-            const st = oppStatus(x)
-            return (
-            <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.flag ? 'bg-amber-500/5' : ''}`}>
-              <td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
-              <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-              <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : 'Open'}</span></td>
-              <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
-              <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
-              <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
-              <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
-              <td className="px-4 py-3 text-mav-muted truncate max-w-xs">{x.source_subject}</td>
-              <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || '').slice(0, 10)}</td>
-              <td className="px-4 py-3">{x.flag ? <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title={x.flag}>⚠ Review</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-            </tr>
-          )})}</tbody>
-        </table>
+          <table className="w-full text-sm">
+            <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{COLS.map(c => (
+              <th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-white">
+                {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
+              </th>
+            ))}</tr></thead>
+            <tbody>{o.map(x => {
+              const st = oppStatus(x)
+              return (
+                <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.flag ? 'bg-amber-500/5' : ''}`}>
+                  <td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
+                  <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+                  <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : 'Open'}</span></td>
+                  <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
+                  <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
+                  <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
+                  <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
+                  <td className="px-4 py-3 text-mav-muted truncate max-w-xs">{x.source_subject}</td>
+                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || '').slice(0, 10)}</td>
+                  <td className="px-4 py-3">{x.flag ? <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title={x.flag}>⚠ Review</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+                </tr>
+              )
+            })}</tbody>
+          </table>
         </div>
       </div>
 
@@ -148,7 +179,7 @@ export default function Opportunities() {
               <div className="h-2 w-full rounded-full bg-mav-dark overflow-hidden"><div className={`h-full ${probBar(sel.win_probability)}`} style={{ width: (sel.win_probability ?? 0) + '%' }} /></div>
             </div>
 
-            {sel.gist && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">What&apos;s happening</div><p className="text-sm leading-relaxed">{sel.gist}</p></div>}
+            {sel.gist && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">What's happening</div><p className="text-sm leading-relaxed">{sel.gist}</p></div>}
             {sel.win_reason && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Why this probability</div><p className="text-sm leading-relaxed text-mav-muted">{sel.win_reason}</p></div>}
             {sel.company_note && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Company</div><p className="text-sm leading-relaxed italic text-mav-muted">{sel.company_note}</p></div>}
             {!sel.gist && <p className="text-sm text-mav-muted mb-5">No email-thread analysis yet for this lead — it currently comes from an open quote in the sheet. {sel.summary}</p>}
