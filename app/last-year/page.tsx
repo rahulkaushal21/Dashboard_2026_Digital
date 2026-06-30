@@ -28,30 +28,30 @@ const qRange = (f: FQ): [string, string] => {
   return [`${y}-${pad(sm)}`, `${y}-${pad(sm + 2)}`]
 }
 const qLabel = (f: FQ) => { const sm = qStartMonth(f.q); const y = qCalYear(f); return `${SHORT[sm]}–${SHORT[sm + 2]} '${String(y).slice(2)}` }
-// last 4 quarters, oldest → newest (newest = current quarter)
-const QS: FQ[] = (() => { const cur = fqOf(now.getFullYear(), curM); const a = [cur]; for (let i = 0; i < 3; i++) a.unshift(decQ(a[0])); return a })()
-const LAST_I = QS.length - 1            // this quarter
-const PREV_I = QS.length - 2            // last quarter
+const incQ = (f: FQ): FQ => f.q < 4 ? { fy: f.fy, q: f.q + 1 } : { fy: f.fy + 1, q: 1 }
+const sameQ = (a: FQ, b: FQ) => a.fy === b.fy && a.q === b.q
+// every fiscal quarter from when web-revenue data starts (Apr 2025) → current,
+// oldest → newest. The user picks any two of these to compare.
+const QS: FQ[] = (() => {
+  const start = fqOf(2025, 4); const end = fqOf(now.getFullYear(), curM)
+  const a = [start]; let guard = 0
+  while (!sameQ(a[a.length - 1], end) && guard++ < 40) a.push(incQ(a[a.length - 1]))
+  return a
+})()
+const CUR_I = QS.length - 1                       // current (still in-progress) quarter
+// default compare = last COMPLETE quarter vs the one before it (both finished)
+const DEF_CUR = Math.max(0, QS.length - 2)
+const DEF_BASE = Math.max(0, QS.length - 3)
 
-// months elapsed so far in the current fiscal quarter (1..3) — drives the
-// like-for-like "same period to date" comparison so a just-started quarter
-// isn't unfairly flagged as Dropped against a full prior quarter.
-const curQ = fqOf(now.getFullYear(), curM)
-const elapsedQM = curM - qStartMonth(curQ.q) + 1
-// the first `elapsedQM` months of a quarter (same elapsed window as this quarter)
-const qSPRange = (f: FQ): [string, string] => {
-  const sm = qStartMonth(f.q); const y = qCalYear(f)
-  return [`${y}-${pad(sm)}`, `${y}-${pad(sm + elapsedQM - 1)}`]
-}
-
-type Row = { client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[]; qvSP: number[]; upcoming: number }
+type Row = { client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[]; upcoming: number }
 
 export default function LastYearReview() {
   const [rows, setRows] = useState<BookingRow[]>([])
   const [q, setQ] = useState('')
   const [mv, setMv] = useState('')      // quarter movement filter
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')   // 'YYYY-MM' month range
-  const [samePeriod, setSamePeriod] = useState(true)                       // like-for-like to-date compare
+  const [qCur, setQCur] = useState(DEF_CUR)     // index of the quarter being compared
+  const [qBase, setQBase] = useState(DEF_BASE)  // index of the quarter compared against
   useEffect(() => { getBookingsFull().then(setRows) }, [])
 
   const data = useMemo(() => {
@@ -64,7 +64,7 @@ export default function LastYearReview() {
       if (from && k < from) return        // From/To month range narrows the whole analysis
       if (to && k > to) return
       const amt = r.booking_amount || 0
-      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0), qvSP: QS.map(() => 0), upcoming: 0 }
+      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0), upcoming: 0 }
       if (between(k, `${lyStart}-04`, `${tyStart}-03`)) cur.fyLast += amt
       // "to date" = current fiscal year up to (and including) the current month only
       if (k >= `${tyStart}-04` && k <= curMonthKey) cur.fyTd += amt
@@ -72,34 +72,32 @@ export default function LastYearReview() {
       if (between(k, `${lyStart}-04`, `${lyStart}-${curMM}`)) cur.spLy += amt
       if (between(k, `${tyStart}-04`, `${tyStart}-${curMM}`)) cur.spTy += amt
       QS.forEach((fq, i) => { const [a, b] = qRange(fq); if (between(k, a, b)) cur.qv[i] += amt })
-      QS.forEach((fq, i) => { const [a, b] = qSPRange(fq); if (between(k, a, b)) cur.qvSP[i] += amt })
       m.set(c, cur)
     })
     return [...m.values()]
   }, [rows, from, to])
 
-  // compare full quarters, or only the same elapsed window of each (to-date)
-  const qa = (r: Row) => samePeriod ? r.qvSP : r.qv
+  // compare the two user-selected quarters (qCur vs qBase)
   const qStatus = (r: Row) => {
-    const tq = qa(r)[LAST_I], lq = qa(r)[PREV_I]
+    const tq = r.qv[qCur], lq = r.qv[qBase]
     if (lq > 0 && tq <= 0) return 'Dropped'
     if (lq <= 0 && tq > 0) return 'New'
     if (tq > lq) return 'Up'
     if (tq < lq) return 'Down'
     return 'Flat'
   }
-  const qDelta = (r: Row) => qa(r)[LAST_I] - qa(r)[PREV_I]
-  const qPct = (r: Row) => qa(r)[PREV_I] > 0 ? Math.round((qDelta(r) / qa(r)[PREV_I]) * 100) : null
+  const qDelta = (r: Row) => r.qv[qCur] - r.qv[qBase]
+  const qPct = (r: Row) => r.qv[qBase] > 0 ? Math.round((qDelta(r) / r.qv[qBase]) * 100) : null
 
   const view = useMemo(() => data
     .filter(r => r.client.toLowerCase().includes(q.toLowerCase()))
     .filter(r => !mv || qStatus(r) === mv)
     .filter(r => r.fyLast || r.fyTd || r.qv.some(v => v))
-    .sort((a, b) => b.fyTd - a.fyTd || b.fyLast - a.fyLast), [data, q, mv, samePeriod])
+    .sort((a, b) => b.fyTd - a.fyTd || b.fyLast - a.fyLast), [data, q, mv, qCur, qBase])
 
   const tot = (sel: (r: Row) => number) => view.reduce((s, r) => s + sel(r), 0)
-  const aggTq = data.reduce((s, r) => s + qa(r)[LAST_I], 0)
-  const aggLq = data.reduce((s, r) => s + qa(r)[PREV_I], 0)
+  const aggTq = data.reduce((s, r) => s + r.qv[qCur], 0)
+  const aggLq = data.reduce((s, r) => s + r.qv[qBase], 0)
   const qoqPct = aggLq > 0 ? Math.round(((aggTq - aggLq) / aggLq) * 100) : null
   const dropped = data.filter(r => qStatus(r) === 'Dropped').length
   const newq = data.filter(r => qStatus(r) === 'New').length
@@ -117,30 +115,35 @@ export default function LastYearReview() {
       <Header title="Last Year Review" subtitle={`Year-on-year + quarter-over-quarter — who's growing, slipping or dropped off`} />
 
       <div className="mb-4 text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
-        Revenue data starts April 2025, so early quarters may be partial. <span className="text-white">&ldquo;To date&rdquo;</span> counts Apr&nbsp;{tyStart} through {SHORT[curM]}&nbsp;{tyStart} only — future-dated bookings are held out. <span className="text-white">Dropped</span> = had revenue last quarter ({qLabel(QS[PREV_I])}) but none this quarter ({qLabel(QS[LAST_I])}).
-        {samePeriod && <span> <span className="text-white">Same period to date</span> is on: movement (status &amp; QoQ&nbsp;Δ) compares each quarter only up to the same point — the first {elapsedQM}&nbsp;month{elapsedQM > 1 ? 's' : ''} — so a just-started quarter isn&rsquo;t flagged Dropped on day one. The $ columns still show full-quarter totals.</span>}
+        Pick any two quarters with the <span className="text-white">Compare / vs</span> selectors — use two <em>completed</em> quarters (e.g. {qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete. <span className="text-white">Dropped</span> = had revenue in {qLabel(QS[qBase])} but none in {qLabel(QS[qCur])}; <span className="text-white">New</span> = the reverse. The FY columns&rsquo; <span className="text-white">&ldquo;to date&rdquo;</span> still counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.
         {upcoming > 0 && <span> Excludes <span className="text-mav-yellow">{money(upcoming)}</span> in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</span>}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <KPICard label={`FY ${lyStart}-${String(tyStart).slice(2)} (Apr–Mar)`} value={money(tot(r => r.fyLast))} />
         <KPICard label={`FY ${tyStart}-${String(tyStart + 1).slice(2)} to date`} value={money(tot(r => r.fyTd))} />
-        <KPICard label={`${qLabel(QS[PREV_I])} → ${qLabel(QS[LAST_I])}${samePeriod ? ' · to date' : ''}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct} />
-        <KPICard label={`Dropped / New this Qtr${samePeriod ? ' (to date)' : ''}`} value={`${dropped} / ${newq}`} />
+        <KPICard label={`${qLabel(QS[qBase])} → ${qLabel(QS[qCur])}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct} />
+        <KPICard label="Dropped / New" value={`${dropped} / ${newq}`} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client…" className={`${sel} w-56`} />
         <select value={mv} onChange={e => setMv(e.target.value)} className={sel}>
-          <option value="">All movements (Qtr)</option>
-          <option value="Dropped">Dropped (gave last Qtr, not this)</option>
-          <option value="New">New this quarter</option>
-          <option value="Up">Up vs last quarter</option>
-          <option value="Down">Down vs last quarter</option>
+          <option value="">All movements</option>
+          <option value="Dropped">Dropped (had baseline, not compared)</option>
+          <option value="New">New (compared only)</option>
+          <option value="Up">Up vs baseline</option>
+          <option value="Down">Down vs baseline</option>
           <option value="Flat">Flat</option>
         </select>
-        <button onClick={() => setSamePeriod(v => !v)} title="Compare this quarter and last quarter only up to the same point in the quarter"
-          className={`text-sm px-3 py-2 rounded-md border transition-colors ${samePeriod ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⏱ Same period to date</button>
+        <span className="text-xs text-mav-muted ml-1">Compare</span>
+        <select value={qCur} onChange={e => setQCur(+e.target.value)} className={sel} title="Quarter to compare">
+          {QS.map((f, i) => <option key={i} value={i}>{qLabel(f)}{i === CUR_I ? ' · current' : ''}</option>)}
+        </select>
+        <span className="text-xs text-mav-muted">vs</span>
+        <select value={qBase} onChange={e => setQBase(+e.target.value)} className={sel} title="Quarter to compare against">
+          {QS.map((f, i) => <option key={i} value={i}>{qLabel(f)}{i === CUR_I ? ' · current' : ''}</option>)}
+        </select>
         <span className="text-xs text-mav-muted ml-1">From</span>
         <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">To</span>
@@ -157,7 +160,7 @@ export default function LastYearReview() {
                 <th className="px-5 py-3 font-medium sticky left-0 bg-mav-panel">Client</th>
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(lyStart).slice(2)}-{String(tyStart).slice(2)}</th>
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(tyStart).slice(2)} TD</th>
-                {QS.map((f, i) => <th key={i} className="px-4 py-3 font-medium text-right whitespace-nowrap">{qLabel(f)}{i === LAST_I ? ' (this)' : i === PREV_I ? ' (last)' : ''}</th>)}
+                {QS.map((f, i) => <th key={i} className={`px-4 py-3 font-medium text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow' : i === qBase ? 'text-white' : ''}`}>{qLabel(f)}{i === qCur ? ' (compare)' : i === qBase ? ' (vs)' : ''}</th>)}
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">QoQ Δ</th>
                 <th className="px-5 py-3 font-medium">Qtr trend</th>
               </tr>
@@ -170,7 +173,7 @@ export default function LastYearReview() {
                     <td className="px-5 py-3 font-medium whitespace-nowrap sticky left-0 bg-mav-panel">{r.client}</td>
                     <td className="px-4 py-3 text-right text-mav-muted">{r.fyLast ? money(r.fyLast) : '—'}</td>
                     <td className="px-4 py-3 text-right">{r.fyTd ? money(r.fyTd) : '—'}</td>
-                    {r.qv.map((v, i) => <td key={i} className={`px-4 py-3 text-right whitespace-nowrap ${i === LAST_I ? '' : 'text-mav-muted'}`}>{v ? money(v) : '—'}</td>)}
+                    {r.qv.map((v, i) => <td key={i} className={`px-4 py-3 text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow font-medium' : i === qBase ? '' : 'text-mav-muted'}`}>{v ? money(v) : '—'}</td>)}
                     <td className={`px-4 py-3 text-right font-medium whitespace-nowrap ${d > 0 ? 'text-green-400' : d < 0 ? 'text-red-400' : 'text-mav-muted'}`}>
                       {d === 0 ? '—' : (d > 0 ? '+' : '') + money(d)}{p != null && <span className="text-xs text-mav-muted ml-1">({p >= 0 ? '+' : ''}{p}%)</span>}
                     </td>
