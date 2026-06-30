@@ -216,7 +216,19 @@ export interface QuoteConversion { id: number; company_name?: string; outcome?: 
 export interface SqlLead { id: number; month?: string; year?: number; venture?: string; industry?: string; persona?: string; company_name?: string; prospect_region?: string; assigned_to?: string; lead_date?: string }
 export interface Escalation { id: number; company_name?: string; geo?: string; situation_type?: string; escalation_type?: string; business_impact?: string; month?: string; email_subject?: string; tracking_date?: string; project_name?: string; link?: string; source?: string; raised_by?: string }
 
+// The source Google Sheet's header row sometimes lands in the synced data as a
+// real row (e.g. company_name = "Company Name", escalation_type = "Escalation
+// Type"). Drop any row whose fields literally repeat the column titles.
+const eq = (a: string | undefined, b: string) => (a || '').trim().toLowerCase() === b
+const isEscalationHeaderRow = (e: Escalation) =>
+  eq(e.company_name, 'company name') || eq(e.escalation_type, 'escalation type') ||
+  eq(e.situation_type, 'type of situation') || eq(e.business_impact, 'business impact') ||
+  eq(e.email_subject, 'email subject line')
+const isSqlHeaderRow = (s: SqlLead) =>
+  eq(s.company_name, 'company name') || eq(s.industry, 'industry') ||
+  eq(s.persona, 'persona') || eq(s.venture, 'venture')
+
 export async function getQuotes(): Promise<Quote[]> { const l = await read<Quote>('quotes'); return l && l.length ? l : (await import('./mockData')).mockQuotes }
 export async function getConversions(): Promise<QuoteConversion[]> { const l = await read<QuoteConversion>('quote_conversions'); return l && l.length ? l : (await import('./mockData')).mockConversions }
-export async function getSqlLeads(): Promise<SqlLead[]> { const l = await read<SqlLead>('sql_leads'); return l && l.length ? l : (await import('./mockData')).mockSqlLeads }
-export async function getEscalations(): Promise<Escalation[]> { const l = await read<Escalation>('escalations', 'id, company_name, geo, situation_type, escalation_type, business_impact, month, email_subject, tracking_date, project_name, link, source, raised_by'); return l && l.length ? l : (await import('./mockData')).mockEscalations }
+export async function getSqlLeads(): Promise<SqlLead[]> { const l = await read<SqlLead>('sql_leads'); const rows = l?.filter(s => !isSqlHeaderRow(s)); return rows && rows.length ? rows : (await import('./mockData')).mockSqlLeads }
+export async function getEscalations(): Promise<Escalation[]> { const l = await read<Escalation>('escalations', 'id, company_name, geo, situation_type, escalation_type, business_impact, month, email_subject, tracking_date, project_name, link, source, raised_by'); const rows = l?.filter(e => !isEscalationHeaderRow(e)); return rows && rows.length ? rows : (await import('./mockData')).mockEscalations }
