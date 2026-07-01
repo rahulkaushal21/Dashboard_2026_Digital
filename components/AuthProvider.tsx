@@ -1,7 +1,7 @@
 'use client'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
-import { checkAccess, getMyProfile, setCurrentEmail, clearCurrentEmail, canSee, Profile } from '@/lib/access'
+import { checkAccess, getStoredProfile, saveSession, clearSession, canSee, Profile } from '@/lib/access'
 import Sidebar from './Sidebar'
 
 interface AuthState { profile: Profile | null; email: string | null; signOut: () => void }
@@ -11,10 +11,27 @@ export const useAuth = () => useContext(AuthCtx)
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined) // undefined = loading
 
-  useEffect(() => { getMyProfile().then(p => setProfile(p ?? null)) }, [])
+  useEffect(() => {
+    const stored = getStoredProfile()
+    if (stored && stored.is_active) {
+      // Trust the cached session immediately — no network gate on load.
+      setProfile(stored)
+      // Revalidate quietly. Only sign out if the server DEFINITIVELY says the
+      // email is gone/disabled (returns null). Transient errors are swallowed
+      // so a network blip never bounces the user to the sign-in screen.
+      checkAccess(stored.email)
+        .then(fresh => {
+          if (fresh === null) { clearSession(); setProfile(null) }
+          else { saveSession(fresh); setProfile(fresh) }
+        })
+        .catch(() => { /* keep the cached session */ })
+    } else {
+      setProfile(null)
+    }
+  }, [])
 
   const onLogin = (p: Profile) => setProfile(p)
-  const signOut = () => { clearCurrentEmail(); setProfile(null) }
+  const signOut = () => { clearSession(); setProfile(null) }
 
   if (profile === undefined) return <Centered>Loading…</Centered>
   if (!profile || !profile.is_active) return <LoginScreen onLogin={onLogin} />
@@ -56,7 +73,7 @@ function LoginScreen({ onLogin }: { onLogin: (p: Profile) => void }) {
     setErr(''); setBusy(true)
     try {
       const p = await checkAccess(email)
-      if (p && p.is_active) { setCurrentEmail(email); onLogin(p) }
+      if (p && p.is_active) { saveSession(p); onLogin(p) }
       else setErr("This email doesn't have access. Ask an admin to add you.")
     } catch (e: any) { setErr(e.message || 'Login failed') }
     finally { setBusy(false) }

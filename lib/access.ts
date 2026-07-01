@@ -23,12 +23,23 @@ export interface Profile {
 }
 
 const KEY = 'dash_email'
+const PKEY = 'dash_profile'
 export function currentEmail(): string | null {
   if (typeof window === 'undefined') return null
   return window.localStorage.getItem(KEY)
 }
-export function setCurrentEmail(email: string) { window.localStorage.setItem(KEY, email.trim().toLowerCase()) }
-export function clearCurrentEmail() { window.localStorage.removeItem(KEY) }
+// Cache the whole profile so a reload is instant and does NOT depend on a
+// network round-trip succeeding — the session survives transient failures.
+export function getStoredProfile(): Profile | null {
+  if (typeof window === 'undefined') return null
+  try { const s = window.localStorage.getItem(PKEY); return s ? JSON.parse(s) as Profile : null }
+  catch { return null }
+}
+export function saveSession(profile: Profile) {
+  window.localStorage.setItem(KEY, profile.email.trim().toLowerCase())
+  window.localStorage.setItem(PKEY, JSON.stringify(profile))
+}
+export function clearSession() { window.localStorage.removeItem(KEY); window.localStorage.removeItem(PKEY) }
 
 // Which routes this profile may open. Admins see everything (incl. Settings);
 // viewers see only their allowed_pages.
@@ -40,19 +51,15 @@ export function canSee(profile: Profile | null, path: string): boolean {
   return allowed.includes(path)
 }
 
-// Look up an email in the allowlist (active only). Returns the profile or null.
+// Look up an email in the allowlist (active only). Returns the profile, or null
+// if the email is definitively not on the list. THROWS on a transient error
+// (network/RPC) so callers can tell "not allowed" apart from "couldn't check".
 export async function checkAccess(email: string): Promise<Profile | null> {
   if (!supabase) return null
-  const { data } = await supabase.rpc('dashboard_check', { p_email: email.trim().toLowerCase() })
+  const { data, error } = await supabase.rpc('dashboard_check', { p_email: email.trim().toLowerCase() })
+  if (error) throw error
   const row = Array.isArray(data) ? data[0] : data
   return (row as Profile) || null
-}
-
-// Resolve the currently "logged-in" email (from localStorage) to its profile.
-export async function getMyProfile(): Promise<Profile | null> {
-  const e = currentEmail()
-  if (!e) return null
-  return checkAccess(e)
 }
 
 // ---- Admin user management (RPCs verify the actor is an active admin) ----
