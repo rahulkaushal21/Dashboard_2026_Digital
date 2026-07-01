@@ -1,14 +1,11 @@
 import './globals.css'
-import Sidebar from '@/components/Sidebar'
+import AuthProvider from '@/components/AuthProvider'
 export const metadata = { title: 'Digital Dashboard', description: 'Digital dashboard — revenue, clients & opportunities' }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="font-sans">
-        <div className="flex h-screen overflow-hidden">
-          <Sidebar />
-          <main className="flex-1 p-8 max-w-[1400px] h-screen overflow-y-auto">{children}</main>
-        </div>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   )
