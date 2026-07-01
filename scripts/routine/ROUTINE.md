@@ -22,13 +22,14 @@ Gmail connector is already authorized as that account, so scan the inbox directl
 `in:inbox newer_than:1d`. (If you later need to scope to a specific alias, add a
 `to:`/`deliveredto:` clause then.)
 
-High-precision shortcut: structured system mails from notifications@uplers.com are
-the most reliable opportunity source. An RFQ notification ("… has generated a RFQ")
-carries Client Name, Client Email, Geo, Engagement Model, Service, and Budget as
-labelled fields — parse these directly into `opportunities`. Invoice-generated
-notifications already correspond to sheet bookings, so do NOT also write them as
-quote_conversions (avoids double-counting won deals). These are edited by the admin in
-the Settings panel, so never hardcode the sheet or inbox here.
+IMPORTANT — system mails are NOT opportunities. Auto-generated pipeline mail from
+notifications@uplers.com (e.g. "… has generated a RFQ", "Quote ( QUT… ) Request")
+and invoice-app alerts are created AFTER the client's real email enquiry and are
+already represented in the sheet's Quotes tab. Do NOT write them into
+`opportunities` (that double-counts). Opportunities come from only two sources:
+(1) a genuine client EMAIL enquiry, and (2) the SHEET Quotes tab (step A). Invoice
+notifications also must not become quote_conversions (they correspond to sheet
+bookings). The sheet and inbox are set by the admin in Settings — never hardcode them.
 
 ## A. Business Sheet -> Supabase  (deterministic, via the Sheets connector)
 Read ONLY these tabs. Map each row, set src_row_hash = hash(identifying fields),
@@ -47,11 +48,12 @@ Chase, Dashboards, Pivot, Claude Cache) — they are out of scope or stale.
 The central inbox receives ~100 emails/hour (~400–500 per 4h window; a cold
 start after an overnight gap can be more). Two rules that matter at this volume:
 
-DYNAMIC WINDOW (no gaps): call getLastScan() (from writers.mjs). Compute
-`h = ceil(hoursSince(lastScan)) + 1`, capped at 48; if lastScan is null use 6.
-Search `in:inbox newer_than:{h}h`. This scans exactly what arrived since the last
-successful run plus a 1h overlap — so a slept laptop just means a bigger next
-window, never lost mail.
+DYNAMIC WINDOW (no gaps, recall is the priority): call getLastScan() (from
+writers.mjs). Compute `h = ceil(hoursSince(lastScan)) + 2`, capped at 96 (4 days);
+if lastScan is null use 6. Search `in:inbox newer_than:{h}h`. This scans everything
+that arrived since the last successful run plus a 2h overlap — a slept laptop just
+means a bigger next window, never lost mail. The user does NOT want to miss any
+opportunity thread, so favour a wider window and full pagination over speed.
 
 PAGINATE FULLY: do NOT stop at the first page of search_threads. Loop with the
 page cursor until results are exhausted — expect hundreds of threads. Triage
@@ -66,9 +68,13 @@ unsure whether something is feedback/escalation/conversion, DO NOT write it —
 but DO still record a sentiment signal (see Sentiment below) if the client tone
 is clear.
 
-- Opportunities -> writeOpportunities : a NEW RFQ/business enquiry not already in
-  the Quotes tab. Record company_name, new vs repeat, rfq + status, geo,
-  sales_person, subject, sender, date, summary.
+- Opportunities -> writeOpportunities : a NEW business enquiry that arrives as a
+  GENUINE client email (the client, or a Mavlers person forwarding/relaying the
+  client's request). Record company_name, new vs repeat, rfq + status, geo,
+  sales_person, subject, sender, date, summary. NEVER create an opportunity from a
+  system-generated mail (notifications@uplers.com "… has generated a RFQ" /
+  "Quote ( QUT… ) Request", invoice-app alerts) — those are downstream of the real
+  client email and are already covered by the sheet Quotes tab. Skip them here.
 - Quote conversion -> writeQuoteConversions : ONLY when a quote is explicitly
   confirmed won or lost (e.g. "we're going ahead", PO attached, or a clear
   decline). Record outcome (won|lost), lost_reason if stated, amount, decided_at,
@@ -86,10 +92,20 @@ is clear.
   nature=Positive, evidence="Ref: MEM…", comments=the appreciation summary.
   Note: subjects like "<Client> - Client Feedback - Major Impact" are NEGATIVE
   experience situations — route those to writeEscalations, NOT as positive feedback.
-- Escalations -> writeEscalations : ONLY a real client escalation (not a routine
-  question or internal note). Record company_name, geo, situation_type
+- Escalations -> writeEscalations : run an ESCALATION KEYWORD SWEEP over EVERY
+  thread (subject + snippet, and the body if a keyword hits) — not just the ones
+  you deep-read for opportunities. Trigger words/phrases (case-insensitive):
+  "major issue", "major impact", "critical", "urgent" (in a negative context),
+  "escalate"/"escalation", "disappointed", "dissatisfied", "unacceptable"/"not
+  acceptable", "complaint", "frustrated", "unhappy", "poor experience", "worst",
+  "let down", "deleted"/"no backup", "missed deadline"/"delay", "refund",
+  "cancel"/"terminate", "legal", "concern(s)", "not happy". A hit means: open the
+  thread and decide if it's a GENUINE client escalation (an external client
+  expressing a real problem/dissatisfaction) — internal chatter, routine questions
+  and system mail don't count. If genuine, record company_name, geo, situation_type
   (Functional|Technical), escalation_type, business_impact (Low|Medium|High),
-  email_subject, evidence. Flag any company with >3 in a quarter for the alert.
+  email_subject, evidence (quote the exact triggering line). Dedup on thread_id.
+  Flag any company with >3 in a quarter for the alert.
 - Sentiment -> writeEmailSignals : for EVERY client-facing thread with a clear
   tone (broader than explicit feedback — appreciation, frustration, urgency,
   churn risk, upsell interest all count). This is the "scan all emails for
