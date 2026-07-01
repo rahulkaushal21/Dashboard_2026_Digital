@@ -122,6 +122,13 @@ export default function Clients() {
   const industries = uniq(clients.map(c => c.industry))
   const aiCount = clients.filter(c => c.ai_focus).length
   const statCount = (b: string) => clients.filter(c => statusOf(c) === b).length
+  // client count per industry (drives the clickable breakdown chart)
+  const indCounts = useMemo(() => {
+    const m: Record<string, number> = {}
+    clients.forEach(c => { const k = c.industry || 'Other / Unclassified'; m[k] = (m[k] || 0) + 1 })
+    return Object.entries(m).sort((a, b) => b[1] - a[1])
+  }, [clients])
+  const maxIndCount = indCounts[0]?.[1] || 1
 
   const rows = useMemo(() => {
     let result = clients
@@ -201,6 +208,30 @@ export default function Clients() {
       </div>
 
       <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Click a row for the full picture. Click column headers to sort.</p>
+
+      <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
+        <div className="flex items-baseline justify-between mb-4">
+          <div className="text-sm font-medium">Clients by industry</div>
+          <div className="text-xs text-mav-muted">{clients.length} total · click a bar to filter{ind ? ` · showing ${ind}` : ''}</div>
+        </div>
+        <div className="space-y-1.5">
+          {indCounts.map(([name, n]) => {
+            const active = ind === name
+            const pct = Math.round((n / maxIndCount) * 100)
+            return (
+              <button key={name} onClick={() => setInd(active ? '' : name)} title={`${n} client${n === 1 ? '' : 's'} — click to ${active ? 'clear' : 'filter'}`}
+                className="w-full flex items-center gap-3 text-left group py-0.5">
+                <span className={`w-44 shrink-0 truncate text-xs ${active ? 'text-mav-yellow font-medium' : 'text-mav-muted group-hover:text-white'}`}>{name}</span>
+                <span className="flex-1 h-4 rounded bg-mav-dark overflow-hidden">
+                  <span className={`block h-full rounded ${active ? 'bg-mav-yellow' : 'bg-mav-yellow/40 group-hover:bg-mav-yellow/70'}`} style={{ width: `${pct}%` }} />
+                </span>
+                <span className={`w-8 text-right text-xs font-semibold ${active ? 'text-mav-yellow' : 'text-white'}`}>{n}</span>
+              </button>
+            )
+          })}
+        </div>
+        {ind && <button onClick={() => setInd('')} className="mt-3 text-xs text-mav-muted hover:text-white">✕ Clear industry filter</button>}
+      </div>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
