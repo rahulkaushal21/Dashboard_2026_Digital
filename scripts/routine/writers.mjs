@@ -12,6 +12,22 @@ export async function getConfig() {
 }
 export const hash = (obj) => createHash('sha1').update(JSON.stringify(obj)).digest('hex')
 
+// High-water mark for the email scan: the timestamp of the last successful scan.
+// The routine scans threads NEWER than this (with 1h overlap) so no mail is
+// missed even after the laptop sleeps for hours. Returns null on a cold start.
+export async function getLastScan() {
+  const { data } = await SB.from('sync_runs').select('ran_at')
+    .eq('source', 'email-opportunities-scan').eq('ok', true)
+    .order('ran_at', { ascending: false }).limit(1)
+  return data?.[0]?.ran_at || null
+}
+
+// Heartbeat: advance the high-water mark every run, even when 0 rows are written,
+// so the next window starts from here (otherwise a quiet run would re-scan forever).
+export async function markScan(message, rows_upserted = 0) {
+  await SB.from('sync_runs').insert({ source: 'email-opportunities-scan', rows_upserted, ok: true, message })
+}
+
 async function upsert(table, rows, conflict) {
   if (!rows?.length) return 0
   const { error } = await SB.from(table).upsert(rows, { onConflict: conflict })
@@ -28,6 +44,9 @@ export const writeOpportunities = (r) => upsert('opportunities', r, 'thread_id')
 export const writeFeedback      = (r) => upsert('feedback', r, 'thread_id')
 export const writeEscalations   = (r) => upsert('escalations', r, 'thread_id')
 export const writeQuoteConversions = (r) => upsert('quote_conversions', r, 'thread_id')
+// Per-email sentiment signal for any client-facing message with a discernible
+// tone (not just explicit feedback). Deduped on thread_id.
+export const writeEmailSignals  = (r) => upsert('email_signals', r, 'thread_id')
 
 // Rebuild the derived clients table from the synced tabs.
 export async function rebuildClients() {
