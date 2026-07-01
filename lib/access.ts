@@ -19,9 +19,16 @@ export interface Profile {
   full_name?: string | null
   role: 'admin' | 'viewer' | string
   is_active: boolean
-  access_expires_at?: string | null
   allowed_pages?: string[] | null
 }
+
+const KEY = 'dash_email'
+export function currentEmail(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem(KEY)
+}
+export function setCurrentEmail(email: string) { window.localStorage.setItem(KEY, email.trim().toLowerCase()) }
+export function clearCurrentEmail() { window.localStorage.removeItem(KEY) }
 
 // Which routes this profile may open. Admins see everything (incl. Settings);
 // viewers see only their allowed_pages.
@@ -33,45 +40,46 @@ export function canSee(profile: Profile | null, path: string): boolean {
   return allowed.includes(path)
 }
 
-// The current signed-in user's allowlist row (null if not on the allowlist).
-export async function getMyProfile(): Promise<Profile | null> {
+// Look up an email in the allowlist (active only). Returns the profile or null.
+export async function checkAccess(email: string): Promise<Profile | null> {
   if (!supabase) return null
-  const { data: { user } } = await supabase.auth.getUser()
-  const email = user?.email
-  if (!email) return null
-  const { data } = await supabase
-    .from('dashboard_users')
-    .select('email, full_name, role, is_active, access_expires_at, allowed_pages')
-    .ilike('email', email)
-    .maybeSingle()
-  return (data as Profile) || null
+  const { data } = await supabase.rpc('dashboard_check', { p_email: email.trim().toLowerCase() })
+  const row = Array.isArray(data) ? data[0] : data
+  return (row as Profile) || null
 }
 
-// ---- Admin user management (RLS lets only an admin session write) ----
+// Resolve the currently "logged-in" email (from localStorage) to its profile.
+export async function getMyProfile(): Promise<Profile | null> {
+  const e = currentEmail()
+  if (!e) return null
+  return checkAccess(e)
+}
+
+// ---- Admin user management (RPCs verify the actor is an active admin) ----
 export async function listUsers(): Promise<Profile[]> {
   if (!supabase) return []
-  const { data } = await supabase
-    .from('dashboard_users')
-    .select('email, full_name, role, is_active, access_expires_at, allowed_pages')
-    .order('created_at', { ascending: true })
+  const { data } = await supabase.rpc('dashboard_list', { p_actor: currentEmail() || '' })
   return (data as Profile[]) || []
 }
 
 export async function upsertUser(u: Partial<Profile> & { email: string }): Promise<void> {
   if (!supabase) throw new Error('Supabase not configured')
-  const row = {
-    email: u.email.trim().toLowerCase(),
-    full_name: u.full_name ?? null,
-    role: u.role || 'viewer',
-    is_active: u.is_active ?? true,
-    allowed_pages: u.role === 'admin' ? null : (u.allowed_pages || []),
-  }
-  const { error } = await supabase.from('dashboard_users').upsert(row, { onConflict: 'email' })
+  const { error } = await supabase.rpc('dashboard_upsert_user', {
+    p_actor: currentEmail() || '',
+    p_email: u.email.trim().toLowerCase(),
+    p_full_name: u.full_name ?? '',
+    p_role: u.role || 'viewer',
+    p_pages: u.role === 'admin' ? [] : (u.allowed_pages || []),
+    p_active: u.is_active ?? true,
+  })
   if (error) throw error
 }
 
 export async function deleteUser(email: string): Promise<void> {
   if (!supabase) throw new Error('Supabase not configured')
-  const { error } = await supabase.from('dashboard_users').delete().ilike('email', email)
+  const { error } = await supabase.rpc('dashboard_delete_user', {
+    p_actor: currentEmail() || '',
+    p_email: email.trim().toLowerCase(),
+  })
   if (error) throw error
 }

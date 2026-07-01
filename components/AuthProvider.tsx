@@ -1,8 +1,7 @@
 'use client'
 import { createContext, useContext, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import { getMyProfile, canSee, Profile } from '@/lib/access'
+import { checkAccess, getMyProfile, setCurrentEmail, clearCurrentEmail, canSee, Profile } from '@/lib/access'
 import Sidebar from './Sidebar'
 
 interface AuthState { profile: Profile | null; email: string | null; signOut: () => void }
@@ -10,38 +9,18 @@ const AuthCtx = createContext<AuthState>({ profile: null, email: null, signOut: 
 export const useAuth = () => useContext(AuthCtx)
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<any>(undefined) // undefined = still loading
-  const [profile, setProfile] = useState<Profile | null | undefined>(undefined)
+  const [profile, setProfile] = useState<Profile | null | undefined>(undefined) // undefined = loading
 
-  useEffect(() => {
-    if (!supabase) { setSession(null); return }
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
-    return () => sub.subscription.unsubscribe()
-  }, [])
+  useEffect(() => { getMyProfile().then(p => setProfile(p ?? null)) }, [])
 
-  useEffect(() => {
-    if (session === undefined) return
-    if (!session) { setProfile(null); return }
-    getMyProfile().then(setProfile)
-  }, [session])
+  const onLogin = (p: Profile) => setProfile(p)
+  const signOut = () => { clearCurrentEmail(); setProfile(null) }
 
-  const signOut = () => { supabase?.auth.signOut() }
-
-  if (session === undefined || (session && profile === undefined))
-    return <Centered>Loading…</Centered>
-
-  if (!supabase)
-    return <Centered>Connect Supabase to enable sign-in.</Centered>
-
-  if (!session)
-    return <LoginScreen />
-
-  if (!profile || !profile.is_active)
-    return <NoAccess email={session.user?.email} signOut={signOut} />
+  if (profile === undefined) return <Centered>Loading…</Centered>
+  if (!profile || !profile.is_active) return <LoginScreen onLogin={onLogin} />
 
   return (
-    <AuthCtx.Provider value={{ profile, email: session.user?.email ?? null, signOut }}>
+    <AuthCtx.Provider value={{ profile, email: profile.email, signOut }}>
       <div className="flex h-screen overflow-hidden">
         <Sidebar />
         <main className="flex-1 p-8 max-w-[1400px] h-screen overflow-y-auto">
@@ -69,15 +48,18 @@ function Centered({ children }: { children: React.ReactNode }) {
   return <div className="h-screen flex items-center justify-center text-mav-muted">{children}</div>
 }
 
-function LoginScreen() {
+function LoginScreen({ onLogin }: { onLogin: (p: Profile) => void }) {
   const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
   const [err, setErr] = useState('')
-  const sendLink = async () => {
-    setErr('')
-    if (!supabase) return
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href } })
-    if (error) setErr(error.message); else setSent(true)
+  const [busy, setBusy] = useState(false)
+  const login = async () => {
+    setErr(''); setBusy(true)
+    try {
+      const p = await checkAccess(email)
+      if (p && p.is_active) { setCurrentEmail(email); onLogin(p) }
+      else setErr("This email doesn't have access. Ask an admin to add you.")
+    } catch (e: any) { setErr(e.message || 'Login failed') }
+    finally { setBusy(false) }
   }
   return (
     <div className="h-screen flex items-center justify-center">
@@ -87,31 +69,17 @@ function LoginScreen() {
           <span className="font-semibold tracking-tight">Digital Dashboard</span>
         </div>
         <h1 className="text-xl font-semibold mb-1">Sign in</h1>
-        <p className="text-sm text-mav-muted mb-4">Access is restricted. We'll email you a one-time sign-in link.</p>
-        {sent ? (
-          <p className="text-sm text-green-400">Link sent to {email}. Check your inbox, then open the link on this device.</p>
-        ) : (
-          <div className="space-y-3">
-            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com"
-              onKeyDown={e => e.key === 'Enter' && sendLink()}
-              className="w-full bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow" />
-            <button onClick={sendLink} className="w-full bg-mav-yellow text-black font-medium rounded-md py-2 text-sm">Send sign-in link</button>
-            {err && <p className="text-sm text-red-400">{err}</p>}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function NoAccess({ email, signOut }: { email?: string; signOut: () => void }) {
-  return (
-    <div className="h-screen flex items-center justify-center">
-      <div className="w-full max-w-sm px-6 text-center">
-        <h1 className="text-xl font-semibold mb-2">No access</h1>
-        <p className="text-sm text-mav-muted mb-1">{email} isn't on the access list for this dashboard.</p>
-        <p className="text-sm text-mav-muted mb-5">Ask an admin (web@uplers.com) to add you.</p>
-        <button onClick={signOut} className="text-xs text-mav-muted hover:text-white underline">Sign out</button>
+        <p className="text-sm text-mav-muted mb-4">Enter your work email to continue.</p>
+        <div className="space-y-3">
+          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com"
+            onKeyDown={e => e.key === 'Enter' && login()} autoFocus
+            className="w-full bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow" />
+          <button onClick={login} disabled={busy}
+            className="w-full bg-mav-yellow text-black font-medium rounded-md py-2 text-sm disabled:opacity-60">
+            {busy ? 'Checking…' : 'Log in'}
+          </button>
+          {err && <p className="text-sm text-red-400">{err}</p>}
+        </div>
       </div>
     </div>
   )
