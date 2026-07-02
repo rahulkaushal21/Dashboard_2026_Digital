@@ -115,21 +115,31 @@ is clear.
   source_subject, source_sender, source_date, thread_id. Skip pure internal/
   automated mail (no external client on the thread). Dedup on thread_id.
 
-## B2. Enrich OPEN quotes with their client email (brief + journey)
-The dashboard merges the sheet Quotes tab into Opportunities by company name. For
-each OPEN quote (status Quote Shared / Waiting for details / Waiting for Final
-Approval / On Hold — not Confirmed/Cancelled), try to find the client's email
-thread and write ONE opportunities row (via writeOpportunities, dedup thread_id)
-for that agency with:
-  - gist  : a 1–2 line BRIEF of what the client actually asked for / latest state.
-  - journey : short dated bullet trail of the thread (enquiry → quote → replies →
-    current ask), newline-separated.
-  - win_reason : your read on whether it will close and why (tie to real signals:
-    client engagement, budget pushback, silence, approval language).
-  - win_probability : 0–100 estimate.
-  - company_name = the quote's agency (so it merges with the sheet row's value/status).
-Do this only when you can find a genuine matching client thread; skip silently
-otherwise. Budget this to the highest-value open quotes first if volume is large.
+## B2. Enrich + RE-CHECK open quotes against their client email
+The dashboard merges the sheet Quotes tab into Opportunities by company name.
+ALL account-manager / PM client mail forwards to web@uplers.com, so the client
+threads ARE in this inbox — find them by the quote's CLIENT EMAIL (client_email),
+not just the domain. Scope = OPEN quotes: Quote Shared / Waiting for Final
+Approval / Waiting for details. (Confirmed=won, Cancelled=lost, On Hold=parked —
+skip for enrichment, but you may re-check On Hold to catch a revival.)
+
+Pull the open quotes from Supabase (there are <100). For EACH, search Gmail by
+client_email for the latest thread and write ONE opportunities row (via
+writeOpportunities, dedup thread_id, company_name = the quote's agency so it
+merges with the sheet value/status):
+  - gist       : 1–2 line brief of what the client asked / latest state.
+  - journey    : dated bullet trail (enquiry → quote → replies → current ask).
+  - win_reason : your read on whether it closes and why (engagement, budget
+    pushback, silence, approval language).
+  - win_probability : 0–100.
+
+MOVEMENT RE-CHECK (every run): for open quotes that ALREADY have an enrichment
+row, look for NEW messages in the thread since source_date. If there is movement,
+refresh gist/journey and MOVE win_probability up or down by the latest email
+sentiment — a warm/approving reply raises it, silence or price pushback lowers it
+— and update source_date to the newest message. No movement → leave it. Do this
+only where a genuine client thread exists; skip silently otherwise. Highest-value
+open quotes first if you are time-limited.
 
 ## C. Finally
 1. Call rebuildClients() to refresh the derived clients table (LTV from bookings,
