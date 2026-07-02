@@ -7,7 +7,6 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/opportunities', label: 'Opportunities' },
   { href: '/clients', label: 'Clients' },
-  { href: '/quotes', label: 'Quotes' },
   { href: '/escalations', label: 'Escalations' },
   { href: '/sql-leads', label: 'SQL / Leads' },
   { href: '/business-trend', label: 'Business Trend' },

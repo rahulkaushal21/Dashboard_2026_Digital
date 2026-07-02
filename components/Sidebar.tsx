@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Briefcase, Users, FileText, AlertTriangle, Target, TrendingUp, History, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, Briefcase, Users, AlertTriangle, Target, TrendingUp, History, Settings, LogOut } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
@@ -9,7 +9,6 @@ const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   { href: '/clients', label: 'Clients', icon: Users },
-  { href: '/quotes', label: 'Quotes', icon: FileText },
   { href: '/escalations', label: 'Escalations', icon: AlertTriangle },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },

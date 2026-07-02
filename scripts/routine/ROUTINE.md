@@ -115,6 +115,22 @@ is clear.
   source_subject, source_sender, source_date, thread_id. Skip pure internal/
   automated mail (no external client on the thread). Dedup on thread_id.
 
+## B2. Enrich OPEN quotes with their client email (brief + journey)
+The dashboard merges the sheet Quotes tab into Opportunities by company name. For
+each OPEN quote (status Quote Shared / Waiting for details / Waiting for Final
+Approval / On Hold — not Confirmed/Cancelled), try to find the client's email
+thread and write ONE opportunities row (via writeOpportunities, dedup thread_id)
+for that agency with:
+  - gist  : a 1–2 line BRIEF of what the client actually asked for / latest state.
+  - journey : short dated bullet trail of the thread (enquiry → quote → replies →
+    current ask), newline-separated.
+  - win_reason : your read on whether it will close and why (tie to real signals:
+    client engagement, budget pushback, silence, approval language).
+  - win_probability : 0–100 estimate.
+  - company_name = the quote's agency (so it merges with the sheet row's value/status).
+Do this only when you can find a genuine matching client thread; skip silently
+otherwise. Budget this to the highest-value open quotes first if volume is large.
+
 ## C. Finally
 1. Call rebuildClients() to refresh the derived clients table (LTV from bookings,
    industry from SQLs, latest sentiment from feedback).

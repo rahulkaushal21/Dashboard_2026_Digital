@@ -19,6 +19,30 @@ rfq_status?: string; geo?: string; sales_person?: string; source_subject?: strin
 source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
 gist?: string; win_probability?: number; win_reason?: string; company_note?: string
 won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]
+value?: number; technology?: string; service?: string; journey?: string; quote_ref?: string
+}
+
+// Group the many raw quote "technology" values into a handful of service lines.
+export const serviceOf = (tech?: string): string => {
+const t = (tech || '').toLowerCase()
+if (!t.trim()) return 'Other / Unspecified'
+if (/shopify|woocommerce|magento|bigcommerce/.test(t)) return 'E-commerce'
+if (/design|banner|figma/.test(t)) return 'Design'
+if (/hubspot|ghl|gohighlevel|marketo|klaviyo|pardot/.test(t)) return 'Marketing Automation'
+if (/mobile app|react native|flutter|ios|android|web & mobile|web and mobile/.test(t)) return 'App Development'
+if (/\bai\b|automation/.test(t)) return 'AI / Automation'
+if (/wordpress|\bwp\b|webflow|wix|squarespace|html|php|laravel|react|memberclicks|lp /.test(t)) return 'Web Development'
+return 'Other / Unspecified'
+}
+
+// Status of an open quote -> a rough close likelihood + a plain-English read.
+const quoteOutlook = (status?: string): { prob: number; read: string } => {
+const v = (status || '').toLowerCase()
+if (/final approval/.test(v)) return { prob: 75, read: 'Late stage — awaiting final approval; likely to close.' }
+if (/quote shared/.test(v)) return { prob: 50, read: 'Quote shared — in play, awaiting the client’s decision.' }
+if (/waiting for details|waiting for detail/.test(v)) return { prob: 40, read: 'Early — waiting on client details/scope before it can progress.' }
+if (/on hold/.test(v)) return { prob: 25, read: 'On hold — stalled and at risk unless re-engaged.' }
+return { prob: 45, read: 'Open quote — outcome not yet clear from the sheet.' }
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
@@ -96,7 +120,7 @@ const emailOpps: Opportunity[] = ((await read<Opportunity>('opportunities')) || 
 // Map bookings columns to quote schema:
 // service_name → quote_id, booking_date → added_date, company_name → agency, booking_amount → usd_value, engagement_model → status
 const quotes = (await read<any>('quotes',
-'id, quote_id, added_date, agency, usd_value, status, geo, sales_person')) || []
+'id, quote_id, added_date, agency, usd_value, status, geo, sales_person, technology, business_type')) || []
 const norm = (s?: string) => (s || '').trim().toLowerCase()
 // collapse GEO into 3 buckets: US (incl. Canada/N.America), AU (incl. APAC/NZ), UK (everything else)
 const geo3 = (g?: string) => {
@@ -123,10 +147,11 @@ return isOpenQuote(q.status)
 const won = norm(q.status) === 'confirmed'
 const wonAmt = won ? Math.round(confirmedValue.get(norm(q.agency)) || q.usd_value || 0) : undefined
 const usd = q.usd_value ? ' · $' + Math.round(q.usd_value).toLocaleString() : ''
+const outlook = quoteOutlook(q.status)
 return {
 id: 1000000 + (q.id || 0),
 company_name: q.agency,
-is_new_client: /new/i.test(q.quote_id || ''),
+is_new_client: /new/i.test(q.business_type || '') && !/repeat/i.test(q.business_type || ''),
 rfq: true,
 rfq_status: won ? 'won' : (/shared|approval/i.test(q.status || '') ? 'quoted' : 'pending'),
 geo: q.geo,
@@ -138,6 +163,13 @@ source: 'spreadsheet',
 pm_owner: undefined,
 won,
 won_amount: wonAmt,
+value: won ? wonAmt : Math.round(q.usd_value || 0),
+technology: q.technology || undefined,
+service: serviceOf(q.technology),
+quote_ref: q.quote_id,
+win_probability: won ? 100 : outlook.prob,
+win_reason: won ? undefined : outlook.read,
+status: q.status,
 }
 })
 const pick = <T,>(a: T | undefined, b: T | undefined) => (a !== undefined && a !== null && a !== '' ? a : b)
@@ -176,6 +208,11 @@ company_note: pick(cur.company_note, x.company_note),
 won: cur.won || x.won,
 won_amount: pick(cur.won_amount, x.won_amount),
 status: pick(cur.status, x.status),
+value: pick(cur.value, x.value),
+technology: pick(cur.technology, x.technology),
+service: pick(cur.service, x.service),
+quote_ref: pick(cur.quote_ref, x.quote_ref),
+journey: pick(cur.journey, x.journey),
 }
 // Use spreadsheet data as canonical source of truth (clean normalized name)
 const canonicalName = x.source === 'spreadsheet' ? x.company_name : cur.company_name
