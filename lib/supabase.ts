@@ -83,7 +83,9 @@ return data && data.length ? (data[0] as { ran_at: string }).ran_at : null
 
 const isOpenQuote = (s?: string) => {
 const v = (s || '').trim().toLowerCase()
-return v !== '' && v !== 'confirmed' && v !== 'cancelled'
+// Open pipeline = shared / awaiting details / awaiting approval. Confirmed = won,
+// Cancelled = closed-lost, On Hold = parked — all excluded from Opportunities.
+return v !== '' && v !== 'confirmed' && v !== 'cancelled' && v !== 'on hold'
 }
 
 // Levenshtein distance similarity: returns 0-1 score (1 = identical)
