@@ -142,11 +142,13 @@ const confirmedValue = new Map<string, number>()
 for (const q of quotes) if (norm(q.status) === 'confirmed') confirmedValue.set(norm(q.agency), (confirmedValue.get(norm(q.agency)) || 0) + (q.usd_value || 0))
 // Open quotes -> in-progress. All confirmed quotes (whether booked or not) -> "Won" or "Confirmed".
 // Cancelled excluded.
-const quoteOpps: Opportunity[] = quotes.filter(q => {
-if (norm(q.status) === 'confirmed') return true
-return isOpenQuote(q.status)
-}).map(q => {
+// Include every quote with a real status. The UI buckets them: Confirmed=Won,
+// Cancelled=Lost, On Hold=On Hold, everything else (Quote Shared / Waiting for
+// approval / Waiting for details) = Open. isOpenQuote is kept for reference.
+void isOpenQuote
+const quoteOpps: Opportunity[] = quotes.filter(q => norm(q.status) !== '').map(q => {
 const won = norm(q.status) === 'confirmed'
+const lost = /cancel/.test(norm(q.status))
 const wonAmt = won ? Math.round(confirmedValue.get(norm(q.agency)) || q.usd_value || 0) : undefined
 const usd = q.usd_value ? ' · $' + Math.round(q.usd_value).toLocaleString() : ''
 const outlook = quoteOutlook(q.status)
@@ -169,8 +171,8 @@ value: won ? wonAmt : Math.round(q.usd_value || 0),
 technology: q.technology || undefined,
 service: serviceOf(q.technology),
 quote_ref: q.quote_id,
-win_probability: won ? 100 : outlook.prob,
-win_reason: won ? undefined : outlook.read,
+win_probability: won ? 100 : lost ? 0 : outlook.prob,
+win_reason: won ? undefined : lost ? 'Cancelled / closed lost.' : outlook.read,
 status: q.status,
 }
 })

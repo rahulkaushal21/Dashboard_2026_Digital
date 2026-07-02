@@ -16,8 +16,14 @@ const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
 const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >= 60 ? 'bg-green-500/15 text-green-400' : p >= 45 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
-const oppStatus = (x: Opportunity) => x.won ? 'Won' : (x.status || '').toLowerCase() === 'lost' ? 'Lost' : 'Open'
-const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : 'bg-mav-line text-mav-muted'
+const oppStatus = (x: Opportunity) => {
+if (x.won) return 'Won'
+const s = (x.status || '').toLowerCase()
+if (s.includes('cancel') || s === 'lost') return 'Lost'
+if (s.includes('hold')) return 'On Hold'
+return 'Open'
+}
+const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : 'bg-mav-line text-mav-muted'
 const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
 
 type SortKey = 'company' | 'value' | 'win' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
@@ -94,6 +100,7 @@ const flagged = all.filter(x => x.flag).length
 const dated = useMemo(() => all.filter(x => inRange(x.source_date)), [all, from, to])
 const open = useMemo(() => dated.filter(x => oppStatus(x) === 'Open'), [dated])
 const openValue = open.reduce((s, x) => s + (x.value || 0), 0)
+const onHold = useMemo(() => dated.filter(x => oppStatus(x) === 'On Hold'), [dated])
 const won = useMemo(() => dated.filter(x => oppStatus(x) === 'Won'), [dated])
 const wonValue = won.reduce((s, x) => s + (x.value || x.won_amount || 0), 0)
 const byGeo = useMemo(() => breakdown(open, x => x.geo || '—'), [open])
@@ -118,9 +125,10 @@ return (
 <Header title="Opportunities" subtitle="Open pipeline + won business — email leads and the sheet Quotes tab, merged. Value, close-likelihood and status in one place." />
 
 <div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).</div>
-<div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+<div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
 <KPICard label="Open opportunities" value={String(open.length)} />
 <KPICard label="Open pipeline value" value={money(openValue)} />
+<KPICard label="On Hold" value={String(onHold.length)} />
 <KPICard label="Won" value={String(won.length)} />
 <KPICard label="Won value" value={money(wonValue)} />
 </div>
@@ -133,7 +141,7 @@ return (
 
 <div className="flex flex-wrap items-center gap-2 mb-4">
 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client…" className={`${selCls} w-44`} />
-<select value={fStatus} onChange={e => setFStatus(e.target.value)} className={selCls}><option value="">All status</option><option value="Open">Open</option><option value="Won">Won</option><option value="Lost">Lost</option></select>
+<select value={fStatus} onChange={e => setFStatus(e.target.value)} className={selCls}><option value="">All status</option><option value="Open">Open</option><option value="On Hold">On Hold</option><option value="Won">Won</option><option value="Lost">Lost</option></select>
 <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option><option value="New">New</option><option value="Repeat">Repeat</option></select>
 <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>
 <select value={fSvc} onChange={e => setFSvc(e.target.value)} className={selCls}><option value="">All services</option>{uniq(all.map(svcOf)).map(s => <option key={s} value={s}>{s}</option>)}</select>
@@ -161,7 +169,7 @@ return (
 <td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
 <td className="px-4 py-3 whitespace-nowrap font-medium">{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : 'Open'}</span></td>
+<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
 <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
