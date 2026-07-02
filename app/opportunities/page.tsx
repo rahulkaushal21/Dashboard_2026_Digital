@@ -53,15 +53,18 @@ export default function Opportunities() {
 const [all, setAll] = useState<Opportunity[]>([])
 const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
 const [fOwner, setFOwner] = useState(''); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
-const [from, setFrom] = useState(''); const [to, setTo] = useState('')
+const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
 const [flagOnly, setFlagOnly] = useState(false)
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'value', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
 useEffect(() => { getOpportunities().then(setAll) }, [])
+// Default the "To" date to today (set on the client to avoid a hydration mismatch).
+useEffect(() => { setTo(new Date().toISOString().slice(0, 10)) }, [])
 
-const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return !from && !to; if (from && v < from) return false; if (to && v > to) return false; return true }
+// Undated rows always show; otherwise honour the From/To range.
+const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return true; if (from && v < from) return false; if (to && v > to) return false; return true }
 const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' || k === 'value' ? -1 : 1 })
 
 const o = useMemo(() => {
@@ -83,17 +86,19 @@ return 0
 })
 }, [all, search, fType, fGeo, fOwner, fStatus, fSvc, fTech, flagOnly, from, to, sort])
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom(''); setTo(''); setFlagOnly(false) }
+const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false) }
 const flagged = all.filter(x => x.flag).length
 
-// Open pipeline = the headline. Value/counts come from the current filters too.
-const open = all.filter(x => oppStatus(x) === 'Open')
+// Headline numbers follow the DATE range (independent of the other dropdowns so
+// the breakdown panels stay stable for click-to-filter).
+const dated = useMemo(() => all.filter(x => inRange(x.source_date)), [all, from, to])
+const open = useMemo(() => dated.filter(x => oppStatus(x) === 'Open'), [dated])
 const openValue = open.reduce((s, x) => s + (x.value || 0), 0)
-const won = all.filter(x => oppStatus(x) === 'Won')
+const won = useMemo(() => dated.filter(x => oppStatus(x) === 'Won'), [dated])
 const wonValue = won.reduce((s, x) => s + (x.value || x.won_amount || 0), 0)
-const byGeo = useMemo(() => breakdown(open, x => x.geo || '—'), [all])
-const bySvc = useMemo(() => breakdown(open, svcOf), [all])
-const byTech = useMemo(() => breakdown(open, x => x.technology || '—'), [all])
+const byGeo = useMemo(() => breakdown(open, x => x.geo || '—'), [open])
+const bySvc = useMemo(() => breakdown(open, svcOf), [open])
+const byTech = useMemo(() => breakdown(open, x => x.technology || '—'), [open])
 
 const Panel = ({ title, rows, active, onPick }: { title: string; rows: [string, { count: number; value: number }][]; active: string; onPick: (k: string) => void }) => (
 <div className="bg-mav-panel border border-mav-line rounded-xl p-4">
@@ -112,6 +117,7 @@ return (
 <div>
 <Header title="Opportunities" subtitle="Open pipeline + won business — email leads and the sheet Quotes tab, merged. Value, close-likelihood and status in one place." />
 
+<div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).</div>
 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 <KPICard label="Open opportunities" value={String(open.length)} />
 <KPICard label="Open pipeline value" value={money(openValue)} />
