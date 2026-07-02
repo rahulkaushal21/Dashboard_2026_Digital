@@ -20,6 +20,7 @@ source_date?: string; summary?: string; source?: string; sources?: string[]; pm_
 gist?: string; win_probability?: number; win_reason?: string; company_note?: string
 won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]
 value?: number; technology?: string; service?: string; journey?: string; quote_ref?: string
+quote_date?: string
 }
 
 // Group the many raw quote "technology" values into a handful of service lines.
@@ -162,6 +163,7 @@ geo: q.geo,
 sales_person: q.sales_person,
 source_subject: q.quote_id,
 source_date: q.added_date,
+quote_date: q.added_date,
 summary: won ? `Confirmed · $${(wonAmt || 0).toLocaleString()}` : `Quote: ${q.status}${usd}`,
 source: 'spreadsheet',
 pm_owner: undefined,
@@ -217,6 +219,7 @@ technology: pick(cur.technology, x.technology),
 service: pick(cur.service, x.service),
 quote_ref: pick(cur.quote_ref, x.quote_ref),
 journey: pick(cur.journey, x.journey),
+quote_date: pick(cur.quote_date, x.quote_date),
 }
 // Use spreadsheet data as canonical source of truth (clean normalized name)
 const canonicalName = x.source === 'spreadsheet' ? x.company_name : cur.company_name
@@ -232,6 +235,10 @@ const all = [...m.values()]
 const confirmedLike = /(\bapproved\b|\bretainer\b|existing client|already a client|migration complete|signed off|renewed|go ?ahead given)/i
 for (const o of all) {
 o.geo = geo3(o.geo)
+// The row's shown date should be the QUOTE SHARED date (from the sheet), not the
+// latest follow-up email. A newer email may win the merge for its richer content,
+// but the date must stay anchored to when the quote was shared.
+if (o.quote_date) o.source_date = o.quote_date
 const key = norm(o.company_name)
 const inRevenue = revenueSet.has(key)
 // Repeat = already in the revenue sheet, or the scan already saw them as an existing client
