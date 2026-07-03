@@ -82,6 +82,16 @@ const { data } = await supabase.from('sync_runs').select('ran_at').eq('source', 
 return data && data.length ? (data[0] as { ran_at: string }).ran_at : null
 }
 
+// Like getLastSync but also returns ok/message of the most recent run, so the UI
+// can distinguish a healthy scan from a failed one (e.g. Gmail auth expired ->
+// the routine writes an ok:false heartbeat via markScanFailed).
+export interface SyncStatus { ran_at: string; ok: boolean; message?: string }
+export async function getLastSyncStatus(source: string): Promise<SyncStatus | null> {
+if (!supabase) return null
+const { data } = await supabase.from('sync_runs').select('ran_at, ok, message').eq('source', source).order('ran_at', { ascending: false }).limit(1)
+return data && data.length ? (data[0] as SyncStatus) : null
+}
+
 const isOpenQuote = (s?: string) => {
 const v = (s || '').trim().toLowerCase()
 // Open pipeline = shared / awaiting details / awaiting approval. Confirmed = won,

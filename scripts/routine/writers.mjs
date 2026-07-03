@@ -28,6 +28,16 @@ export async function markScan(message, rows_upserted = 0) {
   await SB.from('sync_runs').insert({ source: 'email-opportunities-scan', rows_upserted, ok: true, message })
 }
 
+// Failure heartbeat: record that a run could NOT complete (e.g. the Gmail
+// connector token expired and needs re-authorization). Writes ok:false, which
+// (a) getLastScan ignores — so the high-water mark does NOT advance and the next
+// successful run still catches up the full backlog, and (b) the dashboard reads
+// to flip the "Opportunities scan" light red with a reconnect prompt, so a silent
+// auth lapse becomes visible instead of the scan just quietly doing nothing.
+export async function markScanFailed(message) {
+  await SB.from('sync_runs').insert({ source: 'email-opportunities-scan', rows_upserted: 0, ok: false, message })
+}
+
 async function upsert(table, rows, conflict) {
   if (!rows?.length) return 0
   const { error } = await SB.from(table).upsert(rows, { onConflict: conflict })

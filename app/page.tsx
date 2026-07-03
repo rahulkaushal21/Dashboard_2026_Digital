@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, getBookingsFull, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { RefreshCw } from 'lucide-react'
 
@@ -85,6 +85,8 @@ export default function Dashboard() {
 
   const [syncRev, setSyncRev] = useState<string | null>(null)
   const [syncOpp, setSyncOpp] = useState<string | null>(null)
+  // Whether the most recent opportunities scan FAILED (e.g. Gmail auth expired).
+  const [syncOppFailed, setSyncOppFailed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [nowMs, setNowMs] = useState(Date.now())
@@ -96,9 +98,11 @@ export default function Dashboard() {
     try {
       const [r, c, o, b, srA, srB, so] = await Promise.all([
         getRevenue(), getClients(), getOpportunities(), getBookingsFull(),
-        getLastSync('web-revenue-appscript'), getLastSync('web-revenue-sync'), getLastSync('email-opportunities-scan'),
+        getLastSync('web-revenue-appscript'), getLastSync('web-revenue-sync'), getLastSyncStatus('email-opportunities-scan'),
       ])
-      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(later(srA, srB)); setSyncOpp(so); setLastRefreshed(new Date()); setNowMs(Date.now())
+      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(later(srA, srB))
+      setSyncOpp(so?.ran_at ?? null); setSyncOppFailed(so ? !so.ok : false)
+      setLastRefreshed(new Date()); setNowMs(Date.now())
     } finally { setRefreshing(false) }
   }
   // "Sync now" actually re-pulls the revenue sheet (via a Supabase edge function) THEN reloads the data.
@@ -195,8 +199,11 @@ export default function Dashboard() {
           <span className="text-mav-muted">Web revenue</span><span className="font-medium">{ago(syncRev, nowMs)}</span>
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full ${freshWithin(syncOpp, 45, nowMs) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
-          <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp, nowMs)}</span><span className="text-mav-muted">· auto every 30m</span>
+          <span className={`w-2 h-2 rounded-full ${syncOppFailed ? 'bg-red-500' : freshWithin(syncOpp, 45, nowMs) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
+          <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp, nowMs)}</span>
+          {syncOppFailed
+            ? <span className="text-red-400 font-medium">· ⚠ Gmail auth expired — reconnect the Gmail connector</span>
+            : <span className="text-mav-muted">· auto every 4h</span>}
         </span>
         <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
         <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"

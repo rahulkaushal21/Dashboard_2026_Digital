@@ -31,6 +31,18 @@ already represented in the sheet's Quotes tab. Do NOT write them into
 notifications also must not become quote_conversions (they correspond to sheet
 bookings). The sheet and inbox are set by the admin in Settings — never hardcode them.
 
+## 0b. Connector failure -> leave a VISIBLE heartbeat (don't fail silently)
+If the Gmail connector returns a re-authorization / expired-token error (or a hard,
+unrecoverable connector failure) so the email scan CANNOT run, do NOT just stop:
+call `markScanFailed('Gmail auth expired — reconnect the Gmail connector')` (from
+writers.mjs) and end the run. This writes an `ok:false` heartbeat, which:
+- does NOT advance the high-water mark (getLastScan only reads ok:true), so the next
+  successful run still catches up the whole backlog — no mail lost; and
+- flips the dashboard's "Opportunities scan" light RED with a reconnect prompt, so a
+  silent auth lapse becomes visible instead of the scan quietly doing nothing.
+NEVER call markScan (the success heartbeat) on a failed run — that would advance the
+window past mail you never scanned. Use markScanFailed for failure, markScan for success.
+
 ## A. Business Sheet -> Supabase  (deterministic, via the Sheets connector)
 Read ONLY these tabs. Map each row, set src_row_hash = hash(identifying fields),
 call the writer.
@@ -146,5 +158,7 @@ open quotes first if you are time-limited.
    industry from SQLs, latest sentiment from feedback).
 2. Call markScan(msg, totalRowsWritten) with a one-line summary
    (e.g. `window=6h · threads=412 · opps=3 feedback=2 signals=57`). This advances
-   the high-water mark so the next run's window starts here — ALWAYS call it,
-   even on a 0-row run, or the window will keep growing.
+   the high-water mark so the next run's window starts here — ALWAYS call it on a
+   SUCCESSFUL run, even a 0-row one, or the window will keep growing. (If the run
+   could not scan because a connector auth expired, call markScanFailed instead —
+   see §0b — and do NOT call markScan.)
