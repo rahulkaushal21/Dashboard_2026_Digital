@@ -9,7 +9,10 @@ permissions:
   id-token: write
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Queue deploys instead of cancelling in-flight ones. Cancelling mid-deploy can
+  # leave GitHub Pages wedged and make the next run fail with "Deployment failed,
+  # try again later" — letting them run to completion in order avoids that.
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
