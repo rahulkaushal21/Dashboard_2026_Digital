@@ -107,6 +107,9 @@ mismatched name orphans the row. Known canonical mappings (extend as you learn m
 - "The View From Here (TVFH)"                   -> `view from here`
 - Amadeus / ForwardKeys / "Amadeus (ForwardKeys)" -> `Amadeus IT Group SA`
 - Marston Holdings / Marston Recovery           -> `Project Centre Ltd`
+- Regenative Labs / Humanandthebeast / any *@hummingbirdideas.com -> `Hummingbird Ideas`
+  (Hummingbird Ideas is the agency/booking client; Regenative Labs etc. are its end
+  clients — put the end-client/project in company_note)
 When a new client appears under a parenthetical/product name, prefer the parent
 company's booking name if it exists in `clients`; if unsure, use the plainest company
 name and note the alias — the dashboard's token matching handles most variants, but an
