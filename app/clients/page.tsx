@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClients, getEmailSignals, getEscalations, getBookingsFull, type Client, type EmailSignal, type Escalation, type BookingRow } from '@/lib/supabase'
+import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -43,12 +43,18 @@ export default function Clients() {
   const [clients, setClients] = useState<Client[]>([])
   const [signals, setSignals] = useState<EmailSignal[]>([])
   const [escs, setEscs] = useState<Escalation[]>([])
+  const [opps, setOpps] = useState<Opportunity[]>([])
   const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
   const [owner, setOwner] = useState(''); const [geo, setGeo] = useState('')
-  const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo'>('ltv'); const [sortAsc, setSortAsc] = useState(false)
+  const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [recentOnly, setRecentOnly] = useState(false)
+  const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo' | 'activity'>('activity'); const [sortAsc, setSortAsc] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
   const [bookings, setBookings] = useState<BookingRow[]>([])
-  useEffect(() => { getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings) }, [])
+  useEffect(() => {
+    getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings)
+    // only email-sourced opportunities count as "active discussion" (sheet quotes live on the Opportunities page)
+    getOpportunities().then(all => setOpps(all.filter(o => (o.source_tags || []).includes('email') || o.source === 'email')))
+  }, [])
 
   const sigByCompany = useMemo(() => {
     const m = new Map<string, EmailSignal[]>()
@@ -57,18 +63,62 @@ export default function Clients() {
     return m
   }, [signals])
 
+  // ── Activity index: aggregate every "action" (email conversations, escalations,
+  // email-sourced opportunities/quotes) by company, so clients in live discussion
+  // surface even if they have no bookings row. Keyed by alphanumeric name key.
+  type Act = { name: string; last: string; convo: number; esc: number; quote: number; latestNote?: string }
+  const activity = useMemo(() => {
+    const m = new Map<string, Act>()
+    const bump = (rawName: string | undefined, date: string | undefined, kind: 'convo' | 'esc' | 'quote', note?: string) => {
+      const nm = (rawName || '').trim(); const k = akey(nm); if (!k || k.length < 3) return
+      const d = (date || '').slice(0, 10)
+      const a = m.get(k) || { name: nm, last: '', convo: 0, esc: 0, quote: 0 }
+      if (!a.name) a.name = nm
+      if (d > a.last) { a.last = d; if (note) a.latestNote = note }
+      a[kind]++
+      m.set(k, a)
+    }
+    for (const s of signals) bump(s.company_name, s.source_date, 'convo', s.summary || s.source_subject)
+    for (const e of escs) { if (isPosFb(e) || isJunk(e)) continue; bump(e.geo || e.company_name, e.tracking_date, 'esc', e.email_subject || e.link || e.project_name) }
+    for (const o of opps) bump(o.company_name, o.source_date, 'quote', o.summary || o.rfq_status)
+    return m
+  }, [signals, escs, opps])
+
+  // Merge booking-derived clients with "activity-only" companies (in discussion but
+  // not yet a booked client), so the dashboard reflects who is actually active.
+  const clientAkeys = useMemo(() => clients.map(c => ({ c, k: akey(c.company_name) })).filter(x => x.k.length >= 4), [clients])
+  const matchClient = (k: string) => clientAkeys.find(x => x.k === k || (k.length >= 4 && (x.k.startsWith(k) || k.startsWith(x.k))))?.c
+  const allClients = useMemo(() => {
+    const synthetic: Client[] = []
+    for (const [k, a] of activity) {
+      if (matchClient(k)) continue           // already a booked client
+      synthetic.push({ company_name: a.name, client_status: 'In discussion' })
+    }
+    synthetic.sort((x, y) => x.company_name.localeCompare(y.company_name))
+    return [...clients, ...synthetic]
+  }, [clients, activity, clientAkeys])
+
+  // last activity (date + kind counts) for any client, real or synthetic
+  const activityOf = (c: Client): Act | null => {
+    const ck = akey(c.company_name)
+    let best = activity.get(ck) || null
+    if (!best) for (const [k, a] of activity) { if (k.length >= 4 && (k === ck || k.startsWith(ck) || ck.startsWith(k))) { if (!best || a.last > best.last) best = a } }
+    return best
+  }
+  const lastActivity = (c: Client) => activityOf(c)?.last || ''
+
   // escalations carry the client name in the `geo` field (sheet column drift); match on alphanumeric key
   const escByClient = useMemo(() => {
     const tagged = escs.map(e => ({ e, k: akey(e.geo) || akey(e.company_name) }))
     const map = new Map<string, Escalation[]>()
-    for (const c of clients) {
+    for (const c of allClients) {
       const ck = akey(c.company_name); if (ck.length < 4) { map.set(c.company_name, []); continue }
       const list = tagged.filter(t => t.k && (t.k === ck || (t.k.length >= 4 && (t.k.startsWith(ck) || ck.startsWith(t.k))))).map(t => t.e)
         .sort((a, b) => (b.tracking_date || '').localeCompare(a.tracking_date || ''))
       map.set(c.company_name, list)
     }
     return map
-  }, [escs, clients])
+  }, [escs, allClients])
 
   // bookings grouped by client (normalised name), for the tenure summary in the detail panel
   const bookingsByClient = useMemo(() => {
@@ -121,7 +171,9 @@ export default function Clients() {
   const geos = uniq(clients.map(c => c.geo))
   const industries = uniq(clients.map(c => c.industry))
   const aiCount = clients.filter(c => c.ai_focus).length
-  const statCount = (b: string) => clients.filter(c => statusOf(c) === b).length
+  const statCount = (b: string) => allClients.filter(c => statusOf(c) === b).length
+  // recent-activity cutoff (last 14 days) for the quick "🔥 Active discussions" toggle
+  const recentCutoff = useMemo(() => { const d = new Date(now); d.setDate(d.getDate() - 14); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }, [])
   // client count per industry (drives the clickable breakdown chart)
   const indCounts = useMemo(() => {
     const m: Record<string, number> = {}
@@ -131,48 +183,46 @@ export default function Clients() {
   const maxIndCount = indCounts[0]?.[1] || 1
 
   const rows = useMemo(() => {
-    let result = clients
+    // date-range filter runs on each client's last-activity date; a client with no
+    // activity is excluded whenever any date filter (range or "recent") is active.
+    const lo = recentOnly ? (from && from > recentCutoff ? from : recentCutoff) : from
+    const hi = to
+    let result = allClients
       .filter(c => c.company_name.toLowerCase().includes(q.toLowerCase()))
       .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
       .filter(c => !stat || statusOf(c) === stat)
       .filter(c => !aiOnly || c.ai_focus)
       .filter(c => !owner || c.pc_sme === owner)
       .filter(c => !geo || c.geo === geo)
-    
+      .filter(c => {
+        if (!lo && !hi) return true
+        const d = lastActivity(c)
+        if (!d) return false
+        if (lo && d < lo) return false
+        if (hi && d > hi) return false
+        return true
+      })
+
     // Apply sorting
-    result.sort((a, b) => {
+    result = [...result].sort((a, b) => {
       let aVal: string | number, bVal: string | number
       switch (sortBy) {
-        case 'name':
-          aVal = a.company_name.toLowerCase()
-          bVal = b.company_name.toLowerCase()
-          break
-        case 'ltv':
-          aVal = a.ltv_usd || 0
-          bVal = b.ltv_usd || 0
-          break
-        case 'owner':
-          aVal = (a.pc_sme || '').toLowerCase()
-          bVal = (b.pc_sme || '').toLowerCase()
-          break
-        case 'geo':
-          aVal = (a.geo || '').toLowerCase()
-          bVal = (b.geo || '').toLowerCase()
-          break
-        default:
-          aVal = 0
-          bVal = 0
+        case 'name': aVal = a.company_name.toLowerCase(); bVal = b.company_name.toLowerCase(); break
+        case 'ltv': aVal = a.ltv_usd || 0; bVal = b.ltv_usd || 0; break
+        case 'owner': aVal = (a.pc_sme || '').toLowerCase(); bVal = (b.pc_sme || '').toLowerCase(); break
+        case 'geo': aVal = (a.geo || '').toLowerCase(); bVal = (b.geo || '').toLowerCase(); break
+        case 'activity': aVal = lastActivity(a) || ''; bVal = lastActivity(b) || ''; break
+        default: aVal = 0; bVal = 0
       }
-      
       if (aVal < bVal) return sortAsc ? -1 : 1
       if (aVal > bVal) return sortAsc ? 1 : -1
       return 0
     })
-    
-    return result
-  }, [clients, q, ind, stat, aiOnly, owner, geo, sortBy, sortAsc, escByClient, sigByCompany])
 
-  const handleSort = (field: 'name' | 'ltv' | 'owner' | 'geo') => {
+    return result
+  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByCompany, activity])
+
+  const handleSort = (field: 'name' | 'ltv' | 'owner' | 'geo' | 'activity') => {
     if (sortBy === field) {
       setSortAsc(!sortAsc)
     } else {
@@ -188,7 +238,7 @@ export default function Clients() {
 
   return (
     <div>
-      <Header title="Clients" subtitle="Health, sentiment & escalations — At risk / Watch flags from triggers and email signals" />
+      <Header title="Clients" subtitle="Sorted by latest action — email discussions, escalations & open quotes. Includes prospects in active discussion, not just booked clients." />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
@@ -204,7 +254,17 @@ export default function Clients() {
           <option value="Negative">🔴 Negative ({statCount('Negative')})</option>
         </select>
         <button onClick={() => setAiOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI &amp; Automation{aiCount ? ` (${aiCount})` : ''}</button>
+        <button onClick={() => setRecentOnly(v => !v)} title="Clients with an email, escalation or quote in the last 14 days" className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🔥 Active discussions</button>
         <span className="text-xs text-mav-muted ml-auto">{rows.length} clients</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className="text-xs text-mav-muted">Activity between</span>
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
+        <span className="text-xs text-mav-muted">and</span>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
+        {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-white">✕ clear dates</button>}
+        <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
       </div>
 
       <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Click a row for the full picture. Click column headers to sort.</p>
@@ -243,6 +303,7 @@ export default function Clients() {
                 <button key="geo" onClick={() => handleSort('geo')} className="hover:text-white cursor-pointer">GEO{getSortIndicator('geo')}</button>,
                 <button key="owner" onClick={() => handleSort('owner')} className="hover:text-white cursor-pointer">Owner{getSortIndicator('owner')}</button>,
                 'Health',
+                <button key="activity" onClick={() => handleSort('activity')} className="hover:text-white cursor-pointer">Last activity{getSortIndicator('activity')}</button>,
                 'Escal.',
                 'Convos',
                 <button key="ltv" onClick={() => handleSort('ltv')} className="hover:text-white cursor-pointer">LTV{getSortIndicator('ltv')}</button>
@@ -251,15 +312,19 @@ export default function Clients() {
             <tbody>
               {rows.map(c => {
                 const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByCompany.get(norm(c.company_name)) || []).length
+                const act = activityOf(c); const isRecent = !!act && act.last >= recentCutoff
                 const rowBg = r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
                 return (
                   <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
                     <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${dotCls(st)}`} /></td>
-                    <td className="px-4 py-3">{c.company_name}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                    <td className="px-4 py-3">{c.company_name}{c.client_status === 'In discussion' && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 whitespace-nowrap">in discussion</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
                     <td className="px-4 py-3"><button onClick={e => { e.stopPropagation(); setStat(b => b === st ? '' : st) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${tone(st)}`}>{st || '—'}</button></td>
+                    <td className="px-4 py-3 whitespace-nowrap">{act?.last
+                      ? <span className="inline-flex items-center gap-1.5"><span className={isRecent ? 'text-white' : 'text-mav-muted'}>{act.last}</span><span className="text-[11px] tracking-tight">{act.convo ? '💬' : ''}{act.esc ? '⚠' : ''}{act.quote ? '💰' : ''}</span>{isRecent && <span className="inline-block w-1.5 h-1.5 rounded-full bg-mav-yellow" title="active in the last 14 days" />}</span>
+                      : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{r.escs.length ? <span className="text-xs px-2 py-1 rounded-full bg-red-500/15 text-red-400 font-medium">⚠ {r.escs.length}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{nc ? <span className="text-xs px-2 py-1 rounded-full bg-blue-500/15 text-blue-400 font-medium">💬 {nc}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{c.ltv_usd ? fmtUsd(c.ltv_usd) : '—'}</td>
@@ -273,6 +338,9 @@ export default function Clients() {
 
       {selC && (() => {
         const r = riskOf(selC); const convos = sigByCompany.get(norm(selC.company_name)) || []; const ten = tenureOf(selC)
+        const ck = akey(selC.company_name)
+        const cOpps = opps.filter(o => { const ok = akey(o.company_name); return ok && (ok === ck || (ck.length >= 4 && (ok.startsWith(ck) || ck.startsWith(ok)))) })
+          .sort((a, b) => (b.source_date || '').localeCompare(a.source_date || ''))
         return (
           <div className="fixed inset-0 z-40" onClick={() => setSelC(null)}>
             <div className="absolute inset-0 bg-black/50" />
@@ -303,6 +371,28 @@ export default function Clients() {
                 <div><div className="text-xs text-mav-muted">Last booking</div>{ym(selC.last_booking_month) || '—'}</div>
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
               </div>
+
+              {cOpps.length > 0 && (
+                <div className="mt-6 border-t border-mav-line pt-4">
+                  <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Open opportunities &amp; quotes</span><span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">{cOpps.length}</span><span className="text-[11px] text-mav-muted">needs input</span></div>
+                  <div className="space-y-3">
+                    {cOpps.slice(0, 8).map(o => (
+                      <div key={o.id} className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-sm font-medium leading-snug">{o.summary || o.rfq_status || o.source_subject || '(opportunity)'}</div>
+                          {o.win_probability != null && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400">{o.win_probability}%</span>}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">
+                          {o.rfq_status && <span className="px-1.5 py-0.5 rounded-full bg-mav-line">{o.rfq_status}</span>}
+                          {o.source_date && <span>{(o.source_date || '').slice(0, 10)}</span>}
+                          {o.pm_owner && <span>· {o.pm_owner}</span>}
+                        </div>
+                        {o.gist && <p className="mt-2 text-xs leading-relaxed text-mav-muted">{o.gist}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {r.escs.length > 0 && (
                 <div className="mt-6 border-t border-mav-line pt-4">
@@ -394,7 +484,7 @@ export default function Clients() {
 
               {selC.journey && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.journey}</p></div>}
               {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
-              {!r.escs.length && !r.posFb.length && !convos.length && !selC.journey && !selC.action_steps && !ten && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
+              {!r.escs.length && !r.posFb.length && !convos.length && !cOpps.length && !selC.journey && !selC.action_steps && !ten && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
             </aside>
           </div>
         )
