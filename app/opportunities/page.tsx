@@ -61,7 +61,7 @@ const [search, setSearch] = useState(''); const [fType, setFType] = useState('')
 const [fOwner, setFOwner] = useState(''); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
 const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
 const [flagOnly, setFlagOnly] = useState(false)
-const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'value', dir: -1 })
+const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
