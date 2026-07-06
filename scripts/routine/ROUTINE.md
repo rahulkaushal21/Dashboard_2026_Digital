@@ -62,6 +62,16 @@ the latest `sync_runs` row for source='gmail-ingest'.
 NEVER call markScan on a run where you could not actually see the mail. markScanFailed
 for a broken feed, markScan for a real (even 0-row) classification pass.
 
+SUPABASE/MCP UNREACHABLE (502 / connector down) is DIFFERENT from a stalled capture:
+if Supabase itself errors so you cannot even read `email_inbox`, just SKIP this run
+entirely — do NOT write markScanFailed (that heartbeat needs the same connection, and
+capture via the Apps Script is independent and still running, so nothing is lost). The
+unprocessed rows wait at `processed=false` and the next run that reaches Supabase
+catches up the whole backlog. Optionally confirm the project itself is up (and capture
+still flowing) via the REST API — `/rest/v1/sync_runs?source=eq.gmail-ingest` with the
+anon key — which works even when the MCP proxy is down. Back off ~60s, retry a couple of
+times, then report the outage and stop; do not fabricate a scan result.
+
 ## A. Business Sheet -> Supabase  (deterministic, via the Sheets connector)
 Read ONLY these tabs. Map each row, set src_row_hash = hash(identifying fields),
 call the writer.
@@ -115,6 +125,17 @@ company's booking name if it exists in `clients`; if unsure, use the plainest co
 name and note the alias — the dashboard's token matching handles most variants, but an
 exact booking name is best. Client sub-brands sharing one booking account (e.g. several
 Zulu8 end-clients) all roll up under that one booking name.
+
+RESOLVE THE COMPANY FROM THE SENDER — DON'T GUESS: before naming an opportunity/signal,
+take the real sender address from `email_inbox.from_addr` and match its DOMAIN to an
+existing `clients`/`quotes` row (e.g. `@hummingbirdideas.com` → the "Hummingbird Ideas"
+client; a lone product name like "Regenative Labs" is usually an END client of that
+booking account). This avoids orphaned/duplicate rows named after the product.
+
+NEVER FABRICATE CONTACT FIELDS: `source_sender` / `client_email` must be the ACTUAL
+address from the thread (`from_addr`), never an invented address like
+`tim@<productname>.com`. If you don't have a real address, leave it null. (Learned the
+hard way: a guessed email + product name filed a won deal under a non-existent client.)
 
 MARK PROCESSED: after classifying the batch, set `processed=true` on the rows you
 handled (including the noise you deliberately skipped) so the next run doesn't
