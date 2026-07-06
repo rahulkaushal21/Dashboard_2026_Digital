@@ -8,6 +8,35 @@ const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm ou
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const norm = (s?: string) => (s || '').trim().toLowerCase()
 const akey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+// Expand a company name into candidate match keys: the whole name, the name minus a
+// leading article ("The View From Here" -> "viewfromhere"), the part before the first
+// "(", and every parenthetical token ("Enphase (Solargraf)" -> "solargraf";
+// "ForHealth (Zulu8)" -> "zulu8"). This lets email/opportunity names written as
+// "EndClient (Agency)" or "Product (Client)" link to the canonical booking client.
+const stripArticle = (s: string) => s.replace(/^\s*(the|a|an)\s+/i, '')
+const nameKeys = (name?: string): string[] => {
+  const raw = name || ''
+  const out = new Set<string>()
+  const add = (s: string) => { const k = akey(s); if (k.length >= 2) out.add(k) }
+  add(raw); add(stripArticle(raw))
+  const before = raw.split('(')[0]; if (before !== raw) { add(before); add(stripArticle(before)) }
+  for (const m of raw.matchAll(/\(([^)]+)\)/g)) { add(m[1]); add(stripArticle(m[1])) }
+  return [...out]
+}
+// Two names match if any candidate keys are equal, or (for keys >= 4 chars) one is a
+// prefix of the other. The >=4 floor avoids short tokens colliding across clients.
+const keyMatch = (a: string[], b: string[]): boolean => {
+  for (const x of a) for (const y of b) {
+    if (x === y) return true
+    if (x.length >= 4 && y.length >= 4 && (x.startsWith(y) || y.startsWith(x))) return true
+  }
+  return false
+}
+// Display aliases: booked under one name, better shown merged (keyed by akey).
+const DISPLAY_ALIAS: Record<string, string> = {
+  projectcentreltd: 'Project Centre Ltd / Marston Holdings',
+}
+const displayName = (name?: string) => DISPLAY_ALIAS[akey(name)] || name || ''
 const ym = (s?: string) => (s || '').slice(0, 7)
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const now = new Date()
@@ -56,60 +85,61 @@ export default function Clients() {
     getOpportunities().then(all => setOpps(all.filter(o => (o.source_tags || []).includes('email') || o.source === 'email')))
   }, [])
 
-  const sigByCompany = useMemo(() => {
-    const m = new Map<string, EmailSignal[]>()
-    for (const s of signals) { const k = norm(s.company_name); if (!k) continue; (m.get(k) || m.set(k, []).get(k))!.push(s) }
-    for (const a of m.values()) a.sort((x, y) => (y.source_date || '').localeCompare(x.source_date || ''))
-    return m
-  }, [signals])
-
-  // ── Activity index: aggregate every "action" (email conversations, escalations,
-  // email-sourced opportunities/quotes) by company, so clients in live discussion
-  // surface even if they have no bookings row. Keyed by alphanumeric name key.
-  type Act = { name: string; last: string; convo: number; esc: number; quote: number; latestNote?: string }
-  const activity = useMemo(() => {
-    const m = new Map<string, Act>()
-    const bump = (rawName: string | undefined, date: string | undefined, kind: 'convo' | 'esc' | 'quote', note?: string) => {
-      const nm = (rawName || '').trim(); const k = akey(nm); if (!k || k.length < 3) return
-      const d = (date || '').slice(0, 10)
-      const a = m.get(k) || { name: nm, last: '', convo: 0, esc: 0, quote: 0 }
-      if (!a.name) a.name = nm
-      if (d > a.last) { a.last = d; if (note) a.latestNote = note }
-      a[kind]++
-      m.set(k, a)
-    }
-    for (const s of signals) bump(s.company_name, s.source_date, 'convo', s.summary || s.source_subject)
-    for (const e of escs) { if (isPosFb(e) || isJunk(e)) continue; bump(e.geo || e.company_name, e.tracking_date, 'esc', e.email_subject || e.link || e.project_name) }
-    for (const o of opps) bump(o.company_name, o.source_date, 'quote', o.summary || o.rfq_status)
-    return m
-  }, [signals, escs, opps])
-
-  // The client LIST comes only from booking data (as before). The activity index is
-  // used solely to sort clients by their latest action and to populate the detail
-  // panel — it never adds standalone rows for non-booked companies.
+  // The client LIST comes only from booking data (as before). Signals/escalations/
+  // opportunities are linked to each client by token matching (nameKeys/keyMatch), so a
+  // thread logged as "Enphase (Solargraf)" attaches to the "Enphase Energy" booking row.
   const allClients = clients
 
-  // last activity (date + kind counts) for any client, real or synthetic
-  const activityOf = (c: Client): Act | null => {
-    const ck = akey(c.company_name)
-    let best = activity.get(ck) || null
-    if (!best) for (const [k, a] of activity) { if (k.length >= 4 && (k === ck || k.startsWith(ck) || ck.startsWith(k))) { if (!best || a.last > best.last) best = a } }
-    return best
-  }
-  const lastActivity = (c: Client) => activityOf(c)?.last || ''
+  // email conversation signals linked to each client
+  const sigByClient = useMemo(() => {
+    const tagged = signals.map(s => ({ s, keys: nameKeys(s.company_name) }))
+    const map = new Map<string, EmailSignal[]>()
+    for (const c of allClients) {
+      const ck = nameKeys(c.company_name)
+      map.set(c.company_name, tagged.filter(t => keyMatch(ck, t.keys)).map(t => t.s)
+        .sort((x, y) => (y.source_date || '').localeCompare(x.source_date || '')))
+    }
+    return map
+  }, [signals, allClients])
 
-  // escalations carry the client name in the `geo` field (sheet column drift); match on alphanumeric key
+  // escalations carry the client name in the `geo` field (sheet column drift)
   const escByClient = useMemo(() => {
-    const tagged = escs.map(e => ({ e, k: akey(e.geo) || akey(e.company_name) }))
+    const tagged = escs.map(e => ({ e, keys: nameKeys(e.geo || e.company_name) }))
     const map = new Map<string, Escalation[]>()
     for (const c of allClients) {
-      const ck = akey(c.company_name); if (ck.length < 4) { map.set(c.company_name, []); continue }
-      const list = tagged.filter(t => t.k && (t.k === ck || (t.k.length >= 4 && (t.k.startsWith(ck) || ck.startsWith(t.k))))).map(t => t.e)
-        .sort((a, b) => (b.tracking_date || '').localeCompare(a.tracking_date || ''))
-      map.set(c.company_name, list)
+      const ck = nameKeys(c.company_name)
+      map.set(c.company_name, tagged.filter(t => keyMatch(ck, t.keys)).map(t => t.e)
+        .sort((a, b) => (b.tracking_date || '').localeCompare(a.tracking_date || '')))
     }
     return map
   }, [escs, allClients])
+
+  // email-sourced opportunities linked to each client
+  const oppByClient = useMemo(() => {
+    const tagged = opps.map(o => ({ o, keys: nameKeys(o.company_name) }))
+    const map = new Map<string, Opportunity[]>()
+    for (const c of allClients) {
+      const ck = nameKeys(c.company_name)
+      map.set(c.company_name, tagged.filter(t => keyMatch(ck, t.keys)).map(t => t.o)
+        .sort((a, b) => (b.source_date || '').localeCompare(a.source_date || '')))
+    }
+    return map
+  }, [opps, allClients])
+
+  // last activity (date + kind counts) for a client, across all three linked sources
+  type Act = { last: string; convo: number; esc: number; quote: number }
+  const activityOf = (c: Client): Act => {
+    const sig = sigByClient.get(c.company_name) || []
+    const esc = (escByClient.get(c.company_name) || []).filter(e => !isPosFb(e) && !isJunk(e))
+    const opp = oppByClient.get(c.company_name) || []
+    const dates = [
+      ...sig.map(s => (s.source_date || '').slice(0, 10)),
+      ...esc.map(e => (e.tracking_date || '').slice(0, 10)),
+      ...opp.map(o => (o.source_date || '').slice(0, 10)),
+    ].filter(Boolean).sort()
+    return { last: dates[dates.length - 1] || '', convo: sig.length, esc: esc.length, quote: opp.length }
+  }
+  const lastActivity = (c: Client) => activityOf(c).last
 
   // bookings grouped by client (normalised name), for the tenure summary in the detail panel
   const bookingsByClient = useMemo(() => {
@@ -140,7 +170,7 @@ export default function Clients() {
     const maxMonth = maxKey ? byMonth[maxKey] : 0
     const cutoff = monthsAgoYM(2)
     const recentMajor = list.filter(e => (ym(e.tracking_date) >= cutoff) && /major|critical|high|sev/i.test(`${e.business_impact || ''} ${e.escalation_type || ''}`))
-    const negSigs = (sigByCompany.get(norm(c.company_name)) || []).filter(s => sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || ''))
+    const negSigs = (sigByClient.get(c.company_name) || []).filter(s => sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || ''))
     const lb = ym(c.last_booking_month)
     const gap = !!lb && lb < monthsAgoYM(2) && (c.ltv_usd || 0) > 0
     const reasons: string[] = []
@@ -179,7 +209,7 @@ export default function Clients() {
     const lo = recentOnly ? (from && from > recentCutoff ? from : recentCutoff) : from
     const hi = to
     let result = allClients
-      .filter(c => c.company_name.toLowerCase().includes(q.toLowerCase()))
+      .filter(c => (c.company_name + ' ' + displayName(c.company_name)).toLowerCase().includes(q.toLowerCase()))
       .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
       .filter(c => !stat || statusOf(c) === stat)
       .filter(c => !aiOnly || c.ai_focus)
@@ -211,7 +241,7 @@ export default function Clients() {
     })
 
     return result
-  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByCompany, activity])
+  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient])
 
   const handleSort = (field: 'name' | 'ltv' | 'owner' | 'geo' | 'activity') => {
     if (sortBy === field) {
@@ -302,18 +332,18 @@ export default function Clients() {
             </tr></thead>
             <tbody>
               {rows.map(c => {
-                const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByCompany.get(norm(c.company_name)) || []).length
-                const act = activityOf(c); const isRecent = !!act && act.last >= recentCutoff
+                const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByClient.get(c.company_name) || []).length
+                const act = activityOf(c); const isRecent = !!act.last && act.last >= recentCutoff
                 const rowBg = r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
                 return (
                   <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
                     <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${dotCls(st)}`} /></td>
-                    <td className="px-4 py-3">{c.company_name}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                    <td className="px-4 py-3">{displayName(c.company_name)}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
                     <td className="px-4 py-3"><button onClick={e => { e.stopPropagation(); setStat(b => b === st ? '' : st) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${tone(st)}`}>{st || '—'}</button></td>
-                    <td className="px-4 py-3 whitespace-nowrap">{act?.last
+                    <td className="px-4 py-3 whitespace-nowrap">{act.last
                       ? <span className="inline-flex items-center gap-1.5"><span className={isRecent ? 'text-white' : 'text-mav-muted'}>{act.last}</span><span className="text-[11px] tracking-tight">{act.convo ? '💬' : ''}{act.esc ? '⚠' : ''}{act.quote ? '💰' : ''}</span>{isRecent && <span className="inline-block w-1.5 h-1.5 rounded-full bg-mav-yellow" title="active in the last 14 days" />}</span>
                       : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{r.escs.length ? <span className="text-xs px-2 py-1 rounded-full bg-red-500/15 text-red-400 font-medium">⚠ {r.escs.length}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
@@ -328,17 +358,15 @@ export default function Clients() {
       </div>
 
       {selC && (() => {
-        const r = riskOf(selC); const convos = sigByCompany.get(norm(selC.company_name)) || []; const ten = tenureOf(selC)
-        const ck = akey(selC.company_name)
-        const cOpps = opps.filter(o => { const ok = akey(o.company_name); return ok && (ok === ck || (ck.length >= 4 && (ok.startsWith(ck) || ck.startsWith(ok)))) })
-          .sort((a, b) => (b.source_date || '').localeCompare(a.source_date || ''))
+        const r = riskOf(selC); const convos = sigByClient.get(selC.company_name) || []; const ten = tenureOf(selC)
+        const cOpps = oppByClient.get(selC.company_name) || []
         return (
           <div className="fixed inset-0 z-40" onClick={() => setSelC(null)}>
             <div className="absolute inset-0 bg-black/50" />
             <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <div className="flex items-center gap-2 flex-wrap"><span className={`inline-block w-2.5 h-2.5 rounded-full ${dotCls(r.level || sentBucket(selC.sentiment))}`} /><h2 className="text-xl font-semibold">{selC.company_name}</h2></div>
+                  <div className="flex items-center gap-2 flex-wrap"><span className={`inline-block w-2.5 h-2.5 rounded-full ${dotCls(r.level || sentBucket(selC.sentiment))}`} /><h2 className="text-xl font-semibold">{displayName(selC.company_name)}</h2></div>
                   {selC.ai_focus && <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">⚡ AI &amp; Automation</span>}
                   {selC.website && <div className="text-xs text-mav-muted mt-1">{selC.website}</div>}
                 </div>
