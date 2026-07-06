@@ -97,6 +97,22 @@ Drive share notices. For EVERYTHING ELSE — any thread with a genuine external 
 message looks routine. Do not classify a real client thread from its snippet. Dedup
 on thread_id means re-seeing a thread is harmless; only look for NEW messages.
 
+CANONICAL COMPANY NAMES (so every write links to the right client on the dashboard):
+always set `company_name` to the CLIENT'S booking name, not the end-product or
+sub-brand. Put the product/sub-brand in the summary/company_note instead. The Clients
+page lists booking-derived clients and links signals/opps/escalations by name — a
+mismatched name orphans the row. Known canonical mappings (extend as you learn more):
+- Solargraf / "Enphase (Solargraf)"            -> `Enphase Energy`
+- ForHealth / Ray White / any "… (Zulu8)"      -> `ZULU 8`
+- "The View From Here (TVFH)"                   -> `view from here`
+- Amadeus / ForwardKeys / "Amadeus (ForwardKeys)" -> `Amadeus IT Group SA`
+- Marston Holdings / Marston Recovery           -> `Project Centre Ltd`
+When a new client appears under a parenthetical/product name, prefer the parent
+company's booking name if it exists in `clients`; if unsure, use the plainest company
+name and note the alias — the dashboard's token matching handles most variants, but an
+exact booking name is best. Client sub-brands sharing one booking account (e.g. several
+Zulu8 end-clients) all roll up under that one booking name.
+
 MARK PROCESSED: after classifying the batch, set `processed=true` on the rows you
 handled (including the noise you deliberately skipped) so the next run doesn't
 re-triage them. `update email_inbox set processed=true where processed=false` once
