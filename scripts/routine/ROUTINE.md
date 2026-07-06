@@ -191,6 +191,15 @@ is clear.
   code (US|UK|AU), NEVER the company name. (The Clients page links escalations by
   company_name; putting the name in geo also corrupts the Escalations page's GEO
   column.) Leave geo null if unknown rather than duplicating the company name.
+  DRIFT GUARD (sheet ingest): some escalation tabs carry an extra leading
+  "Business Unit" column (values like "Digital BU" / "MarTech"). If it isn't
+  stripped, every field shifts one left — company_name holds the BU, geo holds
+  the real company, deal_type holds the geo, email_subject holds the category
+  (Agency/Direct), and the REAL subject lands in `link`. Symptom: company_name IN
+  ('Digital BU','MarTech'). To repair, shift each value one field right
+  (company_name:=geo, geo:=deal_type, deal_type:=email_subject,
+  email_subject:=link, ... escalation_type:=business_impact), drop the BU value,
+  then canonicalize the recovered names. Fixed once for ids 63214-63256.
 - Sentiment -> writeEmailSignals : for EVERY client-facing thread with a clear
   tone (broader than explicit feedback — appreciation, frustration, urgency,
   churn risk, upsell interest all count). This is the "scan all emails for
