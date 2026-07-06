@@ -84,19 +84,10 @@ export default function Clients() {
     return m
   }, [signals, escs, opps])
 
-  // Merge booking-derived clients with "activity-only" companies (in discussion but
-  // not yet a booked client), so the dashboard reflects who is actually active.
-  const clientAkeys = useMemo(() => clients.map(c => ({ c, k: akey(c.company_name) })).filter(x => x.k.length >= 4), [clients])
-  const matchClient = (k: string) => clientAkeys.find(x => x.k === k || (k.length >= 4 && (x.k.startsWith(k) || k.startsWith(x.k))))?.c
-  const allClients = useMemo(() => {
-    const synthetic: Client[] = []
-    for (const [k, a] of activity) {
-      if (matchClient(k)) continue           // already a booked client
-      synthetic.push({ company_name: a.name, client_status: 'In discussion' })
-    }
-    synthetic.sort((x, y) => x.company_name.localeCompare(y.company_name))
-    return [...clients, ...synthetic]
-  }, [clients, activity, clientAkeys])
+  // The client LIST comes only from booking data (as before). The activity index is
+  // used solely to sort clients by their latest action and to populate the detail
+  // panel — it never adds standalone rows for non-booked companies.
+  const allClients = clients
 
   // last activity (date + kind counts) for any client, real or synthetic
   const activityOf = (c: Client): Act | null => {
@@ -238,7 +229,7 @@ export default function Clients() {
 
   return (
     <div>
-      <Header title="Clients" subtitle="Sorted by latest action — email discussions, escalations & open quotes. Includes prospects in active discussion, not just booked clients." />
+      <Header title="Clients" subtitle="Booked clients, sorted by latest action. Click a client for its live discussions — escalations, open quotes & email conversations." />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
@@ -317,7 +308,7 @@ export default function Clients() {
                 return (
                   <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
                     <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${dotCls(st)}`} /></td>
-                    <td className="px-4 py-3">{c.company_name}{c.client_status === 'In discussion' && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 whitespace-nowrap">in discussion</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                    <td className="px-4 py-3">{c.company_name}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
