@@ -1,11 +1,11 @@
 # Claude routine — every 30 minutes (LOCAL Claude schedule)
 
 Runs from a local Claude session (session cron, `7,37 * * * *` — every 30 min at
-:07/:37). It MUST be local, not cloud: the scan needs the Gmail + Google Sheets
-connectors, which the headless cloud routines don't have. Consequence: it only
-fires while a Claude session is running and the Mac is awake — overnight/off
-periods are skipped, but the dynamic scan window (step B) catches up the backlog
-on the next run, so no mail is lost, only delayed.
+:07/:37). Email capture is now handled independently by the Apps Script (runs 24/7
+on Google's servers into `email_inbox`), so no mail is ever lost even while this
+routine is asleep — it just gets classified on the next run. This routine still
+prefers local because step A (the Business Sheet sync) uses the Google Sheets
+connector; the email classification itself only needs Supabase.
 
 MODE: continuous account sense-check. At this 30-min cadence the per-run volume is
 small (tens of threads, mostly automated), so the goal is THOROUGH not fast: cheap
@@ -14,20 +14,29 @@ human (a client, prospect, or partner) is OPENED and deep-read in full — not j
 from its snippet. The point is to never miss an opportunity, feedback, or
 escalation, and to keep a live read on how each account is moving.
 
+MAIL SOURCE (changed): mail is NO LONGER pulled from the claude.ai Gmail connector
+(its OAuth token kept expiring and stalling the scan). A Google Apps Script running
+under web@uplers.com (scripts/routine/pull-gmail-to-supabase.gs) captures inbox mail
+every 30 min into the PRIVATE Supabase `email_inbox` table, with a persistent cursor
+so nothing is missed even across trigger outages (up to a 72h catch-up). This routine
+now CLASSIFIES from `email_inbox` — it reads unprocessed rows from Supabase, deep-reads
+them, writes the classification tables, and marks the rows processed. The Gmail
+connector is not used at all; capture runs 24/7 on Google's servers even when no
+Claude session is open, so off-hours mail piles up safely and is classified on the
+next run.
+
 ## Environment
 - NEXT_PUBLIC_SUPABASE_URL
 - SUPABASE_SERVICE_ROLE_KEY        (routine env only)
 - Network access: ON
 - Connectors: Google Sheets/Drive (read the Business Sheet privately — NO
-  publishing), Gmail (the stringent scan).
+  publishing). Email classification reads Supabase `email_inbox` (no Gmail
+  connector; capture is handled by the Apps Script).
 
 ## 0. Read runtime config first
 Call getConfig() (from writers.mjs). Use config.business_sheet_url as the sheet
-to read in step A, and config.scan_gmail_address only as a label/notice — the central inbox (web@uplers.com)
-receives most mail via FORWARDING, so `to:`/`deliveredto:` filters miss it. The
-Gmail connector is already authorized as that account, so scan the inbox directly:
-`in:inbox newer_than:1d`. (If you later need to scope to a specific alias, add a
-`to:`/`deliveredto:` clause then.)
+to read in step A. The email scan no longer touches the Gmail connector — it reads
+already-captured mail from the private Supabase `email_inbox` table (see step B).
 
 IMPORTANT — system mails are NOT opportunities. Auto-generated pipeline mail from
 notifications@uplers.com (e.g. "… has generated a RFQ", "Quote ( QUT… ) Request")
@@ -38,17 +47,20 @@ already represented in the sheet's Quotes tab. Do NOT write them into
 notifications also must not become quote_conversions (they correspond to sheet
 bookings). The sheet and inbox are set by the admin in Settings — never hardcode them.
 
-## 0b. Connector failure -> leave a VISIBLE heartbeat (don't fail silently)
-If the Gmail connector returns a re-authorization / expired-token error (or a hard,
-unrecoverable connector failure) so the email scan CANNOT run, do NOT just stop:
-call `markScanFailed('Gmail auth expired — reconnect the Gmail connector')` (from
-writers.mjs) and end the run. This writes an `ok:false` heartbeat, which:
-- does NOT advance the high-water mark (getLastScan only reads ok:true), so the next
-  successful run still catches up the whole backlog — no mail lost; and
-- flips the dashboard's "Opportunities scan" light RED with a reconnect prompt, so a
-  silent auth lapse becomes visible instead of the scan quietly doing nothing.
-NEVER call markScan (the success heartbeat) on a failed run — that would advance the
-window past mail you never scanned. Use markScanFailed for failure, markScan for success.
+## 0b. Capture-feed health check (don't classify a stale/empty inbox blindly)
+The Apps Script → `email_inbox` capture is now the mail source. Before classifying,
+sanity-check that capture is alive: look at the newest `email_inbox.inserted_at` and
+the latest `sync_runs` row for source='gmail-ingest'.
+- If there are unprocessed rows, classify them (step B) — normal path.
+- If `email_inbox` has NO unprocessed rows AND the newest inserted_at is recent
+  (< ~40 min), it's simply a quiet window — write a normal 0-row markScan.
+- If the newest inserted_at is STALE (e.g. > 2h old) or gmail-ingest is logging
+  errors, the Apps Script trigger has likely stalled: capture — not classification —
+  is broken. Call `markScanFailed('Apps Script capture stalled — check the Gmail→Supabase trigger')`
+  and end. This keeps the dashboard light RED and visible. Do NOT markScan when
+  capture is dead, or the window would look healthy while no mail is arriving.
+NEVER call markScan on a run where you could not actually see the mail. markScanFailed
+for a broken feed, markScan for a real (even 0-row) classification pass.
 
 ## A. Business Sheet -> Supabase  (deterministic, via the Sheets connector)
 Read ONLY these tabs. Map each row, set src_row_hash = hash(identifying fields),
@@ -63,28 +75,32 @@ call the writer.
 Ignore every other tab (Web/Hub/LP, Invoice Match, Feedback, Escalation,
 Chase, Dashboards, Pivot, Claude Cache) — they are out of scope or stale.
 
-## B. Email scan -> Supabase  (HIGH VOLUME — scan everything, write precisely)
-The central inbox receives ~100 emails/hour (~400–500 per 4h window; a cold
-start after an overnight gap can be more). Two rules that matter at this volume:
+## B. Email scan -> Supabase  (read from email_inbox, write precisely)
+Mail is already captured in the private `email_inbox` table by the Apps Script
+(gap-proof persistent cursor; see the MODE note and §0b). This routine's job is to
+CLASSIFY it, not to pull it.
 
-DYNAMIC WINDOW (no gaps, recall is the priority): call getLastScan() (from
-writers.mjs). Compute `h = max(1, ceil(hoursSince(lastScan)))`, capped at 48;
-if lastScan is null use 6. Search `in:inbox newer_than:{h}h`. NOTE: Gmail's
-`newer_than` unit `m` means MONTHS, not minutes — never use it; the smallest safe
-unit is `h` (hours), so the floor is 1h. At the 30-min cadence the gap is ~0.5h so
-h=1 → a 1h window (~2× overlap, which dedup makes harmless); a slept laptop just
-means a bigger next window (up to the 48h cap), never lost mail.
+READ THE UNPROCESSED QUEUE: select from `email_inbox where processed=false`
+(service-role only — this table is NOT public-read; it holds confidential client
+mail). Prefer the external threads: `has_external=true`. Group by thread_id and
+work newest-first. The full plaintext `body` (up to 60k chars) is already stored,
+so you can deep-read every message without any Gmail call. There is no time window
+to compute and nothing to paginate from Gmail — the queue IS the window, and the
+Apps Script cursor guarantees no gaps (it catches up to 72h across any outage).
 
-PAGINATE FULLY: do NOT stop at the first page of search_threads. Loop with the
-page cursor until results are exhausted. Triage cheaply ONLY to discard pure
-machine noise — newsletters, promos, calendar invites/accepts, OOO auto-replies,
-monitoring/deploy/error alerts (Kinsta, Wordfence, Render…), HR/billing/system
-mail, notifications@uplers.com RFQ/invoice mails, and Google Drive/Docs share
-notices. For EVERYTHING ELSE — any thread with a genuine external human
-(client / prospect / partner domain) — OPEN and deep-read the full thread body,
-even if the last message looks routine. Do not classify a real client thread from
-its snippet. Dedup on thread_id means re-seeing an overlapped thread is harmless;
-on a re-seen thread, only look for NEW messages since its stored source_date.
+TRIAGE + DEEP-READ: triage cheaply ONLY to discard pure machine noise —
+newsletters, promos, calendar invites/accepts, OOO auto-replies, monitoring/deploy/
+error alerts (Kinsta, Wordfence, Render…), HR/billing/system mail,
+notifications@uplers.com RFQ/invoice mails, Basecamp/Slack/Docs notifications, and
+Drive share notices. For EVERYTHING ELSE — any thread with a genuine external human
+(client / prospect / partner) — deep-read the full stored `body`, even if the last
+message looks routine. Do not classify a real client thread from its snippet. Dedup
+on thread_id means re-seeing a thread is harmless; only look for NEW messages.
+
+MARK PROCESSED: after classifying the batch, set `processed=true` on the rows you
+handled (including the noise you deliberately skipped) so the next run doesn't
+re-triage them. `update email_inbox set processed=true where processed=false` once
+the pass is complete.
 
 Be conservative on what you WRITE: only write a row when the evidence is
 explicit. Always capture thread_id (dedup), source_sender, source_date, and a
@@ -148,8 +164,11 @@ not just the domain. Scope = OPEN quotes: Quote Shared / Waiting for Final
 Approval / Waiting for details. (Confirmed=won, Cancelled=lost, On Hold=parked —
 skip for enrichment, but you may re-check On Hold to catch a revival.)
 
-Pull the open quotes from Supabase (there are <100). For EACH, search Gmail by
-client_email for the latest thread and write ONE opportunities row (via
+Pull the open quotes from Supabase (there are <100). For EACH, look for the client's
+latest thread in `email_inbox` by client_email (the capture stores from/to/cc, so a
+`from_addr/to_addrs/cc_addrs ilike '%client_email%'` match finds it). Only recent
+mail is captured, so many open quotes will have no fresh thread this run — that's
+fine, skip them silently. Where a thread IS present, write ONE opportunities row (via
 writeOpportunities, dedup thread_id, company_name = the quote's agency so it
 merges with the sheet value/status):
   - gist       : 1–2 line brief of what the client asked / latest state.
@@ -177,8 +196,8 @@ open quotes first if you are time-limited.
 1. Call rebuildClients() to refresh the derived clients table (LTV from bookings,
    industry from SQLs, latest sentiment from feedback).
 2. Call markScan(msg, totalRowsWritten) with a one-line summary
-   (e.g. `window=6h · threads=412 · opps=3 feedback=2 signals=57`). This advances
-   the high-water mark so the next run's window starts here — ALWAYS call it on a
-   SUCCESSFUL run, even a 0-row one, or the window will keep growing. (If the run
-   could not scan because a connector auth expired, call markScanFailed instead —
-   see §0b — and do NOT call markScan.)
+   (e.g. `email_inbox: 41 threads · opps=2 conv=1 esc=1 signals=8`). This writes the
+   success heartbeat that keeps the dashboard "Opportunities scan" light green —
+   ALWAYS call it on a real classification pass, even a 0-row quiet one. (If the
+   capture feed itself is stalled — stale email_inbox / gmail-ingest errors — call
+   markScanFailed instead, see §0b, and do NOT call markScan.)
