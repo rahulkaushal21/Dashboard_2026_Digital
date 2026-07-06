@@ -12,23 +12,37 @@
  * when no Claude session is open — so mail is captured continuously and nothing is
  * lost. The Gmail connector is removed from the loop entirely.
  *
+ * GAP-PROOF: the script keeps a persistent cursor (the timestamp of the newest
+ * message it has successfully pushed) in Script Properties. Each run resumes from
+ * that cursor (minus a small overlap), NOT from a fixed 2h window — so if Google
+ * ever delays or disables the trigger for hours, the very next run still catches
+ * up the whole backlog automatically (capped at MAX_WINDOW_HOURS). Dedup on
+ * message_id in the edge function makes the overlap harmless.
+ *
  * ⚠ CRITICAL: this script reads the mailbox of WHATEVER Google account it runs
  * under (GmailApp = the owner's inbox). It MUST be created/owned by web@uplers.com,
  * or it will scan the wrong inbox. Verify with whoAmI() below before installing.
  *
- * SETUP (one time):
+ * SETUP (one time — do these IN ORDER):
  *   1. Sign in to script.google.com as web@uplers.com (NOT rahul.k / any other).
- *   2. New project → paste this file.
- *   3. Run whoAmI() once → authorize → confirm the log shows web@uplers.com.
- *   4. Run installGmailPullTrigger() once → creates the 30-min time trigger.
- *   5. Run pullGmailToSupabase() once manually to backfill + confirm it works.
+ *   2. New project → name it "Gmail → Supabase inbox" → paste this whole file.
+ *   3. Run whoAmI()               → authorize when prompted → confirm the log
+ *                                    (View ▸ Logs) shows web@uplers.com.
+ *   4. Run pullGmailToSupabase()  → one manual backfill; confirm the log shows
+ *                                    "pushed N" and no "ingest error".
+ *   5. Run installGmailPullTrigger() → creates the recurring 30-min trigger.
+ *   6. (optional) Run status()    → prints the cursor + trigger state anytime.
+ * That's it. From then on it runs itself every 30 min, unattended.
  */
 
 // ── Config ──────────────────────────────────────────────────────────────────
-var SUPABASE_FN   = 'https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/gmail-ingest';
-var INGEST_TOKEN  = 'ingestWebHub_a7c2e9';            // shared secret; matches the edge function
-var WINDOW_HOURS  = 2;                                 // 30-min trigger + 2h window = safe overlap (dedup on message_id makes re-sends harmless)
-var INTERNAL      = ['mavlers.com', 'uplers.com', 'uplers.in', 'mavlers.agency', 'mavlers.biz'];
+var SUPABASE_FN      = 'https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/gmail-ingest';
+var INGEST_TOKEN     = 'ingestWebHub_a7c2e9';   // shared secret; matches the edge function
+var COLD_START_HOURS = 6;                        // first ever run (no cursor): look back this far
+var OVERLAP_MIN      = 20;                        // re-pull this much before the cursor (dedup makes it safe)
+var MAX_WINDOW_HOURS = 72;                        // safety cap: even after a long outage, never scan more than this
+var CURSOR_KEY       = 'lastMsgEpochMs';          // Script Property holding the newest pushed msg time
+var INTERNAL         = ['mavlers.com', 'uplers.com', 'uplers.in', 'mavlers.agency', 'mavlers.biz'];
 // Internal-only threads are skipped as noise EXCEPT when the body reads like a
 // relayed client opportunity/escalation — so an AM forwarding a client request
 // internally is still captured.
@@ -40,11 +54,34 @@ function whoAmI() {
   Logger.log('It MUST say web@uplers.com. If not, recreate the project under that account.');
 }
 
+// ── Show the current cursor + trigger state (diagnostic) ────────────────────
+function status() {
+  var props = PropertiesService.getScriptProperties();
+  var cur = props.getProperty(CURSOR_KEY);
+  Logger.log('Cursor (newest pushed msg): ' + (cur ? new Date(Number(cur)).toUTCString() : '(none — next run is a cold start)'));
+  var trs = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'pullGmailToSupabase'; });
+  Logger.log('Active 30-min triggers: ' + trs.length + (trs.length ? ' ✓' : ' ✗ (run installGmailPullTrigger)'));
+}
+
 // ── Main: pull recent inbox messages → Supabase ─────────────────────────────
 function pullGmailToSupabase() {
-  var cutoff = Date.now() - WINDOW_HOURS * 3600 * 1000;
-  var query = 'in:inbox newer_than:' + WINDOW_HOURS + 'h';
+  var props = PropertiesService.getScriptProperties();
+  var now = Date.now();
+  var minCutoff = now - MAX_WINDOW_HOURS * 3600 * 1000;   // never look back further than the cap
+
+  // Resume from the cursor (with overlap); cold start → COLD_START_HOURS.
+  var cursor = props.getProperty(CURSOR_KEY);
+  var cutoff = cursor
+    ? Math.max(Number(cursor) - OVERLAP_MIN * 60 * 1000, minCutoff)
+    : now - COLD_START_HOURS * 3600 * 1000;
+
+  // Gmail search only accepts whole hours (newer_than:Xh). Round the window UP so
+  // we never under-scan, then filter precisely by `cutoff` per message below.
+  var hoursBack = Math.min(MAX_WINDOW_HOURS, Math.max(1, Math.ceil((now - cutoff) / 3600000)));
+  var query = 'in:inbox newer_than:' + hoursBack + 'h';   // NB: Gmail's `m` unit means MONTHS — never use it.
+
   var out = [];
+  var maxPushedEpoch = cursor ? Number(cursor) : 0;
   var start = 0, PAGE = 100;
 
   while (true) {
@@ -56,7 +93,8 @@ function pullGmailToSupabase() {
       var msgs = t.getMessages();
       for (var j = 0; j < msgs.length; j++) {
         var m = msgs[j];
-        if (m.getDate().getTime() < cutoff) continue;      // only NEW messages in the window
+        var epoch = m.getDate().getTime();
+        if (epoch < cutoff) continue;                      // only NEW messages past the cursor/window
         var from = m.getFrom() || '';
         var to = m.getTo() || '';
         var cc = m.getCc() || '';
@@ -77,17 +115,28 @@ function pullGmailToSupabase() {
           body: body.slice(0, 60000),
           has_external: external
         });
+        if (epoch > maxPushedEpoch) maxPushedEpoch = epoch;
       }
     }
     if (threads.length < PAGE) break;
     start += PAGE;
   }
 
-  var pushed = 0;
+  // Push in batches. Only advance the cursor if EVERY batch succeeded — a failed
+  // push must not move the high-water mark, or those messages would be skipped
+  // next run (mirrors the Claude routine's markScan/markScanFailed discipline).
+  var pushed = 0, allOk = true;
   for (var k = 0; k < out.length; k += 200) {
-    pushed += postBatch(out.slice(k, k + 200));
+    var res = postBatch(out.slice(k, k + 200));
+    if (res < 0) { allOk = false; } else { pushed += res; }
   }
-  Logger.log('pullGmailToSupabase: examined window=' + WINDOW_HOURS + 'h, queued ' + out.length + ' messages, pushed ' + pushed);
+
+  if (allOk && maxPushedEpoch > 0) {
+    props.setProperty(CURSOR_KEY, String(maxPushedEpoch));
+  }
+  Logger.log('pullGmailToSupabase: window=' + hoursBack + 'h, queued ' + out.length +
+             ', pushed ' + pushed + (allOk ? '' : ' — SOME BATCHES FAILED (cursor held)') +
+             ', cursor=' + (maxPushedEpoch ? new Date(maxPushedEpoch).toUTCString() : 'unchanged'));
 }
 
 // external = any participant whose domain is not one of ours
@@ -104,6 +153,7 @@ function computeExternal(participants) {
   return false;
 }
 
+// Returns count inserted (>=0) on success, or -1 on failure (so the caller holds the cursor).
 function postBatch(messages) {
   var res = UrlFetchApp.fetch(SUPABASE_FN + '?token=' + INGEST_TOKEN, {
     method: 'post',
@@ -112,7 +162,7 @@ function postBatch(messages) {
     muteHttpExceptions: true
   });
   var code = res.getResponseCode();
-  if (code !== 200) { Logger.log('ingest error ' + code + ': ' + res.getContentText().slice(0, 300)); return 0; }
+  if (code !== 200) { Logger.log('ingest error ' + code + ': ' + res.getContentText().slice(0, 300)); return -1; }
   try { return JSON.parse(res.getContentText()).inserted || 0; } catch (e) { return 0; }
 }
 
