@@ -102,9 +102,10 @@ export default function Clients() {
     return map
   }, [signals, allClients])
 
-  // escalations carry the client name in the `geo` field (sheet column drift)
+  // Match escalations by company_name (plus geo as a fallback, since some older sheet
+  // rows carried the client name in the geo field).
   const escByClient = useMemo(() => {
-    const tagged = escs.map(e => ({ e, keys: nameKeys(e.geo || e.company_name) }))
+    const tagged = escs.map(e => ({ e, keys: [...nameKeys(e.company_name), ...nameKeys(e.geo)] }))
     const map = new Map<string, Escalation[]>()
     for (const c of allClients) {
       const ck = nameKeys(c.company_name)

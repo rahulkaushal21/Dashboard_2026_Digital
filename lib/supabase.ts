@@ -284,10 +284,17 @@ export interface Escalation { id: number; company_name?: string; geo?: string; s
 // real row (e.g. company_name = "Company Name", escalation_type = "Escalation
 // Type"). Drop any row whose fields literally repeat the column titles.
 const eq = (a: string | undefined, b: string) => (a || '').trim().toLowerCase() === b
+const has = (a: string | undefined, b: string) => (a || '').trim().toLowerCase().includes(b)
+// The source sheet's header/instruction rows sometimes land as data. Match them even
+// when the columns are drifted by one (e.g. company_name="Business Unit",
+// geo="Company Name", situation_type="Which is the missing word as per you").
 const isEscalationHeaderRow = (e: Escalation) =>
   eq(e.company_name, 'company name') || eq(e.escalation_type, 'escalation type') ||
   eq(e.situation_type, 'type of situation') || eq(e.business_impact, 'business impact') ||
-  eq(e.email_subject, 'email subject line')
+  eq(e.email_subject, 'email subject line') ||
+  eq(e.raised_by, 'name') || eq(e.month, 'month') || eq(e.geo, 'company name') ||
+  eq(e.company_name, 'business unit') || eq(e.business_impact, 'escalation type') ||
+  has(e.situation_type, 'missing word') || has(e.email_subject, 'deal type/client category')
 const isSqlHeaderRow = (s: SqlLead) =>
   eq(s.company_name, 'company name') || eq(s.industry, 'industry') ||
   eq(s.persona, 'persona') || eq(s.venture, 'venture')

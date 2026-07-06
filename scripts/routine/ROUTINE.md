@@ -187,6 +187,10 @@ is clear.
   (Functional|Technical), escalation_type, business_impact (Low|Medium|High),
   email_subject, evidence (quote the exact triggering line). Dedup on thread_id.
   Flag any company with >3 in a quarter for the alert.
+  COLUMN HYGIENE: `company_name` = the canonical client name; `geo` = a REAL geo
+  code (US|UK|AU), NEVER the company name. (The Clients page links escalations by
+  company_name; putting the name in geo also corrupts the Escalations page's GEO
+  column.) Leave geo null if unknown rather than duplicating the company name.
 - Sentiment -> writeEmailSignals : for EVERY client-facing thread with a clear
   tone (broader than explicit feedback — appreciation, frustration, urgency,
   churn risk, upsell interest all count). This is the "scan all emails for
