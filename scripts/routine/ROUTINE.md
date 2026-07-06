@@ -1,11 +1,18 @@
-# Claude routine — every 4 hours (LOCAL Claude schedule)
+# Claude routine — every 30 minutes (LOCAL Claude schedule)
 
-Runs from a local Claude session (durable cron, `13 */4 * * *`). It MUST be
-local, not cloud: the scan needs the Gmail + Google Sheets connectors, which the
-headless cloud routines don't have. Consequence: it only fires while a Claude
-session is running and the Mac is awake — overnight/off periods are skipped, but
-the dynamic scan window (step B) catches up the backlog on the next run, so no
-mail is lost, only delayed.
+Runs from a local Claude session (session cron, `7,37 * * * *` — every 30 min at
+:07/:37). It MUST be local, not cloud: the scan needs the Gmail + Google Sheets
+connectors, which the headless cloud routines don't have. Consequence: it only
+fires while a Claude session is running and the Mac is awake — overnight/off
+periods are skipped, but the dynamic scan window (step B) catches up the backlog
+on the next run, so no mail is lost, only delayed.
+
+MODE: continuous account sense-check. At this 30-min cadence the per-run volume is
+small (tens of threads, mostly automated), so the goal is THOROUGH not fast: cheap
+triage is used ONLY to discard machine noise; EVERY thread with a real external
+human (a client, prospect, or partner) is OPENED and deep-read in full — not judged
+from its snippet. The point is to never miss an opportunity, feedback, or
+escalation, and to keep a live read on how each account is moving.
 
 ## Environment
 - NEXT_PUBLIC_SUPABASE_URL
@@ -61,17 +68,23 @@ The central inbox receives ~100 emails/hour (~400–500 per 4h window; a cold
 start after an overnight gap can be more). Two rules that matter at this volume:
 
 DYNAMIC WINDOW (no gaps, recall is the priority): call getLastScan() (from
-writers.mjs). Compute `h = ceil(hoursSince(lastScan)) + 2`, capped at 96 (4 days);
-if lastScan is null use 6. Search `in:inbox newer_than:{h}h`. This scans everything
-that arrived since the last successful run plus a 2h overlap — a slept laptop just
-means a bigger next window, never lost mail. The user does NOT want to miss any
-opportunity thread, so favour a wider window and full pagination over speed.
+writers.mjs). Compute `h = max(1, ceil(hoursSince(lastScan)))`, capped at 48;
+if lastScan is null use 6. Search `in:inbox newer_than:{h}h`. NOTE: Gmail's
+`newer_than` unit `m` means MONTHS, not minutes — never use it; the smallest safe
+unit is `h` (hours), so the floor is 1h. At the 30-min cadence the gap is ~0.5h so
+h=1 → a 1h window (~2× overlap, which dedup makes harmless); a slept laptop just
+means a bigger next window (up to the 48h cap), never lost mail.
 
 PAGINATE FULLY: do NOT stop at the first page of search_threads. Loop with the
-page cursor until results are exhausted — expect hundreds of threads. Triage
-cheaply first (subject + sender + snippet); only open/read the body of threads
-that look client-facing or match the shortcuts below. Dedup on thread_id means
-re-seeing an overlapped thread is harmless.
+page cursor until results are exhausted. Triage cheaply ONLY to discard pure
+machine noise — newsletters, promos, calendar invites/accepts, OOO auto-replies,
+monitoring/deploy/error alerts (Kinsta, Wordfence, Render…), HR/billing/system
+mail, notifications@uplers.com RFQ/invoice mails, and Google Drive/Docs share
+notices. For EVERYTHING ELSE — any thread with a genuine external human
+(client / prospect / partner domain) — OPEN and deep-read the full thread body,
+even if the last message looks routine. Do not classify a real client thread from
+its snippet. Dedup on thread_id means re-seeing an overlapped thread is harmless;
+on a re-seen thread, only look for NEW messages since its stored source_date.
 
 Be conservative on what you WRITE: only write a row when the evidence is
 explicit. Always capture thread_id (dedup), source_sender, source_date, and a
@@ -154,6 +167,13 @@ only where a genuine client thread exists; skip silently otherwise. Highest-valu
 open quotes first if you are time-limited.
 
 ## C. Finally
+0. ACCOUNT-MOVEMENT SENSE-CHECK (the point of the 30-min cadence): after writing,
+   step back and report a one-paragraph pulse on how the book of business is
+   moving THIS run — new opportunities surfaced, any open escalations still
+   unresolved (and for how long), sentiment trend (count of Positive / Neutral /
+   Negative signals this run), and any account whose trajectory clearly shifted
+   (warming, cooling, churn-risk, upsell). This is a sense-check for the user, not
+   a DB write. If nothing moved, say so plainly ("quiet window, no movement").
 1. Call rebuildClients() to refresh the derived clients table (LTV from bookings,
    industry from SQLs, latest sentiment from feedback).
 2. Call markScan(msg, totalRowsWritten) with a one-line summary
