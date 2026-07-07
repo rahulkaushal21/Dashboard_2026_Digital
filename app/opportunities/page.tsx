@@ -218,10 +218,19 @@ return (
 </div>
 
 {sel.win_reason && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Will it close?</div><p className="text-sm leading-relaxed text-mav-muted">{sel.win_reason}</p></div>}
-{sel.gist && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Brief — what's happening</div><p className="text-sm leading-relaxed">{sel.gist}</p></div>}
+{(() => {
+  // The Brief should carry the FULL story — the request, the quote/price shared, and
+  // where the discussion stands. `summary` holds that detailed narrative; `gist` is a
+  // shorter one-liner. Show both, longest-first, dropping either if it's already
+  // contained in the other so we never repeat a sentence.
+  const g = (sel.gist || '').trim(), s = (sel.summary || '').trim()
+  const brief = g && s ? (s.includes(g) ? s : g.includes(s) ? g : `${s}\n\n${g}`) : (s || g)
+  return brief
+    ? <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Brief — what's happening</div><p className="text-sm leading-relaxed whitespace-pre-line">{brief}</p></div>
+    : <p className="text-sm text-mav-muted mb-5">No email brief yet for this lead — it comes from an open quote in the sheet.</p>
+})()}
 {sel.journey && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed text-mav-muted whitespace-pre-line">{sel.journey}</p></div>}
 {sel.company_note && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Company</div><p className="text-sm leading-relaxed italic text-mav-muted">{sel.company_note}</p></div>}
-{!sel.gist && !sel.journey && <p className="text-sm text-mav-muted mb-5">No email brief yet for this lead — it comes from an open quote in the sheet. {sel.summary}</p>}
 
 <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
 <div><div className="text-xs text-mav-muted">Owner</div>{sel.sales_person || '—'}</div>
