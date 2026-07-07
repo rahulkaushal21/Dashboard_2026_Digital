@@ -124,7 +124,12 @@ Deno.serve(async (req) => {
     await insertBatches(sb, table, mapped);
     await sb.from("sync_runs").insert({ source: tab + "-appscript", ok: true, rows_upserted: mapped.length, message: "app script push" });
     // Refresh derived clients + sentiment after escalations/feedback change.
-    if (tab === "esc" || tab === "feedback") { await sb.rpc("rebuild_clients").catch(() => {}); await sb.rpc("compute_client_sentiment").catch(() => {}); }
+    // NB: supabase-js v2's query builder is thenable but has no .catch() — must
+    // await inside try/catch, or a refresh failure 500s an otherwise-good ingest.
+    if (tab === "esc" || tab === "feedback") {
+      try { await sb.rpc("rebuild_clients"); } catch (_) { /* refresh best-effort */ }
+      try { await sb.rpc("compute_client_sentiment"); } catch (_) { /* refresh best-effort */ }
+    }
     return new Response(JSON.stringify({ ok: true, tab, inserted: mapped.length }), { headers: { "Content-Type": "application/json" } });
   } catch (e) {
     await sb.from("sync_runs").insert({ source: "sheet-ingest", ok: false, message: String(e) });

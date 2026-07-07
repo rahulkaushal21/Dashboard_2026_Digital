@@ -19,8 +19,13 @@ export default function Escalations() {
   const [to, setTo] = useState('')
   const [sortBy, setSortBy] = useState<SortField>('date')
   const [sortAsc, setSortAsc] = useState(false)
-  
+  const [sel, setSel] = useState<Escalation | null>(null)
+
   useEffect(() => { getEscalations().then(setAll) }, [])
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setSel(null) }
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const inRange = (d?: string) => { if (!d) return !from && !to; if (from && d < from) return false; if (to && d > to) return false; return true }
   
@@ -112,7 +117,7 @@ export default function Escalations() {
             </tr>
           </thead>
           <tbody>{e.slice(0, 400).map(x => (
-            <tr key={x.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+            <tr key={x.id} onClick={() => setSel(x)} className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
               <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.tracking_date || x.month || '—'}</td>
               <td className="px-4 py-3">{x.company_name}</td>
               <td className="px-4 py-3"><span className={`text-xs ${isMajor(x) ? 'text-red-400' : 'text-mav-muted'}`}>{x.escalation_type || '—'}</span></td>
@@ -123,6 +128,65 @@ export default function Escalations() {
             </tr>
           ))}</tbody>
         </table>
+      </div>
+      {sel && <EscalationDetail e={sel} onClose={() => setSel(null)} />}
+    </div>
+  )
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  if (!children) return null
+  return (
+    <div className="flex gap-3 py-2 border-b border-mav-line/40 last:border-0">
+      <div className="w-32 shrink-0 text-xs uppercase tracking-wide text-mav-muted pt-0.5">{label}</div>
+      <div className="text-sm text-white/90 break-words min-w-0">{children}</div>
+    </div>
+  )
+}
+
+function EscalationDetail({ e, onClose }: { e: Escalation; onClose: () => void }) {
+  const major = /major|high/i.test(e.business_impact || '') || /major/i.test(e.escalation_type || '')
+  const isLink = (s?: string) => !!s && /^https?:\/\//i.test(s)
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+      <div onClick={ev => ev.stopPropagation()} className="bg-mav-panel border border-mav-line rounded-xl w-full max-w-2xl my-4 shadow-2xl">
+        <div className="flex items-start justify-between gap-4 p-5 border-b border-mav-line">
+          <div>
+            <div className="text-lg font-semibold text-white">{e.company_name || 'Escalation'}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+              <span className={`px-2 py-0.5 rounded-full border ${major ? 'border-red-500/50 text-red-400' : 'border-mav-line text-mav-muted'}`}>{e.escalation_type || 'Escalation'}</span>
+              {e.business_impact && <span className="px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">{e.business_impact} impact</span>}
+              {e.geo && <span className="px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">{e.geo}</span>}
+              <span className="text-mav-muted">{e.tracking_date || e.month || ''}</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-mav-muted hover:text-white text-xl leading-none px-2">×</button>
+        </div>
+        <div className="p-5">
+          {e.evidence && (
+            <div className="mb-4 rounded-lg bg-mav-dark/50 border border-mav-line p-4">
+              <div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">What happened — email insight</div>
+              <div className="text-sm text-white/90 italic whitespace-pre-wrap">“{e.evidence}”</div>
+            </div>
+          )}
+          <div className="rounded-lg border border-mav-line/60 px-4">
+            <Row label="Subject">{e.email_subject}</Row>
+            <Row label="Situation">{e.situation_type}</Row>
+            <Row label="Project">{e.project_name}</Row>
+            <Row label="Reference">{e.reference_id}</Row>
+            <Row label="Deal type">{e.deal_type}</Row>
+            <Row label="Service">{e.service_type}</Row>
+            <Row label="Source">{e.source}</Row>
+            <Row label="Raised by">{e.raised_by}</Row>
+            <Row label="From">{e.source_sender}</Row>
+            <Row label="Email date">{e.source_date ? new Date(e.source_date).toLocaleString() : ''}</Row>
+            <Row label="Week">{e.week}</Row>
+            <Row label="Link">{isLink(e.link) ? <a href={e.link} target="_blank" rel="noreferrer" className="text-mav-yellow hover:underline break-all">{e.link}</a> : e.link}</Row>
+          </div>
+          {!e.evidence && (
+            <div className="mt-3 text-xs text-mav-muted">This escalation came from the tracking sheet — no captured email insight. The subject and situation above summarise it.</div>
+          )}
+        </div>
       </div>
     </div>
   )
