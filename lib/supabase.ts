@@ -189,6 +189,10 @@ status: q.status,
 }
 })
 const pick = <T,>(a: T | undefined, b: T | undefined) => (a !== undefined && a !== null && a !== '' ? a : b)
+// Most-recent of two ISO-ish dates (so a company with several quotes anchors to the
+// LATEST one, not whichever merged first — otherwise an old quote can drag the row
+// out of the dashboard's date window and hide it entirely).
+const maxDate = (a?: string, b?: string) => ((a || '') > (b || '') ? a : b)
 const m = new Map<string, Opportunity & { sources: string[] }>()
 for (const x of [...emailOpps, ...quoteOpps]) {
 const key = norm(x.company_name) || ('id:' + x.id)
@@ -229,7 +233,7 @@ technology: pick(cur.technology, x.technology),
 service: pick(cur.service, x.service),
 quote_ref: pick(cur.quote_ref, x.quote_ref),
 journey: pick(cur.journey, x.journey),
-quote_date: pick(cur.quote_date, x.quote_date),
+quote_date: maxDate(cur.quote_date, x.quote_date),
 }
 // Use spreadsheet data as canonical source of truth (clean normalized name)
 const canonicalName = x.source === 'spreadsheet' ? x.company_name : cur.company_name
@@ -248,7 +252,7 @@ o.geo = geo3(o.geo)
 // The row's shown date should be the QUOTE SHARED date (from the sheet), not the
 // latest follow-up email. A newer email may win the merge for its richer content,
 // but the date must stay anchored to when the quote was shared.
-if (o.quote_date) o.source_date = o.quote_date
+if (o.quote_date) o.source_date = maxDate(o.source_date, o.quote_date)
 const key = norm(o.company_name)
 const inRevenue = revenueSet.has(key)
 // Repeat = already in the revenue sheet, or the scan already saw them as an existing client
