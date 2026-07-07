@@ -203,7 +203,7 @@ export default function Dashboard() {
           <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp, nowMs)}</span>
           {syncOppFailed
             ? <span className="text-red-400 font-medium">· ⚠ Gmail auth expired — reconnect the Gmail connector</span>
-            : <span className="text-mav-muted">· auto every 4h</span>}
+            : <span className="text-mav-muted">· auto every 30m</span>}
         </span>
         <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
         <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
