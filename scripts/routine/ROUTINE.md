@@ -162,6 +162,16 @@ is clear.
   system-generated mail (notifications@uplers.com "… has generated a RFQ" /
   "Quote ( QUT… ) Request", invoice-app alerts) — those are downstream of the real
   client email and are already covered by the sheet Quotes tab. Skip them here.
+  COST-FIGURE RULE (don't under-capture): if ANY price/cost/estimate is shared in
+  the thread — a firm number, a monthly rate, OR a RANGE (e.g. "US $3,500–3,700",
+  "125 GBP", "USD 3,900/mo", "$96 AUD/3h") — write an opportunity for it, in
+  addition to the sentiment signal. A quote/estimate/range going TO the client, or
+  a rate the client is negotiating, is pipeline and must appear on the Opportunities
+  page. Put the figure in gist/summary; set rfq_status ('Quote sent', 'Proposal
+  sent', 'Rate proposed', 'Won — approved' if they said yes). Dedup by thread_id.
+  Opportunities merge by company on the dashboard, so an end-client/product (e.g.
+  Prismo under Fabrik Brands) links under the parent's booking name automatically —
+  just use the canonical company_name and it consolidates.
 - Quote conversion -> writeQuoteConversions : ONLY when a quote is explicitly
   confirmed won or lost (e.g. "we're going ahead", PO attached, or a clear
   decline). Record outcome (won|lost), lost_reason if stated, amount, decided_at,
