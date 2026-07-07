@@ -23,6 +23,45 @@ function toObjects(rows: string[][]): Record<string, string>[] {
   return rows.slice(1).map((r) => { const o: Record<string, string> = {}; headers.forEach((hh, i) => { o[hh] = (r[i] ?? "").toString().trim(); }); return o; });
 }
 
+// Some escalation sheet rows carry an extra leading "Business Unit" column
+// (values "Digital BU" / "MarTech"). When present it shifts EVERY field one to
+// the left: company_name holds the BU, the real company lands in geo, geo lands
+// in deal_type, the category lands in email_subject, and the real subject lands
+// in link. Detect that signature and realign so the dashboard stays correct on
+// every sync (the table is fully re-inserted each push, so a one-off DB patch
+// would just get wiped — this fix has to live at ingest).
+const ESC_GEO_NORM: Record<string, string> = { "us/canada": "US / Canada", "us / canada": "US / Canada", "anz": "ANZ", "uk": "UK", "generic": "Generic" };
+function escCompanyCanon(name: string): string {
+  const s = (name || "").toLowerCase();
+  if (s.includes("hummingbird")) return "Hummingbird Ideas";
+  if (s.startsWith("cazenove") || s.includes("cazloyd")) return "Cazloyd";
+  if (s.includes("view from here") || s.startsWith("theviewfromhere")) return "view from here";
+  if (s.includes("marston")) return "Project Centre Ltd";
+  if (s.startsWith("zulu")) return "ZULU 8";
+  if (s.startsWith("apple print") || s.startsWith("appleprint")) return "Appleprint";
+  if (s.includes("enphase")) return "Enphase Energy";
+  return name;
+}
+function fixEscDrift(o: Record<string, unknown>): Record<string, unknown> {
+  const cn = String(o.company_name ?? "").toLowerCase().trim();
+  if (!(cn.startsWith("digital bu") || cn === "martech" || cn === "martech bu")) return o;
+  const geoRaw = String(o.deal_type ?? "").toLowerCase().trim();
+  return {
+    ...o,
+    company_name: escCompanyCanon(String(o.geo ?? "")),
+    geo: ESC_GEO_NORM[geoRaw] ?? (o.deal_type ?? null),
+    deal_type: o.email_subject ?? null,
+    email_subject: o.link ?? null,
+    link: o.project_name ?? null,
+    project_name: o.reference_id ?? null,
+    reference_id: o.situation_type ?? null,
+    situation_type: o.source ?? null,
+    source: o.escalation_type ?? null,
+    escalation_type: o.business_impact ?? null,
+    business_impact: null,
+  };
+}
+
 const TABLE: Record<string, string> = { quotes: "quotes", sql: "sql_leads", esc: "escalations", feedback: "feedback" };
 const KEEP: Record<string, (r: Record<string, string>) => boolean> = {
   quotes: (r) => !!(r["Added Date"] || r["Agency"] || r["Client Email"] || r["Status"] || r["Estimated Cost"]),
@@ -73,7 +112,8 @@ Deno.serve(async (req) => {
     const tab = String(body?.tab || "");
     if (!MAP[tab]) return new Response(JSON.stringify({ ok: false, error: "unknown tab: " + tab }), { status: 400, headers: { "Content-Type": "application/json" } });
     const objs = toObjects(body?.rows || []).filter(KEEP[tab]);
-    const mapped = objs.map(MAP[tab]);
+    let mapped = objs.map(MAP[tab]);
+    if (tab === "esc") mapped = mapped.map(fixEscDrift);
     // Guard: never let an empty/garbled push delete a populated table.
     if (mapped.length === 0) {
       await sb.from("sync_runs").insert({ source: tab + "-appscript", ok: false, rows_upserted: 0, message: "empty payload — table preserved" });

@@ -199,7 +199,11 @@ is clear.
   ('Digital BU','MarTech'). To repair, shift each value one field right
   (company_name:=geo, geo:=deal_type, deal_type:=email_subject,
   email_subject:=link, ... escalation_type:=business_impact), drop the BU value,
-  then canonicalize the recovered names. Fixed once for ids 63214-63256.
+  then canonicalize the recovered names. NOW HANDLED AT INGEST: sheet-ingest's
+  fixEscDrift() auto-realigns these on every esc push (the table is fully
+  re-inserted each sync, so a DB-only patch gets wiped — the fix lives in the
+  edge function). If it ever recurs, check that fixEscDrift still fires (BU
+  signature: company_name starts "Digital BU" / equals "MarTech").
 - Sentiment -> writeEmailSignals : for EVERY client-facing thread with a clear
   tone (broader than explicit feedback — appreciation, frustration, urgency,
   churn risk, upsell interest all count). This is the "scan all emails for
