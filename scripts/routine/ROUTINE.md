@@ -120,6 +120,12 @@ mismatched name orphans the row. Known canonical mappings (extend as you learn m
 - Regenative Labs / Humanandthebeast / any *@hummingbirdideas.com -> `Hummingbird Ideas`
   (Hummingbird Ideas is the agency/booking client; Regenative Labs etc. are its end
   clients — put the end-client/project in company_note)
+- Prismo / Vernisol                             -> `Fabrik Brands`
+  (Fabrik Brands is the booking client; Prismo/Vernisol are its end clients/products —
+  put the end-client/project in company_note)
+- GWF Foodservice website                       -> `GWF` (agency Soar Communications
+  Group / scg.net.nz; PO-raised website project — belongs in opportunities, not just
+  a maintenance signal)
 When a new client appears under a parenthetical/product name, prefer the parent
 company's booking name if it exists in `clients`; if unsure, use the plainest company
 name and note the alias — the dashboard's token matching handles most variants, but an
