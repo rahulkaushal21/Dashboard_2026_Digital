@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity } from '@/lib/supabase'
+import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -63,7 +63,9 @@ const sigTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/risk|e
 const impactTone = (i?: string) => /critical|sev1|sev 1/i.test(i || '') ? 'bg-red-500/20 text-red-300' : /major/i.test(i || '') ? 'bg-red-500/15 text-red-400' : /minor/i.test(i || '') ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
 const dotCls = (b: string) => b === 'At risk' ? 'bg-red-500' : b === 'Watch' ? 'bg-orange-400' : b === 'Positive' ? 'bg-green-400' : b === 'Negative' ? 'bg-red-400' : b === 'Neutral' ? 'bg-amber-400' : 'bg-mav-muted'
 
-type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[] }
+type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[]; recovered: boolean; recoveryNote?: string }
+// A feedback-table row counts as positive when its Nature/type reads positive (praise, happy, great…)
+const isPosFeedback = (f: Feedback) => sentBucket(f.nature) === 'Positive' || /positive|praise|apprec|happy|great|delight|testimonial/i.test(`${f.nature || ''} ${f.feedback_type || ''}`)
 // the escalation report also logs positive feedback, tagged "Not An Escalation" — those must NOT count as risk
 const isPosFb = (e: Escalation) => /not an escalation/i.test(e.escalation_type || '') || /not an escalation/i.test(e.business_impact || '')
 const isJunk = (e: Escalation) => /^(source|escalation type|type of situation)$/i.test((e.escalation_type || '').trim()) || /^escalation type$/i.test((e.business_impact || '').trim())
@@ -79,8 +81,9 @@ export default function Clients() {
   const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo' | 'activity'>('activity'); const [sortAsc, setSortAsc] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
   const [bookings, setBookings] = useState<BookingRow[]>([])
+  const [feedback, setFeedback] = useState<Feedback[]>([])
   useEffect(() => {
-    getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings)
+    getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
     // only email-sourced opportunities count as "active discussion" (sheet quotes live on the Opportunities page)
     getOpportunities().then(all => setOpps(all.filter(o => (o.source_tags || []).includes('email') || o.source === 'email')))
   }, [])
@@ -114,6 +117,18 @@ export default function Clients() {
     }
     return map
   }, [escs, allClients])
+
+  // positive feedback-table rows linked to each client (agency name → client), newest first
+  const posFbByClient = useMemo(() => {
+    const tagged = feedback.filter(isPosFeedback).map(f => ({ f, keys: nameKeys(f.agency) }))
+    const map = new Map<string, Feedback[]>()
+    for (const c of allClients) {
+      const ck = nameKeys(c.company_name)
+      map.set(c.company_name, tagged.filter(t => keyMatch(ck, t.keys)).map(t => t.f)
+        .sort((a, b) => (b.added_date || '').localeCompare(a.added_date || '')))
+    }
+    return map
+  }, [feedback, allClients])
 
   // email-sourced opportunities linked to each client
   const oppByClient = useMemo(() => {
@@ -172,22 +187,40 @@ export default function Clients() {
     const cutoff = monthsAgoYM(2)
     const recentMajor = list.filter(e => (ym(e.tracking_date) >= cutoff) && /major|critical|high|sev/i.test(`${e.business_impact || ''} ${e.escalation_type || ''}`))
     const negSigs = (sigByClient.get(c.company_name) || []).filter(s => sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || ''))
+    const posSigs = (sigByClient.get(c.company_name) || []).filter(s => sentBucket(s.sentiment) === 'Positive')
+    const posFbTbl = posFbByClient.get(c.company_name) || []
     const lb = ym(c.last_booking_month)
     const gap = !!lb && lb < monthsAgoYM(2) && (c.ltv_usd || 0) > 0
+
+    // Date-based recovery: compare the newest *negative* event (a genuine escalation or a
+    // negative email signal) against the newest *positive* event (positive email praise,
+    // positive feedback logged in the escalation report, or a positive feedback-table row).
+    // If the latest positive lands AFTER the latest negative, the client has bounced back —
+    // stale escalation history no longer defines their standing, so we show green.
+    const d = (s?: string) => (s || '').slice(0, 10)
+    const lastNeg = [...list.map(e => d(e.tracking_date)), ...negSigs.map(s => d(s.source_date))].filter(Boolean).sort().pop() || ''
+    const lastPos = [...posSigs.map(s => d(s.source_date)), ...posFb.map(e => d(e.tracking_date)), ...posFbTbl.map(f => d(f.added_date))].filter(Boolean).sort().pop() || ''
+    const recovered = !!lastPos && !!lastNeg && lastPos > lastNeg
+    const recoveryNote = recovered ? `Recovered — positive feedback on ${lastPos} came after the last escalation (${lastNeg}).` : undefined
+
     const reasons: string[] = []
     let level: Risk['level'] = ''
-    if (maxMonth > 2) { level = 'At risk'; reasons.push(`${maxMonth} escalations in ${monLabel(maxKey)}`) }
-    if (recentMajor.length) { level = 'At risk'; reasons.push(`${recentMajor.length} major escalation${recentMajor.length > 1 ? 's' : ''} in the last 2 months`) }
-    if (!level) {
-      if (negSigs.length) { level = 'Watch'; reasons.push('client sounding frustrated over email') }
-      if (list.length) { level = 'Watch'; reasons.push(`${list.length} escalation${list.length > 1 ? 's' : ''} on record`) }
-      if (gap) { level = 'Watch'; reasons.push(`no new booking since ${monLabel(lb)} — contract may be winding down`) }
+    // A recovery (latest sentiment event is positive) suppresses escalation/email-sensed risk.
+    if (!recovered) {
+      if (maxMonth > 2) { level = 'At risk'; reasons.push(`${maxMonth} escalations in ${monLabel(maxKey)}`) }
+      if (recentMajor.length) { level = 'At risk'; reasons.push(`${recentMajor.length} major escalation${recentMajor.length > 1 ? 's' : ''} in the last 2 months`) }
+      if (!level) {
+        if (negSigs.length) { level = 'Watch'; reasons.push('client sounding frustrated over email') }
+        if (list.length) { level = 'Watch'; reasons.push(`${list.length} escalation${list.length > 1 ? 's' : ''} on record`) }
+        if (gap) { level = 'Watch'; reasons.push(`no new booking since ${monLabel(lb)} — contract may be winding down`) }
+      }
     }
-    return { level, reasons, escs: list, posFb, negSigs }
+    return { level, reasons, escs: list, posFb, negSigs, recovered, recoveryNote }
   }
 
-  // Genuine risk wins; otherwise positive feedback (with no negative signal) shows green; else the recorded sentiment
-  const statusOf = (c: Client) => { const r = riskOf(c); if (r.level) return r.level; if (r.posFb.length && !r.negSigs.length) return 'Positive'; return sentBucket(c.sentiment) }
+  // Genuine risk wins; a date-based recovery or positive feedback (with no later negative)
+  // shows green; else the recorded sentiment.
+  const statusOf = (c: Client) => { const r = riskOf(c); if (r.level) return r.level; if (r.recovered || (r.posFb.length && !r.negSigs.length)) return 'Positive'; return sentBucket(c.sentiment) }
 
   const owners = uniq(clients.map(c => c.pc_sme))
   const geos = uniq(clients.map(c => c.geo))
@@ -289,7 +322,7 @@ export default function Clients() {
         <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Click a row for the full picture. Click column headers to sort.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
         <div className="flex items-baseline justify-between mb-4">
@@ -367,7 +400,7 @@ export default function Clients() {
             <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <div className="flex items-center gap-2 flex-wrap"><span className={`inline-block w-2.5 h-2.5 rounded-full ${dotCls(r.level || sentBucket(selC.sentiment))}`} /><h2 className="text-xl font-semibold">{displayName(selC.company_name)}</h2></div>
+                  <div className="flex items-center gap-2 flex-wrap"><span className={`inline-block w-2.5 h-2.5 rounded-full ${dotCls(r.level || (r.recovered ? 'Positive' : sentBucket(selC.sentiment)))}`} /><h2 className="text-xl font-semibold">{displayName(selC.company_name)}</h2></div>
                   {selC.ai_focus && <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">⚡ AI &amp; Automation</span>}
                   {selC.website && <div className="text-xs text-mav-muted mt-1">{selC.website}</div>}
                 </div>
@@ -375,6 +408,8 @@ export default function Clients() {
               </div>
 
               {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.level === 'At risk' ? '🔴 At risk' : '🟠 Watch'}:</span> {r.reasons.join(' · ')}</div>}
+
+              {!r.level && r.recovered && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 px-3 py-2 text-sm"><span className="font-semibold">🟢 Recovered:</span> {r.recoveryNote}</div>}
 
               <div className="flex flex-wrap gap-2 mb-5">
                 {selC.sentiment && <span className={`text-xs px-2 py-1 rounded-full ${tone(sentBucket(selC.sentiment))}`}>Sentiment: {selC.sentiment}</span>}
