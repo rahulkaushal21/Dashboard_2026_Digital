@@ -355,19 +355,23 @@ export async function dismissEscalation(threadIds: string[], opts?: { actor?: st
   return !error
 }
 
-// ---- Delights (clients who shared genuinely happy feedback over email) ----
-// A live showcase of positive client sentiment: formal positive feedback rows
-// (feedback.nature = 'Positive', e.g. Tanium) plus praise captured from client
-// emails (email_signals.sentiment = 'Positive'). One row per client, newest first.
+// ---- Delights (clients who shared genuinely great appreciation) ----
+// Sourced ONLY from the business/web-revenue sheet's feedback tab (feedback.nature =
+// 'Positive'): the curated, substantive testimonials — Tanium, Cohort, Poloko, HexaGroup…
+// Deliberately NOT from email_signals, so routine "thanks / looks good / approved"
+// praise (ZULU 8, C7, BEGE, Aurelian…) does NOT clutter this board. One card per client;
+// the detail lists every testimonial. When the praise lives in a screenshot rather than
+// text, `evidence` carries the image link and `project` names the work.
+export interface DelightItem { quote?: string; project?: string; evidence?: string; date?: string; type?: string }
 export interface Delight {
-  company_name: string; geo?: string; quote?: string; source?: string; date?: string
-  count: number; client_email?: string
+  company_name: string; geo?: string; count: number
+  headline?: string; headline_project?: string; headline_evidence?: string
+  items: DelightItem[]; date?: string; client_email?: string
 }
 export async function getDelights(): Promise<Delight[]> {
   if (!supabase) return []
-  const [fbRes, sigRes, clients] = await Promise.all([
-    supabase.from('feedback').select('agency, nature, feedback_type, geo, comments, added_date').ilike('nature', 'positive'),
-    supabase.from('email_signals').select('company_name, client_email, sentiment, summary, source_subject, source_date').ilike('sentiment', 'positive'),
+  const [fbRes, clients] = await Promise.all([
+    supabase.from('feedback').select('agency, nature, feedback_type, geo, comments, evidence, project_names, client_email, added_date').ilike('nature', 'positive'),
     getClients(),
   ])
   const geoBy = new Map<string, string>()
@@ -378,29 +382,32 @@ export async function getDelights(): Promise<Delight[]> {
     for (const [gk, g] of geoBy) { if (k && gk.length >= 4 && (gk.startsWith(k) || k.startsWith(gk))) return g }
     return fallback || ''
   }
-  type Raw = { name?: string; geo?: string; quote?: string; source?: string; date?: string; email?: string }
-  const raw: Raw[] = []
-  for (const f of (fbRes.data as { agency?: string; feedback_type?: string; geo?: string; comments?: string; added_date?: string }[]) || [])
-    raw.push({ name: f.agency, geo: geoFor(f.agency, f.geo), quote: f.comments || undefined, source: f.feedback_type ? `Feedback · ${f.feedback_type}` : 'Feedback', date: f.added_date })
-  for (const s of (sigRes.data as { company_name?: string; client_email?: string; summary?: string; source_subject?: string; source_date?: string }[]) || [])
-    raw.push({ name: s.company_name, geo: geoFor(s.company_name), quote: s.summary || s.source_subject, source: 'Email praise', date: (s.source_date || '').slice(0, 10), email: s.client_email })
-  // group per client, keep the most recent entry as the headline; prefer one WITH a quote
-  const groups = new Map<string, Delight & { _hasQuote: boolean }>()
-  for (const r of raw) {
-    const key = ckey(r.name); if (!key) continue
+  // Quality bar — only genuinely great appreciation. A row qualifies when it carries the
+  // client's actual words (a real comment) OR a real screenshot of their praise (an http
+  // evidence link — a Text-Feedback/Clutch capture like Cohort, Nibbleedge, Poloko).
+  // Excluded: the auto-logged placeholder "Client appreciation received — positive feedback
+  // logged" whose only "evidence" is a "Ref: MEM…" string — that's an internal log line, not
+  // the client's words (ZULU 8, Carlotta + Gee, 24/8, Freela, Studio Nash…), i.e. the noise.
+  const isGeneric = (c?: string) => /appreciation received|positive feedback logged|feedback logged/i.test(c || '')
+  const groups = new Map<string, Delight>()
+  for (const f of (fbRes.data as { agency?: string; feedback_type?: string; geo?: string; comments?: string; evidence?: string; project_names?: string; client_email?: string; added_date?: string }[]) || []) {
+    const key = ckey(f.agency); if (!key) continue
+    const comment = (f.comments || '').trim()
+    const realQuote = comment && !isGeneric(comment) ? comment : ''
+    const realEvidence = /^https?:\/\//i.test((f.evidence || '').trim()) ? (f.evidence || '').trim() : ''
+    if (!realQuote && !realEvidence) continue   // drop generic auto-logged rows (Ref: MEM…)
+    const item: DelightItem = { quote: realQuote || undefined, project: f.project_names || undefined, evidence: realEvidence || undefined, date: (f.added_date || '').slice(0, 10), type: f.feedback_type }
     const g = groups.get(key)
-    const hasQuote = !!(r.quote && r.quote.trim())
-    if (!g) { groups.set(key, { company_name: r.name || '', geo: r.geo, quote: r.quote, source: r.source, date: r.date, count: 1, client_email: r.email, _hasQuote: hasQuote }) }
-    else {
-      g.count++
-      if (!g.client_email && r.email) g.client_email = r.email
-      if (!g.geo && r.geo) g.geo = r.geo
-      // pick the freshest entry, preferring one that actually has a quote
-      const newer = (r.date || '') > (g.date || '')
-      if ((hasQuote && !g._hasQuote) || (hasQuote === g._hasQuote && newer)) { g.quote = r.quote; g.source = r.source; g.date = r.date; g._hasQuote = hasQuote }
-    }
+    if (!g) groups.set(key, { company_name: f.agency || '', geo: geoFor(f.agency, f.geo), count: 1, items: [item], date: item.date, client_email: f.client_email || undefined })
+    else { g.count++; g.items.push(item); if (!g.geo) g.geo = geoFor(f.agency, f.geo); if (!g.client_email && f.client_email) g.client_email = f.client_email; if ((item.date || '') > (g.date || '')) g.date = item.date }
   }
-  return [...groups.values()].map(({ _hasQuote, ...d }) => d).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  // headline = the strongest testimonial (longest quote); fall back to a screenshot one
+  for (const g of groups.values()) {
+    const withQuote = g.items.filter(i => i.quote).sort((a, b) => (b.quote?.length || 0) - (a.quote?.length || 0))
+    const pick = withQuote[0] || g.items.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0]
+    g.headline = pick?.quote; g.headline_project = pick?.project; g.headline_evidence = pick?.evidence
+  }
+  return [...groups.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
 export interface Quote { id: number; quote_id?: string; added_date?: string; agency?: string; usd_value?: number; status?: string; business_type?: string; geo?: string; sales_person?: string; confirmed_in_days?: number; technology?: string; client_email?: string }

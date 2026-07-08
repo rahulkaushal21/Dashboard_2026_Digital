@@ -212,10 +212,14 @@ is clear.
   thread's email_signals row as usual (flip sentiment + refresh summary) — the escalation
   stays put and shows your latest summary as its "current update"; the USER manually marks
   it Fixed/Positive in the UI. Never set critical_escalations status yourself.
-  DELIGHTS TAB (AUTOMATIC): any Positive client sentiment feeds it with no extra work —
-  a feedback row with nature='Positive' (writeFeedback) or an email_signals row with
-  sentiment='Positive' (writeEmailSignals) surfaces on the "Delights" tab, one card per
-  client. So capturing praise as you already do keeps Delights current.
+  DELIGHTS TAB (AUTOMATIC, curated): the "Delights" tab shows only GENUINE standout
+  appreciation, sourced ONLY from feedback rows (nature='Positive') that carry the client's
+  actual words (a real `comments` quote) OR a real screenshot link (`evidence` starting
+  http…). It deliberately EXCLUDES the auto-logged "Client appreciation received — positive
+  feedback logged" placeholders (evidence just "Ref: MEM…") and does NOT read email_signals,
+  so routine "thanks / looks good / approved" praise never clutters it. To make a client a
+  delight, log real feedback text or a testimonial screenshot; a bare positive email_signal
+  will NOT put them there (by design).
   NET: both tabs are self-maintaining every scan — accurate sentiment is all that's needed.
   COLUMN HYGIENE: `company_name` = the canonical client name; `geo` = a REAL geo
   code (US|UK|AU), NEVER the company name. (The Clients page links escalations by

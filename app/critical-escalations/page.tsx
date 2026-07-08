@@ -51,8 +51,8 @@ export default function CriticalEscalations() {
 
   async function remove(r: CriticalEscalation) {
     const many = r.count > 1 ? ` (${r.count} threads)` : ''
-    if (!window.confirm(`Remove ${r.company_name}${many} from Critical Escalations?\n\nUse this ONLY when it was flagged but isn't actually a major client escalation (false alarm). To mark a real one as resolved, use “Mark fixed / positive” — it stays in the list.`)) return
-    const reason = window.prompt('Optional: why isn\'t this a real escalation? (kept for the record)', '') || undefined
+    if (!window.confirm(`Remove ${r.company_name}${many} from Critical Escalations?\n\nUse this when it isn't really our escalation — e.g. the client is frustrated for external reasons, not a problem from our side. It's removed from the list (the email signals are preserved). To mark a genuine one as resolved instead, use “Mark fixed / positive” — that keeps it in the list.`)) return
+    const reason = window.prompt('Optional: why isn\'t this our escalation? (e.g. "external frustration, not our issue" — kept for the record)', '') || undefined
     setBusy(key(r))
     const done = await dismissEscalation(r.threadIds, { actor: currentEmail() || undefined, reason })
     setBusy(null)
@@ -116,6 +116,7 @@ export default function CriticalEscalations() {
                       <button onClick={() => setStatusOf(r, 'positive')} disabled={busy === key(r)} className="text-xs px-2.5 py-1 rounded-md border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50">Positive</button>
                     </>
                   : <button onClick={() => setStatusOf(r, 'open')} disabled={busy === key(r)} className="text-xs px-2.5 py-1 rounded-md border border-mav-line text-mav-muted hover:text-orange-300 disabled:opacity-50">Reopen</button>}
+                <button onClick={() => remove(r)} disabled={busy === key(r)} title="Not really our escalation — e.g. client frustrated for external reasons. Removes it from the list." className="text-xs px-2.5 py-1 rounded-md border border-mav-line text-mav-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-50">Not an issue</button>
               </div>
             </div>
           )})}
@@ -168,8 +169,8 @@ export default function CriticalEscalations() {
                 <button onClick={() => setStatusOf(sel_, 'open')} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-orange-300 disabled:opacity-50">↺ Reopen</button>
               )}
               <div>
-                <p className="text-xs text-mav-muted mb-2">Flagged by mistake — not actually a major escalation? Remove it (the email signals are preserved).</p>
-                <button onClick={() => remove(sel_)} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-50">✕ Remove (false alarm)</button>
+                <p className="text-xs text-mav-muted mb-2">Not really our escalation — client frustrated for external reasons, not a problem from our side? Remove it (the email signals are preserved).</p>
+                <button onClick={() => remove(sel_)} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-50">✕ Not an escalation (remove)</button>
               </div>
             </div>
           </aside>
