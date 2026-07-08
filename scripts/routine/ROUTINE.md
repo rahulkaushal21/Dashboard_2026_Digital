@@ -107,6 +107,15 @@ Drive share notices. For EVERYTHING ELSE — any thread with a genuine external 
 message looks routine. Do not classify a real client thread from its snippet. Dedup
 on thread_id means re-seeing a thread is harmless; only look for NEW messages.
 
+VENDOR EXCLUSION (never track): some senders are VENDORS/subcontractors we hire, NOT
+clients — do NOT write ANY row (opportunity/signal/escalation/feedback) for them; just
+mark their threads processed and move on. Current vendor domains: granth.info, granth.in,
+atharvasystem.com (Granth, Atharva System). Note a vendor may name a real end-client in
+the body (e.g. "Greek Grill", "Global Gate", "Single Thread Farm") — still skip it: we
+reach those only through the vendor, so it isn't our client relationship. (The Gmail
+Apps Script also filters these domains at ingest via VENDOR_SKIP, so ideally they never
+even reach the queue.)
+
 CANONICAL COMPANY NAMES (so every write links to the right client on the dashboard):
 always set `company_name` to the CLIENT'S booking name, not the end-product or
 sub-brand. Put the product/sub-brand in the summary/company_note instead. The Clients

@@ -43,6 +43,10 @@ var OVERLAP_MIN      = 20;                        // re-pull this much before th
 var MAX_WINDOW_HOURS = 72;                        // safety cap: even after a long outage, never scan more than this
 var CURSOR_KEY       = 'lastMsgEpochMs';          // Script Property holding the newest pushed msg time
 var INTERNAL         = ['mavlers.com', 'uplers.com', 'uplers.in', 'mavlers.agency', 'mavlers.biz'];
+// VENDORS/subcontractors we hire — NOT clients. Any thread involving one of these domains
+// is skipped entirely (never pushed to Supabase), so their correspondence is never tracked
+// as client business. Add a domain here to permanently stop tracking that vendor.
+var VENDOR_SKIP      = ['granth.info', 'granth.in', 'atharvasystem.com'];
 // Internal-only threads are skipped as noise EXCEPT when the body reads like a
 // relayed client opportunity/escalation — so an AM forwarding a client request
 // internally is still captured.
@@ -100,6 +104,8 @@ function pullGmailToSupabase() {
         var cc = m.getCc() || '';
         var participants = (from + ',' + to + ',' + cc).toLowerCase();
         var body = m.getPlainBody() || '';
+        // Skip vendor/subcontractor threads entirely — they are not clients.
+        if (hasVendor(participants)) continue;
         var external = computeExternal(participants);
         // Skip pure-internal chatter unless it reads like a relayed client matter.
         if (!external && !INCLUDE_INTERNAL_RE.test(body.slice(0, 4000) + ' ' + m.getSubject())) continue;
@@ -137,6 +143,18 @@ function pullGmailToSupabase() {
   Logger.log('pullGmailToSupabase: window=' + hoursBack + 'h, queued ' + out.length +
              ', pushed ' + pushed + (allOk ? '' : ' — SOME BATCHES FAILED (cursor held)') +
              ', cursor=' + (maxPushedEpoch ? new Date(maxPushedEpoch).toUTCString() : 'unchanged'));
+}
+
+// hasVendor = any participant is on a vendor/subcontractor domain we don't track
+function hasVendor(participants) {
+  var emails = participants.match(/[a-z0-9._%+-]+@[a-z0-9.-]+/g) || [];
+  for (var i = 0; i < emails.length; i++) {
+    var dom = (emails[i].split('@')[1] || '');
+    for (var j = 0; j < VENDOR_SKIP.length; j++) {
+      if (dom === VENDOR_SKIP[j] || dom.slice(-(VENDOR_SKIP[j].length + 1)) === '.' + VENDOR_SKIP[j]) return true;
+    }
+  }
+  return false;
 }
 
 // external = any participant whose domain is not one of ours
