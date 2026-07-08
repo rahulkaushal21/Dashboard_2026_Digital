@@ -3,9 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, requestScan, getLatestScanRequest, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
+import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
 
 // --- date helpers ------------------------------------------------------------
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -92,7 +93,30 @@ export default function Dashboard() {
   const [nowMs, setNowMs] = useState(Date.now())
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
+  // On-demand AI sense-check (classifies newly-captured email into opps/escalations/delights).
+  const [scanState, setScanState] = useState<'idle' | 'queued' | 'running' | 'done'>('idle')
+  const [scanMsg, setScanMsg] = useState<string | null>(null)
   useEffect(() => { const id = setInterval(() => setNowMs(Date.now()), 30000); return () => clearInterval(id) }, [])
+  // Kick off the serverless sense-check, then poll its status until it finishes and reload.
+  const runScan = async () => {
+    setScanState('queued'); setScanMsg('Requested — the runner is picking it up…')
+    const req = await requestScan(currentEmail() || undefined)
+    if (!req) { setScanState('idle'); setScanMsg('Could not queue a scan — please try again.'); return }
+    const startId = req.id
+    let ticks = 0
+    const poll = async () => {
+      ticks++
+      const latest = await getLatestScanRequest()
+      if (latest && latest.id === startId && latest.status === 'done') {
+        setScanState('done'); setScanMsg(latest.note || 'Sense-check complete.')
+        await load(); return
+      }
+      if (latest && latest.status === 'running') { setScanState('running'); setScanMsg('Reading new email and classifying…') }
+      if (ticks < 60) setTimeout(poll, 12000)           // up to ~12 min
+      else { setScanState('idle'); setScanMsg('Still running in the background — data will refresh shortly.') }
+    }
+    setTimeout(poll, 8000)
+  }
   const load = async () => {
     setRefreshing(true)
     try {
@@ -202,10 +226,14 @@ export default function Dashboard() {
           <span className={`w-2 h-2 rounded-full ${syncOppFailed ? 'bg-red-500' : freshWithin(syncOpp, 45, nowMs) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
           <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp, nowMs)}</span>
           {syncOppFailed
-            ? <span className="text-red-400 font-medium">· ⚠ Gmail auth expired — reconnect the Gmail connector</span>
-            : <span className="text-mav-muted">· auto every 30m</span>}
+            ? <span className="text-red-400 font-medium">· ⚠ last scan failed — capture may be stalled</span>
+            : <span className="text-mav-muted">· auto hourly + on-demand</span>}
         </span>
-        <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
+        <span className="ml-auto text-mav-muted">{scanMsg ? scanMsg : syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
+        <button onClick={runScan} disabled={scanState === 'queued' || scanState === 'running'} title="Run the AI sense-check now — reads newly-captured email and updates opportunities, escalations and delights"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-yellow/60 text-mav-yellow hover:bg-mav-yellow/10 disabled:opacity-50">
+          <Sparkles size={13} className={(scanState === 'queued' || scanState === 'running') ? 'animate-pulse' : ''} /> {scanState === 'queued' ? 'Queued…' : scanState === 'running' ? 'Scanning…' : 'Run scan'}
+        </button>
         <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white hover:border-mav-yellow disabled:opacity-50">
           <RefreshCw size={13} className={(syncing || refreshing) ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}

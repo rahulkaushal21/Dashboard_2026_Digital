@@ -92,6 +92,24 @@ const { data } = await supabase.from('sync_runs').select('ran_at, ok, message').
 return data && data.length ? (data[0] as SyncStatus) : null
 }
 
+// ---- On-demand sense-check trigger (dashboard button) ----
+// Queues a scan request; the serverless hourly runner claims and processes it
+// (and it also runs every hour on its own). Rapid repeats coalesce server-side.
+export interface ScanRequest { id: number; status: string; requested_at?: string; finished_at?: string; note?: string }
+export async function requestScan(by?: string): Promise<ScanRequest | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('request_scan', { p_by: by ?? null })
+  if (error) return null
+  const row = Array.isArray(data) ? data[0] : data
+  return (row as ScanRequest) || null
+}
+export async function getLatestScanRequest(): Promise<ScanRequest | null> {
+  if (!supabase) return null
+  const { data } = await supabase.rpc('latest_scan_request')
+  const row = Array.isArray(data) ? data[0] : data
+  return (row as ScanRequest) || null
+}
+
 const isOpenQuote = (s?: string) => {
 const v = (s || '').trim().toLowerCase()
 // Open pipeline = shared / awaiting details / awaiting approval. Confirmed = won,
