@@ -279,6 +279,51 @@ export async function getBookingsFull(): Promise<BookingRow[]> { return (await r
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
 export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
 
+// ---- Critical escalations (customer-side major negative feedback) ----
+// These are the client-triggered red flags: any email_signal currently tagged
+// sentiment = 'Negative'. Because the sense-check UPDATES a thread's signal when
+// it resolves (Negative -> Neutral/Positive), this list self-clears — only live
+// negatives show. A row can also be hand-dismissed (escalation_dismissals) when
+// it was flagged but isn't actually major; that hides it without touching the
+// underlying signal other pages rely on. geo is joined from the client record.
+export interface CriticalEscalation {
+  id: number; thread_id?: string; company_name?: string; client_email?: string
+  signal_type?: string; sentiment?: string; summary?: string; source_subject?: string
+  source_sender?: string; source_date?: string; geo?: string
+}
+const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
+  if (!supabase) return []
+  const [sigRes, disRes, clients] = await Promise.all([
+    supabase.from('email_signals').select('id, thread_id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_sender, source_date').ilike('sentiment', 'negative').order('source_date', { ascending: false }),
+    supabase.from('escalation_dismissals').select('thread_id'),
+    getClients(),
+  ])
+  const sigs = (sigRes.data as CriticalEscalation[]) || []
+  const dismissed = new Set(((disRes.data as { thread_id: string }[]) || []).map(d => d.thread_id))
+  // geo lookup: exact normalised name, with a prefix fallback for close matches
+  const geoBy = new Map<string, string>()
+  for (const c of clients) { const k = ckey(c.company_name); if (k && c.geo) geoBy.set(k, c.geo) }
+  const geoFor = (name?: string): string => {
+    const k = ckey(name); if (!k) return ''
+    if (geoBy.has(k)) return geoBy.get(k) as string
+    for (const [ck, g] of geoBy) { if (ck.length >= 4 && (ck.startsWith(k) || k.startsWith(ck))) return g }
+    return ''
+  }
+  return sigs.filter(s => !s.thread_id || !dismissed.has(s.thread_id)).map(s => ({ ...s, geo: geoFor(s.company_name) }))
+}
+// Hide a wrongly-flagged escalation (soft, reversible). Returns true on success.
+export async function dismissEscalation(threadId: string, opts?: { company?: string; actor?: string; reason?: string }): Promise<boolean> {
+  if (!supabase || !threadId) return false
+  const { error } = await supabase.rpc('dismiss_escalation', { p_thread_id: threadId, p_company: opts?.company ?? null, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null })
+  return !error
+}
+export async function restoreEscalation(threadId: string): Promise<boolean> {
+  if (!supabase || !threadId) return false
+  const { error } = await supabase.rpc('restore_escalation', { p_thread_id: threadId })
+  return !error
+}
+
 export interface Quote { id: number; quote_id?: string; added_date?: string; agency?: string; usd_value?: number; status?: string; business_type?: string; geo?: string; sales_person?: string; confirmed_in_days?: number; technology?: string; client_email?: string }
 export interface QuoteConversion { id: number; company_name?: string; outcome?: string; lost_reason?: string; amount_usd?: number; decided_at?: string }
 export interface SqlLead { id: number; month?: string; year?: number; venture?: string; industry?: string; persona?: string; company_name?: string; prospect_region?: string; assigned_to?: string; lead_date?: string }
