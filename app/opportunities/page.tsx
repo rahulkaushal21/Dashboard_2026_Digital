@@ -43,7 +43,7 @@ case 'type': return x.is_new_client ? 'New' : 'Repeat'
 case 'owner': return (x.sales_person || '').toLowerCase()
 case 'geo': return x.geo || ''
 case 'tech': return (x.technology || '').toLowerCase()
-case 'date': return x.source_date || ''
+case 'date': return x.first_date || x.source_date || ''
 case 'flag': return x.flag ? 0 : 1
 }
 }
@@ -175,7 +175,7 @@ return (
 <td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
 <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
-<td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || '').slice(0, 10)}</td>
+<td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.first_date || x.source_date || '').slice(0, 10)}</td>
 <td className="px-4 py-3">{x.flag ? <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title={x.flag}>⚠ Review</span> : <span className="text-xs text-mav-muted">—</span>}</td>
 </tr>
 )
@@ -240,7 +240,7 @@ return (
 <div><div className="text-xs text-mav-muted">Type</div>{sel.is_new_client ? 'New' : 'Repeat'}</div>
 <div><div className="text-xs text-mav-muted">RFQ / quote status</div><span className={`text-xs px-2 py-1 rounded-full ${badge(sel.rfq_status)}`}>{sel.status || sel.rfq_status || (sel.rfq ? 'RFQ' : '—')}</span></div>
 <div><div className="text-xs text-mav-muted">GEO</div>{sel.geo || '—'}</div>
-<div><div className="text-xs text-mav-muted">Date</div>{(sel.source_date || '').slice(0, 10) || '—'}</div>
+<div><div className="text-xs text-mav-muted">Date</div>{(sel.first_date || sel.source_date || '').slice(0, 10) || '—'}</div>
 <div className="col-span-2"><div className="text-xs text-mav-muted">{sel.quote_ref ? 'Quote / subject' : 'Subject'}</div>{sel.source_subject || '—'}</div>
 </div>
 </aside>

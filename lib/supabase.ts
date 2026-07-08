@@ -16,7 +16,7 @@ website?: string; ai_focus?: boolean; industry_note?: string
 export interface Opportunity {
 id: number; company_name?: string; is_new_client?: boolean; rfq?: boolean
 rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
-source_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
+source_date?: string; first_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
 gist?: string; win_probability?: number; win_reason?: string; company_note?: string
 won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]
 value?: number; technology?: string; service?: string; journey?: string; quote_ref?: string
@@ -191,6 +191,7 @@ geo: q.geo,
 sales_person: q.sales_person,
 source_subject: q.quote_id,
 source_date: q.added_date,
+first_date: q.added_date,
 quote_date: q.added_date,
 summary: won ? `Confirmed · $${(wonAmt || 0).toLocaleString()}` : `Quote: ${q.status}${usd}`,
 source: 'spreadsheet',
@@ -211,6 +212,9 @@ const pick = <T,>(a: T | undefined, b: T | undefined) => (a !== undefined && a !
 // LATEST one, not whichever merged first — otherwise an old quote can drag the row
 // out of the dashboard's date window and hide it entirely).
 const maxDate = (a?: string, b?: string) => ((a || '') > (b || '') ? a : b)
+// Earliest of two dates (ignoring blanks) — used to anchor the row to its FIRST
+// quote/opportunity date so the shown date never creeps forward on new emails.
+const minDate = (a?: string, b?: string) => (a && b ? (a < b ? a : b) : (a || b))
 const m = new Map<string, Opportunity & { sources: string[] }>()
 for (const x of [...emailOpps, ...quoteOpps]) {
 const key = norm(x.company_name) || ('id:' + x.id)
@@ -252,6 +256,8 @@ service: pick(cur.service, x.service),
 quote_ref: pick(cur.quote_ref, x.quote_ref),
 journey: pick(cur.journey, x.journey),
 quote_date: maxDate(cur.quote_date, x.quote_date),
+// anchor to the EARLIEST first_date across every merged source
+first_date: minDate(cur.first_date, x.first_date),
 }
 // Use spreadsheet data as canonical source of truth (clean normalized name)
 const canonicalName = x.source === 'spreadsheet' ? x.company_name : cur.company_name
@@ -271,6 +277,10 @@ o.geo = geo3(o.geo)
 // latest follow-up email. A newer email may win the merge for its richer content,
 // but the date must stay anchored to when the quote was shared.
 if (o.quote_date) o.source_date = maxDate(o.source_date, o.quote_date)
+// The DISPLAYED date is the FIRST quote/opportunity date and never drifts as new
+// emails land. source_date stays "latest activity" so active opps keep passing the
+// date-range filter and don't vanish from the dashboard window.
+o.first_date = o.first_date || o.quote_date || o.source_date
 const key = norm(o.company_name)
 const inRevenue = revenueSet.has(key)
 // Repeat = already in the revenue sheet, or the scan already saw them as an existing client
