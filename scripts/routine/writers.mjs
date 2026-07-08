@@ -51,11 +51,23 @@ export const writeBookings     = (r) => upsert('bookings', r, 'src_row_hash')
 export const writeQuotes       = (r) => upsert('quotes', r, 'src_row_hash')
 export const writeSqlLeads      = (r) => upsert('sql_leads', r, 'src_row_hash')
 export const writeOpportunities = (r) => upsert('opportunities', r, 'thread_id')
+// writeFeedback: a Positive row here (nature='Positive') AUTOMATICALLY appears on the
+// dashboard's "Delights" tab — no separate write needed. Just record positive client
+// feedback as usual and it shows up.
 export const writeFeedback      = (r) => upsert('feedback', r, 'thread_id')
 export const writeEscalations   = (r) => upsert('escalations', r, 'thread_id')
 export const writeQuoteConversions = (r) => upsert('quote_conversions', r, 'thread_id')
 // Per-email sentiment signal for any client-facing message with a discernible
 // tone (not just explicit feedback). Deduped on thread_id.
+//
+// AUTOMATIC DASHBOARD RECORDS (no extra writes required — a DB trigger + live views
+// keep them in sync from THIS single write):
+//  • sentiment 'Negative' OR 'At Risk'  -> captured once into public.critical_escalations
+//    and KEPT (powers the "Critical Escalations" tab; grouped one-row-per-client). It
+//    never auto-clears — a human marks it Fixed/Positive in the UI. Later positive
+//    updates to the same thread just refresh its "latest update".
+//  • sentiment 'Positive'               -> surfaces on the "Delights" tab.
+// So: classify sentiment accurately and the two tabs maintain themselves every scan.
 export const writeEmailSignals  = (r) => upsert('email_signals', r, 'thread_id')
 
 // Rebuild the derived clients table from the synced tabs.
