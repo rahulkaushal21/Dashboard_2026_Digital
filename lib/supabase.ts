@@ -288,51 +288,119 @@ export async function getEmailSignals(): Promise<EmailSignal[]> { return (await 
 // negative insight; `latest_*` is joined live from the thread's current signal so
 // the resolution is visible. geo is joined from the client record. A row can be
 // Removed (dismissed) only by a human, for genuine false-positives.
+// One underlying escalation thread for a client.
+export interface EscalationItem {
+  thread_id: string; signal_type?: string; escalation_summary?: string; source_subject?: string
+  client_email?: string; first_flagged_date?: string; status?: string; resolution_note?: string
+  resolved_at?: string; resolved_by?: string; latest_summary?: string; latest_sentiment?: string
+}
+// One row PER CLIENT (a client can have several escalation threads — they roll up here).
 export interface CriticalEscalation {
-  thread_id: string; company_name?: string; client_email?: string; signal_type?: string
-  escalation_summary?: string; source_subject?: string; source_sender?: string
-  first_flagged_date?: string; status?: string; resolution_note?: string; resolved_at?: string; resolved_by?: string
-  geo?: string; latest_summary?: string; latest_sentiment?: string; latest_date?: string
+  company_name: string; geo?: string; client_email?: string; signal_type?: string
+  items: EscalationItem[]; threadIds: string[]; count: number
+  status: 'open' | 'resolved'          // open if ANY underlying thread is still open
+  headline?: string                    // most-recent escalation text (the card summary)
+  latest_summary?: string; latest_sentiment?: string
+  first_flagged_date?: string; last_flagged_date?: string; resolved_at?: string; resolved_by?: string
 }
 const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
   if (!supabase) return []
   const [escRes, sigRes, clients] = await Promise.all([
-    supabase.from('critical_escalations').select('thread_id, company_name, client_email, signal_type, escalation_summary, source_subject, source_sender, first_flagged_date, status, resolution_note, resolved_at, resolved_by').eq('dismissed', false).order('first_flagged_date', { ascending: false }),
+    supabase.from('critical_escalations').select('thread_id, company_name, client_email, signal_type, escalation_summary, source_subject, first_flagged_date, status, resolution_note, resolved_at, resolved_by').eq('dismissed', false).order('first_flagged_date', { ascending: false }),
     supabase.from('email_signals').select('thread_id, summary, sentiment, source_date'),
     getClients(),
   ])
-  const escs = (escRes.data as CriticalEscalation[]) || []
-  // latest signal per thread (email_signals.thread_id is unique) — the current state
+  const rows = (escRes.data as (EscalationItem & { company_name?: string })[]) || []
   const latest = new Map<string, { summary?: string; sentiment?: string; source_date?: string }>()
   for (const s of (sigRes.data as { thread_id: string; summary?: string; sentiment?: string; source_date?: string }[]) || []) if (s.thread_id) latest.set(s.thread_id, s)
-  // geo lookup: exact normalised name, with a prefix fallback for close matches
   const geoBy = new Map<string, string>()
   for (const c of clients) { const k = ckey(c.company_name); if (k && c.geo) geoBy.set(k, c.geo) }
   const geoFor = (name?: string): string => {
     const k = ckey(name); if (!k) return ''
     if (geoBy.has(k)) return geoBy.get(k) as string
-    for (const [ck, g] of geoBy) { if (ck.length >= 4 && (ck.startsWith(k) || k.startsWith(ck))) return g }
+    for (const [gk, g] of geoBy) { if (gk.length >= 4 && (gk.startsWith(k) || k.startsWith(gk))) return g }
     return ''
   }
-  return escs.map(e => { const l = latest.get(e.thread_id); return { ...e, geo: geoFor(e.company_name), latest_summary: l?.summary, latest_sentiment: l?.sentiment, latest_date: l?.source_date } })
+  // group by canonical client key (merges "Growth Funnels"/"GrowthFunnels", ZULU 8's many threads, etc.)
+  const groups = new Map<string, CriticalEscalation>()
+  for (const r of rows) {
+    const key = ckey(r.company_name) || r.thread_id
+    const l = latest.get(r.thread_id)
+    const item: EscalationItem = { thread_id: r.thread_id, signal_type: r.signal_type, escalation_summary: r.escalation_summary, source_subject: r.source_subject, client_email: r.client_email, first_flagged_date: r.first_flagged_date, status: r.status, resolution_note: r.resolution_note, resolved_at: r.resolved_at, resolved_by: r.resolved_by, latest_summary: l?.summary, latest_sentiment: l?.sentiment }
+    const g = groups.get(key)
+    if (!g) {
+      groups.set(key, { company_name: r.company_name || '(unknown client)', geo: geoFor(r.company_name), client_email: r.client_email, signal_type: r.signal_type, items: [item], threadIds: [r.thread_id], count: 1, status: r.status === 'open' ? 'open' : 'resolved', headline: r.escalation_summary, latest_summary: l?.summary, latest_sentiment: l?.sentiment, first_flagged_date: r.first_flagged_date, last_flagged_date: r.first_flagged_date, resolved_at: r.resolved_at, resolved_by: r.resolved_by })
+    } else {
+      g.items.push(item); g.threadIds.push(r.thread_id); g.count++
+      if (r.status === 'open') g.status = 'open'
+      // rows arrive newest-first, so the first seen is the headline; track the date span
+      if ((r.first_flagged_date || '') < (g.first_flagged_date || '')) g.first_flagged_date = r.first_flagged_date
+      if ((r.first_flagged_date || '') > (g.last_flagged_date || '')) g.last_flagged_date = r.first_flagged_date
+    }
+  }
+  // sort: open clients first, then by most-recent activity
+  return [...groups.values()].sort((a, b) => (a.status === b.status ? (b.last_flagged_date || '').localeCompare(a.last_flagged_date || '') : a.status === 'open' ? -1 : 1))
 }
-// Manually mark an escalation's status. It STAYS in the list either way. status: 'open' | 'fixed' | 'positive'.
-export async function markEscalationStatus(threadId: string, status: 'open' | 'fixed' | 'positive', opts?: { actor?: string; note?: string }): Promise<boolean> {
-  if (!supabase || !threadId) return false
-  const { error } = await supabase.rpc('mark_escalation_status', { p_thread_id: threadId, p_status: status, p_actor: opts?.actor ?? null, p_note: opts?.note ?? null })
+// Mark ALL of a client's escalation threads. status: 'open' | 'fixed' | 'positive'. They stay in the list.
+export async function markEscalationStatus(threadIds: string[], status: 'open' | 'fixed' | 'positive', opts?: { actor?: string; note?: string }): Promise<boolean> {
+  if (!supabase || !threadIds.length) return false
+  const { error } = await supabase.rpc('mark_escalations_status', { p_thread_ids: threadIds, p_status: status, p_actor: opts?.actor ?? null, p_note: opts?.note ?? null })
   return !error
 }
-// Remove a wrongly-flagged escalation (false-positive / not actually major). Reversible.
-export async function dismissEscalation(threadId: string, opts?: { company?: string; actor?: string; reason?: string }): Promise<boolean> {
-  if (!supabase || !threadId) return false
-  const { error } = await supabase.rpc('dismiss_escalation', { p_thread_id: threadId, p_company: opts?.company ?? null, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null })
+// Remove a client's escalations (false-positive / not actually major). Reversible.
+export async function dismissEscalation(threadIds: string[], opts?: { actor?: string; reason?: string }): Promise<boolean> {
+  if (!supabase || !threadIds.length) return false
+  const { error } = await supabase.rpc('dismiss_escalations', { p_thread_ids: threadIds, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null })
   return !error
 }
-export async function restoreEscalation(threadId: string): Promise<boolean> {
-  if (!supabase || !threadId) return false
-  const { error } = await supabase.rpc('restore_escalation', { p_thread_id: threadId })
-  return !error
+
+// ---- Delights (clients who shared genuinely happy feedback over email) ----
+// A live showcase of positive client sentiment: formal positive feedback rows
+// (feedback.nature = 'Positive', e.g. Tanium) plus praise captured from client
+// emails (email_signals.sentiment = 'Positive'). One row per client, newest first.
+export interface Delight {
+  company_name: string; geo?: string; quote?: string; source?: string; date?: string
+  count: number; client_email?: string
+}
+export async function getDelights(): Promise<Delight[]> {
+  if (!supabase) return []
+  const [fbRes, sigRes, clients] = await Promise.all([
+    supabase.from('feedback').select('agency, nature, feedback_type, geo, comments, added_date').ilike('nature', 'positive'),
+    supabase.from('email_signals').select('company_name, client_email, sentiment, summary, source_subject, source_date').ilike('sentiment', 'positive'),
+    getClients(),
+  ])
+  const geoBy = new Map<string, string>()
+  for (const c of clients) { const k = ckey(c.company_name); if (k && c.geo) geoBy.set(k, c.geo) }
+  const geoFor = (name?: string, fallback?: string): string => {
+    const k = ckey(name)
+    if (k && geoBy.has(k)) return geoBy.get(k) as string
+    for (const [gk, g] of geoBy) { if (k && gk.length >= 4 && (gk.startsWith(k) || k.startsWith(gk))) return g }
+    return fallback || ''
+  }
+  type Raw = { name?: string; geo?: string; quote?: string; source?: string; date?: string; email?: string }
+  const raw: Raw[] = []
+  for (const f of (fbRes.data as { agency?: string; feedback_type?: string; geo?: string; comments?: string; added_date?: string }[]) || [])
+    raw.push({ name: f.agency, geo: geoFor(f.agency, f.geo), quote: f.comments || undefined, source: f.feedback_type ? `Feedback · ${f.feedback_type}` : 'Feedback', date: f.added_date })
+  for (const s of (sigRes.data as { company_name?: string; client_email?: string; summary?: string; source_subject?: string; source_date?: string }[]) || [])
+    raw.push({ name: s.company_name, geo: geoFor(s.company_name), quote: s.summary || s.source_subject, source: 'Email praise', date: (s.source_date || '').slice(0, 10), email: s.client_email })
+  // group per client, keep the most recent entry as the headline; prefer one WITH a quote
+  const groups = new Map<string, Delight & { _hasQuote: boolean }>()
+  for (const r of raw) {
+    const key = ckey(r.name); if (!key) continue
+    const g = groups.get(key)
+    const hasQuote = !!(r.quote && r.quote.trim())
+    if (!g) { groups.set(key, { company_name: r.name || '', geo: r.geo, quote: r.quote, source: r.source, date: r.date, count: 1, client_email: r.email, _hasQuote: hasQuote }) }
+    else {
+      g.count++
+      if (!g.client_email && r.email) g.client_email = r.email
+      if (!g.geo && r.geo) g.geo = r.geo
+      // pick the freshest entry, preferring one that actually has a quote
+      const newer = (r.date || '') > (g.date || '')
+      if ((hasQuote && !g._hasQuote) || (hasQuote === g._hasQuote && newer)) { g.quote = r.quote; g.source = r.source; g.date = r.date; g._hasQuote = hasQuote }
+    }
+  }
+  return [...groups.values()].map(({ _hasQuote, ...d }) => d).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
 export interface Quote { id: number; quote_id?: string; added_date?: string; agency?: string; usd_value?: number; status?: string; business_type?: string; geo?: string; sales_person?: string; confirmed_in_days?: number; technology?: string; client_email?: string }

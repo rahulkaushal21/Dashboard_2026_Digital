@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Target, TrendingUp, History, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, History, Settings, LogOut } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
@@ -11,6 +11,7 @@ const nav = [
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/escalations', label: 'Escalations', icon: AlertTriangle },
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
+  { href: '/delights', label: 'Delights', icon: Sparkles },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
   { href: '/last-year', label: 'Last Year Review', icon: History },
