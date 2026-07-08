@@ -203,6 +203,14 @@ is clear.
   (Functional|Technical), escalation_type, business_impact (Low|Medium|High),
   email_subject, evidence (quote the exact triggering line). Dedup on thread_id.
   Flag any company with >3 in a quarter for the alert.
+  CRITICAL-ESCALATIONS TAB (customer-side, persistent): every email_signals row you
+  write with sentiment='Negative' is AUTO-CAPTURED (DB trigger) into
+  public.critical_escalations and KEPT there permanently — it powers the dashboard's
+  "Critical Escalations" tab. Do NOT delete or auto-resolve these. When a client later
+  turns positive, just UPDATE that thread's email_signals row as usual (flip its
+  sentiment + refresh the summary) — the escalation row stays put and shows your latest
+  summary as the "current update"; the USER manually marks it Fixed/Positive from the UI.
+  So: keep signals accurate and current; never mark critical_escalations status yourself.
   COLUMN HYGIENE: `company_name` = the canonical client name; `geo` = a REAL geo
   code (US|UK|AU), NEVER the company name. (The Clients page links escalations by
   company_name; putting the name in geo also corrupts the Escalations page's GEO

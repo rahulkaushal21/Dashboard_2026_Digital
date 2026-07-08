@@ -1,75 +1,89 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getCriticalEscalations, dismissEscalation, type CriticalEscalation } from '@/lib/supabase'
+import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const day = (s?: string) => (s || '').slice(0, 10)
-const kindTone = (t?: string) => {
-  const v = (t || '').toLowerCase()
-  if (/complaint|churn/.test(v)) return 'bg-red-500/20 text-red-300'
-  if (/risk|escalat/.test(v)) return 'bg-orange-500/20 text-orange-300'
-  return 'bg-mav-line text-mav-muted'
-}
-const kindLabel = (t?: string) => {
-  const v = (t || '').toLowerCase()
-  if (/complaint/.test(v)) return 'Complaint'
-  if (/churn/.test(v)) return 'Churn risk'
-  if (/risk|escalat/.test(v)) return 'At risk'
-  return t || 'Negative'
-}
+const isResolved = (r: CriticalEscalation) => r.status === 'fixed' || r.status === 'positive'
+const sentBucket = (s?: string) => { const v = (s || '').toLowerCase(); if (/posit|happy|great|delight/.test(v)) return 'Positive'; if (/negat|risk|churn|frustrat/.test(v)) return 'Negative'; if (/neutral|stable|mixed/.test(v)) return 'Neutral'; return '' }
+
+const statusChip = (r: CriticalEscalation) =>
+  r.status === 'fixed' ? { c: 'bg-green-500/20 text-green-300', t: '✓ Fixed' }
+  : r.status === 'positive' ? { c: 'bg-green-500/20 text-green-300', t: '★ Positive' }
+  : { c: 'bg-red-500/20 text-red-300', t: '● Open' }
+const kindTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/complaint|churn/.test(v)) return 'bg-red-500/15 text-red-400'; if (/risk|escalat/.test(v)) return 'bg-orange-500/15 text-orange-300'; return 'bg-mav-line text-mav-muted' }
+const kindLabel = (t?: string) => { const v = (t || '').toLowerCase(); if (/complaint/.test(v)) return 'Complaint'; if (/churn/.test(v)) return 'Churn risk'; if (/risk|escalat/.test(v)) return 'At risk'; return t || 'Negative' }
 
 export default function CriticalEscalations() {
   const [rows, setRows] = useState<CriticalEscalation[]>([])
   const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState(''); const [geo, setGeo] = useState('')
+  const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('all')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<CriticalEscalation | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
   useEffect(() => { getCriticalEscalations().then(r => { setRows(r); setLoading(false) }) }, [])
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSel(null) }
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   const geos = useMemo(() => uniq(rows.map(r => r.geo)), [rows])
+  const openCount = rows.filter(r => !isResolved(r)).length
 
   const filtered = useMemo(() => rows.filter(r => {
+    if (status === 'open' && isResolved(r)) return false
+    if (status === 'resolved' && !isResolved(r)) return false
     if (geo && (r.geo || '') !== geo) return false
-    if (q) { const hay = `${r.company_name || ''} ${r.summary || ''} ${r.source_subject || ''} ${r.client_email || ''}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
-    const d = day(r.source_date)
+    if (q) { const hay = `${r.company_name || ''} ${r.escalation_summary || ''} ${r.resolution_note || ''} ${r.source_subject || ''} ${r.client_email || ''}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
+    const d = day(r.first_flagged_date)
     if (from && (!d || d < from)) return false
     if (to && (!d || d > to)) return false
     return true
-  }), [rows, q, geo, from, to])
+  }), [rows, q, geo, status, from, to])
+
+  const patch = (threadId: string, fields: Partial<CriticalEscalation>) => {
+    setRows(prev => prev.map(x => x.thread_id === threadId ? { ...x, ...fields } : x))
+    setSel(prev => prev && prev.thread_id === threadId ? { ...prev, ...fields } : prev)
+  }
+
+  async function setStatusOf(r: CriticalEscalation, st: 'open' | 'fixed' | 'positive') {
+    setBusy(r.thread_id)
+    const ok = await markEscalationStatus(r.thread_id, st, { actor: currentEmail() || undefined })
+    setBusy(null)
+    if (!ok) { alert('Could not update — please try again.'); return }
+    patch(r.thread_id, { status: st, resolved_at: st === 'open' ? undefined : new Date().toISOString(), resolved_by: st === 'open' ? undefined : (currentEmail() || undefined) })
+  }
 
   async function remove(r: CriticalEscalation) {
-    if (!r.thread_id) { alert('This escalation has no thread reference and can only be resolved by re-classifying the email.'); return }
-    const ok = window.confirm(`Remove this escalation for “${r.company_name || 'client'}”?\n\nUse this when it was flagged but isn't actually a major client escalation (a minor gap). It will be hidden from this list; the underlying email signal is kept.`)
+    const ok = window.confirm(`Remove this escalation for “${r.company_name || 'client'}”?\n\nUse this ONLY when it was flagged but isn't actually a major client escalation (a minor gap / false positive). To mark a real one as resolved, use “Mark fixed / positive” instead — it stays in the list.`)
     if (!ok) return
-    const reason = window.prompt('Optional: why isn\'t this major? (kept for the record)', '') || undefined
+    const reason = window.prompt('Optional: why isn\'t this a real escalation? (kept for the record)', '') || undefined
     setBusy(r.thread_id)
     const done = await dismissEscalation(r.thread_id, { company: r.company_name, actor: currentEmail() || undefined, reason })
     setBusy(null)
     if (!done) { alert('Could not remove it — please try again.'); return }
-    setRows(prev => prev.filter(x => x.thread_id !== r.thread_id))
-    setSel(null)
+    setRows(prev => prev.filter(x => x.thread_id !== r.thread_id)); setSel(null)
   }
 
   return (
     <div>
-      <Header title="Critical Escalations" subtitle="Major negative feedback raised by clients over email — the critical, customer-side red flags. Resolve or re-classify a thread and it drops off automatically." />
+      <Header title="Critical Escalations" subtitle="Major negative feedback raised by clients over email — the critical, customer-side red flags. Escalations stay here even after they're resolved; mark them Fixed or Positive yourself." />
 
       <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-red-300 font-semibold">What this is:</span> live client-triggered escalations — formal complaints, disputes and at-risk warnings pulled straight from customer emails. It updates every 30 minutes. If something here was flagged but isn&rsquo;t genuinely major, use <span className="text-red-300">Remove</span> to drop it (the email signal is preserved).
+        <span className="text-red-300 font-semibold">How this works:</span> every client-triggered escalation is captured automatically and <span className="text-white">kept</span> — it never disappears on its own. When the client comes back positive, the row shows the update; you then click <span className="text-green-300">Mark fixed / positive</span> so the history (&ldquo;was escalated → now solved&rdquo;) stays visible. Use <span className="text-mav-muted">Remove</span> only for a false alarm that wasn&rsquo;t really major.
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client, subject or detail…" className={`${sel} min-w-[220px] flex-1`} />
+        <select value={status} onChange={e => setStatus(e.target.value as 'all' | 'open' | 'resolved')} className={sel}>
+          <option value="all">All statuses</option>
+          <option value="open">● Open only</option>
+          <option value="resolved">✓ Resolved only</option>
+        </select>
         <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}>
           <option value="">All GEOs</option>
           {geos.map(g => <option key={g} value={g}>{g}</option>)}
@@ -78,33 +92,41 @@ export default function CriticalEscalations() {
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo || from || to) && <button onClick={() => { setQ(''); setGeo(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
-        <span className="text-xs text-mav-muted ml-auto">{filtered.length} of {rows.length} shown</span>
+        {(q || geo || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo(''); setFrom(''); setTo(''); setStatus('all') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
+        <span className="text-xs text-mav-muted ml-auto">{filtered.length} shown · {openCount} open</span>
       </div>
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p>
-        : !rows.length ? <div className="rounded-lg border border-mav-line bg-mav-panel px-4 py-10 text-center text-sm text-mav-muted">🎉 No critical client escalations right now — nothing on the customer side is flagged negative.</div>
+        : !rows.length ? <div className="rounded-lg border border-mav-line bg-mav-panel px-4 py-10 text-center text-sm text-mav-muted">No client escalations captured yet.</div>
         : !filtered.length ? <p className="text-sm text-mav-muted">No escalations match these filters.</p>
         : (
         <div className="space-y-2">
-          {filtered.map(r => (
-            <div key={r.id} className="rounded-lg border border-red-500/25 bg-red-500/[0.04] hover:bg-red-500/[0.08] transition-colors px-4 py-3 flex items-start gap-3">
-              <span className="mt-1.5 inline-block w-2.5 h-2.5 rounded-full bg-red-500 shrink-0" />
+          {filtered.map(r => {
+            const sc = statusChip(r); const turnedPositive = !isResolved(r) && sentBucket(r.latest_sentiment) === 'Positive'
+            return (
+            <div key={r.thread_id} className={`rounded-lg border px-4 py-3 flex items-start gap-3 transition-colors ${isResolved(r) ? 'border-mav-line bg-mav-panel hover:bg-mav-line/20' : 'border-red-500/25 bg-red-500/[0.04] hover:bg-red-500/[0.08]'}`}>
+              <span className={`mt-1.5 inline-block w-2.5 h-2.5 rounded-full shrink-0 ${isResolved(r) ? 'bg-green-500' : 'bg-red-500'}`} />
               <button onClick={() => setSel(r)} className="text-left flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold">{r.company_name || '(unknown client)'}</span>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${sc.c}`}>{sc.t}</span>
                   <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${kindTone(r.signal_type)}`}>{kindLabel(r.signal_type)}</span>
                   {r.geo && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-mav-line text-mav-muted">{r.geo}</span>}
-                  {r.source_date && <span className="text-[11px] text-mav-muted">{day(r.source_date)}</span>}
+                  {r.first_flagged_date && <span className="text-[11px] text-mav-muted">{day(r.first_flagged_date)}</span>}
+                  {turnedPositive && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">client now positive →</span>}
                 </div>
-                <div className="text-sm text-mav-muted mt-1 line-clamp-2">{r.summary || r.source_subject || '(no detail)'}</div>
+                <div className="text-sm text-mav-muted mt-1 line-clamp-2">{r.escalation_summary || r.source_subject || '(no detail)'}</div>
               </button>
-              <button onClick={() => remove(r)} disabled={busy === r.thread_id}
-                className="shrink-0 text-xs px-2.5 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-50">
-                {busy === r.thread_id ? '…' : 'Remove'}
-              </button>
+              <div className="shrink-0 flex flex-col gap-1">
+                {!isResolved(r)
+                  ? <>
+                      <button onClick={() => setStatusOf(r, 'fixed')} disabled={busy === r.thread_id} className="text-xs px-2.5 py-1 rounded-md border border-green-500/40 text-green-300 hover:bg-green-500/10 disabled:opacity-50">Mark fixed</button>
+                      <button onClick={() => setStatusOf(r, 'positive')} disabled={busy === r.thread_id} className="text-xs px-2.5 py-1 rounded-md border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50">Positive</button>
+                    </>
+                  : <button onClick={() => setStatusOf(r, 'open')} disabled={busy === r.thread_id} className="text-xs px-2.5 py-1 rounded-md border border-mav-line text-mav-muted hover:text-orange-300 disabled:opacity-50">Reopen</button>}
+              </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
 
@@ -115,36 +137,59 @@ export default function CriticalEscalations() {
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${isResolved(sel_) ? 'bg-green-500' : 'bg-red-500'}`} />
                   <h2 className="text-xl font-semibold">{sel_.company_name || '(unknown client)'}</h2>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
+                  <span className={`text-xs px-2 py-1 rounded-full ${statusChip(sel_).c}`}>{statusChip(sel_).t}</span>
                   <span className={`text-xs px-2 py-1 rounded-full ${kindTone(sel_.signal_type)}`}>{kindLabel(sel_.signal_type)}</span>
                   {sel_.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.geo}</span>}
-                  {sel_.source_date && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{day(sel_.source_date)}</span>}
+                  {sel_.first_flagged_date && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{day(sel_.first_flagged_date)}</span>}
                 </div>
               </div>
               <button onClick={() => setSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
             </div>
 
             <div className="mb-5">
-              <div className="text-xs uppercase tracking-wide text-mav-muted mb-1">What happened — client escalation</div>
-              <p className="text-sm leading-relaxed whitespace-pre-line">{sel_.summary || '(no detail recorded)'}</p>
+              <div className="text-xs uppercase tracking-wide text-red-300/80 mb-1">What happened — the escalation</div>
+              <p className="text-sm leading-relaxed whitespace-pre-line">{sel_.escalation_summary || '(no detail recorded)'}</p>
             </div>
+
+            {sel_.latest_summary && sel_.latest_summary !== sel_.escalation_summary && (
+              <div className="mb-5">
+                <div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Latest update {sentBucket(sel_.latest_sentiment) && <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${sentBucket(sel_.latest_sentiment) === 'Positive' ? 'bg-green-500/15 text-green-400' : sentBucket(sel_.latest_sentiment) === 'Negative' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>{sentBucket(sel_.latest_sentiment)}</span>}</div>
+                <p className="text-sm leading-relaxed whitespace-pre-line text-mav-muted">{sel_.latest_summary}</p>
+              </div>
+            )}
+
+            {sel_.resolution_note && (
+              <div className="mb-5">
+                <div className="text-xs uppercase tracking-wide text-green-300/80 mb-1">Resolution note</div>
+                <p className="text-sm leading-relaxed whitespace-pre-line text-mav-muted">{sel_.resolution_note}</p>
+              </div>
+            )}
 
             <div className="border-t border-mav-line pt-4 grid grid-cols-1 gap-y-3 text-sm">
               {sel_.source_subject && <div><div className="text-xs text-mav-muted">Email subject</div>{sel_.source_subject}</div>}
               {sel_.client_email && <div><div className="text-xs text-mav-muted">Raised by</div>{sel_.client_email}</div>}
               <div><div className="text-xs text-mav-muted">GEO</div>{sel_.geo || '—'}</div>
-              <div><div className="text-xs text-mav-muted">Date</div>{day(sel_.source_date) || '—'}</div>
+              <div><div className="text-xs text-mav-muted">First flagged</div>{day(sel_.first_flagged_date) || '—'}</div>
+              {isResolved(sel_) && sel_.resolved_at && <div><div className="text-xs text-mav-muted">Resolved</div>{day(sel_.resolved_at)}{sel_.resolved_by ? ` · ${sel_.resolved_by}` : ''}</div>}
             </div>
 
-            <div className="mt-6 border-t border-mav-line pt-4">
-              <p className="text-xs text-mav-muted mb-2">Flagged but not actually a major client escalation? Remove it from this list — the underlying email signal is preserved.</p>
-              <button onClick={() => remove(sel_)} disabled={busy === sel_.thread_id}
-                className="text-sm px-3 py-2 rounded-md border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-50">
-                {busy === sel_.thread_id ? 'Removing…' : '✕ Remove escalation'}
-              </button>
+            <div className="mt-6 border-t border-mav-line pt-4 space-y-3">
+              {!isResolved(sel_) ? (
+                <div className="flex gap-2">
+                  <button onClick={() => setStatusOf(sel_, 'fixed')} disabled={busy === sel_.thread_id} className="text-sm px-3 py-2 rounded-md border border-green-500/40 text-green-300 hover:bg-green-500/10 disabled:opacity-50">✓ Mark fixed</button>
+                  <button onClick={() => setStatusOf(sel_, 'positive')} disabled={busy === sel_.thread_id} className="text-sm px-3 py-2 rounded-md border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50">★ Mark positive</button>
+                </div>
+              ) : (
+                <button onClick={() => setStatusOf(sel_, 'open')} disabled={busy === sel_.thread_id} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-orange-300 disabled:opacity-50">↺ Reopen escalation</button>
+              )}
+              <div>
+                <p className="text-xs text-mav-muted mb-2">Flagged by mistake — not actually a major escalation? Remove it (kept out of the list; the email signal is preserved).</p>
+                <button onClick={() => remove(sel_)} disabled={busy === sel_.thread_id} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-50">✕ Remove (false alarm)</button>
+              </div>
             </div>
           </aside>
         </div>

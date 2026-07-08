@@ -280,27 +280,32 @@ export async function getFeedback(): Promise<Feedback[]> { return (await read<Fe
 export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
 
 // ---- Critical escalations (customer-side major negative feedback) ----
-// These are the client-triggered red flags: any email_signal currently tagged
-// sentiment = 'Negative'. Because the sense-check UPDATES a thread's signal when
-// it resolves (Negative -> Neutral/Positive), this list self-clears — only live
-// negatives show. A row can also be hand-dismissed (escalation_dismissals) when
-// it was flagged but isn't actually major; that hides it without touching the
-// underlying signal other pages rely on. geo is joined from the client record.
+// A PERSISTENT record of client-triggered red flags. A DB trigger captures every
+// email_signal that turns sentiment='Negative' into critical_escalations ONCE and
+// keeps it — so when the client later goes positive the escalation does NOT drop
+// off; it stays in the list to be manually marked Fixed/Positive, preserving the
+// "was escalated → now solved" story. The row's `escalation_summary` is the original
+// negative insight; `latest_*` is joined live from the thread's current signal so
+// the resolution is visible. geo is joined from the client record. A row can be
+// Removed (dismissed) only by a human, for genuine false-positives.
 export interface CriticalEscalation {
-  id: number; thread_id?: string; company_name?: string; client_email?: string
-  signal_type?: string; sentiment?: string; summary?: string; source_subject?: string
-  source_sender?: string; source_date?: string; geo?: string
+  thread_id: string; company_name?: string; client_email?: string; signal_type?: string
+  escalation_summary?: string; source_subject?: string; source_sender?: string
+  first_flagged_date?: string; status?: string; resolution_note?: string; resolved_at?: string; resolved_by?: string
+  geo?: string; latest_summary?: string; latest_sentiment?: string; latest_date?: string
 }
 const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
   if (!supabase) return []
-  const [sigRes, disRes, clients] = await Promise.all([
-    supabase.from('email_signals').select('id, thread_id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_sender, source_date').ilike('sentiment', 'negative').order('source_date', { ascending: false }),
-    supabase.from('escalation_dismissals').select('thread_id'),
+  const [escRes, sigRes, clients] = await Promise.all([
+    supabase.from('critical_escalations').select('thread_id, company_name, client_email, signal_type, escalation_summary, source_subject, source_sender, first_flagged_date, status, resolution_note, resolved_at, resolved_by').eq('dismissed', false).order('first_flagged_date', { ascending: false }),
+    supabase.from('email_signals').select('thread_id, summary, sentiment, source_date'),
     getClients(),
   ])
-  const sigs = (sigRes.data as CriticalEscalation[]) || []
-  const dismissed = new Set(((disRes.data as { thread_id: string }[]) || []).map(d => d.thread_id))
+  const escs = (escRes.data as CriticalEscalation[]) || []
+  // latest signal per thread (email_signals.thread_id is unique) — the current state
+  const latest = new Map<string, { summary?: string; sentiment?: string; source_date?: string }>()
+  for (const s of (sigRes.data as { thread_id: string; summary?: string; sentiment?: string; source_date?: string }[]) || []) if (s.thread_id) latest.set(s.thread_id, s)
   // geo lookup: exact normalised name, with a prefix fallback for close matches
   const geoBy = new Map<string, string>()
   for (const c of clients) { const k = ckey(c.company_name); if (k && c.geo) geoBy.set(k, c.geo) }
@@ -310,9 +315,15 @@ export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
     for (const [ck, g] of geoBy) { if (ck.length >= 4 && (ck.startsWith(k) || k.startsWith(ck))) return g }
     return ''
   }
-  return sigs.filter(s => !s.thread_id || !dismissed.has(s.thread_id)).map(s => ({ ...s, geo: geoFor(s.company_name) }))
+  return escs.map(e => { const l = latest.get(e.thread_id); return { ...e, geo: geoFor(e.company_name), latest_summary: l?.summary, latest_sentiment: l?.sentiment, latest_date: l?.source_date } })
 }
-// Hide a wrongly-flagged escalation (soft, reversible). Returns true on success.
+// Manually mark an escalation's status. It STAYS in the list either way. status: 'open' | 'fixed' | 'positive'.
+export async function markEscalationStatus(threadId: string, status: 'open' | 'fixed' | 'positive', opts?: { actor?: string; note?: string }): Promise<boolean> {
+  if (!supabase || !threadId) return false
+  const { error } = await supabase.rpc('mark_escalation_status', { p_thread_id: threadId, p_status: status, p_actor: opts?.actor ?? null, p_note: opts?.note ?? null })
+  return !error
+}
+// Remove a wrongly-flagged escalation (false-positive / not actually major). Reversible.
 export async function dismissEscalation(threadId: string, opts?: { company?: string; actor?: string; reason?: string }): Promise<boolean> {
   if (!supabase || !threadId) return false
   const { error } = await supabase.rpc('dismiss_escalation', { p_thread_id: threadId, p_company: opts?.company ?? null, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null })
