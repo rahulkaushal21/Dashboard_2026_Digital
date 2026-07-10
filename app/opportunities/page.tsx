@@ -5,6 +5,10 @@ import KPICard from '@/components/KPICard'
 import { getOpportunities, serviceOf, type Opportunity } from '@/lib/supabase'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
+// Owner cells can hold several names ("Rahul Kaushal, Maitri Shah"); split so each
+// individual AM/PM is its own selectable dropdown option and filters by "contains".
+const splitNames = (s?: string) => (s || '').split(/[,/&]/).map(x => x.trim()).filter(Boolean)
+const uniqNames = (arr: (string | undefined)[]) => Array.from(new Set(arr.flatMap(splitNames))).sort((a, b) => a.localeCompare(b))
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const badge = (s?: string) => {
 const map: Record<string, string> = { pending: 'bg-amber-500/15 text-amber-400', received: 'bg-blue-500/15 text-blue-400', quoted: 'bg-purple-500/15 text-purple-300', won: 'bg-green-500/15 text-green-400', lost: 'bg-red-500/15 text-red-400' }
@@ -29,7 +33,7 @@ const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
 type SortKey = 'company' | 'value' | 'win' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
 { key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
-{ key: 'type', label: 'Type' }, { key: 'owner', label: 'Owner' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
+{ key: 'type', label: 'Type' }, { key: 'owner', label: 'AM / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
 { key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
 ]
 const sortVal = (x: Opportunity, k: SortKey): string | number => {
@@ -58,7 +62,7 @@ return Object.entries(m).sort((a, b) => b[1].value - a[1].value || b[1].count - 
 export default function Opportunities() {
 const [all, setAll] = useState<Opportunity[]>([])
 const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
-const [fOwner, setFOwner] = useState(''); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
+const [fAM, setFAM] = useState(''); const [fPM, setFPM] = useState(''); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
 const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
 const [flagOnly, setFlagOnly] = useState(false)
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
@@ -78,7 +82,8 @@ const rows = all
 .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
 .filter(x => !fType || (x.is_new_client ? 'New' : 'Repeat') === fType)
 .filter(x => !fGeo || (x.geo || '') === fGeo)
-.filter(x => !fOwner || (x.sales_person || '') === fOwner)
+.filter(x => !fAM || splitNames(x.sales_person).includes(fAM))
+.filter(x => !fPM || splitNames(x.pm_owner).includes(fPM))
 .filter(x => !fStatus || oppStatus(x) === fStatus)
 .filter(x => !fSvc || svcOf(x) === fSvc)
 .filter(x => !fTech || (x.technology || '') === fTech)
@@ -90,9 +95,9 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fOwner, fStatus, fSvc, fTech, flagOnly, from, to, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, from, to, sort])
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFOwner(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false) }
+const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false) }
 const flagged = all.filter(x => x.flag).length
 
 // Headline numbers follow the DATE range (independent of the other dropdowns so
@@ -122,7 +127,7 @@ className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-m
 
 return (
 <div>
-<Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PC, GEO) + email-only opportunities — with a brief, next step and % confidence." />
+<Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence." />
 
 <div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).</div>
 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
@@ -146,7 +151,8 @@ return (
 <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>
 <select value={fSvc} onChange={e => setFSvc(e.target.value)} className={selCls}><option value="">All services</option>{uniq(all.map(svcOf)).map(s => <option key={s} value={s}>{s}</option>)}</select>
 <select value={fTech} onChange={e => setFTech(e.target.value)} className={selCls}><option value="">All tech</option>{uniq(all.map(x => x.technology)).map(t => <option key={t} value={t}>{t}</option>)}</select>
-<select value={fOwner} onChange={e => setFOwner(e.target.value)} className={selCls}><option value="">All owners</option>{uniq(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
+<select value={fAM} onChange={e => setFAM(e.target.value)} className={selCls}><option value="">All AMs</option>{uniqNames(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
+<select value={fPM} onChange={e => setFPM(e.target.value)} className={selCls}><option value="">All PMs</option>{uniqNames(all.map(x => x.pm_owner)).map(pm => <option key={pm} value={pm}>{pm}</option>)}</select>
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
 <span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
 <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
@@ -172,7 +178,7 @@ return (
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
-<td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager">AM: {x.sales_person}</span> : '—'}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Coordinator">PC: {x.pm_owner}</div>}</td>
+<td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager (AM / NBD)">AM: {x.sales_person}</span> : <span className="text-mav-muted">AM: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
 <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.first_date || x.source_date || '').slice(0, 10)}</td>
@@ -234,8 +240,8 @@ return (
 {sel.company_note && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Company</div><p className="text-sm leading-relaxed italic text-mav-muted">{sel.company_note}</p></div>}
 
 <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
-<div><div className="text-xs text-mav-muted">AM (account manager)</div>{sel.sales_person || '—'}</div>
-<div><div className="text-xs text-mav-muted">PC (project coordinator)</div>{sel.pm_owner || '—'}</div>
+<div><div className="text-xs text-mav-muted">AM (account manager / NBD)</div>{sel.sales_person || '—'}</div>
+<div><div className="text-xs text-mav-muted">PM (project manager)</div>{sel.pm_owner || '—'}</div>
 <div><div className="text-xs text-mav-muted">Service</div>{svcOf(sel)}</div>
 <div><div className="text-xs text-mav-muted">Technology</div>{sel.technology || '—'}</div>
 <div><div className="text-xs text-mav-muted">Type</div>{sel.is_new_client ? 'New' : 'Repeat'}</div>
