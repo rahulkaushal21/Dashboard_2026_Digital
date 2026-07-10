@@ -122,7 +122,7 @@ className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-m
 
 return (
 <div>
-<Header title="Opportunities" subtitle="Open pipeline + won business — email leads and the sheet Quotes tab, merged. Value, close-likelihood and status in one place." />
+<Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PC, GEO) + email-only opportunities — with a brief, next step and % confidence." />
 
 <div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).</div>
 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
@@ -172,7 +172,7 @@ return (
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
-<td className="px-4 py-3 text-mav-muted">{x.sales_person}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5">PM: {x.pm_owner}</div>}</td>
+<td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager">AM: {x.sales_person}</span> : '—'}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Coordinator">PC: {x.pm_owner}</div>}</td>
 <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.first_date || x.source_date || '').slice(0, 10)}</td>
@@ -229,12 +229,13 @@ return (
     ? <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Brief — what's happening</div><p className="text-sm leading-relaxed whitespace-pre-line">{brief}</p></div>
     : <p className="text-sm text-mav-muted mb-5">No email brief yet for this lead — it comes from an open quote in the sheet.</p>
 })()}
+{sel.next_step && <div className="mb-5 rounded-lg border border-mav-yellow/30 bg-mav-yellow/5 px-3 py-2"><div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">▶ Next step</div><p className="text-sm leading-relaxed">{sel.next_step}</p></div>}
 {sel.journey && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed text-mav-muted whitespace-pre-line">{sel.journey}</p></div>}
 {sel.company_note && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Company</div><p className="text-sm leading-relaxed italic text-mav-muted">{sel.company_note}</p></div>}
 
 <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
-<div><div className="text-xs text-mav-muted">Owner</div>{sel.sales_person || '—'}</div>
-<div><div className="text-xs text-mav-muted">PM looped in</div>{sel.pm_owner || '—'}</div>
+<div><div className="text-xs text-mav-muted">AM (account manager)</div>{sel.sales_person || '—'}</div>
+<div><div className="text-xs text-mav-muted">PC (project coordinator)</div>{sel.pm_owner || '—'}</div>
 <div><div className="text-xs text-mav-muted">Service</div>{svcOf(sel)}</div>
 <div><div className="text-xs text-mav-muted">Technology</div>{sel.technology || '—'}</div>
 <div><div className="text-xs text-mav-muted">Type</div>{sel.is_new_client ? 'New' : 'Repeat'}</div>
