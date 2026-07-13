@@ -33,12 +33,33 @@ Claude does the full pass:
    ```sql
    select sync_quotes_to_opportunities();
    ```
-3. **Read the mailbox + classify** — catch off-sheet opportunities and refresh
-   deal status / % / next-step (Gmail access + reasoning → done by Claude).
-4. **Write the heartbeat** (`email-opportunities-scan`) so the dashboard shows fresh.
+3. **Reconcile across sources** — link the same client across opportunities /
+   sheet quotes / `web_revenue` and pull values through:
+   ```sql
+   select reconcile_opportunities();
+   ```
+   - Runs automatically every :07/:37 (pg_cron `reconcile-opps`).
+   - **Value backfill (safe/auto):** an open, value-less opp inherits its price
+     from the sheet quote of the same client — but only when that client has one
+     unambiguous quote value, so it never guesses between projects.
+   - **Name mismatches:** when a deal is booked/quoted under a different name than
+     the opportunity (e.g. **OHK** booked as **Holloway**), add a row to
+     `opp_aliases (alias, canonical)` so the link is found:
+     ```sql
+     insert into opp_aliases(alias,canonical,note) values ('ohk','holloway','...');
+     ```
+   - **Won-promotion is NOT automated** — repeat clients (e.g. Telfer: $198k booked
+     but 12 genuinely-open new deals) would be wrongly closed. Marking Won is a
+     per-deal judgement made in step 4 by checking `web_revenue` + the sheet against
+     that specific project.
+4. **Read the mailbox + classify + cross-check** — catch off-sheet opportunities,
+   refresh status/%/next-step, and for each active deal check whether it's already
+   **confirmed in the sheet** or **booked in web_revenue** (via alias) → set Won +
+   value if so. Gmail + reasoning → done by Claude.
+5. **Write the heartbeat** (`email-opportunities-scan`) so the dashboard shows fresh.
 
-Steps 1–2 are the sheet half (safe to run anytime in the SQL Editor); step 3 is
-the email half that needs Claude.
+Steps 1–3 are the sheet/data half (safe to run anytime in the SQL Editor); step 4
+is the email + reasoning half that needs Claude.
 
 ## Notes
 - Source string MUST be `email-opportunities-scan` (the dashboard reads exactly this).
