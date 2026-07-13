@@ -67,6 +67,7 @@ const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
 const [flagOnly, setFlagOnly] = useState(false)
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
+const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
 useEffect(() => { getOpportunities().then(setAll) }, [])
@@ -98,6 +99,12 @@ return 0
 }, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, from, to, sort])
 
 const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false) }
+
+// Pagination — reset to first page whenever the filtered/sorted set changes.
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, from, to, sort, perPage])
+const pageCount = Math.max(1, Math.ceil(o.length / perPage))
+const curPage = Math.min(page, pageCount - 1)
+const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
 const flagged = all.filter(x => x.flag).length
 
 // Headline numbers follow the DATE range (independent of the other dropdowns so
@@ -168,7 +175,7 @@ return (
 {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
 </th>
 ))}</tr></thead>
-<tbody>{o.map(x => {
+<tbody>{pageRows.map(x => {
 const st = oppStatus(x)
 return (
 <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.flag ? 'bg-amber-500/5' : ''}`}>
@@ -188,6 +195,22 @@ return (
 })}</tbody>
 </table>
 </div>
+{o.length > 0 && (
+<div className="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-mav-line text-sm">
+<span className="text-mav-muted">Showing <span className="text-white">{curPage * perPage + 1}–{Math.min((curPage + 1) * perPage, o.length)}</span> of <span className="text-white">{o.length}</span></span>
+<div className="flex items-center gap-1 ml-auto">
+<button onClick={() => setPage(0)} disabled={curPage === 0} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">« First</button>
+<button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={curPage === 0} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">‹ Prev</button>
+<span className="px-2 text-mav-muted">Page <span className="text-white">{curPage + 1}</span> / {pageCount}</span>
+<button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={curPage >= pageCount - 1} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">Next ›</button>
+<button onClick={() => setPage(pageCount - 1)} disabled={curPage >= pageCount - 1} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">Last »</button>
+</div>
+<select value={perPage} onChange={e => setPerPage(Number(e.target.value))} className={selCls} title="Rows per page">
+{[25, 50, 100, 250].map(n => <option key={n} value={n}>{n} / page</option>)}
+<option value={100000}>Show all</option>
+</select>
+</div>
+)}
 </div>
 
 {sel && (
