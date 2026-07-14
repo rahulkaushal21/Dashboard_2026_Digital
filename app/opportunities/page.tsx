@@ -36,6 +36,13 @@ const COLS: { key: SortKey; label: string }[] = [
 { key: 'type', label: 'Type' }, { key: 'owner', label: 'AM / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
 { key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
 ]
+// Type label from the Quotes tab Business Type (col P). A booked client can send
+// fresh work — that's "New + Repeat", legitimate repeat business, not a data error.
+const typeLabel = (x: Opportunity): string => {
+const bt = (x.business_type || '').trim().toLowerCase()
+if (bt === 'new repeat' || bt === 'repeat new') return 'New + Repeat'
+return x.is_new_client ? 'New' : 'Repeat'
+}
 const sortVal = (x: Opportunity, k: SortKey): string | number => {
 switch (k) {
 case 'company': return (x.company_name || '').toLowerCase()
@@ -43,7 +50,7 @@ case 'value': return x.value ?? -1
 case 'win': return x.win_probability ?? -1
 case 'status': return oppStatus(x)
 case 'source': return (x.sources || []).join(',')
-case 'type': return x.is_new_client ? 'New' : 'Repeat'
+case 'type': return typeLabel(x)
 case 'owner': return (x.sales_person || '').toLowerCase()
 case 'geo': return x.geo || ''
 case 'tech': return (x.technology || '').toLowerCase()
@@ -81,7 +88,7 @@ const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.
 const o = useMemo(() => {
 const rows = all
 .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
-.filter(x => !fType || (x.is_new_client ? 'New' : 'Repeat') === fType)
+.filter(x => !fType || typeLabel(x).includes(fType))
 .filter(x => !fGeo || (x.geo || '') === fGeo)
 .filter(x => !fAM || splitNames(x.sales_person).includes(fAM))
 .filter(x => !fPM || splitNames(x.pm_owner).includes(fPM))
@@ -184,7 +191,7 @@ return (
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
-<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full ${x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{x.is_new_client ? 'New' : 'Repeat'}</span></td>
+<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span></td>
 <td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager (AM / NBD)">AM: {x.sales_person}</span> : <span className="text-mav-muted">AM: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
 <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
@@ -222,7 +229,7 @@ return (
 <h2 className="text-xl font-semibold">{sel.company_name}</h2>
 <div className="mt-1 flex flex-wrap gap-1">
 <span className={`text-xs px-2 py-1 rounded-full ${statusTone(oppStatus(sel))}`}>{oppStatus(sel)}</span>
-<span className={`text-xs px-2 py-1 rounded-full ${sel.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{sel.is_new_client ? 'New business' : 'Repeat client'}</span>
+<span className={`text-xs px-2 py-1 rounded-full ${typeLabel(sel) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : sel.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(sel) === 'New + Repeat' ? 'New + repeat work' : sel.is_new_client ? 'New business' : 'Repeat client'}</span>
 {(sel.sources || (sel.source ? [sel.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}
 </div>
 </div>
@@ -267,7 +274,7 @@ return (
 <div><div className="text-xs text-mav-muted">PM (project manager)</div>{sel.pm_owner || '—'}</div>
 <div><div className="text-xs text-mav-muted">Service</div>{svcOf(sel)}</div>
 <div><div className="text-xs text-mav-muted">Technology</div>{sel.technology || '—'}</div>
-<div><div className="text-xs text-mav-muted">Type</div>{sel.is_new_client ? 'New' : 'Repeat'}</div>
+<div><div className="text-xs text-mav-muted">Type</div>{typeLabel(sel)}</div>
 <div><div className="text-xs text-mav-muted">RFQ / quote status</div><span className={`text-xs px-2 py-1 rounded-full ${badge(sel.rfq_status)}`}>{sel.status || sel.rfq_status || (sel.rfq ? 'RFQ' : '—')}</span></div>
 <div><div className="text-xs text-mav-muted">GEO</div>{sel.geo || '—'}</div>
 <div><div className="text-xs text-mav-muted">Date</div>{(sel.first_date || sel.source_date || '').slice(0, 10) || '—'}</div>

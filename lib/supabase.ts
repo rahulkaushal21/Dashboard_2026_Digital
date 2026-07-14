@@ -18,7 +18,7 @@ id: number; company_name?: string; is_new_client?: boolean; rfq?: boolean
 rfq_status?: string; geo?: string; sales_person?: string; source_subject?: string
 source_date?: string; first_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
 gist?: string; win_probability?: number; win_reason?: string; company_note?: string
-won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]
+won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]; business_type?: string
 value?: number; technology?: string; service?: string; journey?: string; quote_ref?: string
 quote_date?: string; origin?: string; est_value?: number; next_step?: string; enriched?: boolean
 }
@@ -168,11 +168,18 @@ const confirmedLike = /(\bapproved\b|\bretainer\b|existing client|already a clie
 const out: Opportunity[] = rows.map((o: any) => {
 const value = o.est_value ?? o.won_amount
 const inRevenue = revenueSet.has(norm(o.company_name))
-const repeat = inRevenue || o.is_new_client === false
-// Data-quality flag only for still-open deals that look like existing/confirmed work
+// Business Type from the Quotes tab (col P): 'New' | 'Repeat' | 'New Repeat' | null.
+// A booked client sending regular work is normal REPEAT business — "Repeat" and
+// "New Repeat" must never be flagged. Only a genuine contradiction counts.
+const bt = norm(o.business_type)
+const taggedRepeat = bt.includes('repeat')       // 'repeat' or 'new repeat'
+const taggedNewOnly = bt === 'new'               // pure "New"
+const repeat = taggedRepeat || inRevenue || o.is_new_client === false
+// Data-quality flag: an already-booked (existing) client still tagged pure "New"
+// in the Quotes sheet — the label is wrong and should be Repeat. Nothing else flags.
 let flag: string | undefined
-if (!o.won) {
-if (inRevenue) flag = 'Already a booked client in the revenue sheet — confirm this is a genuinely new request, not existing work'
+if (!o.won && norm(o.status) !== 'lost') {
+if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
 else if (confirmedLike.test(`${o.summary || ''} ${o.gist || ''}`)) flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities'
 }
 return {
@@ -186,6 +193,7 @@ source_tags: [o.origin],
 service: serviceOf(o.technology),
 quote_ref: o.quote_key || o.quote_ref || undefined,
 is_new_client: !repeat,
+business_type: o.business_type || undefined,
 first_date: o.first_date || o.source_date,
 flag,
 } as Opportunity
