@@ -30,9 +30,14 @@ are frozen.
 > **3. Classify the unprocessed mailbox** (`email_inbox where processed=false and
 > has_external=true`, newest-first, group by thread_id). Deep-read every thread
 > with a real external human; discard pure machine noise (calendar invites,
-> HR-One, Read/Fathom/Fireflies/Fyxer recaps, security codes, newsletters, deploy
-> alerts, notifications@uplers.com RFQ/invoice mail, Slack/Basecamp/GitHub).
+> HR-One, security codes, newsletters, deploy alerts, OOO auto-replies,
+> notifications@uplers.com RFQ/invoice mail, Slack/Basecamp/GitHub/Drive-share).
 > **Vendors never tracked:** granth.info, granth.in, atharvasystem.com.
+>   - **Meeting recaps are NOT noise — read them.** Fathom / Read / Fireflies /
+>     Fyxer recaps and QBR/kickoff summaries often carry the real decision or
+>     sentiment made on a CALL (not email). Deep-read the recap body and write the
+>     opportunity/sentiment/won-lost it implies (dedup thread_id). Only the bare
+>     "X viewed your recording / requested access" notifications are noise.
 > Use canonical company names (Solargraf→Enphase Energy, *@hummingbirdideas.com→
 > Hummingbird Ideas, Prismo/Vernisol→Fabrik Brands, Marston→Project Centre Ltd,
 > any *(Zulu8)→ZULU 8, Amadeus/ForwardKeys→Amadeus IT Group SA). Never fabricate
@@ -60,13 +65,20 @@ are frozen.
 >   - **Quote conversion** (`writeQuoteConversions`/won-lost): only on explicit
 >     "we're going ahead" / PO / clear decline. Never infer from silence.
 >
-> **4. Opportunities deep-dive — re-check EVERY open quote against its client email.**
-> Scope = open quotes (Quote Shared / Waiting for Final Approval / Waiting for
-> details; may re-check On Hold for revival). For each, find the client's latest
-> thread in `email_inbox` by `client_email`. Where a thread exists, write/refresh
-> one opportunities row (company_name = the quote's agency so it merges): gist,
-> journey (dated bullet trail), win_reason, win_probability 0-100. On movement,
-> raise/lower win_probability by the latest sentiment and bump source_date.
+> **4. Opportunities deep-dive — re-check EVERY open quote against its client email.
+> THIS IS MANDATORY, not optional — it is the step most often skipped.** Do NOT only
+> classify the inbox queue from step 3. Pull the FULL list of open opps
+> (`select id, company_name, source_subject, source_date, enriched from opportunities
+> where not won and lower(coalesce(status,'')) not in ('lost','won')` — ~190 rows),
+> **prioritising `enriched=false` and the oldest `source_date` first** (those are the
+> never-touched / stalest deals). For each, find the client's latest thread in
+> `email_inbox` by `client_email` (match `from_addr/to_addrs/cc_addrs ilike
+> '%client_email%'`). Where a thread exists, write/refresh the opportunity row: gist,
+> journey (dated bullet trail), win_reason, win_probability 0-100, set `enriched=true`,
+> and **bump `source_date` to the newest message** (this clears the Stale flag). Many
+> open quotes will have no fresh thread in the capture window — that's fine, skip
+> silently, but you MUST have looked. Report how many you enriched vs how many had no
+> thread.
 >
 > **5. Cross-perspective Won/value check (per-deal, conservative).** For each open
 > opp, check whether it is Confirmed in the sheet OR booked in `web_revenue` (resolve
@@ -76,6 +88,24 @@ are frozen.
 > (e.g. Telfer has one big booking but many genuinely-open new deals). Backfill a
 > value only when the client has one unambiguous sheet/booking figure. If a booking
 > is under a different name, add a row to `opp_aliases(alias,canonical,note)` first.
+>
+> **5b. WON-LAG — when the email says confirmed but the sheet hasn't caught up.**
+> Status/Won for sheet deals is driven by the Quotes tab, so a client who approves
+> by email ("we're going ahead", "we definitely need to do it", PO attached) sits
+> Open until someone edits the sheet. Do NOT force the sheet row to Won. Instead,
+> for any deal with an explicit email confirmation, set its opportunity
+> `rfq_status='Approved — verbal go-ahead'` (or `'Won — email-confirmed'`) and, for
+> email-origin deals, `win_probability>=90`. The dashboard then auto-raises a
+> **"⚠ REVIEW URGENT — client confirmed in email but still Open"** flag on that deal
+> (see the review-flags note below), so the team knows to mark it Confirmed in the
+> Quotes tab. List every deal you flagged this way, with the quote as evidence.
+>
+> **Review flags are auto-computed on the Opportunities page** (in `getOpportunities`,
+> for still-open, not-Lost deals) — you don't write them, but your writes drive them:
+>   - **⚠ REVIEW URGENT (won-lag)** — email-origin deal marked approved / ≥90% (step 5b).
+>   - **Business Type mismatch** — booked/existing client tagged pure "New" (col P).
+>   - **⚠ Stale** — no dated movement in >21 days → chase or confirm still live.
+>     Enriching a deal in step 4 (bumping `source_date`) clears this.
 >
 > **6. Business Trends.** After writing, recompute the derived views:
 > `select rebuild_clients();` (LTV, industry, latest sentiment). Then give me the

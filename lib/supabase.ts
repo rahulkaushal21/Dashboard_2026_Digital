@@ -165,6 +165,12 @@ return 'UK'
 const booked = (await read<{ company_name: string; booking_amount: number }>('web_revenue', 'company_name, booking_amount', 'id')) || []
 const revenueSet = new Set(booked.map(b => norm(b.company_name)).filter(Boolean))
 const confirmedLike = /(\bapproved\b|\bretainer\b|existing client|already a client|migration complete|signed off|renewed|go ?ahead given)/i
+// A deal the EMAIL scan judged confirmed/approved (email origin only, so the sheet
+// never false-triggers). rfq_status set by the scan, or a >=90% email deal.
+const emailWon = /approv|go-?ahead|email-?confirmed|verbal go|\bwon\b/
+const STALE_DAYS = 21
+const nowMs = Date.now()
+const daysSince = (d?: string) => { const t = Date.parse(d || ''); return Number.isFinite(t) ? Math.floor((nowMs - t) / 86400000) : null }
 const out: Opportunity[] = rows.map((o: any) => {
 const value = o.est_value ?? o.won_amount
 const inRevenue = revenueSet.has(norm(o.company_name))
@@ -175,11 +181,18 @@ const bt = norm(o.business_type)
 const taggedRepeat = bt.includes('repeat')       // 'repeat' or 'new repeat'
 const taggedNewOnly = bt === 'new'               // pure "New"
 const repeat = taggedRepeat || inRevenue || o.is_new_client === false
-// Data-quality flag: an already-booked (existing) client still tagged pure "New"
-// in the Quotes sheet — the label is wrong and should be Repeat. Nothing else flags.
+// Review flags for still-open deals, in priority order (one flag shown, most urgent first):
+//  1. WON-LAG   — email says confirmed but the deal is still Open (sheet not updated yet)
+//  2. type      — booked/existing client mislabelled pure "New" in the sheet
+//  3. STALE     — no dated movement in >21d; chase or confirm it's still live
+//  4. text      — brief reads like existing/confirmed work
 let flag: string | undefined
 if (!o.won && norm(o.status) !== 'lost') {
-if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
+const emailConfirmed = o.origin === 'email' && (emailWon.test(norm(o.rfq_status)) || (o.win_probability || 0) >= 90)
+const age = daysSince(o.source_date || o.first_date)
+if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
+else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
+else if (age !== null && age > STALE_DAYS) flag = `⚠ Stale — no movement in ${age} days. Follow up or confirm the deal is still live.`
 else if (confirmedLike.test(`${o.summary || ''} ${o.gist || ''}`)) flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities'
 }
 return {
