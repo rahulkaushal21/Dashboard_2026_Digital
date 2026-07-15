@@ -123,6 +123,25 @@ are frozen.
 
 ---
 
+## No email missed (run this scan at the START and END of each day)
+Mail is captured 24/7 by the Apps Script into `email_inbox` with a **persistent
+cursor** (gap-proof, catches up to 72h across any outage). Every message waits at
+`processed=false` until a scan classifies it — so mail arriving between your two
+daily runs is never lost, only queued. To guarantee nothing slips:
+1. **Step 2 already verifies capture is alive.** If `email_inbox`'s newest
+   `inserted_at` is stale (>2h) or `gmail-ingest` is erroring, capture (not
+   classification) is broken → `markScanFailed` and fix the trigger; do NOT stamp
+   the heartbeat (a green light with dead capture is the real "missed email" risk).
+2. **The only classification-side risk is over-marking noise processed** — once a
+   thread is `processed=true` it won't resurface. Only mark *clear* machine noise
+   processed; when unsure, leave it `processed=false` for the next run rather than
+   guess. Re-seeing a thread is harmless (all writes dedup on `thread_id`).
+3. **Sanity line to run at the end:** `select max(inserted_at) newest,
+   count(*) filter (where not processed) still_open from email_inbox;` — `still_open`
+   should be 0 after a full scan, and `newest` within ~30 min of now.
+
+---
+
 ## What each step feeds on the dashboard
 | Dashboard surface        | Source table            | Refreshed by |
 |--------------------------|-------------------------|--------------|
