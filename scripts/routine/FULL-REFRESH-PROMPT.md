@@ -33,6 +33,19 @@ are frozen.
 > HR-One, security codes, newsletters, deploy alerts, OOO auto-replies,
 > notifications@uplers.com RFQ/invoice mail, Slack/Basecamp/GitHub/Drive-share).
 > **Vendors never tracked:** granth.info, granth.in, atharvasystem.com.
+>   - **SMART CLIENT RESOLUTION — resolve every write to the right client from the
+>     email itself, not guesswork.** Read `select * from client_aliases` first. To
+>     name any opportunity/signal/escalation: (a) take the real sender `from_addr`
+>     domain and look it up in `client_aliases where kind='domain'` → that's the
+>     canonical client; (b) if no domain hit, check the subject/body for a known
+>     sub-brand or app name and map via `kind='name'`; (c) only if still unknown,
+>     use the plainest company name from the body. Sub-brands/apps/end-clients
+>     (e.g. Metrogate→NoLie, Prismo→Fabrik Brands, Validate app→Wyrks Collab,
+>     Ray White→ZULU 8) go in `company_note`, never as the client name. **When you
+>     learn a new domain→client or variant→client mapping, INSERT it into
+>     `client_aliases`** so the system gets smarter every scan (the sheet sync also
+>     reads this table to canonicalise names, so a new `kind='name'` row fixes the
+>     name everywhere on the next sync).
 >   - **Meeting recaps are NOT noise — read them.** Fathom / Read / Fireflies /
 >     Fyxer recaps and QBR/kickoff summaries often carry the real decision or
 >     sentiment made on a CALL (not email). Deep-read the recap body and write the
