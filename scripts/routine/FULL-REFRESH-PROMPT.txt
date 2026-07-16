@@ -51,6 +51,16 @@ me a short pulse report at the end.
    - Opportunities (opportunities, origin='email', dedup thread_id): any NEW client
      enquiry OR any price/estimate/range shared (firm number, monthly rate, or range).
      Put the figure in gist/summary, set rfq_status. NEVER from a system RFQ/invoice mail.
+     QUOTE MAY ARRIVE ON A NEW THREAD: a SOW/estimate/price is often sent in a fresh
+     thread, separate from the one that first created the opp. Before inserting, look up
+     the client's existing open opp by client email OR founder/company name (not just
+     thread_id). If found, UPDATE that row (est_value, rfq_status='Quote/SOW shared',
+     status='Quote Shared', bump source_date to the quote date, refresh gist/journey) —
+     do NOT leave the old row stale or spawn a duplicate. File every deal under a
+     FINDABLE name and put the human contact's name (e.g. the founder) in company_note,
+     so a search for the person surfaces it. (Real miss caught 16 Jul: CodLab/RAPsheet
+     quote AUD 30k from Aman sat unlinked because it came on a new thread and the deal
+     was filed only under the company name.)
    - Client Sentiment (email_signals, dedup thread_id): one signal per client thread with
      a clear tone — sentiment Positive|Neutral|Negative|At Risk.
    - Escalations (escalations, dedup thread_id): run the keyword sweep (urgent, critical,
@@ -78,7 +88,10 @@ me a short pulse report at the end.
    journey (dated bullet trail), win_reason, win_probability 0-100, set enriched=true,
    and bump source_date to the newest message (clears the Stale flag). Many open quotes
    will have no fresh thread — that's fine, skip silently, but you MUST have looked.
-   Report how many you enriched vs how many had no thread.
+   Report how many you enriched vs how many had no thread. When matching, search by
+   client_email AND by founder/company name — a quote/SOW can land on a thread whose
+   thread_id differs from the opp's original; still bind it to the existing open opp and
+   write its value + bump source_date rather than leaving it stale.
 
 5. CROSS-PERSPECTIVE WON/VALUE CHECK (per-deal, conservative). For each open opp, check
    whether it is Confirmed in the sheet OR booked in web_revenue (resolve names via

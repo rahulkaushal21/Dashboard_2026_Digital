@@ -59,7 +59,15 @@ are frozen.
 >   - **Opportunities** (`opportunities`, origin='email', dedup thread_id): any NEW
 >     client enquiry OR any price/estimate/range shared (firm number, monthly rate,
 >     or range). Put the figure in gist/summary, set rfq_status. NEVER from a
->     system-generated RFQ/invoice mail.
+>     system-generated RFQ/invoice mail. **A quote/SOW often arrives on a NEW thread,
+>     separate from the one that created the opp** — before inserting, look up the
+>     client's existing open opp by client email OR founder/company name (not just
+>     thread_id). If found, UPDATE that row (est_value, rfq_status='Quote/SOW shared',
+>     status='Quote Shared', bump source_date, refresh gist/journey) instead of leaving
+>     it stale or spawning a duplicate. File every deal under a **findable** name and put
+>     the human contact (e.g. founder) in `company_note` so a search for the person
+>     surfaces it. (Real miss 16 Jul: CodLab/RAPsheet AUD 30k quote from Aman sat
+>     unlinked — new thread, filed only under the company name.)
 >   - **Client Sentiment** (`email_signals`, dedup thread_id): one signal per client
 >     thread with a clear tone — sentiment Positive|Neutral|Negative|At Risk.
 >   - **Escalations** (`escalations`, dedup thread_id): run the keyword sweep
@@ -91,7 +99,9 @@ are frozen.
 > and **bump `source_date` to the newest message** (this clears the Stale flag). Many
 > open quotes will have no fresh thread in the capture window — that's fine, skip
 > silently, but you MUST have looked. Report how many you enriched vs how many had no
-> thread.
+> thread. **Match by `client_email` AND by founder/company name** — a quote/SOW can land
+> on a thread whose thread_id differs from the opp's original; still bind it to the
+> existing open opp, write its value + bump source_date rather than leaving it stale.
 >
 > **5. Cross-perspective Won/value check (per-deal, conservative).** For each open
 > opp, check whether it is Confirmed in the sheet OR booked in `web_revenue` (resolve
