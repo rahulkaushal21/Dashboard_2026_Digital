@@ -54,7 +54,7 @@ case 'type': return typeLabel(x)
 case 'owner': return (x.sales_person || '').toLowerCase()
 case 'geo': return x.geo || ''
 case 'tech': return (x.technology || '').toLowerCase()
-case 'date': return x.first_date || x.source_date || ''
+case 'date': return x.source_date || x.first_date || ''
 case 'flag': return x.flag ? 0 : 1
 }
 }
@@ -96,7 +96,7 @@ const rows = all
 .filter(x => !fSvc || svcOf(x) === fSvc)
 .filter(x => !fTech || (x.technology || '') === fTech)
 .filter(x => !flagOnly || x.flag)
-.filter(x => inRange(x.source_date))
+.filter(x => inRange(x.source_date || x.first_date))
 return rows.sort((a, b) => {
 const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
 if (av < bv) return -1 * sort.dir
@@ -116,7 +116,7 @@ const flagged = all.filter(x => x.flag).length
 
 // Headline numbers follow the DATE range (independent of the other dropdowns so
 // the breakdown panels stay stable for click-to-filter).
-const dated = useMemo(() => all.filter(x => inRange(x.source_date)), [all, from, to])
+const dated = useMemo(() => all.filter(x => inRange(x.source_date || x.first_date)), [all, from, to])
 const open = useMemo(() => dated.filter(x => oppStatus(x) === 'Open'), [dated])
 const openValue = open.reduce((s, x) => s + (x.value || 0), 0)
 const onHold = useMemo(() => dated.filter(x => oppStatus(x) === 'On Hold'), [dated])
@@ -195,7 +195,7 @@ return (
 <td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager (AM / NBD)">AM: {x.sales_person}</span> : <span className="text-mav-muted">AM: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
 <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
-<td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.first_date || x.source_date || '').slice(0, 10)}</td>
+<td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>
 <td className="px-4 py-3">{x.flag ? <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title={x.flag}>⚠ Review</span> : <span className="text-xs text-mav-muted">—</span>}</td>
 </tr>
 )
@@ -277,7 +277,7 @@ return (
 <div><div className="text-xs text-mav-muted">Type</div>{typeLabel(sel)}</div>
 <div><div className="text-xs text-mav-muted">RFQ / quote status</div><span className={`text-xs px-2 py-1 rounded-full ${badge(sel.rfq_status)}`}>{sel.status || sel.rfq_status || (sel.rfq ? 'RFQ' : '—')}</span></div>
 <div><div className="text-xs text-mav-muted">GEO</div>{sel.geo || '—'}</div>
-<div><div className="text-xs text-mav-muted">Date</div>{(sel.first_date || sel.source_date || '').slice(0, 10) || '—'}</div>
+<div><div className="text-xs text-mav-muted">Date</div>{(sel.source_date || sel.first_date || '').slice(0, 10) || '—'}</div>
 <div className="col-span-2"><div className="text-xs text-mav-muted">{sel.quote_ref ? 'Quote / subject' : 'Subject'}</div>{sel.source_subject || '—'}</div>
 </div>
 </aside>
