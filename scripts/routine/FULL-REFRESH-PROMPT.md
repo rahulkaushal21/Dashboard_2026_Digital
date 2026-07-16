@@ -143,6 +143,37 @@ are frozen.
 > ('email-opportunities-scan', true, <rows>, '<one-line summary>');`  (source MUST
 > be exactly `email-opportunities-scan`). If the capture feed was dead, write
 > markScanFailed instead and do NOT stamp the heartbeat.
+>
+> **8. Data integrity & dedup (run every scan — where "bad data" creeps in).**
+> Before writing anything new, and once after classifying:
+>   - **Dedup vs the sheet / parent entity.** Before INSERTing an email opp OR flagging a
+>     won-lag, check the deal isn't ALREADY in the sheet — including under a **parent
+>     entity** or canonical name (resolve via `client_aliases` + `opp_aliases`). Match on
+>     client + subject + value, not just the name. (Caught: Scott & Co booked under
+>     "Project Centre Ltd"; Getecco already a sheet row; HexaGroup "Tenside" = a sheet Won
+>     row.) **Only DELETE as a duplicate when subject AND value match a booked row;** if the
+>     subject differs it's NEW work for a known client — keep it, re-home under the canonical
+>     account. Seed a new `client_aliases`/`opp_aliases` row whenever you learn an entity link.
+>   - **Write the quote value.** When a quote/estimate/SOW figure is in an email body, set
+>     `est_value` on the matching opp (note currency in gist/next_step). Never leave a
+>     quoted/confirmed deal with `est_value=null`. If the number is only in an attachment,
+>     say so and leave a note.
+>   - **Unify email leads with existing clients.** If an email lead's client already exists
+>     as a sheet client under a different spelling, add a `client_aliases` name row so both
+>     canonicalise to one name; the sync self-heals AM/PM from the client's other rows
+>     (e.g. an email "Response MS" lead inherits PM Maitri / AM Saquib from the sheet).
+>   - **Integrity sweep.** Query the open book for: blank `company_name`; gist containing
+>     "Client: unknown"; scrambled enrichment (gist's "Client:" ≠ the row's company); email
+>     rows duplicating a sheet row. FIX by `enriched=false` + `gist=null` on the bad sheet
+>     rows and re-running `sync_quotes_to_opportunities()` (it re-derives a clean company —
+>     now from the FULL subject when there's no delimiter — and gist). Never leave a company
+>     blank.
+>   - **source_date honesty.** Only bump `source_date` when there's a GENUINE recent client
+>     message in that thread. Never batch-bump. A bumped date makes a dead deal look active
+>     and breaks the date filter. To repair: reset `source_date = first_date` for any stale
+>     deal whose `source_date` was pushed >30 days past `first_date` with no real recent thread.
+>   - **Stale review.** List open deals with no real movement in >90 days; confirm still-live
+>     or mark Lost. Don't let 2025 leads sit Open forever inflating pipeline.
 
 ---
 
