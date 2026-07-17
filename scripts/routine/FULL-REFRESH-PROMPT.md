@@ -48,9 +48,15 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     from the client's existing rows (or leave blank — step 1's sync self-heal fills them from
 >     the same client, so re-run `sync_quotes_to_opportunities()` after your writes), `geo`,
 >     `business_type`, and `est_value` if any figure is present. Dedup on thread_id.
->   - **Write the cost.** Any price/estimate/SOW figure in a body → set `est_value` on the
->     matching opp (note currency). Never leave a quoted/confirmed deal value-less; if the
->     number is only in an attachment, say so.
+>   - **Write the cost — DEEP-read the whole thread for the FINAL number.** Prices move across
+>     a thread (a $2,400 estimate becomes a $4,000 confirmed scope). Read the latest messages, not
+>     the first, and set `est_value` to the confirmed/latest figure (note currency). Never leave a
+>     quoted/confirmed deal value-less; if the number is only in an attachment, say so.
+>   - **Combined / split deals (why deep scan is mandatory).** One sheet entry may COMBINE several
+>     email threads (e.g. Plan 9's 3 asks booked as one line), and one email deal may SPLIT into
+>     several sheet rows. Don't assume 1 email = 1 deal. Reconcile to the master sheet entry: if
+>     the client's confirmed sheet/booking value already covers the email asks, treat the email
+>     rows as that one deal (merge, don't duplicate) rather than separate opportunities.
 >   - **Recording-AI recaps → deal & client health.** Read AI / Fathom / Fireflies / Otter /
 >     Fyxer recaps of CLIENT calls (skip internal standups/scrums). Move `win_probability` by
 >     the call outcome, append the dated decision to `journey`, write a client-health signal.
