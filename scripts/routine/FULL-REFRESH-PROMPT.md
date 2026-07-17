@@ -58,10 +58,15 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >
 > **4. REVIEW EVERY OPEN OPPORTUNITY (the core).** Pull all open deals
 > (`where not won and lower(coalesce(status,'')) not in ('lost','won')`). For each:
->   - **Won?** Confirmed in the sheet (status Confirmed) OR booked in `web_revenue` (resolve via
->     `opp_aliases`) → it should be Won. Sheet-origin: the sheet drives it (verify it's Confirmed
->     there). Email-origin with explicit client go-ahead → mark won-lag (`rfq_status`
+>   - **Won?** Confirmed in the sheet (status Confirmed) OR booked/invoiced in `bookings`
+>     (`invoice_number` from webPMS/eSalesEngine) / `web_revenue`, OR `quote_conversions.outcome`
+>     ='won' (resolve names via `opp_aliases`) → it should be Won. Sheet-origin: the sheet drives
+>     it. Email-origin with explicit client go-ahead → mark won-lag (`rfq_status`
 >     'Approved — verbal go-ahead', `win_probability>=90`) so the ⚠ REVIEW URGENT flag fires.
+>     **`reconcile_opportunities()` (step 1) auto-merges an email twin into the master sheet row
+>     (company+value, or company+subject-overlap) — so once a deal is entered+confirmed in the
+>     sheet, its email duplicate is deleted and the Need-Review flag clears itself.** A flag that
+>     persists means the deal is genuinely NOT yet in the sheet/bookings — enter + confirm it.
 >   - **Lost/cancelled?** Explicit decline / "cancelled" in sheet → Lost.
 >   - **Win %** — refresh from the latest signal (email, recap, sheet status). Up on
 >     approval/progress; down + flag on stall, cost pushback, or silence.
