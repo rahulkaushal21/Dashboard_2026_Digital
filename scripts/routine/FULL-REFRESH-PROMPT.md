@@ -46,11 +46,23 @@ are frozen.
 >     `client_aliases`** so the system gets smarter every scan (the sheet sync also
 >     reads this table to canonicalise names, so a new `kind='name'` row fixes the
 >     name everywhere on the next sync).
->   - **Meeting recaps are NOT noise — read them.** Fathom / Read / Fireflies /
->     Fyxer recaps and QBR/kickoff summaries often carry the real decision or
->     sentiment made on a CALL (not email). Deep-read the recap body and write the
->     opportunity/sentiment/won-lost it implies (dedup thread_id). Only the bare
->     "X viewed your recording / requested access" notifications are noise.
+>   - **Recording-AI recaps → deal & client health (high-value).** ~120 call recaps flow
+>     in per 10 days from Read AI / Fathom / Fireflies / Otter / Fyxer — a call is stronger
+>     evidence than email. Mine every **client-facing** recap:
+>     (a) **Skip internal-only calls** — Daily/Uplers Scrum, Development Standup, Readout
+>         Updates, "bot wasn't admitted", "X requested access / viewed recording" = noise.
+>     (b) Identify the client/deal from title + participants (map via `client_aliases`), then
+>         read the body for the decision/outcome, approvals, cost/scope/timeline concerns,
+>         blockers, next steps.
+>     (c) **Update the matched opportunity** — move `win_probability` by the call outcome
+>         (verbal go-ahead/approval → up; cost pushback, stall, scope dispute → down + flag),
+>         append the dated decision to `journey`, set `win_reason`/`next_step`, bump
+>         `source_date`. (e.g. Watpart cost/scope pushback → At Risk; Optavo "My Work" approved → up.)
+>     (d) Write a client-health `email_signal` (Positive/Neutral/At Risk) from the **call** tone.
+>     (e) If a recap covers a client/project with **no tracked opportunity**, treat it as a NEW
+>         lead (e.g. "Allergy Buddy blog section").
+>     (f) In the pulse, call out which deals **warmed or cooled** based on calls this run.
+>     Dedup on thread_id. QBR/kickoff summaries count the same.
 > Use canonical company names (Solargraf→Enphase Energy, *@hummingbirdideas.com→
 > Hummingbird Ideas, Prismo/Vernisol→Fabrik Brands, Marston→Project Centre Ltd,
 > any *(Zulu8)→ZULU 8, Amadeus/ForwardKeys→Amadeus IT Group SA). Never fabricate

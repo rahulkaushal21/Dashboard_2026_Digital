@@ -40,10 +40,23 @@ me a short pulse report at the end.
      When you learn a new domain->client or variant->client mapping, INSERT it into
      client_aliases so the system gets smarter every scan (the sheet sync also reads this
      table to canonicalise names).
-   - Meeting recaps are NOT noise — read them. Fathom / Read / Fireflies / Fyxer recaps
-     and QBR/kickoff summaries often carry the real decision or sentiment made on a CALL.
-     Deep-read the recap body and write the opportunity/sentiment/won-lost it implies
-     (dedup thread_id). Only bare "X viewed your recording / requested access" are noise.
+   - RECORDING-AI RECAPS → DEAL & CLIENT HEALTH (high-value; ~120 call recaps flow in per
+     10 days from Read AI / Fathom / Fireflies / Otter / Fyxer). A call is STRONGER evidence
+     than email — mine every CLIENT-facing recap:
+     (a) SKIP internal-only calls — Daily/Uplers Scrum, Development Standup, Readout Updates,
+         "bot wasn't admitted", "X requested access / viewed your recording". Those are noise.
+     (b) For each client recap, identify the client/deal from the title + participants
+         (map via client_aliases), then read the body for: the decision/outcome, approvals,
+         cost/scope/timeline concerns, blockers, and next steps.
+     (c) UPDATE the matched opportunity — move win_probability by the call outcome (verbal
+         go-ahead/approval → up; cost pushback, stall, scope dispute → down AND flag), append
+         the dated decision to journey, set win_reason/next_step, bump source_date. (e.g.
+         Watpart cost/scope-creep pushback → At Risk; Optavo "My Work" feature approved → up.)
+     (d) Write a client-health email_signal (Positive/Neutral/At Risk) from the CALL tone.
+     (e) If a recap is about a client/project with NO tracked opportunity, treat it as a NEW
+         opportunity lead (e.g. "Allergy Buddy blog section", "Evtrove discussion").
+     (f) In the pulse, call out which deals warmed or cooled based on calls this run.
+     Dedup on thread_id. QBR/kickoff summaries count the same as recap tools.
    Use canonical company names (Solargraf->Enphase Energy, *@hummingbirdideas.com->
    Hummingbird Ideas, Prismo/Vernisol->Fabrik Brands, Marston->Project Centre Ltd, any
    *(Zulu8)->ZULU 8, Amadeus/ForwardKeys->Amadeus IT Group SA). Never fabricate a
