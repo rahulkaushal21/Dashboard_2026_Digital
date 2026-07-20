@@ -44,6 +44,14 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     master. Instead update that sheet row (win%, brief/gist, next_step) if there's news. Only
 >     create an `origin='email'` opp when the deal is a genuine enquiry with **no** sheet row.
 >     Match by client + project intent, not just an exact subject string.
+>   - **NOT an opportunity — do NOT create a row (and delete existing ones):** (a) internal
+>     team-to-team handoffs / coordination between Mavlers/Uplers staff (reassignments,
+>     "formal warning", "please take this directly", auto-responder setup) — a real client deal
+>     buried under an internal thread is tracked under the deal, not the handoff; (b) ad-hoc
+>     support / bug-fix / small feature or content requests for an **already-won / existing**
+>     client (ongoing delivery work belongs to that won deal, not a fresh pipeline row);
+>     (c) pure support complaints / escalations (route to `escalations`, not opportunities).
+>     Only track a genuine NEW paid scope. When unsure, leave it **off** the board.
 >   - **When you DO create an email opp, populate it fully:** set `sales_person`/`pm_owner`
 >     from the client's existing rows (or leave blank — step 1's sync self-heal fills them from
 >     the same client, so re-run `sync_quotes_to_opportunities()` after your writes), `geo`,
