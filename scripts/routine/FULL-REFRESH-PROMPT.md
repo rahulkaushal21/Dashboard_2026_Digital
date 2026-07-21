@@ -29,8 +29,10 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 > (don't classify a dead inbox). Else continue.
 >
 > **3. Incremental email scan — from where it last left off.** The cursor is the
-> `processed` flag: classify `email_inbox where processed=false and has_external=true`,
-> newest-first, grouped by thread_id. Deep-read every thread with a real external human;
+> `processed` flag: classify `email_inbox where processed=false and has_external=true
+> and archived=false` (the **live** stream), newest-first, grouped by thread_id. The
+> `archived=true` rows are the one-time FY backfill (from 1 Apr) — a separate backlog worked
+> in dedicated batches, NOT part of the live "queue must be 0" invariant. Deep-read every thread with a real external human;
 > discard machine noise (HR-One, WP Engine/Wordfence/status alerts, Slack/Trello/Figma/Drive
 > notifications, calendar invites, newsletters, security codes, `notifications@uplers.com`).
 > **Vendors never tracked:** granth.info, granth.in, atharvasystem.com.
@@ -119,10 +121,18 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 ## No email missed
 Mail is captured 24/7 into `email_inbox` (persistent cursor, 72h outage catch-up) and waits at
 `processed=false` until a scan classifies it — nothing between runs is lost, only queued.
-Run the scan at the **start and end** of each day. End-of-scan sanity:
-`select max(inserted_at) newest, count(*) filter (where not processed) still_open from email_inbox;`
+Run the scan at the **start and end** of each day. End-of-scan sanity (live stream only):
+`select max(inserted_at) newest, count(*) filter (where not processed and not archived) still_open from email_inbox;`
 → `still_open` should be 0, `newest` within ~30 min of now. Only mark **clear** noise
 processed; when unsure, leave it for the next run (all writes dedup on thread_id).
+
+## FY backfill stream (archived=true)
+A one-time backfill (`scripts/routine/gmail-backfill.gs`, run under web@uplers.com → `gmail-ingest?backfill=1`)
+loads mail from **1 Apr** as `archived=true, processed=false`. It builds the full-FY opportunity &
+client-health picture but is worked as a **separate backlog** so it never blocks the live scan.
+Process it in batches: `email_inbox where processed=false and has_external=true and archived=true`,
+oldest-first by thread — same classify/dedup rules as the live scan. Heartbeat those runs under
+source `gmail-backfill-classify` so the live freshness clock stays clean.
 
 ## What feeds each dashboard surface
 | Surface | Table | Step |
