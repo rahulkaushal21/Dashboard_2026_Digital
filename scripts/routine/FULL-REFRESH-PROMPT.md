@@ -113,11 +113,16 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   - blank `company_name`; gist saying "Client: unknown"; scrambled enrichment (gist "Client:"
 >     ≠ company) → `enriched=false, gist=null` then re-sync;
 >   - open sheet quote line superseded by a Won line (janitor handles on sync);
->   - **win% without a value** — any open opp with `win_probability` set but `est_value` null/0:
+>   - **win% without a value** — any open opp with `win_probability` set but `est_value` null/0
+>     **that is NOT an approved/won-lag deal**:
 >     `update opportunities set win_probability=null where not won and lower(coalesce(status,''))
->     not in ('lost','won') and win_probability is not null and (est_value is null or est_value=0);`
+>     not in ('lost','won') and win_probability is not null and (est_value is null or est_value=0)
+>     and coalesce(rfq_status,'') not ilike '%approved%';`
 >     (either the value never existed → % must go, or it did → backfill `est_value` from the
->     sheet/thread first, then keep the %).
+>     sheet/thread first, then keep the %). **Exception:** a deal the client has explicitly
+>     approved (rfq_status `Approved …`) legitimately keeps its high win% even when the scope was
+>     quoted only in hours — the value is committed, just not yet dollarised; leave it and flag
+>     the missing $ for booking.
 >
 > **8. Mark processed + heartbeat.** `processed=true` on the rows you handled (incl. clear
 > noise). Then `insert into sync_runs (source, ok, rows_upserted, message) values
