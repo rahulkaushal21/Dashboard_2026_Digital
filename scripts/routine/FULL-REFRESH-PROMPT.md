@@ -86,6 +86,12 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   - **Lost/cancelled?** Explicit decline / "cancelled" in sheet → Lost.
 >   - **Win %** — refresh from the latest signal (email, recap, sheet status). Up on
 >     approval/progress; down + flag on stall, cost pushback, or silence.
+>     **HARD RULE: win% only exists where a real value was quoted/shared.** `win_probability`
+>     requires a non-null `est_value` that we actually sent the client. No quoted figure →
+>     leave BOTH null (a pre-quote lead has no %). Never seed a default % (e.g. 40) on a
+>     value-less row. And the value must be the **confirmed/approved amount, not the full
+>     theoretical scope** — quote what the client agreed to, not "everything-if-it-all-lands"
+>     (e.g. bill the 2 approved items, not all 4 possible ones).
 >   - **Brief/gist** — update if the scope or ask materially changed.
 >   - **Owners & cost** — every deal should have AM (`sales_person`) + PM (`pm_owner`) + a value
 >     where one exists. Re-run `sync_quotes_to_opportunities()` so self-heal fills blank owners;
@@ -106,7 +112,12 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   - email rows duplicating a sheet deal (same client; delete the email row, sheet wins);
 >   - blank `company_name`; gist saying "Client: unknown"; scrambled enrichment (gist "Client:"
 >     ≠ company) → `enriched=false, gist=null` then re-sync;
->   - open sheet quote line superseded by a Won line (janitor handles on sync).
+>   - open sheet quote line superseded by a Won line (janitor handles on sync);
+>   - **win% without a value** — any open opp with `win_probability` set but `est_value` null/0:
+>     `update opportunities set win_probability=null where not won and lower(coalesce(status,''))
+>     not in ('lost','won') and win_probability is not null and (est_value is null or est_value=0);`
+>     (either the value never existed → % must go, or it did → backfill `est_value` from the
+>     sheet/thread first, then keep the %).
 >
 > **8. Mark processed + heartbeat.** `processed=true` on the rows you handled (incl. clear
 > noise). Then `insert into sync_runs (source, ok, rows_upserted, message) values
