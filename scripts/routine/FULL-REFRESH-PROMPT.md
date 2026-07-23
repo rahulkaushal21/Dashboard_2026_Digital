@@ -55,9 +55,13 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     (c) pure support complaints / escalations (route to `escalations`, not opportunities).
 >     Only track a genuine NEW paid scope. When unsure, leave it **off** the board.
 >   - **When you DO create an email opp, populate it fully:** set `sales_person`/`pm_owner`
->     from the client's existing rows (or leave blank — step 1's sync self-heal fills them from
->     the same client, so re-run `sync_quotes_to_opportunities()` after your writes), `geo`,
->     `business_type`, and `est_value` if any figure is present. Dedup on thread_id.
+>     from the client's existing rows, `geo`, `business_type`, and `est_value` if any figure is
+>     present. Dedup on thread_id. **NEVER leave AM/PM blank on an email opp.** Resolve them from
+>     the thread's own **internal (@mavlers/@uplers) participants** — the person fronting the
+>     client is the AM (`sales_person`), the delivery/PM lead is the `pm_owner`. If the client has
+>     existing rows, self-heal fills them (re-run `sync_quotes_to_opportunities()`); otherwise read
+>     the thread's `from/to/cc` and assign by role. Only sheet-origin rows may carry a blank AM
+>     (that's a gap in the source Quotes sheet, not to be invented here).
 >   - **Write the cost — DEEP-read the whole thread for the FINAL number.** Prices move across
 >     a thread (a $2,400 estimate becomes a $4,000 confirmed scope). Read the latest messages, not
 >     the first, and set `est_value` to the confirmed/latest figure (note currency). Never leave a

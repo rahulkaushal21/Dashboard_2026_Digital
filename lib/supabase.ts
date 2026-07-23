@@ -201,8 +201,12 @@ geo: geo3(o.geo),
 value: value != null ? Math.round(value) : undefined,
 won_amount: o.won_amount != null ? Math.round(o.won_amount) : undefined,
 source: o.origin,
-sources: [o.origin],
-source_tags: [o.origin],
+// Dual source: a sheet quote line whose client is ALSO active in email is tracked from BOTH
+// the Quotes sheet and email — show both tags. `email_tracked` is set by
+// reconcile_opportunities() (company name == external sender domain), or when an email twin
+// gets merged into the sheet row.
+sources: (o.origin === 'sheet' && o.email_tracked) ? ['sheet', 'email'] : [o.origin],
+source_tags: (o.origin === 'sheet' && o.email_tracked) ? ['sheet', 'email'] : [o.origin],
 service: serviceOf(o.technology),
 quote_ref: o.quote_key || o.quote_ref || undefined,
 is_new_client: !repeat,
