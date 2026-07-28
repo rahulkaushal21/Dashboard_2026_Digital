@@ -159,6 +159,13 @@ Vendors never tracked: granth.info, granth.in, atharvasystem.com.
 5. Client health (client section). Update email_signals where a client's brief,
 sentiment, or relationship materially changed this run (Positive|Neutral|Negative|At Risk),
 then select rebuild_clients(); to refresh the Clients/Business-Trends rollups.
+ALWAYS write thread_id on an email_signals row. The Critical-Escalations trigger keys
+off it, and a signal without one used to be dropped in silence — a Negative sentiment that
+never reached the board (this happened to Innovative Capital). The trigger now falls back to
+a synthetic sig:<id> key so nothing is lost, but a real thread_id is what lets the
+escalation dedup against the same conversation next run. After writing any Negative/At-Risk
+signal, VERIFY it landed:
+select company_name, status from critical_escalations where not dismissed and status='open';
 
 6. Escalations + Critical Escalations up to date. Keyword sweep (urgent, critical,
 hacked/malware, complaint, disappointed, refund, cancel/terminate, legal, missed deadline,
@@ -166,6 +173,12 @@ not happy). Write real client problems to escalations (company_name, geo=US|UK|A
 situation_type, business_impact, evidence, dedup thread_id). Critical Escalations
 auto-capture from Negative/At-Risk email_signals (DB trigger) — just get the sentiment
 right; never auto-resolve. Confirm none stale/duplicated.
+A repeat incident on an account that already has a DISMISSED escalation still counts.
+Dismissing an old escalation does not immunise the client — if they raise it again, write a
+fresh Negative signal on the NEW thread so a new critical escalation is created. Judge the
+client's own words, not our assessment of the fix: Innovative Capital was told the malware
+flag was a stale false positive and rejected that twice in half an hour — that is an
+escalation regardless of whether we believe the site is clean.
 
 7. Integrity & dedup sweep (stop refresh-twins). Fix and report:
   - email rows duplicating a sheet deal (same client; delete the email row, sheet wins);
