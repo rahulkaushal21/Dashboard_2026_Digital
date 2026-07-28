@@ -30,6 +30,8 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   dates, and runs the JANITORs (removes superseded/duplicate quote lines).
 > - `select reconcile_opportunities();` — cross-source value backfill.
 > - `select * from reconcile_sheet_drift();` — **run this every time, straight after the sync.**
+>   (Also on pg_cron at **:09/:39**, right after `sync-quotes-to-opps` :05/:35 and `reconcile-opps`
+>   :07/:37, so drift self-heals between refreshes. Running it again by hand is harmless.)
 >   It fixes two things that otherwise look like "I updated the sheet and the dashboard ignored me":
 >   (a) **stale row keys.** A Quotes row with no Quote ID is keyed by its ROW POSITION (`r:N`).
 >   Insert a row near the top of the sheet and everything below shifts down, re-keys, and
