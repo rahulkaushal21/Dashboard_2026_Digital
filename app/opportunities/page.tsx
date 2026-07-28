@@ -228,6 +228,11 @@ const unlikelyOpen = useMemo(() => open.filter(x => x.unlikely), [open])
 const unlikelyValue = unlikelyOpen.reduce((s, x) => s + (x.value || 0), 0)
 const likelyValue = openValue - unlikelyValue
 const onHold = useMemo(() => dated.filter(x => oppStatus(x) === 'On Hold'), [dated])
+const onHoldValue = onHold.reduce((s, x) => s + (x.value || 0), 0)
+// Open + On Hold = everything still undecided. This is what the month cards call
+// "Pending"; the Open KPI beside it is the narrower Open-only figure. Both are shown
+// so the two panels can be reconciled instead of appearing to contradict each other.
+const pendingValue = openValue + onHoldValue
 const won = useMemo(() => dated.filter(x => oppStatus(x) === 'Won'), [dated])
 const wonValue = won.reduce((s, x) => s + (x.value || x.won_amount || 0), 0)
 const byGeo = useMemo(() => breakdown(open, x => x.geo || '—'), [open])
@@ -247,13 +252,21 @@ const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 const rows = all.filter(x => (x.source_date || x.first_date || '').slice(0, 7) === key)
 const sum = (a: Opportunity[]) => a.reduce((s, x) => s + (x.value || x.won_amount || 0), 0)
 const wonR = rows.filter(x => oppStatus(x) === 'Won')
-const pendR = rows.filter(x => { const s = oppStatus(x); return s === 'Open' || s === 'On Hold' })
+// Pending = Open + On Hold, i.e. everything not yet decided. It HAS to include On Hold,
+// otherwise shared ≠ pending + won + lost and the card stops reconciling. The On Hold
+// slice is surfaced separately below so this never looks like it disagrees with the
+// Open-only KPI further down the page.
+const openR = rows.filter(x => oppStatus(x) === 'Open')
+const holdR = rows.filter(x => oppStatus(x) === 'On Hold')
+const pendR = [...openR, ...holdR]
 const lostR = rows.filter(x => oppStatus(x) === 'Lost')
 const unlikelyR = pendR.filter(x => x.unlikely)
 return {
 key, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
 shared: rows.length, sharedValue: sum(rows),
 pending: pendR.length, pendingValue: sum(pendR),
+openOnly: openR.length, openOnlyValue: sum(openR),
+hold: holdR.length, holdValue: sum(holdR),
 won: wonR.length, wonValue: sum(wonR),
 lost: lostR.length, lostValue: sum(lostR),
 unlikely: unlikelyR.length, unlikelyValue: sum(unlikelyR),
@@ -269,8 +282,8 @@ decidedRate: (wonR.length + lostR.length) ? Math.round(wonR.length / (wonR.lengt
 const MonthCard = ({ m }: { m: typeof monthsAgg[number] }) => {
 // Money leads, count supports: the dollar figure is the headline number and the
 // deal count sits under it as context.
-const Stat = ({ label, n, v, tone }: { label: string; n: number; v: number; tone: string }) => (
-<div className="flex-1 min-w-0">
+const Stat = ({ label, n, v, tone, title }: { label: string; n: number; v: number; tone: string; title?: string }) => (
+<div className="flex-1 min-w-0" title={title}>
 <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">{label}</div>
 {/* steps down on narrower cards so four 6-figure sums never wrap or clip */}
 <div className={`text-lg lg:text-xl xl:text-2xl font-bold leading-tight tracking-tight whitespace-nowrap ${tone}`}>{money(v)}</div>
@@ -287,11 +300,21 @@ return (
 </div>
 </div>
 <div className="flex gap-2 xl:gap-3">
-<Stat label="Quotes shared" n={m.shared} v={m.sharedValue} tone="text-white" />
-<Stat label="Pending" n={m.pending} v={m.pendingValue} tone="text-amber-400" />
+<Stat label="Quotes shared" n={m.shared} v={m.sharedValue} tone="text-white" title="Every quote dated in this month. Equals Pending + Won + Lost." />
+<Stat label="Pending" n={m.pending} v={m.pendingValue} tone="text-amber-400"
+  title={`Not yet decided = Open + On Hold. Open ${money(m.openOnlyValue)} (${m.openOnly}) + On Hold ${money(m.holdValue)} (${m.hold}). The "Open pipeline value" KPI below counts Open ONLY, so it is the smaller number.`} />
 <Stat label="Won" n={m.won} v={m.wonValue} tone="text-green-400" />
 <Stat label="Lost" n={m.lost} v={m.lostValue} tone="text-red-400" />
 </div>
+{/* Spells out the Open/On-Hold split so Pending can never look like it contradicts
+    the Open-only KPI further down the page. */}
+{m.hold > 0 && (
+<div className="mt-2 text-xs text-mav-muted">
+pending = <span className="text-amber-300 font-semibold">{money(m.openOnlyValue)}</span> open
+ + <span className="text-orange-300 font-semibold">{money(m.holdValue)}</span> on hold
+ <span className="opacity-60"> ({m.openOnly} + {m.hold} quotes)</span>
+</div>
+)}
 {m.unlikely > 0 && (
 <div className="mt-2 text-xs text-mav-muted">
 of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)}</span> flagged “might not come” · {m.unlikely} {m.unlikely === 1 ? 'quote' : 'quotes'}
@@ -376,11 +399,12 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 </div>
 )}
 
-<div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).</div>
+<div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).
+{onHold.length > 0 && <> Open pipeline here excludes On Hold; the cards above count both as pending — <span className="text-white">{money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}</span> still undecided.</>}</div>
 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
 <KPICard label="Open opportunities" value={String(open.length)} />
-<KPICard label={unlikelyOpen.length ? `Open pipeline (${money(likelyValue)} likely)` : 'Open pipeline value'} value={money(openValue)} />
-<KPICard label="On Hold" value={String(onHold.length)} />
+<KPICard label={unlikelyOpen.length ? `Open pipeline, excl. On Hold (${money(likelyValue)} likely)` : 'Open pipeline value (excl. On Hold)'} value={money(openValue)} />
+<KPICard label={`On Hold value (${onHold.length})`} value={money(onHoldValue)} />
 <KPICard label="Won" value={String(won.length)} />
 <KPICard label="Won value" value={money(wonValue)} />
 </div>
