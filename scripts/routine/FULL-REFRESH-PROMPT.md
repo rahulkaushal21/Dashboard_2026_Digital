@@ -19,10 +19,29 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >
 > **1. Refresh the master (sheet) first.**
 > - `select net.http_get(url:='https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/sheet-sync?token=syncWebHubLP_8f3a91');`
+>   **This only refreshes bookings/web-revenue — it does NOT pull the Quotes tab.**
+> - **The Quotes tab is PUSH-only.** A Google Apps Script posts it to `sheet-ingest` on the hour
+>   at **:49** (`sync_runs.source='quotes-appscript'`). Nothing you can run from SQL will pull it
+>   in sooner. So before telling anyone a sheet edit "didn't work", check
+>   `select max(ran_at) from sync_runs where source='quotes-appscript';` — if their edit is newer
+>   than that, it simply hasn't arrived yet. Say so; don't hand-patch the row and call it fixed.
 > - `select sync_quotes_to_opportunities();` — upserts the Quotes tab, canonicalises names via
 >   `client_aliases`, **self-heals blank AM/PM** from the client's other rows, backfills null
 >   dates, and runs the JANITORs (removes superseded/duplicate quote lines).
 > - `select reconcile_opportunities();` — cross-source value backfill.
+> - `select * from reconcile_sheet_drift();` — **run this every time, straight after the sync.**
+>   It fixes two things that otherwise look like "I updated the sheet and the dashboard ignored me":
+>   (a) **stale row keys.** A Quotes row with no Quote ID is keyed by its ROW POSITION (`r:N`).
+>   Insert a row near the top of the sheet and everything below shifts down, re-keys, and
+>   duplicates — the old opportunity is orphaned, invisible to every future sync, and
+>   double-counts in Won value AND open pipeline. One 4-row insert produced 29 orphans worth
+>   $27k phantom Won + $21k phantom open. Only deletes an orphan when an identical live twin
+>   exists (same company + subject + value), so a genuinely deleted quote is never lost silently.
+>   (b) **spent manual flags** — clears `email_won`/`email_lost` once the sheet agrees, which is
+>   what retires the "update the sheet" alert. Without this the alert never goes away.
+>   If it reports orphans with a mismatched SUBJECT it won't catch them (e.g. `pureluxh2o` vs
+>   `pureluxh2o | Maintainance`) — check for leftovers by hand:
+>   sheet-origin opps whose `quote_key` has no matching row in `quotes`.
 >
 > **2. Check capture is alive.** Newest `email_inbox.inserted_at` and latest `sync_runs` for
 > `source='gmail-ingest'`. If capture is >2h stale or erroring → `markScanFailed` and STOP
@@ -52,7 +71,11 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     buried under an internal thread is tracked under the deal, not the handoff; (b) ad-hoc
 >     support / bug-fix / small feature or content requests for an **already-won / existing**
 >     client (ongoing delivery work belongs to that won deal, not a fresh pipeline row);
->     (c) pure support complaints / escalations (route to `escalations`, not opportunities).
+>     (c) pure support complaints / escalations (route to `escalations`, not opportunities);
+>     (d) **work that isn't WEB** — this board is web only. SEO / AIO / LLM-visibility / paid-media
+>     scopes belong to another team even when the client is a web client and the AM is the same.
+>     Read the actual scope, not the client name (e.g. "Inncap_SEO_AIO_Proposal", a "one-off SEO +
+>     LLM setup" — both were SEO, both were wrongly on the board).
 >     Only track a genuine NEW paid scope. When unsure, leave it **off** the board.
 >   - **When you DO create an email opp, populate it fully:** set `sales_person`/`pm_owner`
 >     from the client's existing rows, `geo`, `business_type`, and `est_value` if any figure is
@@ -88,6 +111,20 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     sheet, its email duplicate is deleted and the Need-Review flag clears itself.** A flag that
 >     persists means the deal is genuinely NOT yet in the sheet/bookings — enter + confirm it.
 >   - **Lost/cancelled?** Explicit decline / "cancelled" in sheet → Lost.
+>   - **Respect the human calls, and never fight them.** `email_won` / `email_lost` / `unlikely`
+>     are set by a person on the dashboard and are deliberately held OUTSIDE `status`/`won`,
+>     because the sync rewrites those from the sheet every run. Never write `status`/`won` on a
+>     sheet-origin row to record a decision — it is gone within 30 minutes. Use
+>     `set_opportunity_confirmed` / `set_opportunity_lost` / `set_opportunity_unlikely` (all
+>     SECURITY DEFINER, all reversible, all mutually exclusive). They survive the sync; the
+>     janitor in step 1 clears them once the sheet catches up.
+>   - **A confirmed deal may already be Won under another line.** Before confirming an open row,
+>     check for a Won row with the same company + subject. Sheet rows are re-keyed when they gain
+>     a Quote ID (see step 1), so the "open" line is often the stale predecessor of a win that is
+>     ALREADY booked. Confirming it double-counts. Verify, then delete the stale line instead.
+>   - **Quoted value ≠ closed value.** Sales discount to hit monthly targets, and the Quotes tab
+>     keeps the ORIGINAL quoted figure. When the user says "confirmed at a lower value", the
+>     revenue sheet is right and the quote line is stale — don't try to "fix" the quoted number.
 >   - **Win %** — refresh from the latest signal (email, recap, sheet status). Up on
 >     approval/progress; down + flag on stall, cost pushback, or silence.
 >     **HARD RULE: win% only exists where a real value was quoted/shared.** `win_probability`
@@ -96,7 +133,17 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     value-less row. And the value must be the **confirmed/approved amount, not the full
 >     theoretical scope** — quote what the client agreed to, not "everything-if-it-all-lands"
 >     (e.g. bill the 2 approved items, not all 4 possible ones).
->   - **Brief/gist** — update if the scope or ask materially changed.
+>   - **Brief/gist** — update if the scope or ask materially changed. Watch for a **scrambled
+>     gist**: one client's gist carrying another's client name / AM / value / subject. Fix with
+>     `gist=null, enriched=false` then re-sync — do NOT hand-write the text.
+>   - **What you may and may NOT edit on a sheet-origin row.** The upsert overwrites
+>     `status`, `won`, `won_amount`, `est_value`, `rfq_status`, `source_subject` outright, and
+>     overwrites `geo`, `sales_person`, `pm_owner`, `technology`, `business_type` whenever the
+>     sheet holds any value. Editing those here is erased on the next sync — the fix belongs in
+>     the Quotes tab. You CAN durably set `win_probability`, `next_step`, `summary`, `gist`
+>     (they're protected once `enriched=true`), plus `journey`, `company_note` and the manual
+>     flags. Tell the user which of the two it is instead of silently patching a column that
+>     will revert.
 >   - **Owners & cost** — every deal should have AM (`sales_person`) + PM (`pm_owner`) + a value
 >     where one exists. Re-run `sync_quotes_to_opportunities()` so self-heal fills blank owners;
 >     backfill `est_value` from the sheet/email.
@@ -117,6 +164,17 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   - blank `company_name`; gist saying "Client: unknown"; scrambled enrichment (gist "Client:"
 >     ≠ company) → `enriched=false, gist=null` then re-sync;
 >   - open sheet quote line superseded by a Won line (janitor handles on sync);
+>   - **orphaned sheet rows** — sheet-origin opps whose `quote_key` matches no current row in
+>     `quotes`. `reconcile_sheet_drift()` (step 1) clears the clean cases; report any leftovers
+>     with their value, since each one double-counts until it is dealt with:
+>     `with qkeys as (select coalesce(nullif(quote_id,''), case when src_row_hash ~ '^Q:[^:]*:[0-9]+$'
+>     then 'r:'||split_part(src_row_hash,':',3) else nullif(src_row_hash,'') end,
+>     md5(coalesce(agency,'')||coalesce(subject_project,'')||coalesce(added_date::text,'')||id::text)) qkey
+>     from quotes) select id, company_name, quote_key, est_value, status from opportunities o
+>     where origin='sheet' and quote_key is not null
+>     and not exists (select 1 from qkeys k where k.qkey=o.quote_key);`
+>   - the **blank Quotes row `r:23`** regenerates on every sync and must be deleted at source in
+>     the Quotes tab; until then delete the opp and say so rather than reporting it as fixed;
 >   - **win% without a value** — any open opp with `win_probability` set but `est_value` null/0
 >     **that is NOT an approved/won-lag deal**:
 >     `update opportunities set win_probability=null where not won and lower(coalesce(status,''))
@@ -135,8 +193,35 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >
 > **Pulse:** new opps (with owner+cost), status/win% changes with evidence, Won moved,
 > duplicates removed, deals warmed/cooled (esp. from calls), open escalations + how long.
+> **Also state plainly:** anything you could NOT make stick (a sheet-owned column, a sheet edit
+> not yet pushed), and any figure you converted or inferred rather than read — never present a
+> derived number as if the client sent it.
 
 ---
+
+## Currency
+The board is USD. A quote in another currency (NZD/AUD/GBP/EUR) must be converted before it goes
+in `est_value`, and the **original amount + the rate used** must be written into the gist, with
+the conversion called out in the pulse so it can be corrected. Never store a foreign figure in
+`est_value` as though it were dollars.
+
+## What the user has corrected — apply without being asked again
+Every one of these came from a real correction; treat them as standing rules.
+- **Web only.** SEO / AIO / LLM-visibility scopes come off the board even for web clients.
+- **Sub-brands are not clients.** Tip Top Foodservice NZ → `GWF`; SurfStyle → `Hummingbird Ideas`;
+  First Defense Supply → `Market Veep`; Fyshe → `Ink Digital`; PAH → `Underdog Digital`.
+  The end client goes in `company_note`, never in `company_name`.
+- **One deal, one row.** Before creating anything, look for the same job already present under a
+  different key, a different value, or the other origin. The sheet always wins over email.
+- **Never infer technology or GEO from an email body.** Mavlers' own signature embeds HubSpot
+  tracking links, which produced false "Hubspot" labels. Use only direct evidence; leave it null
+  and report the gap otherwise. `geo='Unknown'` must be NULL — `geo3()` buckets any non-AU/US
+  string as UK, so "Unknown" silently becomes a UK deal.
+- **Deleting is only durable for `origin='email'` rows.** A sheet-origin row returns on the next
+  sync unless its Quotes row is gone or re-keyed. Say which case applies.
+- **Credentials.** Client mail regularly contains WP/SFTP/staging logins. Read them if needed to
+  judge the deal, never write them into any column, never echo them back — and tell the user to
+  rotate anything that arrived in plain email.
 
 ## No email missed
 Mail is captured 24/7 into `email_inbox` (persistent cursor, 72h outage catch-up) and waits at
