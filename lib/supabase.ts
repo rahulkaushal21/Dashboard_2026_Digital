@@ -28,6 +28,9 @@ unlikely?: boolean; unlikely_reason?: string; unlikely_at?: string; unlikely_by?
 // overwrites `status` every 30 min — so while the Quotes sheet still says Open, the two
 // disagree, and that disagreement is what raises the "update the sheet" alert.
 email_lost?: boolean; email_lost_reason?: string; email_lost_at?: string; email_lost_by?: string
+// Confirmed Won from the dashboard — the mirror image of email_lost, and held apart
+// from `won`/`status` for the same reason: the sheet sync overwrites both.
+email_won?: boolean; email_won_reason?: string; email_won_at?: string; email_won_by?: string
 }
 
 // Group the many raw quote "technology" values into a handful of service lines.
@@ -189,19 +192,22 @@ const taggedRepeat = bt.includes('repeat')       // 'repeat' or 'new repeat'
 const taggedNewOnly = bt === 'new'               // pure "New"
 const repeat = taggedRepeat || inRevenue || o.is_new_client === false
 // Review flags for still-open deals, in priority order (one flag shown, most urgent first):
-//  1. LOST-LAG  — someone marked it Lost from email but the sheet line is still Open
-//  2. WON-LAG   — email says confirmed but the deal is still Open (sheet not updated yet)
-//  3. type      — booked/existing client mislabelled pure "New" in the sheet
-//  4. STALE     — no dated movement in >21d; chase or confirm it's still live
-//  5. text      — brief reads like existing/confirmed work
+//  1. CONFIRM-LAG — someone confirmed it Won here but the sheet line is still Open
+//  2. LOST-LAG    — someone marked it Lost here but the sheet line is still Open
+//  3. WON-LAG     — email reads confirmed but the deal is still Open (sheet not updated yet)
+//  4. type        — booked/existing client mislabelled pure "New" in the sheet
+//  5. STALE       — no dated movement in >21d; chase or confirm it's still live
+//  6. text        — brief reads like existing/confirmed work
 let flag: string | undefined
 if (!o.won && norm(o.status) !== 'lost' && !norm(o.status).includes('cancel')) {
 const emailConfirmed = o.origin === 'email' && (emailWon.test(norm(o.rfq_status)) || (o.win_probability || 0) >= 90)
-// Only sheet-origin rows can be "out of sync with the sheet" — an email-origin deal
-// has no Quotes line to correct, so calling it Lost there needs no follow-up action.
+// Only sheet-origin rows can be "out of sync with the sheet" — an email-origin deal has
+// no Quotes line to correct, so a call made there needs no follow-up action.
 const lostLag = o.email_lost && o.origin === 'sheet'
+const confirmLag = o.email_won && o.origin === 'sheet'
 const age = daysSince(o.source_date || o.first_date)
-if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set that row to Cancelled so it stops counting as live pipeline.'
+if (confirmLag) flag = '⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set that row to Confirmed so it books as revenue.'
+else if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set that row to Cancelled so it stops counting as live pipeline.'
 else if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
 else if (age !== null && age > STALE_DAYS) flag = `⚠ Stale — no movement in ${age} days. Follow up or confirm the deal is still live.`
@@ -328,6 +334,16 @@ export async function setOpportunityLost(id: number, lost: boolean, opts?: { act
 if (!supabase || !id) return false
 const { data, error } = await supabase.rpc('set_opportunity_lost', {
 p_id: id, p_lost: lost, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null,
+})
+return !error && Number(data) > 0
+}
+// Confirm a deal as Won from the dashboard (reversible). Writes `email_won`, not `won`,
+// so the 30-minute sheet sync can't wipe it. The RPC clears any Lost / "might not come"
+// flag on the same deal — the three calls are mutually exclusive by construction.
+export async function setOpportunityConfirmed(id: number, confirmed: boolean, opts?: { actor?: string; reason?: string }): Promise<boolean> {
+if (!supabase || !id) return false
+const { data, error } = await supabase.rpc('set_opportunity_confirmed', {
+p_id: id, p_confirmed: confirmed, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null,
 })
 return !error && Number(data) > 0
 }

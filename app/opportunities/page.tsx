@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, serviceOf, setOpportunityLost, setOpportunityUnlikely, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, type Opportunity } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -22,16 +22,21 @@ const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
 const oppStatus = (x: Opportunity) => {
-if (x.won) return 'Won'                       // a booking always wins — even over a Lost call
+if (x.won) return 'Won'                       // a booking always wins
+if (x.email_won) return 'Won'                 // confirmed here; the sheet may not know yet
 const s = (x.status || '').toLowerCase()
 if (s.includes('cancel') || s === 'lost') return 'Lost'
-if (x.email_lost) return 'Lost'               // marked Lost here; the sheet may not know yet
+if (x.email_lost) return 'Lost'               // marked Lost here; likewise ahead of the sheet
 if (s.includes('hold')) return 'On Hold'
 return 'Open'
 }
-// Marked Lost on the dashboard while its Quotes-sheet line still reads Open. Only
+// A call made on the dashboard that the Quotes sheet hasn't caught up with yet. Only
 // sheet-origin deals can drift like this, and only until someone edits the sheet.
 const lostLag = (x: Opportunity) => !!x.email_lost && !x.won && x.origin === 'sheet' && !/lost|cancel/i.test(x.status || '')
+const confirmLag = (x: Opportunity) => !!x.email_won && !x.won && x.origin === 'sheet' && !/won|confirm/i.test(x.status || '')
+const sheetLag = (x: Opportunity) => lostLag(x) || confirmLag(x)
+// Every manual call, whatever its verdict — the set you'd look through to change your mind.
+const markedByHand = (x: Opportunity) => !!(x.email_won || x.email_lost || x.unlikely)
 const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : 'bg-mav-line text-mav-muted'
 const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
 
@@ -83,9 +88,12 @@ const [flagOnly, setFlagOnly] = useState(false)
 // "Might not come" — filter + in-flight save state for the toggle.
 const [unlikelyOnly, setUnlikelyOnly] = useState(false)
 const [savingUnlikely, setSavingUnlikely] = useState(false)
-// "Lost here, still Open in the sheet" — the mismatch alert filter + its save state.
+// "Called here, still Open in the sheet" — the mismatch alert filter + its save state.
 const [lagOnly, setLagOnly] = useState(false)
 const [savingLost, setSavingLost] = useState(false)
+const [savingWon, setSavingWon] = useState(false)
+// Every deal someone marked by hand, so a call can always be found again and reversed.
+const [markedOnly, setMarkedOnly] = useState(false)
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
@@ -111,7 +119,8 @@ const rows = all
 .filter(x => !fTech || (x.technology || '') === fTech)
 .filter(x => !flagOnly || x.flag)
 .filter(x => !unlikelyOnly || x.unlikely)
-.filter(x => !lagOnly || lostLag(x))
+.filter(x => !lagOnly || sheetLag(x))
+.filter(x => !markedOnly || markedByHand(x))
 .filter(x => inRange(x.source_date || x.first_date))
 return rows.sort((a, b) => {
 const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
@@ -119,7 +128,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, from, to, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, from, to, sort])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -168,17 +177,46 @@ window.alert('Could not save that — please try again.')
 }
 }
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false) }
+// Confirm a deal as Won (or undo). Like Lost, this does NOT edit the Quotes sheet — the
+// deal keeps its "confirm it in the sheet" alert until that row is set to Confirmed.
+const toggleConfirmed = async (x: Opportunity) => {
+const turningOn = !x.email_won
+const reason = turningOn
+? (window.prompt(`Mark "${x.company_name}" as Confirmed (Won)?\n\nIt counts as Won here straight away. The Quotes sheet is not edited — the deal stays flagged until you set its sheet row to Confirmed so it books as revenue.\n\nNote? (optional)`) ?? undefined)
+: undefined
+if (turningOn && reason === undefined) return   // cancelled the prompt
+setSavingWon(true)
+// Confirming supersedes Lost and "might not come" — the RPC clears both, so the UI must too.
+const patch: Partial<Opportunity> = turningOn
+? { email_won: true, email_won_reason: reason || undefined, email_won_at: new Date().toISOString(), email_won_by: currentEmail() || undefined,
+    email_lost: false, email_lost_reason: undefined, email_lost_at: undefined, email_lost_by: undefined,
+    unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined }
+: { email_won: false, email_won_reason: undefined, email_won_at: undefined, email_won_by: undefined }
+setAll(prev => prev.map(r => r.id === x.id ? { ...r, ...patch } : r))
+setSel(s => s && s.id === x.id ? { ...s, ...patch } : s)
+const ok = await setOpportunityConfirmed(x.id, turningOn, { actor: currentEmail() || undefined, reason })
+setSavingWon(false)
+if (!ok) {   // roll the row back rather than show a win that never saved
+setAll(prev => prev.map(r => r.id === x.id ? x : r))
+setSel(s => s && s.id === x.id ? x : s)
+window.alert('Could not save that — please try again.')
+}
+}
+
+const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false) }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, from, to, sort, perPage])
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, from, to, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
 const flagged = all.filter(x => x.flag).length
 // Deals whose Lost call hasn't reached the Quotes sheet yet — computed over ALL rows,
 // not the date-filtered set, so the alert can't hide behind a narrow From/To window.
-const lagRows = useMemo(() => all.filter(lostLag), [all])
+const lagRows = useMemo(() => all.filter(sheetLag), [all])
+const lagWon = lagRows.filter(confirmLag)
+const lagLost = lagRows.filter(lostLag)
+const markedRows = useMemo(() => all.filter(markedByHand), [all])
 
 // Headline numbers follow the DATE range (independent of the other dropdowns so
 // the breakdown panels stay stable for click-to-filter).
@@ -286,26 +324,45 @@ return (
 <div>
 <Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence." />
 
-{/* Sheet-mismatch alert: called Lost here, still Open in the Quotes sheet. Sits above
-    everything because it's the one thing on this page that needs an action elsewhere. */}
+{/* Sheet-mismatch alert: a Won/Lost call made here that the Quotes sheet hasn't caught
+    up with. Sits above everything — it's the one thing on this page needing action
+    elsewhere. Won and Lost are listed separately because the fix differs for each. */}
 {lagRows.length > 0 && (
-<div className="mb-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+<div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
 <div className="flex flex-wrap items-center justify-between gap-3">
 <div>
-<div className="text-sm font-semibold text-red-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} marked Lost here {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet</div>
-<div className="text-xs text-mav-muted mt-0.5">Set {lagRows.length > 1 ? 'those rows' : 'that row'} to <span className="text-white">Cancelled</span> in the sheet — until then {lagRows.length > 1 ? 'they' : 'it'} still counts as live pipeline in every sheet-driven report. This alert clears itself on the next sync.</div>
+<div className="text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} decided here {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet</div>
+<div className="text-xs text-mav-muted mt-0.5">The sheet is the master record, so nothing books or drops out of pipeline until you update it there. This alert clears itself on the next sync.</div>
 </div>
-<button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setSearch('') }}
-className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-red-500/50 text-red-300 hover:bg-red-500/15 transition-colors">Show {lagRows.length > 1 ? 'them' : 'it'}</button>
+<button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setMarkedOnly(false); setSearch('') }}
+className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 text-amber-300 hover:bg-amber-500/15 transition-colors">Show {lagRows.length > 1 ? 'them' : 'it'}</button>
 </div>
-<div className="mt-2 flex flex-wrap gap-1.5">
-{lagRows.slice(0, 12).map(x => (
-<button key={x.id} onClick={() => setSel(x)} className="text-xs px-2 py-1 rounded-md bg-red-500/15 text-red-200 hover:bg-red-500/25 transition-colors">
-{x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
+{lagWon.length > 0 && (
+<div className="mt-2.5">
+<div className="text-xs text-green-300 font-medium mb-1">Set to <span className="underline">Confirmed</span> in the sheet so {lagWon.length > 1 ? 'they book' : 'it books'} as revenue:</div>
+<div className="flex flex-wrap gap-1.5">
+{lagWon.slice(0, 12).map(x => (
+<button key={x.id} onClick={() => setSel(x)} className="text-xs px-2 py-1 rounded-md bg-green-500/15 text-green-200 hover:bg-green-500/25 transition-colors">
+✓ {x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
 </button>
 ))}
-{lagRows.length > 12 && <span className="text-xs text-mav-muted self-center">+{lagRows.length - 12} more</span>}
+{lagWon.length > 12 && <span className="text-xs text-mav-muted self-center">+{lagWon.length - 12} more</span>}
 </div>
+</div>
+)}
+{lagLost.length > 0 && (
+<div className="mt-2.5">
+<div className="text-xs text-red-300 font-medium mb-1">Set to <span className="underline">Cancelled</span> in the sheet so {lagLost.length > 1 ? 'they stop' : 'it stops'} counting as live pipeline:</div>
+<div className="flex flex-wrap gap-1.5">
+{lagLost.slice(0, 12).map(x => (
+<button key={x.id} onClick={() => setSel(x)} className="text-xs px-2 py-1 rounded-md bg-red-500/15 text-red-200 hover:bg-red-500/25 transition-colors">
+✗ {x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
+</button>
+))}
+{lagLost.length > 12 && <span className="text-xs text-mav-muted self-center">+{lagLost.length - 12} more</span>}
+</div>
+</div>
+)}
 </div>
 )}
 
@@ -346,7 +403,10 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-red-500/50 text
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
 <button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
 {lagRows.length > 0 && (
-<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Marked Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>✗ Lost, sheet not updated ({lagRows.length})</button>
+<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Sheet not updated ({lagRows.length})</button>
+)}
+{markedRows.length > 0 && (
+<button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-sm px-3 py-2 rounded-md border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>✎ Marked by hand ({markedRows.length})</button>
 )}
 <span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
 <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
@@ -366,10 +426,10 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-red-500/50 text
 const st = oppStatus(x)
 return (
 <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.unlikely ? 'bg-orange-500/[0.07]' : x.flag ? 'bg-amber-500/5' : ''}`}>
-<td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
+<td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.email_won && <span className="mr-1.5 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>✓</span>}{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
 <td className={`px-4 py-3 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
+<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (confirmLag(x) ? '✓ Won · sheet open' : `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span></td>
 <td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager (AM / NBD)">AM: {x.sales_person}</span> : <span className="text-mav-muted">AM: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
@@ -378,7 +438,7 @@ return (
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>
 {/* lostLag is checked directly, not just via x.flag: flag comes from the last data
     load, so a deal marked Lost in this session must still show the alert instantly. */}
-<td className="px-4 py-3">{(x.flag || lostLag(x)) ? <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${lostLag(x) ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300'}`} title={lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{lostLag(x) ? '⚠ Update sheet' : '⚠ Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+<td className="px-4 py-3">{(x.flag || sheetLag(x)) ? <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? '⚠ Update sheet' : '⚠ Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
 </tr>
 )
 })}</tbody>
@@ -423,58 +483,71 @@ return (
 <span className="text-2xl font-bold">{sel.value ? money(sel.value) : '—'}</span>
 </div>
 
-{/* "Might not come" — only offered on deals that are still live. */}
-{(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold') && (
-<div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.unlikely ? 'border-orange-500/40 bg-orange-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
-<div className="flex items-center justify-between gap-3">
-<div className="min-w-0">
-<div className={`text-sm font-medium ${sel.unlikely ? 'text-orange-300' : ''}`}>{sel.unlikely ? '🚫 Flagged: might not come' : 'Might not come?'}</div>
-<div className="text-xs text-mav-muted mt-0.5">{sel.unlikely ? 'Discounted from the likely pipeline. Still Open — not marked Lost.' : 'Discount this from the likely pipeline without calling it Lost.'}</div>
+{/* ── Your call ─────────────────────────────────────────────────────────────
+    The three manual verdicts in one place: Confirmed, Lost, might-not-come.
+    They're mutually exclusive (the RPCs enforce it), and every one of them is
+    reversible from here — pick a different verdict, or Undo to hand the deal
+    back to the sheet. Offered on live deals and on anything already marked by
+    hand; a deal the SHEET settled has no buttons, because the sheet owns it. */}
+{(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || markedByHand(sel)) && (
+<div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.email_won ? 'border-green-500/40 bg-green-500/10' : sel.email_lost ? 'border-red-500/40 bg-red-500/10' : sel.unlikely ? 'border-orange-500/40 bg-orange-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
+<div className="text-sm font-medium mb-0.5">
+{sel.email_won ? <span className="text-green-300">✓ Confirmed — Won</span>
+ : sel.email_lost ? <span className="text-red-300">✗ Marked Lost</span>
+ : sel.unlikely ? <span className="text-orange-300">🚫 Flagged: might not come</span>
+ : 'Your call on this deal'}
 </div>
-<button disabled={savingUnlikely} onClick={() => toggleUnlikely(sel)}
-className={`shrink-0 text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-line text-mav-muted hover:text-white' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/15'}`}>
-{savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo' : 'Mark unlikely'}
+<div className="text-xs text-mav-muted mb-2.5">
+{markedByHand(sel)
+ ? 'Recorded on the dashboard only — the Quotes sheet is never edited automatically. Change it any time; nothing here is final.'
+ : 'Record the outcome here the moment you know it. The Quotes sheet still needs updating by hand afterwards.'}
+</div>
+<div className="flex flex-wrap gap-2">
+<button disabled={savingWon} onClick={() => toggleConfirmed(sel)}
+className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_won ? 'border-mav-line text-mav-muted hover:text-white' : 'border-green-500/50 text-green-300 hover:bg-green-500/15'}`}>
+{savingWon ? 'Saving…' : sel.email_won ? 'Undo confirm' : '✓ Mark Confirmed'}
 </button>
-</div>
-{sel.unlikely && (sel.unlikely_reason || sel.unlikely_by) && (
-<div className="mt-2 pt-2 border-t border-orange-500/20 text-xs text-mav-muted">
-{sel.unlikely_reason && <div className="text-orange-200/80">“{sel.unlikely_reason}”</div>}
-{sel.unlikely_by && <div className="mt-0.5">flagged by {sel.unlikely_by}{sel.unlikely_at ? ` · ${sel.unlikely_at.slice(0, 10)}` : ''}</div>}
-</div>
-)}
-</div>
-)}
-
-{/* Mark Lost / undo. Offered on live deals, and on any deal already marked Lost here
-    so the call can be reversed. A sheet-driven Lost has no button — fix that in the sheet. */}
-{(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || sel.email_lost) && (
-<div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.email_lost ? 'border-red-500/40 bg-red-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
-<div className="flex items-center justify-between gap-3">
-<div className="min-w-0">
-<div className={`text-sm font-medium ${sel.email_lost ? 'text-red-300' : ''}`}>{sel.email_lost ? '✗ Marked Lost' : 'Lost this one?'}</div>
-<div className="text-xs text-mav-muted mt-0.5">{sel.email_lost ? 'Out of the pipeline here. The Quotes sheet is not edited automatically.' : 'Records the loss here straight away — the Quotes sheet still needs updating by hand.'}</div>
-</div>
 <button disabled={savingLost} onClick={() => toggleLost(sel)}
-className={`shrink-0 text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-white' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
-{savingLost ? 'Saving…' : sel.email_lost ? 'Undo' : 'Mark Lost'}
+className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-white' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
+{savingLost ? 'Saving…' : sel.email_lost ? 'Undo Lost' : '✗ Mark Lost'}
 </button>
+{/* "Might not come" is a pipeline-confidence call, so it only applies while the deal is still live. */}
+{(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || sel.unlikely) && (
+<button disabled={savingUnlikely} onClick={() => toggleUnlikely(sel)}
+className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-line text-mav-muted hover:text-white' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/15'}`}>
+{savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo unlikely' : '🚫 Might not come'}
+</button>
+)}
 </div>
+{sel.email_won && (sel.email_won_reason || sel.email_won_by) && (
+<div className="mt-2.5 pt-2 border-t border-green-500/20 text-xs text-mav-muted">
+{sel.email_won_reason && <div className="text-green-200/80">“{sel.email_won_reason}”</div>}
+{sel.email_won_by && <div className="mt-0.5">confirmed by {sel.email_won_by}{sel.email_won_at ? ` · ${sel.email_won_at.slice(0, 10)}` : ''}</div>}
+</div>
+)}
 {sel.email_lost && (sel.email_lost_reason || sel.email_lost_by) && (
-<div className="mt-2 pt-2 border-t border-red-500/20 text-xs text-mav-muted">
+<div className="mt-2.5 pt-2 border-t border-red-500/20 text-xs text-mav-muted">
 {sel.email_lost_reason && <div className="text-red-200/80">“{sel.email_lost_reason}”</div>}
 {sel.email_lost_by && <div className="mt-0.5">marked by {sel.email_lost_by}{sel.email_lost_at ? ` · ${sel.email_lost_at.slice(0, 10)}` : ''}</div>}
 </div>
 )}
-{lostLag(sel) && (
-<div className="mt-2 pt-2 border-t border-red-500/20 text-xs text-red-300">
-⚠ The Quotes sheet still shows this Open — set that row to <span className="font-semibold">Cancelled</span>. Until you do, it keeps counting as live pipeline in every sheet-driven report.
+{sel.unlikely && (sel.unlikely_reason || sel.unlikely_by) && (
+<div className="mt-2.5 pt-2 border-t border-orange-500/20 text-xs text-mav-muted">
+{sel.unlikely_reason && <div className="text-orange-200/80">“{sel.unlikely_reason}”</div>}
+{sel.unlikely_by && <div className="mt-0.5">flagged by {sel.unlikely_by}{sel.unlikely_at ? ` · ${sel.unlikely_at.slice(0, 10)}` : ''}</div>}
+</div>
+)}
+{sheetLag(sel) && (
+<div className="mt-2.5 pt-2 border-t border-amber-500/30 text-xs text-amber-300">
+⚠ The Quotes sheet still shows this Open — set that row to <span className="font-semibold">{confirmLag(sel) ? 'Confirmed' : 'Cancelled'}</span>.
+{confirmLag(sel) ? ' Until you do, it will not book as revenue.' : ' Until you do, it keeps counting as live pipeline in every sheet-driven report.'}
 </div>
 )}
 </div>
 )}
 
-{sel.flag && !lostLag(sel) && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
-{oppStatus(sel) === 'Won' && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
+{sel.flag && !sheetLag(sel) && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
+{oppStatus(sel) === 'Won' && !sel.email_won && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
 {oppStatus(sel) === 'Lost' && !sel.email_lost && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">✗ Lost — cancelled in the Quotes sheet. Won always overrides if the client later books.</div>}
 
 <div className="mb-5">
