@@ -21,6 +21,9 @@ gist?: string; win_probability?: number; win_reason?: string; company_note?: str
 won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]; business_type?: string
 value?: number; technology?: string; service?: string; journey?: string; quote_ref?: string
 quote_date?: string; origin?: string; est_value?: number; next_step?: string; enriched?: boolean
+// "Might not come" — a human call that this open quote probably won't convert.
+// The deal stays Open (it isn't Lost), but it's discounted from the realistic view.
+unlikely?: boolean; unlikely_reason?: string; unlikely_at?: string; unlikely_by?: string
 }
 
 // Group the many raw quote "technology" values into a handful of service lines.
@@ -296,6 +299,19 @@ export async function markEscalationStatus(threadIds: string[], status: 'open' |
   const { error } = await supabase.rpc('mark_escalations_status', { p_thread_ids: threadIds, p_status: status, p_actor: opts?.actor ?? null, p_note: opts?.note ?? null })
   return !error
 }
+// Flag/unflag an open quote as "might not come". Reversible; never changes the deal's
+// real status — Won/Lost still come from the sheet and email evidence alone.
+// Goes through an RPC, not a table update: `opportunities` has RLS enabled with a
+// SELECT-only policy, so a direct .update() from the browser silently affects 0 rows.
+// The RPC returns the row count so a no-op is reported as a failure, not a fake save.
+export async function setOpportunityUnlikely(id: number, unlikely: boolean, opts?: { actor?: string; reason?: string }): Promise<boolean> {
+if (!supabase || !id) return false
+const { data, error } = await supabase.rpc('set_opportunity_unlikely', {
+p_id: id, p_unlikely: unlikely, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null,
+})
+return !error && Number(data) > 0
+}
+
 // Remove a client's escalations (false-positive / not actually major). Reversible.
 export async function dismissEscalation(threadIds: string[], opts?: { actor?: string; reason?: string }): Promise<boolean> {
   if (!supabase || !threadIds.length) return false

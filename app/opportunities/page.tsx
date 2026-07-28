@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, serviceOf, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, serviceOf, setOpportunityUnlikely, type Opportunity } from '@/lib/supabase'
+import { currentEmail } from '@/lib/access'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
 // Owner cells can hold several names ("Rahul Kaushal, Maitri Shah"); split so each
@@ -71,7 +72,13 @@ const [all, setAll] = useState<Opportunity[]>([])
 const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
 const [fAM, setFAM] = useState(''); const [fPM, setFPM] = useState(''); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
 const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
+// Today's date, resolved on the client. Drives the fixed "last 2 months" window,
+// which must not move when the user edits the From/To filter.
+const [today, setToday] = useState('')
 const [flagOnly, setFlagOnly] = useState(false)
+// "Might not come" — filter + in-flight save state for the toggle.
+const [unlikelyOnly, setUnlikelyOnly] = useState(false)
+const [savingUnlikely, setSavingUnlikely] = useState(false)
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
@@ -79,7 +86,7 @@ const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
 useEffect(() => { getOpportunities().then(setAll) }, [])
 // Default the "To" date to today (set on the client to avoid a hydration mismatch).
-useEffect(() => { setTo(new Date().toISOString().slice(0, 10)) }, [])
+useEffect(() => { const d = new Date().toISOString().slice(0, 10); setTo(d); setToday(d) }, [])
 
 // Undated rows always show; otherwise honour the From/To range.
 const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return true; if (from && v < from) return false; if (to && v > to) return false; return true }
@@ -96,6 +103,7 @@ const rows = all
 .filter(x => !fSvc || svcOf(x) === fSvc)
 .filter(x => !fTech || (x.technology || '') === fTech)
 .filter(x => !flagOnly || x.flag)
+.filter(x => !unlikelyOnly || x.unlikely)
 .filter(x => inRange(x.source_date || x.first_date))
 return rows.sort((a, b) => {
 const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
@@ -103,12 +111,34 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, from, to, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, from, to, sort])
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false) }
+// Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
+const toggleUnlikely = async (x: Opportunity) => {
+const turningOn = !x.unlikely
+const reason = turningOn
+? (window.prompt(`Flag "${x.company_name}" as unlikely to convert?\n\nThe deal stays Open — this only discounts it from the realistic pipeline view.\n\nWhy? (optional)`) ?? undefined)
+: undefined
+if (turningOn && reason === undefined) return   // cancelled the prompt
+setSavingUnlikely(true)
+const patch = turningOn
+? { unlikely: true, unlikely_reason: reason || undefined, unlikely_at: new Date().toISOString(), unlikely_by: currentEmail() || undefined }
+: { unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined }
+setAll(prev => prev.map(r => r.id === x.id ? { ...r, ...patch } : r))
+setSel(s => s && s.id === x.id ? { ...s, ...patch } : s)
+const ok = await setOpportunityUnlikely(x.id, turningOn, { actor: currentEmail() || undefined, reason })
+setSavingUnlikely(false)
+if (!ok) {   // roll back so the UI never claims a save that didn't happen
+setAll(prev => prev.map(r => r.id === x.id ? { ...r, unlikely: x.unlikely, unlikely_reason: x.unlikely_reason, unlikely_at: x.unlikely_at, unlikely_by: x.unlikely_by } : r))
+setSel(s => s && s.id === x.id ? { ...s, unlikely: x.unlikely, unlikely_reason: x.unlikely_reason } : s)
+window.alert('Could not save that flag — please try again.')
+}
+}
+
+const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false) }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, from, to, sort, perPage])
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, from, to, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
@@ -119,12 +149,86 @@ const flagged = all.filter(x => x.flag).length
 const dated = useMemo(() => all.filter(x => inRange(x.source_date || x.first_date)), [all, from, to])
 const open = useMemo(() => dated.filter(x => oppStatus(x) === 'Open'), [dated])
 const openValue = open.reduce((s, x) => s + (x.value || 0), 0)
+// Realistic view = open pipeline minus everything a human flagged "might not come".
+const unlikelyOpen = useMemo(() => open.filter(x => x.unlikely), [open])
+const unlikelyValue = unlikelyOpen.reduce((s, x) => s + (x.value || 0), 0)
+const likelyValue = openValue - unlikelyValue
 const onHold = useMemo(() => dated.filter(x => oppStatus(x) === 'On Hold'), [dated])
 const won = useMemo(() => dated.filter(x => oppStatus(x) === 'Won'), [dated])
 const wonValue = won.reduce((s, x) => s + (x.value || x.won_amount || 0), 0)
 const byGeo = useMemo(() => breakdown(open, x => x.geo || '—'), [open])
 const bySvc = useMemo(() => breakdown(open, svcOf), [open])
 const byTech = useMemo(() => breakdown(open, x => x.technology || '—'), [open])
+
+// ── Last 2 months ────────────────────────────────────────────────────────────
+// Deliberately IGNORES the From/To filter — "last 2 months" is a fixed window so
+// the quote-to-win picture stays comparable run to run. A deal counts in the month
+// it was quoted (source_date, else first_date); Pending = still Open or On Hold.
+const monthsAgg = useMemo(() => {
+if (!today) return []                                    // wait for the client date (no SSR mismatch)
+const base = new Date(today + 'T00:00:00')
+return [1, 0].map(i => {
+const d = new Date(base.getFullYear(), base.getMonth() - i, 1)
+const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+const rows = all.filter(x => (x.source_date || x.first_date || '').slice(0, 7) === key)
+const sum = (a: Opportunity[]) => a.reduce((s, x) => s + (x.value || x.won_amount || 0), 0)
+const wonR = rows.filter(x => oppStatus(x) === 'Won')
+const pendR = rows.filter(x => { const s = oppStatus(x); return s === 'Open' || s === 'On Hold' })
+const lostR = rows.filter(x => oppStatus(x) === 'Lost')
+const unlikelyR = pendR.filter(x => x.unlikely)
+return {
+key, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+shared: rows.length, sharedValue: sum(rows),
+pending: pendR.length, pendingValue: sum(pendR),
+won: wonR.length, wonValue: sum(wonR),
+lost: lostR.length, lostValue: sum(lostR),
+unlikely: unlikelyR.length, unlikelyValue: sum(unlikelyR),
+// Win rate over ALL quotes shared that month — won ÷ everything quoted. Recent
+// months read low by design because their quotes are still in play; `decidedRate`
+// is kept alongside so a month can also be judged on what has actually closed.
+winRate: rows.length ? Math.round(wonR.length / rows.length * 100) : null,
+decidedRate: (wonR.length + lostR.length) ? Math.round(wonR.length / (wonR.length + lostR.length) * 100) : null,
+}
+})
+}, [all, today])
+
+const MonthCard = ({ m }: { m: typeof monthsAgg[number] }) => {
+const Stat = ({ label, n, v, tone }: { label: string; n: number; v: number; tone: string }) => (
+<div className="flex-1 min-w-0">
+<div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">{label}</div>
+<div className={`text-lg font-semibold leading-tight ${tone}`}>{n}</div>
+<div className="text-xs text-mav-muted truncate">{money(v)}</div>
+</div>
+)
+const pct = m.shared ? Math.round(m.won / m.shared * 100) : 0
+return (
+<div className="bg-mav-panel border border-mav-line rounded-xl p-4">
+<div className="flex items-baseline justify-between mb-3">
+<div className="text-sm font-medium">{m.label}</div>
+<div className="text-xs text-mav-muted">
+{m.winRate == null ? 'no quotes' : <>win rate <span className="text-white font-semibold">{m.winRate}%</span> <span className="opacity-60">of all quotes</span>{m.decidedRate != null && <span className="opacity-60"> · {m.decidedRate}% of decided</span>}</>}
+</div>
+</div>
+<div className="flex gap-3">
+<Stat label="Quotes shared" n={m.shared} v={m.sharedValue} tone="text-white" />
+<Stat label="Pending" n={m.pending} v={m.pendingValue} tone="text-amber-400" />
+<Stat label="Won" n={m.won} v={m.wonValue} tone="text-green-400" />
+<Stat label="Lost" n={m.lost} v={m.lostValue} tone="text-red-400" />
+</div>
+{m.unlikely > 0 && (
+<div className="mt-2 text-xs text-mav-muted">
+of which <span className="text-orange-300 font-medium">{m.unlikely} flagged “might not come”</span> · {money(m.unlikelyValue)}
+</div>
+)}
+{/* share-of-quotes bar: won / pending / lost */}
+<div className="mt-3 h-1.5 w-full rounded-full bg-mav-line overflow-hidden flex">
+<div className="bg-green-500 h-full" style={{ width: `${pct}%` }} />
+<div className="bg-amber-500 h-full" style={{ width: `${m.shared ? (m.pending / m.shared) * 100 : 0}%` }} />
+<div className="bg-red-500 h-full" style={{ width: `${m.shared ? (m.lost / m.shared) * 100 : 0}%` }} />
+</div>
+</div>
+)
+}
 
 const Panel = ({ title, rows, active, onPick }: { title: string; rows: [string, { count: number; value: number }][]; active: string; onPick: (k: string) => void }) => (
 <div className="bg-mav-panel border border-mav-line rounded-xl p-4">
@@ -143,10 +247,20 @@ return (
 <div>
 <Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence." />
 
+{monthsAgg.length > 0 && (
+<div className="mb-6">
+<div className="flex items-baseline gap-2 mb-2">
+<h2 className="text-sm font-medium">Last 2 months</h2>
+<span className="text-xs text-mav-muted">· quotes shared, still pending, and won — counted in the month the quote went out (fixed window, ignores the date filter below)</span>
+</div>
+<div className="grid md:grid-cols-2 gap-4">{monthsAgg.map(m => <MonthCard key={m.key} m={m} />)}</div>
+</div>
+)}
+
 <div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).</div>
 <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
 <KPICard label="Open opportunities" value={String(open.length)} />
-<KPICard label="Open pipeline value" value={money(openValue)} />
+<KPICard label={unlikelyOpen.length ? `Open pipeline (${money(likelyValue)} likely)` : 'Open pipeline value'} value={money(openValue)} />
 <KPICard label="On Hold" value={String(onHold.length)} />
 <KPICard label="Won" value={String(won.length)} />
 <KPICard label="Won value" value={money(wonValue)} />
@@ -168,6 +282,7 @@ return (
 <select value={fAM} onChange={e => setFAM(e.target.value)} className={selCls}><option value="">All AMs</option>{uniqNames(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
 <select value={fPM} onChange={e => setFPM(e.target.value)} className={selCls}><option value="">All PMs</option>{uniqNames(all.map(x => x.pm_owner)).map(pm => <option key={pm} value={pm}>{pm}</option>)}</select>
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
+<button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
 <span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
 <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
 <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
@@ -185,9 +300,9 @@ return (
 <tbody>{pageRows.map(x => {
 const st = oppStatus(x)
 return (
-<tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.flag ? 'bg-amber-500/5' : ''}`}>
-<td className="px-4 py-3">{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
-<td className="px-4 py-3 whitespace-nowrap font-medium">{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
+<tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.unlikely ? 'bg-orange-500/[0.07]' : x.flag ? 'bg-amber-500/5' : ''}`}>
+<td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
+<td className={`px-4 py-3 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
@@ -240,6 +355,28 @@ return (
 <span className="text-xs uppercase tracking-wide text-mav-muted">Value</span>
 <span className="text-2xl font-bold">{sel.value ? money(sel.value) : '—'}</span>
 </div>
+
+{/* "Might not come" — only offered on deals that are still live. */}
+{(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold') && (
+<div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.unlikely ? 'border-orange-500/40 bg-orange-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
+<div className="flex items-center justify-between gap-3">
+<div className="min-w-0">
+<div className={`text-sm font-medium ${sel.unlikely ? 'text-orange-300' : ''}`}>{sel.unlikely ? '🚫 Flagged: might not come' : 'Might not come?'}</div>
+<div className="text-xs text-mav-muted mt-0.5">{sel.unlikely ? 'Discounted from the likely pipeline. Still Open — not marked Lost.' : 'Discount this from the likely pipeline without calling it Lost.'}</div>
+</div>
+<button disabled={savingUnlikely} onClick={() => toggleUnlikely(sel)}
+className={`shrink-0 text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-line text-mav-muted hover:text-white' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/15'}`}>
+{savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo' : 'Mark unlikely'}
+</button>
+</div>
+{sel.unlikely && (sel.unlikely_reason || sel.unlikely_by) && (
+<div className="mt-2 pt-2 border-t border-orange-500/20 text-xs text-mav-muted">
+{sel.unlikely_reason && <div className="text-orange-200/80">“{sel.unlikely_reason}”</div>}
+{sel.unlikely_by && <div className="mt-0.5">flagged by {sel.unlikely_by}{sel.unlikely_at ? ` · ${sel.unlikely_at.slice(0, 10)}` : ''}</div>}
+</div>
+)}
+</div>
+)}
 
 {sel.flag && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
 {oppStatus(sel) === 'Won' && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
