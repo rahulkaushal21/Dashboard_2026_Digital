@@ -229,11 +229,14 @@ decidedRate: (wonR.length + lostR.length) ? Math.round(wonR.length / (wonR.lengt
 }, [all, today])
 
 const MonthCard = ({ m }: { m: typeof monthsAgg[number] }) => {
+// Money leads, count supports: the dollar figure is the headline number and the
+// deal count sits under it as context.
 const Stat = ({ label, n, v, tone }: { label: string; n: number; v: number; tone: string }) => (
 <div className="flex-1 min-w-0">
 <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">{label}</div>
-<div className={`text-lg font-semibold leading-tight ${tone}`}>{n}</div>
-<div className="text-xs text-mav-muted truncate">{money(v)}</div>
+{/* steps down on narrower cards so four 6-figure sums never wrap or clip */}
+<div className={`text-lg lg:text-xl xl:text-2xl font-bold leading-tight tracking-tight whitespace-nowrap ${tone}`}>{money(v)}</div>
+<div className="text-xs text-mav-muted mt-0.5">{n} {n === 1 ? 'quote' : 'quotes'}</div>
 </div>
 )
 const pct = m.shared ? Math.round(m.won / m.shared * 100) : 0
@@ -245,7 +248,7 @@ return (
 {m.winRate == null ? 'no quotes' : <>win rate <span className="text-white font-semibold">{m.winRate}%</span> <span className="opacity-60">of all quotes</span>{m.decidedRate != null && <span className="opacity-60"> · {m.decidedRate}% of decided</span>}</>}
 </div>
 </div>
-<div className="flex gap-3">
+<div className="flex gap-2 xl:gap-3">
 <Stat label="Quotes shared" n={m.shared} v={m.sharedValue} tone="text-white" />
 <Stat label="Pending" n={m.pending} v={m.pendingValue} tone="text-amber-400" />
 <Stat label="Won" n={m.won} v={m.wonValue} tone="text-green-400" />
@@ -253,7 +256,7 @@ return (
 </div>
 {m.unlikely > 0 && (
 <div className="mt-2 text-xs text-mav-muted">
-of which <span className="text-orange-300 font-medium">{m.unlikely} flagged “might not come”</span> · {money(m.unlikelyValue)}
+of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)}</span> flagged “might not come” · {m.unlikely} {m.unlikely === 1 ? 'quote' : 'quotes'}
 </div>
 )}
 {/* share-of-quotes bar: won / pending / lost */}
