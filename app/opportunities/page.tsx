@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, serviceOf, setOpportunityUnlikely, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, serviceOf, setOpportunityLost, setOpportunityUnlikely, type Opportunity } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -22,12 +22,16 @@ const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
 const oppStatus = (x: Opportunity) => {
-if (x.won) return 'Won'
+if (x.won) return 'Won'                       // a booking always wins — even over a Lost call
 const s = (x.status || '').toLowerCase()
 if (s.includes('cancel') || s === 'lost') return 'Lost'
+if (x.email_lost) return 'Lost'               // marked Lost here; the sheet may not know yet
 if (s.includes('hold')) return 'On Hold'
 return 'Open'
 }
+// Marked Lost on the dashboard while its Quotes-sheet line still reads Open. Only
+// sheet-origin deals can drift like this, and only until someone edits the sheet.
+const lostLag = (x: Opportunity) => !!x.email_lost && !x.won && x.origin === 'sheet' && !/lost|cancel/i.test(x.status || '')
 const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : 'bg-mav-line text-mav-muted'
 const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
 
@@ -79,6 +83,9 @@ const [flagOnly, setFlagOnly] = useState(false)
 // "Might not come" — filter + in-flight save state for the toggle.
 const [unlikelyOnly, setUnlikelyOnly] = useState(false)
 const [savingUnlikely, setSavingUnlikely] = useState(false)
+// "Lost here, still Open in the sheet" — the mismatch alert filter + its save state.
+const [lagOnly, setLagOnly] = useState(false)
+const [savingLost, setSavingLost] = useState(false)
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
@@ -104,6 +111,7 @@ const rows = all
 .filter(x => !fTech || (x.technology || '') === fTech)
 .filter(x => !flagOnly || x.flag)
 .filter(x => !unlikelyOnly || x.unlikely)
+.filter(x => !lagOnly || lostLag(x))
 .filter(x => inRange(x.source_date || x.first_date))
 return rows.sort((a, b) => {
 const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
@@ -111,7 +119,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, from, to, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, from, to, sort])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -135,14 +143,42 @@ window.alert('Could not save that flag — please try again.')
 }
 }
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false) }
+// Mark a deal Lost (or undo). Optimistic like the unlikely toggle. This does NOT edit
+// the Quotes sheet — the sheet stays the master record, so the deal keeps showing the
+// "still Open in the sheet" alert until someone updates that row by hand.
+const toggleLost = async (x: Opportunity) => {
+const turningOn = !x.email_lost
+const reason = turningOn
+? (window.prompt(`Mark "${x.company_name}" as Lost?\n\nThis records the loss here immediately. The Quotes sheet is not edited — the deal will stay flagged until you set its sheet row to Cancelled.\n\nWhy was it lost? (optional)`) ?? undefined)
+: undefined
+if (turningOn && reason === undefined) return   // cancelled the prompt
+setSavingLost(true)
+// Lost supersedes "might not come" — the RPC clears it, so the UI must too.
+const patch: Partial<Opportunity> = turningOn
+? { email_lost: true, email_lost_reason: reason || undefined, email_lost_at: new Date().toISOString(), email_lost_by: currentEmail() || undefined, unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined }
+: { email_lost: false, email_lost_reason: undefined, email_lost_at: undefined, email_lost_by: undefined }
+setAll(prev => prev.map(r => r.id === x.id ? { ...r, ...patch } : r))
+setSel(s => s && s.id === x.id ? { ...s, ...patch } : s)
+const ok = await setOpportunityLost(x.id, turningOn, { actor: currentEmail() || undefined, reason })
+setSavingLost(false)
+if (!ok) {   // roll the row back rather than show a loss that never saved
+setAll(prev => prev.map(r => r.id === x.id ? x : r))
+setSel(s => s && s.id === x.id ? x : s)
+window.alert('Could not save that — please try again.')
+}
+}
+
+const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false) }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, from, to, sort, perPage])
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, from, to, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
 const flagged = all.filter(x => x.flag).length
+// Deals whose Lost call hasn't reached the Quotes sheet yet — computed over ALL rows,
+// not the date-filtered set, so the alert can't hide behind a narrow From/To window.
+const lagRows = useMemo(() => all.filter(lostLag), [all])
 
 // Headline numbers follow the DATE range (independent of the other dropdowns so
 // the breakdown panels stay stable for click-to-filter).
@@ -247,6 +283,29 @@ return (
 <div>
 <Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence." />
 
+{/* Sheet-mismatch alert: called Lost here, still Open in the Quotes sheet. Sits above
+    everything because it's the one thing on this page that needs an action elsewhere. */}
+{lagRows.length > 0 && (
+<div className="mb-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+<div className="flex flex-wrap items-center justify-between gap-3">
+<div>
+<div className="text-sm font-semibold text-red-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} marked Lost here {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet</div>
+<div className="text-xs text-mav-muted mt-0.5">Set {lagRows.length > 1 ? 'those rows' : 'that row'} to <span className="text-white">Cancelled</span> in the sheet — until then {lagRows.length > 1 ? 'they' : 'it'} still counts as live pipeline in every sheet-driven report. This alert clears itself on the next sync.</div>
+</div>
+<button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setSearch('') }}
+className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-red-500/50 text-red-300 hover:bg-red-500/15 transition-colors">Show {lagRows.length > 1 ? 'them' : 'it'}</button>
+</div>
+<div className="mt-2 flex flex-wrap gap-1.5">
+{lagRows.slice(0, 12).map(x => (
+<button key={x.id} onClick={() => setSel(x)} className="text-xs px-2 py-1 rounded-md bg-red-500/15 text-red-200 hover:bg-red-500/25 transition-colors">
+{x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
+</button>
+))}
+{lagRows.length > 12 && <span className="text-xs text-mav-muted self-center">+{lagRows.length - 12} more</span>}
+</div>
+</div>
+)}
+
 {monthsAgg.length > 0 && (
 <div className="mb-6">
 <div className="flex items-baseline gap-2 mb-2">
@@ -283,6 +342,9 @@ return (
 <select value={fPM} onChange={e => setFPM(e.target.value)} className={selCls}><option value="">All PMs</option>{uniqNames(all.map(x => x.pm_owner)).map(pm => <option key={pm} value={pm}>{pm}</option>)}</select>
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
 <button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
+{lagRows.length > 0 && (
+<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Marked Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>✗ Lost, sheet not updated ({lagRows.length})</button>
+)}
 <span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
 <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
 <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
@@ -304,14 +366,16 @@ return (
 <td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
 <td className={`px-4 py-3 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? '✗ Lost' : st}</span></td>
+<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}` : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span></td>
 <td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager (AM / NBD)">AM: {x.sales_person}</span> : <span className="text-mav-muted">AM: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
 <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>
-<td className="px-4 py-3">{x.flag ? <span className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title={x.flag}>⚠ Review</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+{/* lostLag is checked directly, not just via x.flag: flag comes from the last data
+    load, so a deal marked Lost in this session must still show the alert instantly. */}
+<td className="px-4 py-3">{(x.flag || lostLag(x)) ? <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${lostLag(x) ? 'bg-red-500/20 text-red-300' : 'bg-amber-500/20 text-amber-300'}`} title={lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{lostLag(x) ? '⚠ Update sheet' : '⚠ Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
 </tr>
 )
 })}</tbody>
@@ -378,9 +442,37 @@ className={`shrink-0 text-xs px-3 py-1.5 rounded-md border transition-colors dis
 </div>
 )}
 
-{sel.flag && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
+{/* Mark Lost / undo. Offered on live deals, and on any deal already marked Lost here
+    so the call can be reversed. A sheet-driven Lost has no button — fix that in the sheet. */}
+{(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || sel.email_lost) && (
+<div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.email_lost ? 'border-red-500/40 bg-red-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
+<div className="flex items-center justify-between gap-3">
+<div className="min-w-0">
+<div className={`text-sm font-medium ${sel.email_lost ? 'text-red-300' : ''}`}>{sel.email_lost ? '✗ Marked Lost' : 'Lost this one?'}</div>
+<div className="text-xs text-mav-muted mt-0.5">{sel.email_lost ? 'Out of the pipeline here. The Quotes sheet is not edited automatically.' : 'Records the loss here straight away — the Quotes sheet still needs updating by hand.'}</div>
+</div>
+<button disabled={savingLost} onClick={() => toggleLost(sel)}
+className={`shrink-0 text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-white' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
+{savingLost ? 'Saving…' : sel.email_lost ? 'Undo' : 'Mark Lost'}
+</button>
+</div>
+{sel.email_lost && (sel.email_lost_reason || sel.email_lost_by) && (
+<div className="mt-2 pt-2 border-t border-red-500/20 text-xs text-mav-muted">
+{sel.email_lost_reason && <div className="text-red-200/80">“{sel.email_lost_reason}”</div>}
+{sel.email_lost_by && <div className="mt-0.5">marked by {sel.email_lost_by}{sel.email_lost_at ? ` · ${sel.email_lost_at.slice(0, 10)}` : ''}</div>}
+</div>
+)}
+{lostLag(sel) && (
+<div className="mt-2 pt-2 border-t border-red-500/20 text-xs text-red-300">
+⚠ The Quotes sheet still shows this Open — set that row to <span className="font-semibold">Cancelled</span>. Until you do, it keeps counting as live pipeline in every sheet-driven report.
+</div>
+)}
+</div>
+)}
+
+{sel.flag && !lostLag(sel) && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
 {oppStatus(sel) === 'Won' && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
-{oppStatus(sel) === 'Lost' && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">✗ Lost — marked from an explicit decline in email. Won always overrides if the client later books.</div>}
+{oppStatus(sel) === 'Lost' && !sel.email_lost && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">✗ Lost — cancelled in the Quotes sheet. Won always overrides if the client later books.</div>}
 
 <div className="mb-5">
 <div className="flex items-baseline justify-between mb-1">

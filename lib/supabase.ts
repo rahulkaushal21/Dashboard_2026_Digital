@@ -24,6 +24,10 @@ quote_date?: string; origin?: string; est_value?: number; next_step?: string; en
 // "Might not come" — a human call that this open quote probably won't convert.
 // The deal stays Open (it isn't Lost), but it's discounted from the realistic view.
 unlikely?: boolean; unlikely_reason?: string; unlikely_at?: string; unlikely_by?: string
+// Lost, called from email evidence. Held apart from `status` because the sheet sync
+// overwrites `status` every 30 min — so while the Quotes sheet still says Open, the two
+// disagree, and that disagreement is what raises the "update the sheet" alert.
+email_lost?: boolean; email_lost_reason?: string; email_lost_at?: string; email_lost_by?: string
 }
 
 // Group the many raw quote "technology" values into a handful of service lines.
@@ -185,15 +189,20 @@ const taggedRepeat = bt.includes('repeat')       // 'repeat' or 'new repeat'
 const taggedNewOnly = bt === 'new'               // pure "New"
 const repeat = taggedRepeat || inRevenue || o.is_new_client === false
 // Review flags for still-open deals, in priority order (one flag shown, most urgent first):
-//  1. WON-LAG   — email says confirmed but the deal is still Open (sheet not updated yet)
-//  2. type      — booked/existing client mislabelled pure "New" in the sheet
-//  3. STALE     — no dated movement in >21d; chase or confirm it's still live
-//  4. text      — brief reads like existing/confirmed work
+//  1. LOST-LAG  — someone marked it Lost from email but the sheet line is still Open
+//  2. WON-LAG   — email says confirmed but the deal is still Open (sheet not updated yet)
+//  3. type      — booked/existing client mislabelled pure "New" in the sheet
+//  4. STALE     — no dated movement in >21d; chase or confirm it's still live
+//  5. text      — brief reads like existing/confirmed work
 let flag: string | undefined
-if (!o.won && norm(o.status) !== 'lost') {
+if (!o.won && norm(o.status) !== 'lost' && !norm(o.status).includes('cancel')) {
 const emailConfirmed = o.origin === 'email' && (emailWon.test(norm(o.rfq_status)) || (o.win_probability || 0) >= 90)
+// Only sheet-origin rows can be "out of sync with the sheet" — an email-origin deal
+// has no Quotes line to correct, so calling it Lost there needs no follow-up action.
+const lostLag = o.email_lost && o.origin === 'sheet'
 const age = daysSince(o.source_date || o.first_date)
-if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
+if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set that row to Cancelled so it stops counting as live pipeline.'
+else if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
 else if (age !== null && age > STALE_DAYS) flag = `⚠ Stale — no movement in ${age} days. Follow up or confirm the deal is still live.`
 else if (confirmedLike.test(`${o.summary || ''} ${o.gist || ''}`)) flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities'
@@ -308,6 +317,17 @@ export async function setOpportunityUnlikely(id: number, unlikely: boolean, opts
 if (!supabase || !id) return false
 const { data, error } = await supabase.rpc('set_opportunity_unlikely', {
 p_id: id, p_unlikely: unlikely, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null,
+})
+return !error && Number(data) > 0
+}
+// Call a deal Lost from email evidence (reversible). Writes `email_lost`, NOT `status` —
+// the sheet sync rewrites `status` every 30 min, so a direct status write would vanish.
+// Same RLS reasoning as setOpportunityUnlikely: an RPC returning the row count, so a
+// write that matched nothing is reported as a failure instead of a silent success.
+export async function setOpportunityLost(id: number, lost: boolean, opts?: { actor?: string; reason?: string }): Promise<boolean> {
+if (!supabase || !id) return false
+const { data, error } = await supabase.rpc('set_opportunity_lost', {
+p_id: id, p_lost: lost, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null,
 })
 return !error && Number(data) > 0
 }
