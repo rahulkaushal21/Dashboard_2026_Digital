@@ -44,6 +44,13 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   If it reports orphans with a mismatched SUBJECT it won't catch them (e.g. `pureluxh2o` vs
 >   `pureluxh2o | Maintainance`) — check for leftovers by hand:
 >   sheet-origin opps whose `quote_key` has no matching row in `quotes`.
+>   **ALWAYS run the step-7 orphan query too, even when the janitor reports 0.** The janitor only
+>   deletes what its twin test can see, and a miss is silent. Until 29 Jul it compared the sheet's
+>   RAW `agency` against the CANONICALISED `company_name` — so `aurelianvault` never matched
+>   `Aurelian Vault`, and a **Won** orphan (`r:518`, $21,500) sat double-counting revenue while the
+>   real row lived at `r:522`. Both sides are now normalised (lowercase, non-alphanumerics stripped).
+>   **Orphans are not only an open-pipeline problem — check WON rows hardest**, because a phantom
+>   Won inflates booked revenue and nobody notices it in the open list.
 >
 > **2. Check capture is alive.** Newest `email_inbox.inserted_at` and latest `sync_runs` for
 > `source='gmail-ingest'`. If capture is >2h stale or erroring → `markScanFailed` and STOP
@@ -77,7 +84,9 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     (d) **work that isn't WEB** — this board is web only. SEO / AIO / LLM-visibility / paid-media
 >     scopes belong to another team even when the client is a web client and the AM is the same.
 >     Read the actual scope, not the client name (e.g. "Inncap_SEO_AIO_Proposal", a "one-off SEO +
->     LLM setup" — both were SEO, both were wrongly on the board).
+>     LLM setup" — both were SEO, both were wrongly on the board). **SFMC / Salesforce Marketing
+>     Cloud, and email-build or email-signature scopes, belong to the email team — not this board**
+>     (e.g. Brandtech's "SFMC Offshore Partnership & Pricing Models" was removed).
 >     Only track a genuine NEW paid scope. When unsure, leave it **off** the board.
 >   - **When you DO create an email opp, populate it fully:** set `sales_person`/`pm_owner`
 >     from the client's existing rows, `geo`, `business_type`, and `est_value` if any figure is
@@ -224,8 +233,11 @@ the conversion called out in the pulse so it can be corrected. Never store a for
 Every one of these came from a real correction; treat them as standing rules.
 - **Web only.** SEO / AIO / LLM-visibility scopes come off the board even for web clients.
 - **Sub-brands are not clients.** Tip Top Foodservice NZ → `GWF`; SurfStyle → `Hummingbird Ideas`;
-  First Defense Supply → `Market Veep`; Fyshe → `Ink Digital`; PAH → `Underdog Digital`.
-  The end client goes in `company_note`, never in `company_name`.
+  First Defense Supply → `Market Veep`; Fyshe → `Ink Digital`; PAH → `Underdog Digital`;
+  Convello → `YLP Legal`. The end client goes in `company_note`, never in `company_name`.
+- **A go-ahead with no number is still a real deal — just a value-less one.** Create the row, write
+  what the client actually said into the gist, and leave `est_value` AND `win_probability` null
+  rather than guessing a figure. Say in the pulse that the value is missing and where it lives.
 - **One deal, one row.** Before creating anything, look for the same job already present under a
   different key, a different value, or the other origin. The sheet always wins over email.
 - **Never infer technology or GEO from an email body.** Mavlers' own signature embeds HubSpot
