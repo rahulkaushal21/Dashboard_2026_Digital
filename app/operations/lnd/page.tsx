@@ -1,9 +1,14 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import Header from '@/components/Header'
 import { getLnd, creditedPct, strictPct, type LndRow } from '@/lib/supabase'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+// Re-reads the published sheet on demand. Authenticated with the public anon key —
+// the private sync token stays server-side, out of this bundle.
+const SYNC_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '') + '/functions/v1/sync-lnd?year=2026'
+const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 const pct = (n: number) => `${n.toFixed(1)}%`
 const dayjs = (s?: string | null) => (s || '').slice(0, 10)
 const fmtDate = (s?: string | null) =>
@@ -17,6 +22,71 @@ const daysBetween = (a?: string | null, b?: string | null) => {
   return Number.isFinite(d) ? Math.round(d) : null
 }
 const STALL_DAYS = 14
+
+// The sheet gives no structured module list — only free-text Remarks that happen to
+// name the courses ("Completed Pre-Assessment, Advanced React Patterns, and Web Dev
+// Performance."). We surface those names as chips, but always show the sentence they
+// came from underneath, so nothing here is a guess dressed up as data.
+//
+// Sentences are split on ".␣" rather than "." so course names that contain a dot
+// ("Node.js Clean Architecture") survive intact.
+function coursesFrom(remark?: string | null): { done: string[]; doing: string[] } {
+  const done: string[] = []
+  const doing: string[] = []
+  if (!remark) return { done, doing }
+  for (const raw of remark.split(/\.\s+/)) {
+    const s = raw.replace(/\.$/, '').trim()
+    if (!s) continue
+    const m = s.match(/^(?:successfully\s+)?completed\s+(?:the\s+)?(.+)$/i)
+    if (m) {
+      m[1].split(/\s*,\s*|\s+and\s+/i)
+        .map(x => x.replace(/^(?:the)\s+/i, '').trim())
+        .filter(x => x && x.length > 1)
+        .forEach(x => done.push(x))
+      continue
+    }
+    const p = s.match(/^(.+?)\s+(?:is|are)\s+(?:currently\s+)?in\s+progress/i)
+    if (p) {
+      p[1].split(/\s*,\s*|\s+and\s+/i)
+        .map(x => x.trim())
+        .filter(x => x && x.length > 1)
+        .forEach(x => doing.push(x))
+    }
+  }
+  return { done, doing }
+}
+
+type Group = { key: string; n: number; credited: number; zero: number; complete: number; stalled: number }
+
+// Shared by "By level" and "By reporting manager" — both want the same three facts:
+// how many people, how many finished, and who is not moving.
+const Breakdown = ({ title, rows, note }: { title: string; rows: Group[]; note?: string }) => (
+  <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
+    <div className="flex items-baseline justify-between mb-4">
+      <h2 className="font-semibold">{title}</h2>
+      {note && <span className="text-xs text-mav-muted">{note}</span>}
+    </div>
+    <div className="space-y-4">
+      {rows.map(g => (
+        <div key={g.key}>
+          <div className="flex justify-between items-baseline text-sm mb-1 gap-2">
+            <span className="truncate" title={g.key}>{g.key}</span>
+            <span className="font-semibold shrink-0">{pct(g.credited)}</span>
+          </div>
+          <div className="h-2 rounded-full bg-mav-line overflow-hidden">
+            <div className="h-full bg-mav-yellow" style={{ width: `${g.credited}%` }} />
+          </div>
+          <div className="text-[11px] mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+            <span className="text-mav-muted">{g.n} {g.n === 1 ? 'member' : 'members'}</span>
+            <span className={g.complete ? 'text-green-400' : 'text-mav-muted'}>{g.complete} completed</span>
+            {g.zero > 0 && <span className="text-red-400">{g.zero} never started</span>}
+            {g.stalled > 0 && <span className="text-amber-400">{g.stalled} stalled</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)
 
 const Stat = ({ label, value, sub, tone = '' }: { label: string; value: string; sub?: string; tone?: string }) => (
   <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
@@ -47,8 +117,40 @@ export default function LndPage() {
   const [q, setQ] = useState('')
   const [only, setOnly] = useState<'' | 'zero' | 'stalled' | 'done'>('')
   const [sort, setSort] = useState<'progress' | 'name' | 'activity'>('progress')
+  const [picked, setPicked] = useState<LndRow | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   useEffect(() => { getLnd().then(r => { setRows(r); setLoading(false) }) }, [])
+
+  // Pull the sheet again right now. Reports what actually moved — "no change" is a
+  // real, useful answer, and saying it plainly beats a spinner that implies work.
+  async function syncNow() {
+    setSyncing(true); setSyncMsg(null)
+    try {
+      const res = await fetch(SYNC_URL, {
+        method: 'POST',
+        headers: ANON ? { apikey: ANON, Authorization: 'Bearer ' + ANON } : {},
+      })
+      const j = await res.json()
+      if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      setRows(await getLnd())
+      setSyncMsg(
+        j.added || j.changed
+          ? `Synced — ${j.added} new, ${j.changed} updated. Latest snapshot ${fmtDate(j.latest_snapshot)}.`
+          : `Synced — nothing changed in the sheet. Latest snapshot ${fmtDate(j.latest_snapshot)}.`,
+      )
+    } catch (err) {
+      setSyncMsg(`Sync failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSyncing(false)
+    }
+  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPicked(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const dates = useMemo(
     () => Array.from(new Set(rows.map(r => r.snapshot_date))).sort(),
@@ -90,34 +192,33 @@ export default function LndPage() {
     return list
   }, [current, level, mgr, q, only, sort])
 
-  // Cohort trend on a CONSISTENT basis, recomputed from counts every week.
-  const trend = useMemo(() => dates.map(d => {
-    const g = rows.filter(r => r.snapshot_date === d)
-    const n = g.length || 1
-    return {
-      date: d,
-      learners: g.length,
-      credited: g.reduce((s, r) => s + creditedPct(r), 0) / n,
-      strict: g.reduce((s, r) => s + strictPct(r), 0) / n,
-      done: g.reduce((s, r) => s + r.completed, 0),
-      total: g.reduce((s, r) => s + r.total_modules, 0),
-    }
-  }), [rows, dates])
-
   const byLevel = useMemo(() => levels.map(l => {
     const g = current.filter(r => r.level === l)
-    return { level: l, n: g.length, credited: g.reduce((s, r) => s + creditedPct(r), 0) / (g.length || 1), zero: g.filter(zeroStart).length }
+    return {
+      key: l, n: g.length,
+      credited: g.reduce((s, r) => s + creditedPct(r), 0) / (g.length || 1),
+      zero: g.filter(zeroStart).length,
+      complete: g.filter(r => strictPct(r) >= 100).length,
+      stalled: g.filter(stalled).length,
+    }
   }), [current, levels])
 
   const byMgr = useMemo(() => mgrs.map(m => {
     const g = current.filter(r => (r.reporting_manager || '') === m)
     return {
-      mgr: m, n: g.length,
+      key: m, n: g.length,
       credited: g.reduce((s, r) => s + creditedPct(r), 0) / (g.length || 1),
       zero: g.filter(zeroStart).length,
+      complete: g.filter(r => strictPct(r) >= 100).length,
       stalled: g.filter(stalled).length,
     }
   }).sort((a, b) => b.n - a.n), [current, mgrs])
+
+  // One learner's row from every snapshot they appear in, oldest first.
+  const history = useMemo(
+    () => picked ? rows.filter(r => r.learner_name === picked.learner_name).sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date)) : [],
+    [rows, picked],
+  )
 
   const k = useMemo(() => {
     const n = current.length || 1
@@ -144,8 +245,6 @@ export default function LndPage() {
     }
   }, [current, prevBy])
 
-  const maxTrend = Math.max(...trend.map(t => t.credited), 10)
-
   if (loading) return <div><Header title="Learning & Development" subtitle="Loading…" /><p className="text-sm text-mav-muted">Loading…</p></div>
   if (!rows.length) return (
     <div>
@@ -160,6 +259,18 @@ export default function LndPage() {
         title="Learning & Development"
         subtitle={`Team upskilling program · ${k.learners} learners · snapshot ${fmtDate(latest)}`}
       />
+
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <button onClick={syncNow} disabled={syncing}
+          title="Re-read the L&D sheet now instead of waiting for the hourly pull"
+          className="flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-mav-line hover:border-mav-yellow hover:text-white text-mav-muted disabled:opacity-60 disabled:hover:border-mav-line">
+          <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+          {syncing ? 'Syncing…' : 'Sync now'}
+        </button>
+        {syncMsg && (
+          <span className={`text-xs ${syncMsg.startsWith('Sync failed') ? 'text-red-400' : 'text-mav-muted'}`}>{syncMsg}</span>
+        )}
+      </div>
 
       {/* The single most important caveat about this data. */}
       <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-mav-muted">
@@ -189,70 +300,9 @@ export default function LndPage() {
           sub={`${k.movedPeople} of ${k.carried} continuing learners completed something`} />
       </div>
 
-      {/* Cohort trend — recomputed, so it is comparable across weeks. */}
-      <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-        <div className="flex items-baseline justify-between mb-4">
-          <h2 className="font-semibold">Cohort progress over time</h2>
-          <span className="text-xs text-mav-muted">credited basis · recomputed from counts</span>
-        </div>
-        <div className="flex items-end gap-3 h-40">
-          {trend.map(t => (
-            <div key={t.date} className="flex-1 flex flex-col items-center justify-end gap-2">
-              <span className="text-xs font-semibold">{pct(t.credited)}</span>
-              <div className="w-full rounded-t bg-mav-yellow/80" style={{ height: `${(t.credited / maxTrend) * 100}%`, minHeight: 4 }} />
-              <span className="text-[11px] text-mav-muted whitespace-nowrap">{fmtDate(t.date)}</span>
-              <span className="text-[11px] text-mav-muted">{t.learners} ppl</span>
-            </div>
-          ))}
-        </div>
-        <p className="text-xs text-mav-muted mt-4">
-          Modules completed: {trend.map(t => `${fmtDate(t.date)} ${t.done}/${t.total}`).join('  ·  ')}
-        </p>
-      </div>
-
       <div className="grid gap-4 lg:grid-cols-2 mb-6">
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-          <h2 className="font-semibold mb-4">By level</h2>
-          <div className="space-y-3">
-            {byLevel.map(l => (
-              <div key={l.level}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span>{l.level} <span className="text-mav-muted">· {l.n}</span></span>
-                  <span className="font-semibold">{pct(l.credited)}</span>
-                </div>
-                <div className="h-2 rounded-full bg-mav-line overflow-hidden">
-                  <div className="h-full bg-mav-yellow" style={{ width: `${l.credited}%` }} />
-                </div>
-                {l.zero > 0 && <div className="text-[11px] text-red-400 mt-1">{l.zero} never started</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-          <div className="flex items-baseline justify-between mb-4">
-            <h2 className="font-semibold">By reporting manager</h2>
-            <span className="text-xs text-mav-muted">who needs a nudge</span>
-          </div>
-          <div className="space-y-3">
-            {byMgr.map(m => (
-              <div key={m.mgr}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="truncate pr-2" title={m.mgr}>{m.mgr} <span className="text-mav-muted">· {m.n}</span></span>
-                  <span className="font-semibold">{pct(m.credited)}</span>
-                </div>
-                <div className="h-2 rounded-full bg-mav-line overflow-hidden">
-                  <div className="h-full bg-mav-yellow" style={{ width: `${m.credited}%` }} />
-                </div>
-                <div className="text-[11px] mt-1 flex gap-3">
-                  {m.zero > 0 && <span className="text-red-400">{m.zero} never started</span>}
-                  {m.stalled > 0 && <span className="text-amber-400">{m.stalled} stalled</span>}
-                  {!m.zero && !m.stalled && <span className="text-green-400">all moving</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <Breakdown title="By level" rows={byLevel} />
+        <Breakdown title="By reporting manager" rows={byMgr} note="who needs a nudge" />
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
@@ -308,8 +358,11 @@ export default function LndPage() {
                 return (
                   <tr key={r.id} className="border-b border-mav-line/60 last:border-0 align-top">
                     <td className="px-4 py-3">
-                      <div className="font-medium">{r.learner_name}</div>
-                      {!p && <span className="text-[11px] text-mav-yellow">new this snapshot</span>}
+                      <button onClick={() => setPicked(r)}
+                        className="font-medium text-left hover:text-mav-yellow hover:underline underline-offset-2">
+                        {r.learner_name}
+                      </button>
+                      {!p && <div><span className="text-[11px] text-mav-yellow">new this snapshot</span></div>}
                     </td>
                     <td className="px-4 py-3 text-mav-muted">{r.level}</td>
                     <td className="px-4 py-3 text-mav-muted truncate max-w-[180px]" title={r.reporting_manager || ''}>{r.reporting_manager || '—'}</td>
@@ -343,6 +396,93 @@ export default function LndPage() {
         Source: L&amp;D program sheet, published to web and pulled hourly. Snapshots held:{' '}
         {dates.map(fmtDate).join(' · ')}.
       </p>
+
+      {picked && (() => {
+        const c = coursesFrom(picked.remarks)
+        return (
+          <div className="fixed inset-0 z-40" onClick={() => setPicked(null)}>
+            <div className="absolute inset-0 bg-black/50" />
+            <aside onClick={e => e.stopPropagation()}
+              className="absolute right-0 top-0 h-full w-full max-w-lg bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
+              <div className="flex items-start justify-between gap-3 mb-5">
+                <div>
+                  <h2 className="text-xl font-semibold">{picked.learner_name}</h2>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{picked.level}</span>
+                    {picked.reporting_manager && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{picked.reporting_manager}</span>}
+                    <span className={`text-xs px-2 py-1 rounded-full ${strictPct(picked) >= 100 ? 'bg-green-500/15 text-green-400' : 'bg-mav-line text-mav-muted'}`}>
+                      {pct(creditedPct(picked))} · {pct(strictPct(picked))} strict
+                    </span>
+                  </div>
+                </div>
+                <button onClick={() => setPicked(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 mb-6 text-center">
+                <div className="rounded-lg border border-green-500/25 bg-green-500/[0.05] py-3">
+                  <div className="text-2xl font-semibold text-green-400">{picked.completed}</div>
+                  <div className="text-[11px] text-mav-muted">completed</div>
+                </div>
+                <div className="rounded-lg border border-mav-yellow/25 bg-mav-yellow/[0.05] py-3">
+                  <div className="text-2xl font-semibold text-mav-yellow">{picked.in_progress}</div>
+                  <div className="text-[11px] text-mav-muted">in progress</div>
+                </div>
+                <div className="rounded-lg border border-mav-line py-3">
+                  <div className="text-2xl font-semibold text-mav-muted">{picked.not_started}</div>
+                  <div className="text-[11px] text-mav-muted">not started</div>
+                </div>
+              </div>
+
+              <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">Courses</div>
+              {c.done.length || c.doing.length ? (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {c.done.map((x, i) => (
+                    <span key={`d${i}`} className="text-xs px-2 py-1 rounded-md bg-green-500/15 text-green-300">✓ {x}</span>
+                  ))}
+                  {c.doing.map((x, i) => (
+                    <span key={`p${i}`} className="text-xs px-2 py-1 rounded-md bg-mav-yellow/15 text-mav-yellow">◐ {x}</span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-mav-muted mb-2">No module named in this week&rsquo;s note.</p>
+              )}
+              <p className="text-[11px] text-mav-muted mb-6">
+                Course names are read out of the weekly note below — the sheet does not carry a
+                structured module list, so treat the note as the authority.
+              </p>
+
+              <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">Week by week</div>
+              <div className="space-y-2">
+                {history.slice().reverse().map((h, i, arr) => {
+                  const older = arr[i + 1]
+                  const gained = older ? h.completed - older.completed : null
+                  return (
+                    <div key={h.id} className={`rounded-lg border p-3 ${h.snapshot_date === latest ? 'border-mav-yellow/30 bg-mav-yellow/[0.04]' : 'border-mav-line'}`}>
+                      <div className="flex justify-between items-baseline gap-2 mb-1">
+                        <span className="text-sm font-medium">
+                          {fmtDate(h.snapshot_date)}
+                          {h.snapshot_date === latest && <span className="text-[11px] text-mav-yellow ml-2">latest</span>}
+                        </span>
+                        <span className="text-xs shrink-0">
+                          {h.completed}/{h.total_modules} done
+                          {gained != null && gained > 0 && <span className="text-green-400 ml-2">+{gained}</span>}
+                          {gained === 0 && <span className="text-mav-muted ml-2">no change</span>}
+                        </span>
+                      </div>
+                      <ProgressBar r={h} />
+                      {h.remarks && <p className="text-xs text-mav-muted mt-2 leading-relaxed">{h.remarks}</p>}
+                      <div className="text-[11px] text-mav-muted mt-1">Last activity {fmtDate(h.last_activity)}</div>
+                    </div>
+                  )
+                })}
+              </div>
+              {history.length === 1 && (
+                <p className="text-xs text-mav-muted mt-3">First snapshot for this learner — no earlier week to compare against.</p>
+              )}
+            </aside>
+          </div>
+        )
+      })()}
     </div>
   )
 }

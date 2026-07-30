@@ -71,7 +71,14 @@ function toPct(s: string): number | null {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   const url = new URL(req.url);
-  if (url.searchParams.get("token") !== TOKEN) {
+  // Two ways in. The private token is for cron and Apps Script. The dashboard's
+  // "Sync now" button instead presents the public anon key, because shipping the
+  // token in the browser bundle would publish it — and this endpoint only re-reads
+  // an already-published sheet, so the anon key is a fair bar for it.
+  const anon = Deno.env.get("SUPABASE_ANON_KEY") || "";
+  const presented = req.headers.get("apikey") || (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  const authorised = url.searchParams.get("token") === TOKEN || (!!anon && presented === anon);
+  if (!authorised) {
     return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), { status: 401, headers: { ...cors, "Content-Type": "application/json" } });
   }
   const fyYear = url.searchParams.get("year") || String(new Date().getUTCFullYear());
@@ -99,6 +106,15 @@ Deno.serve(async (req) => {
     const { data: exRows, error: exErr } = await supa.from("lnd_excluded_learners").select("learner_key");
     if (exErr) throw new Error("exclusions: " + exErr.message);
     const excluded = new Set((exRows || []).map((r: { learner_key: string }) => r.learner_key));
+
+    // What we hold now, so the response can say what actually changed.
+    const { data: beforeRows } = await supa.from("lnd_snapshots")
+      .select("snapshot_date, learner_name, completed, in_progress, total_modules");
+    const before = new Map<string, string>();
+    (beforeRows || []).forEach((b: any) => before.set(
+      `${b.snapshot_date}|${String(b.learner_name).toLowerCase()}`,
+      `${b.completed}/${b.in_progress}/${b.total_modules}`,
+    ));
 
     const out = new Map<string, R>();
     let snapshot: string | null = null;
@@ -144,6 +160,17 @@ Deno.serve(async (req) => {
     const data = [...out.values()];
     if (!data.length) throw new Error("no learner rows parsed — refusing to touch lnd_snapshots");
 
+    // Diff against what was already stored, so "Sync now" can report honestly
+    // whether the sheet actually moved rather than just saying "done".
+    const added: string[] = [];
+    const changed: string[] = [];
+    for (const [key, d] of out) {
+      const sig = `${d.completed}/${d.in_progress}/${d.total_modules}`;
+      const prev = before.get(key);
+      if (prev === undefined) added.push(`${d.learner_name} (${d.snapshot_date})`);
+      else if (prev !== sig) changed.push(`${d.learner_name} (${d.snapshot_date}) ${prev} -> ${sig}`);
+    }
+
     // UPSERT, not full-replace: snapshots are history. A future pull that no longer
     // contains an old week must not delete that week. Corrections to a week already
     // loaded still land, because the key is (snapshot_date, learner_name).
@@ -161,14 +188,19 @@ Deno.serve(async (req) => {
     const cur = data.filter((d) => d.snapshot_date === latest);
     const modules = cur.reduce((s, d) => s + d.total_modules, 0);
     const done = cur.reduce((s, d) => s + d.completed, 0);
+    const summary = (added.length || changed.length)
+      ? `${added.length} new, ${changed.length} changed`
+      : "no change";
     await supa.from("sync_runs").insert({
       source: "lnd-sync", rows_upserted: upserted, ok: true,
-      message: `${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete · ${skippedExcluded} rows skipped (left the program)`,
+      message: `${summary} · ${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete · ${skippedExcluded} rows skipped (left the program)`,
     });
 
     return new Response(JSON.stringify({
       ok: true, rows: upserted, snapshots: dates, latest_snapshot: latest,
       learners_latest: cur.length, modules_total: modules, modules_completed: done,
+      added: added.length, changed: changed.length,
+      added_detail: added.slice(0, 25), changed_detail: changed.slice(0, 25),
       skipped_rows_without_snapshot_date: skippedNoDate,
       skipped_excluded_learners: skippedExcluded,
     }), { headers: { ...cors, "Content-Type": "application/json" } });

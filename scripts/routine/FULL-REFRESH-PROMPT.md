@@ -52,6 +52,18 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   **Orphans are not only an open-pipeline problem — check WON rows hardest**, because a phantom
 >   Won inflates booked revenue and nobody notices it in the open list.
 >
+> - **Operations / L&D.** `select net.http_get(url:='https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/sync-lnd?token=syncLndHub_4e8b21&year=2026');`
+>   (also on pg_cron hourly at **:23**, and the page has a **Sync now** button). It re-reads the
+>   published L&D sheet and reports `added` / `changed` — **say which in the pulse, and say
+>   "no change" plainly when nothing moved.** Two things to keep straight:
+>   (a) **never display the sheet's `Overall Progress` column.** Its definition changed between the
+>   21 Jul and 29 Jul 2026 snapshots (in-progress modules began counting as half), so nine learners
+>   appeared to advance without completing a module. It is stored as `sheet_progress` for audit;
+>   every figure is recomputed from the raw counts, credited = (completed + 0.5×in_progress)/total.
+>   (b) **leavers live in `lnd_excluded_learners`**, because the sheet keeps them in its older weekly
+>   blocks forever and a plain delete is undone on the next pull. To drop someone, insert their
+>   punctuation-stripped lower-cased name there — do not just delete their rows.
+>
 > **2. Check capture is alive.** Newest `email_inbox.inserted_at` and latest `sync_runs` for
 > `source='gmail-ingest'`. If capture is >2h stale or erroring → `markScanFailed` and STOP
 > (don't classify a dead inbox). Else continue.
@@ -275,8 +287,12 @@ source `gmail-backfill-classify` so the live freshness clock stays clean.
 | Critical Escalations | `critical_escalations` (auto-trigger) | 6 |
 | Delights | `feedback` (Positive) | 3 |
 | Business Trends / Clients | `clients` (derived) | 5 `rebuild_clients()` |
+| Operations → L&D | `lnd_snapshots` | 1 `sync-lnd` |
 | Freshness clock | `sync_runs` | 8 heartbeat |
 
 ## Tokens (keep private, never echo)
 sheet-sync `syncWebHubLP_8f3a91` · scan-api `scanApiHub_5d9c31` · ingest `ingestWebHub_a7c2e9`
-· classify `deepdive_b3f7a2`. `email_inbox` is service-role only (confidential client mail).
+· classify `deepdive_b3f7a2` · sync-lnd `syncLndHub_4e8b21`.
+`email_inbox` is service-role only (confidential client mail). `sync-lnd` also accepts the public
+anon key, which is what the dashboard's Sync-now button uses — the token itself never ships to the
+browser.
