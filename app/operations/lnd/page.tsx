@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import Header from '@/components/Header'
-import { getLnd, creditedPct, strictPct, type LndRow } from '@/lib/supabase'
+import { getLnd, getLndModules, creditedPct, strictPct, type LndRow, type LndModule } from '@/lib/supabase'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 // Re-reads the published sheet on demand. Authenticated with the public anon key —
@@ -22,39 +22,9 @@ const daysBetween = (a?: string | null, b?: string | null) => {
   return Number.isFinite(d) ? Math.round(d) : null
 }
 const STALL_DAYS = 14
-
-// The sheet gives no structured module list — only free-text Remarks that happen to
-// name the courses ("Completed Pre-Assessment, Advanced React Patterns, and Web Dev
-// Performance."). We surface those names as chips, but always show the sentence they
-// came from underneath, so nothing here is a guess dressed up as data.
-//
-// Sentences are split on ".␣" rather than "." so course names that contain a dot
-// ("Node.js Clean Architecture") survive intact.
-function coursesFrom(remark?: string | null): { done: string[]; doing: string[] } {
-  const done: string[] = []
-  const doing: string[] = []
-  if (!remark) return { done, doing }
-  for (const raw of remark.split(/\.\s+/)) {
-    const s = raw.replace(/\.$/, '').trim()
-    if (!s) continue
-    const m = s.match(/^(?:successfully\s+)?completed\s+(?:the\s+)?(.+)$/i)
-    if (m) {
-      m[1].split(/\s*,\s*|\s+and\s+/i)
-        .map(x => x.replace(/^(?:the)\s+/i, '').trim())
-        .filter(x => x && x.length > 1)
-        .forEach(x => done.push(x))
-      continue
-    }
-    const p = s.match(/^(.+?)\s+(?:is|are)\s+(?:currently\s+)?in\s+progress/i)
-    if (p) {
-      p[1].split(/\s*,\s*|\s+and\s+/i)
-        .map(x => x.trim())
-        .filter(x => x && x.length > 1)
-        .forEach(x => doing.push(x))
-    }
-  }
-  return { done, doing }
-}
+// Always show the canonical full legal name; the summary tab's short name is an
+// unstable alias and must never be what a manager reads.
+const displayName = (r: { learner_full_name?: string | null; learner_name: string }) => r.learner_full_name || r.learner_name
 
 type Group = { key: string; n: number; credited: number; zero: number; complete: number; stalled: number }
 
@@ -111,6 +81,7 @@ const ProgressBar = ({ r }: { r: LndRow }) => {
 
 export default function LndPage() {
   const [rows, setRows] = useState<LndRow[]>([])
+  const [mods, setMods] = useState<LndModule[]>([])
   const [loading, setLoading] = useState(true)
   const [level, setLevel] = useState('')
   const [mgr, setMgr] = useState('')
@@ -121,7 +92,7 @@ export default function LndPage() {
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
-  useEffect(() => { getLnd().then(r => { setRows(r); setLoading(false) }) }, [])
+  useEffect(() => { Promise.all([getLnd(), getLndModules()]).then(([r, m]) => { setRows(r); setMods(m); setLoading(false) }) }, [])
 
   // Pull the sheet again right now. Reports what actually moved — "no change" is a
   // real, useful answer, and saying it plainly beats a spinner that implies work.
@@ -134,7 +105,8 @@ export default function LndPage() {
       })
       const j = await res.json()
       if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`)
-      setRows(await getLnd())
+      const [r2, m2] = await Promise.all([getLnd(), getLndModules()])
+      setRows(r2); setMods(m2)
       setSyncMsg(
         j.added || j.changed
           ? `Synced — ${j.added} new, ${j.changed} updated. Latest snapshot ${fmtDate(j.latest_snapshot)}.`
@@ -179,14 +151,14 @@ export default function LndPage() {
     let list = current.filter(r => {
       if (level && r.level !== level) return false
       if (mgr && (r.reporting_manager || '') !== mgr) return false
-      if (q && !`${r.learner_name} ${r.reporting_manager || ''} ${r.remarks || ''}`.toLowerCase().includes(q.toLowerCase())) return false
+      if (q && !`${displayName(r)} ${r.reporting_manager || ''} ${r.remarks || ''}`.toLowerCase().includes(q.toLowerCase())) return false
       if (only === 'zero' && !zeroStart(r)) return false
       if (only === 'stalled' && !stalled(r)) return false
       if (only === 'done' && strictPct(r) < 100) return false
       return true
     })
     list = list.slice().sort((a, b) =>
-      sort === 'name' ? a.learner_name.localeCompare(b.learner_name)
+      sort === 'name' ? displayName(a).localeCompare(displayName(b))
       : sort === 'activity' ? (b.last_activity || '').localeCompare(a.last_activity || '')
       : creditedPct(b) - creditedPct(a))
     return list
@@ -214,9 +186,37 @@ export default function LndPage() {
     }
   }).sort((a, b) => b.n - a.n), [current, mgrs])
 
+  // Every assigned course, across the whole cohort. This is the view the weekly
+  // summary could never give: which courses land and which ones people stall on.
+  const byCourse = useMemo(() => {
+    const m = new Map<string, { course: string; track: string; n: number; done: number; doing: number; ns: number }>()
+    for (const x of mods) {
+      const k = x.course
+      const e = m.get(k) || { course: x.course, track: x.track || '—', n: 0, done: 0, doing: 0, ns: 0 }
+      e.n++
+      if (x.is_complete || /complete/i.test(x.status || '')) e.done++
+      else if (/progress/i.test(x.status || '')) e.doing++
+      else e.ns++
+      m.set(k, e)
+    }
+    return [...m.values()].sort((a, b) => (b.n - a.n) || (a.done / a.n - b.done / b.n))
+  }, [mods])
+
+  // Modules for whoever is open in the drawer.
+  const pickedMods = useMemo(() => {
+    if (!picked) return []
+    const key = picked.learner_key
+    return mods
+      .filter(x => key ? x.learner_key === key : x.learner_full_name === displayName(picked))
+      .sort((a, b) => {
+        const rank = (x: LndModule) => (x.is_complete || /complete/i.test(x.status || '')) ? 0 : /progress/i.test(x.status || '') ? 1 : 2
+        return rank(a) - rank(b) || a.course.localeCompare(b.course)
+      })
+  }, [mods, picked])
+
   // One learner's row from every snapshot they appear in, oldest first.
   const history = useMemo(
-    () => picked ? rows.filter(r => r.learner_name === picked.learner_name).sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date)) : [],
+    () => picked ? rows.filter(r => (r.learner_key || r.learner_name) === (picked.learner_key || picked.learner_name)).sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date)) : [],
     [rows, picked],
   )
 
@@ -233,15 +233,15 @@ export default function LndPage() {
       complete: current.filter(r => strictPct(r) >= 100).length,
       // Genuine week-on-week movement = modules actually completed, never the %.
       movedModules: current.reduce((s, r) => {
-        const p = prevBy.get(r.learner_name.toLowerCase())
+        const p = prevBy.get(r.learner_key || r.learner_name.toLowerCase())
         return s + (p ? Math.max(0, r.completed - p.completed) : 0)
       }, 0),
       movedPeople: current.filter(r => {
-        const p = prevBy.get(r.learner_name.toLowerCase())
+        const p = prevBy.get(r.learner_key || r.learner_name.toLowerCase())
         return p != null && r.completed > p.completed
       }).length,
-      carried: current.filter(r => prevBy.has(r.learner_name.toLowerCase())).length,
-      fresh: current.filter(r => !prevBy.has(r.learner_name.toLowerCase())).length,
+      carried: current.filter(r => prevBy.has(r.learner_key || r.learner_name.toLowerCase())).length,
+      fresh: current.filter(r => !prevBy.has(r.learner_key || r.learner_name.toLowerCase())).length,
     }
   }, [current, prevBy])
 
@@ -305,6 +305,58 @@ export default function LndPage() {
         <Breakdown title="By reporting manager" rows={byMgr} note="who needs a nudge" />
       </div>
 
+      {byCourse.length > 0 && (
+        <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
+          <div className="flex items-baseline justify-between mb-1">
+            <h2 className="font-semibold">By course</h2>
+            <span className="text-xs text-mav-muted">{mods.length} assignments across {byCourse.length} courses</span>
+          </div>
+          <p className="text-xs text-mav-muted mb-4">
+            Where the cohort gets stuck. A course with people in progress and nobody finishing is a
+            course problem, not a motivation problem.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs uppercase tracking-wide text-mav-muted border-b border-mav-line">
+                <tr>
+                  <th className="px-2 py-2">Course</th>
+                  <th className="px-2 py-2">Track</th>
+                  <th className="px-2 py-2 text-right">Assigned</th>
+                  <th className="px-2 py-2 text-right">Completed</th>
+                  <th className="px-2 py-2 text-right">In progress</th>
+                  <th className="px-2 py-2 text-right">Not started</th>
+                  <th className="px-2 py-2 w-32">Mix</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byCourse.map(c => {
+                  const stuck = c.n >= 5 && c.done === 0
+                  return (
+                    <tr key={c.course} className="border-b border-mav-line/60 last:border-0">
+                      <td className="px-2 py-2">
+                        {c.course}
+                        {stuck && <span className="ml-2 text-[11px] text-red-400">nobody finishing</span>}
+                      </td>
+                      <td className="px-2 py-2 text-mav-muted text-xs">{c.track}</td>
+                      <td className="px-2 py-2 text-right">{c.n}</td>
+                      <td className={`px-2 py-2 text-right ${c.done ? 'text-green-400' : 'text-mav-muted'}`}>{c.done}</td>
+                      <td className={`px-2 py-2 text-right ${c.doing ? 'text-mav-yellow' : 'text-mav-muted'}`}>{c.doing}</td>
+                      <td className="px-2 py-2 text-right text-mav-muted">{c.ns}</td>
+                      <td className="px-2 py-2">
+                        <div className="flex h-2 w-full overflow-hidden rounded-full bg-mav-line">
+                          <div className="bg-green-500" style={{ width: `${(c.done / c.n) * 100}%` }} />
+                          <div className="bg-mav-yellow" style={{ width: `${(c.doing / c.n) * 100}%` }} />
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 mb-4 items-center">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search learner or manager…" className={`${sel} min-w-[200px] flex-1`} />
         <select value={level} onChange={e => setLevel(e.target.value)} className={sel}>
@@ -353,14 +405,14 @@ export default function LndPage() {
             <tbody>
               {filtered.map(r => {
                 const gap = daysBetween(r.last_activity, latest)
-                const p = prevBy.get(r.learner_name.toLowerCase())
+                const p = prevBy.get(r.learner_key || r.learner_name.toLowerCase())
                 const gained = p ? r.completed - p.completed : null
                 return (
                   <tr key={r.id} className="border-b border-mav-line/60 last:border-0 align-top">
                     <td className="px-4 py-3">
                       <button onClick={() => setPicked(r)}
                         className="font-medium text-left hover:text-mav-yellow hover:underline underline-offset-2">
-                        {r.learner_name}
+                        {displayName(r)}
                       </button>
                       {!p && <div><span className="text-[11px] text-mav-yellow">new this snapshot</span></div>}
                     </td>
@@ -397,16 +449,14 @@ export default function LndPage() {
         {dates.map(fmtDate).join(' · ')}.
       </p>
 
-      {picked && (() => {
-        const c = coursesFrom(picked.remarks)
-        return (
+      {picked && (
           <div className="fixed inset-0 z-40" onClick={() => setPicked(null)}>
             <div className="absolute inset-0 bg-black/50" />
             <aside onClick={e => e.stopPropagation()}
               className="absolute right-0 top-0 h-full w-full max-w-lg bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
               <div className="flex items-start justify-between gap-3 mb-5">
                 <div>
-                  <h2 className="text-xl font-semibold">{picked.learner_name}</h2>
+                  <h2 className="text-xl font-semibold">{displayName(picked)}</h2>
                   <div className="mt-2 flex flex-wrap gap-1">
                     <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{picked.level}</span>
                     {picked.reporting_manager && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{picked.reporting_manager}</span>}
@@ -433,23 +483,35 @@ export default function LndPage() {
                 </div>
               </div>
 
-              <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">Courses</div>
-              {c.done.length || c.doing.length ? (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {c.done.map((x, i) => (
-                    <span key={`d${i}`} className="text-xs px-2 py-1 rounded-md bg-green-500/15 text-green-300">✓ {x}</span>
-                  ))}
-                  {c.doing.map((x, i) => (
-                    <span key={`p${i}`} className="text-xs px-2 py-1 rounded-md bg-mav-yellow/15 text-mav-yellow">◐ {x}</span>
-                  ))}
+              <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">
+                Courses <span className="normal-case tracking-normal">({pickedMods.length} assigned)</span>
+              </div>
+              {pickedMods.length ? (
+                <div className="space-y-1.5 mb-6">
+                  {pickedMods.map(m => {
+                    const done = m.is_complete || /complete/i.test(m.status || '')
+                    const doing = !done && /progress/i.test(m.status || '')
+                    return (
+                      <div key={m.id} className={`rounded-lg border p-2.5 ${done ? 'border-green-500/25 bg-green-500/[0.05]' : doing ? 'border-mav-yellow/25 bg-mav-yellow/[0.05]' : 'border-mav-line'}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-sm">{done ? '✓' : doing ? '◐' : '○'} {m.course}</span>
+                          <span className={`text-[11px] shrink-0 ${done ? 'text-green-400' : doing ? 'text-mav-yellow' : 'text-mav-muted'}`}>
+                            {done ? 'Completed' : doing ? `${m.completion_pct ?? 0}%` : 'Not started'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-mav-muted mt-1 flex flex-wrap gap-x-3">
+                          {m.track && <span>{m.track}</span>}
+                          {m.started_on && <span>started {fmtDate(m.started_on)}</span>}
+                          {m.completed_on && <span>finished {fmtDate(m.completed_on)}</span>}
+                          {!m.started_on && !m.completed_on && <span>never opened</span>}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               ) : (
-                <p className="text-sm text-mav-muted mb-2">No module named in this week&rsquo;s note.</p>
+                <p className="text-sm text-mav-muted mb-6">No module rows for this learner in the level tabs.</p>
               )}
-              <p className="text-[11px] text-mav-muted mb-6">
-                Course names are read out of the weekly note below — the sheet does not carry a
-                structured module list, so treat the note as the authority.
-              </p>
 
               <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">Week by week</div>
               <div className="space-y-2">
@@ -481,8 +543,7 @@ export default function LndPage() {
               )}
             </aside>
           </div>
-        )
-      })()}
+      )}
     </div>
   )
 }

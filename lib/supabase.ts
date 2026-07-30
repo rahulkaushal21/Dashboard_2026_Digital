@@ -451,6 +451,12 @@ export async function getEscalations(): Promise<Escalation[]> { const l = await 
 export interface LndRow {
   id: number
   snapshot_date: string
+  // Canonical identity. `learner_name` is the short name the weekly summary tab
+  // happens to use and it is NOT stable — the sheet renamed two people mid-programme
+  // ("Divya Arora" -> "Arora Anilkumar", "Ketul Gajera" -> "Gajera Harsukhlal"), which
+  // split each of them into two learners. Always key and display on these two.
+  learner_key?: string | null
+  learner_full_name?: string | null
   level: string
   learner_name: string
   reporting_manager?: string | null
@@ -473,7 +479,35 @@ export const strictPct = (r: Pick<LndRow, 'completed' | 'total_modules'>) =>
 export async function getLnd(): Promise<LndRow[]> {
   const l = await read<LndRow>(
     'lnd_snapshots',
-    'id, snapshot_date, level, learner_name, reporting_manager, total_modules, completed, in_progress, not_started, sheet_progress, last_activity, remarks',
+    'id, snapshot_date, level, learner_name, learner_key, learner_full_name, reporting_manager, total_modules, completed, in_progress, not_started, sheet_progress, last_activity, remarks',
+  )
+  return l || []
+}
+
+// One row per learner per assigned course, from the level tabs of the mastersheet.
+export interface LndModule {
+  id: number
+  learner_key?: string | null
+  learner_full_name: string
+  user_id?: string | null
+  email?: string | null
+  sub_department?: string | null
+  level?: string | null
+  track?: string | null
+  stream?: string | null
+  course: string
+  status?: string | null
+  completion_pct?: number | null
+  is_complete?: boolean | null
+  started_on?: string | null
+  last_accessed_on?: string | null
+  completed_on?: string | null
+}
+
+export async function getLndModules(): Promise<LndModule[]> {
+  const l = await read<LndModule>(
+    'lnd_modules',
+    'id, learner_key, learner_full_name, user_id, email, sub_department, level, track, stream, course, status, completion_pct, is_complete, started_on, last_accessed_on, completed_on',
   )
   return l || []
 }
