@@ -496,6 +496,10 @@ export interface LndModule {
   track?: string | null
   stream?: string | null
   course: string
+  // The Pre-Assessment is the programme's entry gate, not a course. The sheet lists
+  // it as a module, so leaving it in overstates learning: 23 of the cohort's 40
+  // completions are this one row. Flagged in Postgres so it can be reported apart.
+  is_assessment?: boolean | null
   status?: string | null
   completion_pct?: number | null
   is_complete?: boolean | null
@@ -507,7 +511,7 @@ export interface LndModule {
 export async function getLndModules(): Promise<LndModule[]> {
   const l = await read<LndModule>(
     'lnd_modules',
-    'id, learner_key, learner_full_name, user_id, email, sub_department, level, track, stream, course, status, completion_pct, is_complete, started_on, last_accessed_on, completed_on',
+    'id, learner_key, learner_full_name, user_id, email, sub_department, level, track, stream, course, is_assessment, status, completion_pct, is_complete, started_on, last_accessed_on, completed_on',
   )
   return l || []
 }

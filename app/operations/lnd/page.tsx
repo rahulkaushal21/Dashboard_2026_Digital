@@ -22,6 +22,12 @@ const daysBetween = (a?: string | null, b?: string | null) => {
   return Number.isFinite(d) ? Math.round(d) : null
 }
 const STALL_DAYS = 14
+// The Pre-Assessment is the entry gate, not learning. Counting it as a course
+// overstates progress badly — 23 of the cohort's 40 completions are this one row —
+// so courses and the gate are reported separately everywhere.
+const isDone = (m: LndModule) => !!m.is_complete || /complete/i.test(m.status || '')
+const isDoing = (m: LndModule) => !isDone(m) && /progress/i.test(m.status || '')
+const isGate = (m: LndModule) => !!m.is_assessment
 // Always show the canonical full legal name; the summary tab's short name is an
 // unstable alias and must never be what a manager reads.
 const displayName = (r: { learner_full_name?: string | null; learner_name: string }) => r.learner_full_name || r.learner_name
@@ -191,15 +197,34 @@ export default function LndPage() {
   const byCourse = useMemo(() => {
     const m = new Map<string, { course: string; track: string; n: number; done: number; doing: number; ns: number }>()
     for (const x of mods) {
+      if (isGate(x)) continue          // the entry assessment is not a course
       const k = x.course
       const e = m.get(k) || { course: x.course, track: x.track || '—', n: 0, done: 0, doing: 0, ns: 0 }
       e.n++
-      if (x.is_complete || /complete/i.test(x.status || '')) e.done++
-      else if (/progress/i.test(x.status || '')) e.doing++
+      if (isDone(x)) e.done++
+      else if (isDoing(x)) e.doing++
       else e.ns++
       m.set(k, e)
     }
     return [...m.values()].sort((a, b) => (b.n - a.n) || (a.done / a.n - b.done / b.n))
+  }, [mods])
+
+  // Course-only truth, with the entry gate stripped out.
+  const courseStats = useMemo(() => {
+    const real = mods.filter(m => !isGate(m))
+    const gate = mods.filter(isGate)
+    const byPerson = new Map<string, number>()
+    real.filter(isDone).forEach(m => byPerson.set(m.learner_key || m.learner_full_name, (byPerson.get(m.learner_key || m.learner_full_name) || 0) + 1))
+    const people = new Set(mods.map(m => m.learner_key || m.learner_full_name))
+    return {
+      assigned: real.length,
+      done: real.filter(isDone).length,
+      doing: real.filter(isDoing).length,
+      gateAssigned: gate.length,
+      gateDone: gate.filter(isDone).length,
+      peopleWithNoCourse: [...people].filter(p => !byPerson.get(p)).length,
+      people: people.size,
+    }
   }, [mods])
 
   // Modules for whoever is open in the drawer.
@@ -209,7 +234,8 @@ export default function LndPage() {
     return mods
       .filter(x => key ? x.learner_key === key : x.learner_full_name === displayName(picked))
       .sort((a, b) => {
-        const rank = (x: LndModule) => (x.is_complete || /complete/i.test(x.status || '')) ? 0 : /progress/i.test(x.status || '') ? 1 : 2
+        // gate last, then completed, in progress, not started
+        const rank = (x: LndModule) => isGate(x) ? 3 : isDone(x) ? 0 : isDoing(x) ? 1 : 2
         return rank(a) - rank(b) || a.course.localeCompare(b.course)
       })
   }, [mods, picked])
@@ -278,6 +304,12 @@ export default function LndPage() {
         Every figure below is derived from the raw module counts, with an in-progress module credited as half.
         The sheet&rsquo;s own <em>Overall Progress</em> column changed definition on 29 Jul 2026 — nine learners
         appeared to jump ahead without finishing a single module — so it is stored for audit and never displayed.
+        <div className="mt-2">
+          <span className="text-amber-300 font-semibold">The Pre-Assessment is not a course.</span>{' '}
+          The sheet lists it as a module, so counting it overstates learning — {courseStats.gateDone} of
+          the cohort&rsquo;s {courseStats.gateDone + courseStats.done} completions are just that entry gate.
+          Course figures here exclude it.
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-4">
@@ -285,8 +317,9 @@ export default function LndPage() {
           sub={`${k.carried} continuing · ${k.fresh} new this snapshot`} />
         <Stat label="Cohort progress" value={pct(k.credited)}
           sub={`${pct(k.strict)} counting completed modules only`} />
-        <Stat label="Modules completed" value={`${k.done} / ${k.total}`}
-          sub={`${pct((k.done / Math.max(k.total, 1)) * 100)} of everything assigned`} />
+        <Stat label="Courses completed" value={`${courseStats.done} / ${courseStats.assigned}`}
+          tone={courseStats.done === 0 ? 'text-red-400' : ''}
+          sub={`excludes the entry assessment (${courseStats.gateDone}/${courseStats.gateAssigned} passed)`} />
         <Stat label="Never started" value={String(k.zero)} tone={k.zero ? 'text-red-400' : 'text-green-400'}
           sub={k.zero ? 'no module opened at all' : 'everyone has begun'} />
       </div>
@@ -296,8 +329,9 @@ export default function LndPage() {
           sub="started, then went quiet" />
         <Stat label="Finished the track" value={String(k.complete)} tone={k.complete ? 'text-green-400' : ''}
           sub="all assigned modules complete" />
-        <Stat label="Real movement since last snapshot" value={`${k.movedModules} modules`}
-          sub={`${k.movedPeople} of ${k.carried} continuing learners completed something`} />
+        <Stat label="Nothing but the entry assessment" value={String(courseStats.peopleWithNoCourse)}
+          tone={courseStats.peopleWithNoCourse ? 'text-red-400' : 'text-green-400'}
+          sub={`of ${courseStats.people} — passed the gate, finished no course`} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2 mb-6">
@@ -484,17 +518,20 @@ export default function LndPage() {
               </div>
 
               <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">
-                Courses <span className="normal-case tracking-normal">({pickedMods.length} assigned)</span>
+                Courses <span className="normal-case tracking-normal">({pickedMods.filter(m => !isGate(m)).length} assigned, plus the entry assessment)</span>
               </div>
               {pickedMods.length ? (
                 <div className="space-y-1.5 mb-6">
                   {pickedMods.map(m => {
-                    const done = m.is_complete || /complete/i.test(m.status || '')
-                    const doing = !done && /progress/i.test(m.status || '')
+                    const done = isDone(m)
+                    const doing = isDoing(m)
                     return (
                       <div key={m.id} className={`rounded-lg border p-2.5 ${done ? 'border-green-500/25 bg-green-500/[0.05]' : doing ? 'border-mav-yellow/25 bg-mav-yellow/[0.05]' : 'border-mav-line'}`}>
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-sm">{done ? '✓' : doing ? '◐' : '○'} {m.course}</span>
+                          <span className="text-sm">
+                            {done ? '✓' : doing ? '◐' : '○'} {m.course}
+                            {isGate(m) && <span className="ml-2 text-[11px] text-mav-muted">entry gate, not a course</span>}
+                          </span>
                           <span className={`text-[11px] shrink-0 ${done ? 'text-green-400' : doing ? 'text-mav-yellow' : 'text-mav-muted'}`}>
                             {done ? 'Completed' : doing ? `${m.completion_pct ?? 0}%` : 'Not started'}
                           </span>
