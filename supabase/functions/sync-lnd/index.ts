@@ -91,10 +91,20 @@ Deno.serve(async (req) => {
       total_modules: number; completed: number; in_progress: number; not_started: number;
       sheet_progress: number | null; last_activity: string | null; remarks: string | null; src_row_hash: string;
     };
+    const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    // People who have left the program. The sheet keeps them in its older weekly
+    // blocks forever, so without this they would reappear on every pull.
+    const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const { data: exRows, error: exErr } = await supa.from("lnd_excluded_learners").select("learner_key");
+    if (exErr) throw new Error("exclusions: " + exErr.message);
+    const excluded = new Set((exRows || []).map((r: { learner_key: string }) => r.learner_key));
+
     const out = new Map<string, R>();
     let snapshot: string | null = null;
     let level: string | null = null;
     let skippedNoDate = 0;
+    let skippedExcluded = 0;
 
     for (const row of rows) {
       const c0 = (row[0] || "").trim();
@@ -110,6 +120,7 @@ Deno.serve(async (req) => {
       if (!/^\d+$/.test(c0)) continue;            // header rows, blanks, notes
       const name = (row[1] || "").trim();
       if (!name) continue;
+      if (excluded.has(nameKey(name))) { skippedExcluded++; continue; }
       if (!snapshot) { skippedNoDate++; continue; }
 
       // Last block wins on a duplicate (snapshot_date, learner) inside one pull.
@@ -133,7 +144,6 @@ Deno.serve(async (req) => {
     const data = [...out.values()];
     if (!data.length) throw new Error("no learner rows parsed — refusing to touch lnd_snapshots");
 
-    const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     // UPSERT, not full-replace: snapshots are history. A future pull that no longer
     // contains an old week must not delete that week. Corrections to a week already
     // loaded still land, because the key is (snapshot_date, learner_name).
@@ -153,13 +163,14 @@ Deno.serve(async (req) => {
     const done = cur.reduce((s, d) => s + d.completed, 0);
     await supa.from("sync_runs").insert({
       source: "lnd-sync", rows_upserted: upserted, ok: true,
-      message: `${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete`,
+      message: `${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete · ${skippedExcluded} rows skipped (left the program)`,
     });
 
     return new Response(JSON.stringify({
       ok: true, rows: upserted, snapshots: dates, latest_snapshot: latest,
       learners_latest: cur.length, modules_total: modules, modules_completed: done,
       skipped_rows_without_snapshot_date: skippedNoDate,
+      skipped_excluded_learners: skippedExcluded,
     }), { headers: { ...cors, "Content-Type": "application/json" } });
   } catch (e) {
     const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
