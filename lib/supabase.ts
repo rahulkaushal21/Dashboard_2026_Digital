@@ -438,3 +438,42 @@ export async function getQuotes(): Promise<Quote[]> { const l = await read<Quote
 export async function getConversions(): Promise<QuoteConversion[]> { const l = await read<QuoteConversion>('quote_conversions'); return l && l.length ? l : (await import('./mockData')).mockConversions }
 export async function getSqlLeads(): Promise<SqlLead[]> { const l = await read<SqlLead>('sql_leads'); const rows = l?.filter(s => !isSqlHeaderRow(s)); return rows && rows.length ? rows : (await import('./mockData')).mockSqlLeads }
 export async function getEscalations(): Promise<Escalation[]> { const l = await read<Escalation>('escalations', 'id, company_name, geo, situation_type, escalation_type, business_impact, month, week, email_subject, tracking_date, project_name, reference_id, deal_type, service_type, link, source, raised_by, evidence, source_sender, source_date'); const rows = l?.filter(e => !isEscalationHeaderRow(e)); return rows && rows.length ? rows : (await import('./mockData')).mockEscalations }
+
+// ---------------------------------------------------------------------------
+// Learning & Development (Operations → L&D)
+// ---------------------------------------------------------------------------
+// One row per learner per weekly snapshot, loaded by the `sync-lnd` edge function.
+// The sheet's own "Overall Progress" column is NOT trusted: its definition changed
+// between the 21 Jul and 29 Jul 2026 snapshots (in-progress modules began counting
+// as half), which made nine learners appear to advance without completing a single
+// module. It is stored as `sheet_progress` for audit and never displayed. Every
+// figure on the page is derived here from the raw counts.
+export interface LndRow {
+  id: number
+  snapshot_date: string
+  level: string
+  learner_name: string
+  reporting_manager?: string | null
+  total_modules: number
+  completed: number
+  in_progress: number
+  not_started: number
+  sheet_progress?: number | null
+  last_activity?: string | null
+  remarks?: string | null
+}
+
+// Credited progress — in-progress modules count as half. This is the agreed
+// definition; `strictPct` is the completed-only figure shown alongside it.
+export const creditedPct = (r: Pick<LndRow, 'completed' | 'in_progress' | 'total_modules'>) =>
+  r.total_modules > 0 ? ((r.completed + 0.5 * r.in_progress) / r.total_modules) * 100 : 0
+export const strictPct = (r: Pick<LndRow, 'completed' | 'total_modules'>) =>
+  r.total_modules > 0 ? (r.completed / r.total_modules) * 100 : 0
+
+export async function getLnd(): Promise<LndRow[]> {
+  const l = await read<LndRow>(
+    'lnd_snapshots',
+    'id, snapshot_date, level, learner_name, reporting_manager, total_modules, completed, in_progress, not_started, sheet_progress, last_activity, remarks',
+  )
+  return l || []
+}

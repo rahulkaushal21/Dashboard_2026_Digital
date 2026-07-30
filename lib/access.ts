@@ -15,6 +15,12 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/last-year', label: 'Last Year Review' },
 ]
 
+// Operations sub-pages are deliberately NOT in PAGES. They hold named-person data
+// (individual learning progress against a reporting manager), so they are admin-only
+// and cannot be granted to a viewer from Settings. Move an entry into PAGES above if
+// that ever needs to change.
+const ADMIN_ONLY = ['/operations/lnd']
+
 export interface Profile {
   email: string
   full_name?: string | null
@@ -48,6 +54,7 @@ export function canSee(profile: Profile | null, path: string): boolean {
   if (!profile || !profile.is_active) return false
   if (profile.role === 'admin') return true
   if (path === '/admin') return false
+  if (ADMIN_ONLY.includes(path)) return false
   const allowed = profile.allowed_pages || []
   return allowed.includes(path)
 }
