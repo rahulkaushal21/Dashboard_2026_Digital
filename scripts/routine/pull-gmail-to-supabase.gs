@@ -41,6 +41,43 @@ var INGEST_TOKEN     = 'ingestWebHub_a7c2e9';   // shared secret; matches the ed
 var COLD_START_HOURS = 6;                        // first ever run (no cursor): look back this far
 var OVERLAP_MIN      = 20;                        // re-pull this much before the cursor (dedup makes it safe)
 var MAX_WINDOW_HOURS = 72;                        // safety cap: even after a long outage, never scan more than this
+
+// ---------------------------------------------------------------------------
+// Body trimming — the single biggest cost lever in the whole system.
+//
+// Every reply re-quotes the entire thread, so the same paragraphs were being
+// stored and re-read on every scan. Measured across the 9,872 stored bodies:
+// average 8,062 characters, 90th percentile 25,193, worst 60,000 — and 75-84%
+// of that volume is quoted chain, not new text. One real example was a 60,000
+// character email whose actual new content was 56 characters:
+// "Hi Hammad, Thanks for raising this. Let me align it."
+//
+// Nothing is lost by cutting it: every earlier message in the thread is already
+// stored as its own row under the same thread_id.
+var MAX_BODY_CHARS = 8000;                        // machine reports (Wordfence, scans) carry no quote markers
+var MIN_KEPT_CHARS = 200;                         // below this, assume we cut too hard and keep the original
+
+// Reply-chain boundaries. Each must be anchored to a line start AND look like a
+// real header — matching a bare "On " would slice mid-sentence on prose like
+// "On Monday we shipped the fix".
+var QUOTE_MARKERS = [
+  /\n[ \t]*On\b[\s\S]{0,200}?wrote:[\s\S]*$/,     // Gmail / Apple Mail
+  /\n[ \t]*-{2,}\s*Original Message\s*-{2,}[\s\S]*$/i,
+  /\n[ \t]*_{10,}[\s\S]*$/,                       // Outlook divider
+  /\n[ \t]*From:[ \t].{0,120}\n[ \t]*Sent:[ \t][\s\S]*$/i,
+  /\n[ \t]*-{5,}\s*Forwarded message\s*-{5,}[\s\S]*$/i,
+  /\n(?:[ \t]*>.*\n?){3,}[\s\S]*$/                // three or more quoted lines
+];
+
+function trimQuoted(text) {
+  if (!text) return '';
+  var out = text;
+  for (var i = 0; i < QUOTE_MARKERS.length; i++) out = out.replace(QUOTE_MARKERS[i], '');
+  out = out.replace(/\s+$/, '');
+  // Safety valve: a forwarded mail whose entire content IS the quote must not be
+  // reduced to nothing. Fall back to the raw body (the cap still applies).
+  return out.length >= MIN_KEPT_CHARS ? out : text;
+}
 var CURSOR_KEY       = 'lastMsgEpochMs';          // Script Property holding the newest pushed msg time
 var INTERNAL         = ['mavlers.com', 'uplers.com', 'uplers.in', 'mavlers.agency', 'mavlers.biz'];
 // VENDORS/subcontractors we hire — NOT clients. Any thread involving one of these domains
@@ -103,12 +140,14 @@ function pullGmailToSupabase() {
         var to = m.getTo() || '';
         var cc = m.getCc() || '';
         var participants = (from + ',' + to + ',' + cc).toLowerCase();
-        var body = m.getPlainBody() || '';
+        var rawBody = m.getPlainBody() || '';
         // Skip vendor/subcontractor threads entirely — they are not clients.
         if (hasVendor(participants)) continue;
         var external = computeExternal(participants);
         // Skip pure-internal chatter unless it reads like a relayed client matter.
-        if (!external && !INCLUDE_INTERNAL_RE.test(body.slice(0, 4000) + ' ' + m.getSubject())) continue;
+        // Tested on the RAW body: the include-signal may sit in the quoted part.
+        if (!external && !INCLUDE_INTERNAL_RE.test(rawBody.slice(0, 4000) + ' ' + m.getSubject())) continue;
+        var body = trimQuoted(rawBody);
         out.push({
           message_id: m.getId(),
           thread_id: tid,
@@ -118,7 +157,7 @@ function pullGmailToSupabase() {
           cc_addrs: cc,
           msg_date: m.getDate().toISOString(),
           snippet: body.slice(0, 300),
-          body: body.slice(0, 60000),
+          body: body.slice(0, MAX_BODY_CHARS),
           has_external: external
         });
         if (epoch > maxPushedEpoch) maxPushedEpoch = epoch;
