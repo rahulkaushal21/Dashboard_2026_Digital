@@ -43,6 +43,28 @@ function parseMonth(s: string): string | null {
   return `${yyyy}-${mm}-01`;
 }
 
+// Fallback when Month-Year is blank: derive the month from a full date cell
+// (Confirmation / Delivery / Start Date). Accepts "20-Jul-2026", "20 Jul 2026",
+// "2026-07-20" and "20/07/2026". Revenue is booked to the month, so the day is
+// discarded — we only need to place the row in the right bucket.
+function monthFromDate(s: string): string | null {
+  const t = (s || "").trim();
+  if (!t) return null;
+  let m = t.match(/^(\d{1,2})[\s\/-]([A-Za-z]{3})[A-Za-z]*[\s\/-](\d{2,4})$/);
+  if (m) {
+    const mm = MON[m[2].toLowerCase()];
+    if (!mm) return null;
+    let yyyy = m[3];
+    if (yyyy.length === 2) yyyy = "20" + yyyy;
+    return `${yyyy}-${mm}-01`;
+  }
+  m = t.match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (m) return `${m[1]}-${m[2]}-01`;
+  m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${String(+m[2]).padStart(2, "0")}-01`;
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
@@ -67,22 +89,48 @@ Deno.serve(async (req) => {
     const cSales = idx(["account/sales person", "sales"]);
     const cSvc = idx(["service department", "service"]);
     const cStatus = idx(["project status"]);
+    const cProject = idx(["project name"]);
+    const cClient = idx(["client name"]);
+    const cConfDate = idx(["confirmation date"]);
+    const cDelDate = idx(["delivery date"]);
+    const cStartDate = idx(["start date"]);
     if (cAgency < 0 || cMonth < 0) throw new Error("required columns not found");
 
     type R = { company_name: string; contact_email: string | null; booking_amount: number; booking_month: string; service_name: string | null; geo: string | null; sme: string | null; sales_person: string | null; src_row_hash: string };
     const agg = new Map<string, R>();
+    const cell = (row: string[], i: number) => (i >= 0 ? (row[i] || "").trim() : "");
     let excluded = 0;
+    let recoveredAgency = 0, recoveredMonth = 0, dropped = 0, droppedValue = 0;
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r];
-      const company = (row[cAgency] || "").trim();
-      const month = parseMonth(row[cMonth] || "");
-      if (!company || !month) continue;
+      const amtStr = cUsd >= 0 ? (row[cUsd] || "") : "";
+      const amt = parseFloat(amtStr.replace(/[$,\s]/g, "")) || 0;
+
+      // A blank Agency or Month-Year used to drop the row silently, quietly
+      // shaving real money off the monthly total (three July-2026 rows worth
+      // $3,600 went missing this way). Recover both instead of skipping:
+      //   • Agency  → fall back to Client Name, then Project Name.
+      //   • Month   → derive from Confirmation / Delivery / Start Date.
+      // Anything still unusable is counted AND its value reported, so a gap can
+      // never again be invisible.
+      let company = cell(row, cAgency);
+      if (!company) {
+        company = cell(row, cClient) || cell(row, cProject);
+        if (company) { company = `${company} (agency blank)`; recoveredAgency++; }
+      }
+      let month = parseMonth(cell(row, cMonth));
+      if (!month) {
+        month = monthFromDate(cell(row, cConfDate)) || monthFromDate(cell(row, cDelDate)) || monthFromDate(cell(row, cStartDate));
+        if (month) recoveredMonth++;
+      }
+      if (!company || !month) {
+        if (amt) { dropped++; droppedValue += amt; }
+        continue;
+      }
       // Skip not-yet-realised revenue by Project Status (column N).
       const status = cStatus >= 0 ? (row[cStatus] || "").trim().toLowerCase() : "";
       if (EXCLUDE_STATUS.has(status)) { excluded++; continue; }
       const svc = cSvc >= 0 ? (row[cSvc] || "").trim() : "";
-      const amtStr = cUsd >= 0 ? (row[cUsd] || "") : "";
-      const amt = parseFloat(amtStr.replace(/[$,\s]/g, "")) || 0;
       const key = `${company}|${month}|${svc}`;
       const cur = agg.get(key);
       if (cur) cur.booking_amount += amt;
@@ -113,11 +161,13 @@ Deno.serve(async (req) => {
       if (error) throw new Error("insert: " + error.message);
       upserted += chunk.length;
     }
-    await supa.from("sync_runs").insert({ source: "web-revenue-sync", rows_upserted: upserted, ok: true, message: `full replace · ${excluded} excluded by status` });
+    const msg = `full replace · ${excluded} excluded by status · recovered ${recoveredAgency} blank-agency + ${recoveredMonth} blank-month`
+      + (dropped ? ` · DROPPED ${dropped} unusable rows worth $${Math.round(droppedValue)}` : ` · 0 dropped`);
+    await supa.from("sync_runs").insert({ source: "web-revenue-sync", rows_upserted: upserted, ok: true, message: msg });
     const total = data.reduce((s, d) => s + d.booking_amount, 0);
     const latest = data.map((d) => d.booking_month).sort().pop() || null;
     const agencies = new Set(data.map((d) => d.company_name.toLowerCase())).size;
-    return new Response(JSON.stringify({ ok: true, rows: upserted, agencies, total: Math.round(total), latest_month: latest, excluded_by_status: excluded }), { headers: { ...cors, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ ok: true, rows: upserted, agencies, total: Math.round(total), latest_month: latest, excluded_by_status: excluded, recovered_blank_agency: recoveredAgency, recovered_blank_month: recoveredMonth, dropped_rows: dropped, dropped_value: Math.round(droppedValue) }), { headers: { ...cors, "Content-Type": "application/json" } });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: { ...cors, "Content-Type": "application/json" } });
   }
