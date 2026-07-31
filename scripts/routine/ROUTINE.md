@@ -38,11 +38,20 @@ Call getConfig() (from writers.mjs). Use config.business_sheet_url as the sheet
 to read in step A. The email scan no longer touches the Gmail connector — it reads
 already-captured mail from the private Supabase `email_inbox` table (see step B).
 
-IMPORTANT — system mails are NOT opportunities. Auto-generated pipeline mail from
-notifications@uplers.com (e.g. "… has generated a RFQ", "Quote ( QUT… ) Request")
-and invoice-app alerts are created AFTER the client's real email enquiry and are
-already represented in the sheet's Quotes tab. Do NOT write them into
-`opportunities` (that double-counts). Opportunities come from only two sources:
+IMPORTANT — system mails are NOT opportunities, but RFQ mails ARE evidence.
+Auto-generated pipeline mail from notifications@uplers.com (e.g. "… has generated
+a RFQ", "Quote ( QUT… ) Request") and invoice-app alerts are created AFTER the
+client's real email enquiry. Do NOT write them into `opportunities` as new rows
+(that double-counts) — but DO read the "Quote ( QUT… ) Request" mails and use them
+to ENRICH the matching existing opportunity: they carry Project Name, Client Name,
+Geo, Currency and Budget plus the RFQ/QUT reference, and for many deals that is the
+only place the quoted figure appears in email. Set `est_value` (converting from the
+stated Currency), record the QUT ref in `rfq_status`, and lift win% — an RFQ being
+raised points at invoicing and confirmation. Match on Project Name + Client Name,
+never on the sender. They are usually also in the sheet's Quotes tab, in which case
+the sheet stays master; when the sheet has not caught up yet, the RFQ mail is what
+stops a confirmed deal from booking as zero.
+Opportunities come from only two sources:
 (1) a genuine client EMAIL enquiry, and (2) the SHEET Quotes tab (step A). Invoice
 notifications also must not become quote_conversions (they correspond to sheet
 bookings). The sheet and inbox are set by the admin in Settings — never hardcode them.
@@ -101,8 +110,10 @@ Apps Script cursor guarantees no gaps (it catches up to 72h across any outage).
 TRIAGE + DEEP-READ: triage cheaply ONLY to discard pure machine noise —
 newsletters, promos, calendar invites/accepts, OOO auto-replies, monitoring/deploy/
 error alerts (Kinsta, Wordfence, Render…), HR/billing/system mail,
-notifications@uplers.com RFQ/invoice mails, Basecamp/Slack/Docs notifications, and
-Drive share notices. For EVERYTHING ELSE — any thread with a genuine external human
+notifications@uplers.com invoice mails, Basecamp/Slack/Docs notifications, and
+Drive share notices. EXCEPTION — notifications@uplers.com "Quote ( QUT… ) Request"
+mails are NOT discardable: read each one for Project Name, Client Name, Currency and
+Budget and apply the value to the matching opportunity (see step 0). For EVERYTHING ELSE — any thread with a genuine external human
 (client / prospect / partner) — deep-read the full stored `body`, even if the last
 message looks routine. Do not classify a real client thread from its snippet. Dedup
 on thread_id means re-seeing a thread is harmless; only look for NEW messages.
@@ -170,7 +181,9 @@ is clear.
   sales_person, subject, sender, date, summary. NEVER create an opportunity from a
   system-generated mail (notifications@uplers.com "… has generated a RFQ" /
   "Quote ( QUT… ) Request", invoice-app alerts) — those are downstream of the real
-  client email and are already covered by the sheet Quotes tab. Skip them here.
+  client email and are already covered by the sheet Quotes tab. Do not create a row
+  from them; DO use the "Quote ( QUT… ) Request" mails to fill in `est_value`,
+  currency, geo and the QUT reference on the opportunity they belong to.
   COST-FIGURE RULE (don't under-capture): if ANY price/cost/estimate is shared in
   the thread — a firm number, a monthly rate, OR a RANGE (e.g. "US $3,500–3,700",
   "125 GBP", "USD 3,900/mo", "$96 AUD/3h") — write an opportunity for it, in

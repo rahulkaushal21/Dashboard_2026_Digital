@@ -95,8 +95,27 @@ and archived=false (the live stream), newest-first, grouped by thread_id. The
 archived=true rows are the one-time FY backfill (from 1 Apr) — a separate backlog worked
 in dedicated batches, NOT part of the live "queue must be 0" invariant. Deep-read every thread with a real external human;
 discard machine noise (HR-One, WP Engine/Wordfence/status alerts, Slack/Trello/Figma/Drive
-notifications, calendar invites, newsletters, security codes, notifications@uplers.com).
+notifications, calendar invites, newsletters, security codes, notifications@uplers.com
+— except its RFQ mails, see below).
 Vendors never tracked: granth.info, granth.in, atharvasystem.com.
+  - ALWAYS PARSE THE RFQ / QUOTE MAILS — they carry the official value. Before you
+    bulk-clear notifications@uplers.com, pull every message where
+    subject like 'Quote ( QUT%'. These are system-generated but they are not noise:
+    they are the authoritative record of what we quoted, and for many deals the figure
+    appears nowhere else in email. Each one gives Project Name, Client Name + email,
+    Geo, Engagement Model, Service, Technology, Currency and Budget, plus the
+    RFQ…/QUT… reference. Use them to:
+    (a) set est_value on the matching opportunity, and write the QUT… ref into
+    rfq_status — an RFQ being raised is a strong signal the deal is heading for
+    confirmation and invoicing, so it usually warrants a win% lift too;
+    (b) match on Project Name + Client Name, never on the sender (the sender is always
+    the notifications address, and the AM's name in the From is the person who raised it);
+    (c) read Currency, not just Budget — these are frequently NZD/GBP/AUD and the board
+    is USD. Convert, and put the original amount + rate in the gist (see Currency below).
+    Why this rule exists: on 31 Jul 2026 two deals were confirmed whose values lived only
+    in these mails — Marston Social Value Hub USD 9,654 (RFQ280726001346) and GWF NZ
+    Foodservice NZD 9,780 (QUT300726113003). Both had been discarded as noise, so one was
+    marked confirmed with a null est_value and booked as zero.
   - Resolve the client first. select * from client_aliases. Map the sender domain →
     client (kind='domain'); else a sub-brand/name in the subject (kind='name'); else the
     plainest company name. Sub-brands/end-clients go in company_note, never the name.
@@ -265,6 +284,9 @@ est_value as though it were dollars.
 ## What the user has corrected — apply without being asked again
 Every one of these came from a real correction; treat them as standing rules.
 - Web only. SEO / AIO / LLM-visibility scopes come off the board even for web clients.
+- RFQ mails are evidence, not noise. Quote ( QUT… ) Request from notifications@uplers.com
+  is where the quoted figure and currency actually live, and an RFQ being raised points at
+  invoicing/confirmation. Parse them every run before clearing that sender (step 3).
 - Sub-brands are not clients. Tip Top Foodservice NZ → GWF; SurfStyle → Hummingbird Ideas;
   First Defense Supply → Market Veep; Fyshe → Ink Digital; PAH → Underdog Digital;
   Convello → YLP Legal. The end client goes in company_note, never in company_name.
