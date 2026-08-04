@@ -14,10 +14,26 @@ human (a client, prospect, or partner) is OPENED and deep-read in full — not j
 from its snippet. The point is to never miss an opportunity, feedback, or
 escalation, and to keep a live read on how each account is moving.
 
-MAIL SOURCE (changed): mail is NO LONGER pulled from the claude.ai Gmail connector
-(its OAuth token kept expiring and stalling the scan). A Google Apps Script running
-under web@uplers.com (scripts/routine/pull-gmail-to-supabase.gs) captures inbox mail
-every 30 min into the PRIVATE Supabase `email_inbox` table, with a persistent cursor
+MAIL SOURCE (changed 4 Aug 2026): mail is NO LONGER pulled from the claude.ai Gmail
+connector (its OAuth token kept expiring and stalling the scan). A Google Apps Script
+running under **reviewweb@uplers.com** (scripts/routine/pull-gmail-to-supabase.gs)
+captures inbox mail every 30 min into the PRIVATE Supabase `email_inbox` table.
+reviewweb@ is a COLLECTOR mailbox carrying the account/PM team's client mail —
+including harshvardhan@, madhav@, nitin@, manmohan@ and pratik@ — which the old
+web@uplers.com feed did not see. web@uplers.com's trigger was retired the same day;
+its ~68k historical rows are KEPT and still classifiable, they simply stop growing.
+Note manmohan@ was near-absent (0 sent / 6 mentions since 1 Jul) — if his mail
+matters, verify it actually routes here before assuming coverage.
+
+One copy of the script = one inbox (GmailApp reads only its owner's mail). To add a
+mailbox, install another copy under that account with EXPECTED_MAILBOX set to it.
+Dedup across mailboxes is on the RFC 5322 Message-ID header, NOT Gmail's message id
+— Gmail's is per-mailbox, so without this every thread two colleagues share would be
+stored and classified twice. Run `checkHeaderSupport()` on any new mailbox first: if
+the header is unreadable there, do not add it. Each `sync_runs` row for gmail-ingest
+names its mailbox and reports RFC coverage (e.g. `reviewweb@uplers.com: … 30/30 with
+RFC Message-ID`); anything short of full coverage means duplicates are getting in.
+The capture has a persistent cursor
 so nothing is missed even across trigger outages (up to a 72h catch-up). This routine
 now CLASSIFIES from `email_inbox` — it reads unprocessed rows from Supabase, deep-reads
 them, writes the classification tables, and marks the rows processed. The Gmail
@@ -271,7 +287,7 @@ is clear.
 
 ## B2. Enrich + RE-CHECK open quotes against their client email
 The dashboard merges the sheet Quotes tab into Opportunities by company name.
-ALL account-manager / PM client mail forwards to web@uplers.com, so the client
+ALL account-manager / PM client mail collects into reviewweb@uplers.com, so the client
 threads ARE in this inbox — find them by the quote's CLIENT EMAIL (client_email),
 not just the domain. Scope = OPEN quotes: Quote Shared / Waiting for Final
 Approval / Waiting for details. (Confirmed=won, Cancelled=lost, On Hold=parked —

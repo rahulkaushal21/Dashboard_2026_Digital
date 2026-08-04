@@ -1,29 +1,38 @@
 /**
- * gmail-backfill.gs — ONE-TIME historical backfill of email_inbox from FY start (1 Apr 2026).
+ * gmail-backfill.gs — historical backfill of email_inbox for ONE mailbox.
  *
- * Runs under web@uplers.com (same account as the live push script). It pages through
- * Gmail from 1 Apr forward and POSTs each message to the gmail-ingest edge function with
- * ?backfill=1, so rows land tagged archived=true (a separate stream from live mail):
- * they are still processed=false and therefore classifiable into FY opportunities /
- * client-health, but excluded from the live daily-scan "queue must be 0" check.
+ * Runs under whichever account owns the script (same rule as the live push script:
+ * GmailApp = the owner's inbox, there is no mailbox list to configure). It pages
+ * through Gmail from SEARCH_QUERY forward and POSTs each message to the gmail-ingest
+ * edge function with ?backfill=1, so rows land tagged archived=true (a separate
+ * stream from live mail): they are still processed=false and therefore classifiable
+ * into FY opportunities / client-health, but excluded from the live daily-scan
+ * "queue must be 0" check.
  *
- * Idempotent: the edge function dedups on message_id, so you can re-run / let a trigger
- * repeat this safely — already-stored messages are ignored, nothing is reset.
+ * Idempotent AND safe to run for several mailboxes: the edge function dedups on the
+ * RFC 5322 Message-ID header, which the sender stamps once and is therefore identical
+ * in every inbox holding the mail. Gmail's own message id is per-mailbox and would
+ * store a shared thread once per colleague. Run `checkHeaderSupport()` from
+ * pull-gmail-to-supabase.gs on this account BEFORE backfilling a second mailbox — if
+ * the header isn't readable there, backfilling it will duplicate every shared thread.
  *
- * HOW TO RUN
- *   1. Open the Apps Script project bound to web@uplers.com (script.google.com).
- *   2. Paste this file in, Save.
+ * HOW TO RUN (per mailbox)
+ *   1. Open the Apps Script project bound to that mailbox (script.google.com).
+ *   2. Paste this file in, set MAILBOX below to that address, Save.
  *   3. Run `backfillRun` once to authorise, then either:
  *        - keep clicking Run until the log says "BACKFILL COMPLETE", or
- *        - run `installBackfillTrigger()` once to auto-run every 10 min until done
+ *        - run `installBackfillTrigger()` once to auto-run every minute until done
  *          (then it self-removes). Use `removeBackfillTrigger()` to stop early.
  *   4. `backfillStatus()` prints progress; `backfillReset()` starts over.
  */
 
 // ---- config ---------------------------------------------------------------
+var MAILBOX     = 'reviewweb@uplers.com';  // the inbox THIS copy backfills; must own the script
 var INGEST_URL  = 'https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/gmail-ingest';
 var INGEST_TOKEN = 'ingestWebHub_a7c2e9';
-var SEARCH_QUERY = 'after:2026/03/31';   // FY start = 1 Apr 2026 (after: is exclusive on the day)
+// Last 3 months. `after:` is exclusive on the day given. Widen to 'after:2026/03/31'
+// (FY start) only if the extra volume is worth the classification cost.
+var SEARCH_QUERY = 'after:2026/05/03';
 var THREADS_PER_RUN = 400;               // ~1.5 min/run, safely under the 6-min execution limit; lower if you hit timeouts
 var POST_BATCH = 50;                     // messages per POST to the edge function
 var INTERNAL_DOMAINS = ['uplers.com', 'mavlers.com', 'mavlers.agency', 'uplers.in', 'uplers.io'];
@@ -67,6 +76,8 @@ function toRow(msg, threadId) {
   var from = msg.getFrom() || '';
   return {
     message_id: msg.getId(),
+    rfc_message_id: rfcId(msg),
+    mailbox: MAILBOX,
     thread_id: threadId,
     subject: msg.getSubject() || '',
     from_addr: from,
@@ -77,6 +88,20 @@ function toRow(msg, threadId) {
     body: (msg.getPlainBody() || '').slice(0, 60000),
     has_external: hasExternal(from + ' ' + to + ' ' + cc)
   };
+}
+
+// The sender-stamped Message-ID: identical in every mailbox holding this message,
+// unlike Gmail's per-mailbox id. Null when unreadable — the edge function then keeps
+// the old per-mailbox key rather than inventing one, since storing a message twice is
+// recoverable and silently merging two real mails is not.
+function rfcId(msg) {
+  try {
+    if (typeof msg.getHeader === 'function') {
+      var h = msg.getHeader('Message-ID') || msg.getHeader('Message-Id');
+      if (h) return String(h).trim();
+    }
+  } catch (e) { /* header unavailable */ }
+  return null;
 }
 
 function hasExternal(participants) {
@@ -96,7 +121,7 @@ function flush(rows) {
   var res = UrlFetchApp.fetch(INGEST_URL + '?token=' + INGEST_TOKEN + '&backfill=1', {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ messages: rows }),
+    payload: JSON.stringify({ mailbox: MAILBOX, messages: rows }),
     muteHttpExceptions: true
   });
   var code = res.getResponseCode();

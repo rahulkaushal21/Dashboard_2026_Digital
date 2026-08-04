@@ -20,22 +20,35 @@
  * message_id in the edge function makes the overlap harmless.
  *
  * ⚠ CRITICAL: this script reads the mailbox of WHATEVER Google account it runs
- * under (GmailApp = the owner's inbox). It MUST be created/owned by web@uplers.com,
- * or it will scan the wrong inbox. Verify with whoAmI() below before installing.
+ * under (GmailApp = the owner's inbox). There is no mailbox list to configure —
+ * one copy of this script = one inbox. To cover several mailboxes, install a copy
+ * under each account and set EXPECTED_MAILBOX in each to that account. They all
+ * push to the same gmail-ingest endpoint, which dedups across them on the RFC
+ * Message-ID header (see rfcId below).
  *
- * SETUP (one time — do these IN ORDER):
- *   1. Sign in to script.google.com as web@uplers.com (NOT rahul.k / any other).
- *   2. New project → name it "Gmail → Supabase inbox" → paste this whole file.
+ * SETUP (one time, PER MAILBOX — do these IN ORDER):
+ *   1. Sign in to script.google.com as the mailbox this copy is for
+ *      (e.g. reviewweb@uplers.com — NOT rahul.k / any other).
+ *   1b. Set EXPECTED_MAILBOX below to that same address. pullGmailToSupabase()
+ *      refuses to run if the signed-in account doesn't match, so a copy pasted
+ *      into the wrong project scans nothing rather than silently scanning the
+ *      wrong inbox and attributing its mail to someone else.
+ *   2. New project → name it "Gmail → Supabase inbox (<mailbox>)" → paste this file.
  *   3. Run whoAmI()               → authorize when prompted → confirm the log
- *                                    (View ▸ Logs) shows web@uplers.com.
- *   4. Run pullGmailToSupabase()  → one manual backfill; confirm the log shows
+ *                                    (View ▸ Logs) shows EXPECTED_MAILBOX.
+ *   4. Run checkHeaderSupport()   → confirms this account can read the RFC
+ *                                    Message-ID header, which is what stops the
+ *                                    same mail being stored once per mailbox.
+ *   5. Run pullGmailToSupabase()  → one manual pull; confirm the log shows
  *                                    "pushed N" and no "ingest error".
- *   5. Run installGmailPullTrigger() → creates the recurring 30-min trigger.
- *   6. (optional) Run status()    → prints the cursor + trigger state anytime.
+ *   6. Run installGmailPullTrigger() → creates the recurring 30-min trigger.
+ *   7. (optional) Run status()    → prints the cursor + trigger state anytime.
  * That's it. From then on it runs itself every 30 min, unattended.
  */
 
 // ── Config ──────────────────────────────────────────────────────────────────
+// The mailbox THIS copy is for. Must equal the account that owns the script.
+var EXPECTED_MAILBOX = 'reviewweb@uplers.com';
 var SUPABASE_FN      = 'https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/gmail-ingest';
 var INGEST_TOKEN     = 'ingestWebHub_a7c2e9';   // shared secret; matches the edge function
 var COLD_START_HOURS = 6;                        // first ever run (no cursor): look back this far
@@ -89,10 +102,60 @@ var VENDOR_SKIP      = ['granth.info', 'granth.in', 'atharvasystem.com'];
 // internally is still captured.
 var INCLUDE_INTERNAL_RE = /\b(rfq|quote|new business|new client|new project|new request|opportunity|proposal|estimate|escalat|complaint|urgent|refund|cancel|dissatisf|disappointed)\b/i;
 
+// ── Cross-mailbox identity ──────────────────────────────────────────────────
+// Gmail's own message id is PER-MAILBOX: the same email in reviewweb@ and in
+// nitin@ carries two different ids. Deduping on it was fine while exactly one
+// mailbox fed Supabase; with several, every thread two colleagues share would be
+// stored twice and classified twice — duplicate opportunities, the same
+// double-counting we had to unpick by hand on 4 Aug 2026.
+//
+// The RFC 5322 Message-ID header is stamped once by the SENDER and is therefore
+// identical in every mailbox that holds the message. That is the real identity.
+// Returns null when the header can't be read; the edge function then falls back
+// to the old per-mailbox key rather than inventing a synthetic one — storing a
+// message twice is recoverable, silently merging two real mails is not.
+function rfcId(msg) {
+  try {
+    if (typeof msg.getHeader === 'function') {
+      var h = msg.getHeader('Message-ID') || msg.getHeader('Message-Id');
+      if (h) return String(h).trim();
+    }
+  } catch (e) { /* header unavailable — fall through */ }
+  return null;
+}
+
 // ── Confirm which mailbox this will scan ────────────────────────────────────
 function whoAmI() {
-  Logger.log('This script will scan the inbox of: ' + Session.getActiveUser().getEmail());
-  Logger.log('It MUST say web@uplers.com. If not, recreate the project under that account.');
+  Logger.log('This script will scan the inbox of: ' + currentMailbox());
+  Logger.log('It MUST say ' + EXPECTED_MAILBOX + '. If not, either fix EXPECTED_MAILBOX or');
+  Logger.log('recreate the project under the right account.');
+}
+
+function currentMailbox() {
+  var who = '';
+  try { who = Session.getEffectiveUser().getEmail() || ''; } catch (e) {}
+  if (!who) { try { who = Session.getActiveUser().getEmail() || ''; } catch (e) {} }
+  return who.toLowerCase();
+}
+
+// ── One-time check: can this account read the Message-ID header? ─────────────
+// getHeader() is not available on every Apps Script runtime. If it isn't, this
+// copy must NOT be added as an extra mailbox — without the RFC id it cannot
+// dedup against the others. Run it once per install and read the verdict.
+function checkHeaderSupport() {
+  var threads = GmailApp.search('in:inbox newer_than:2d', 0, 5);
+  var tried = 0, ok = 0;
+  for (var i = 0; i < threads.length; i++) {
+    var msgs = threads[i].getMessages();
+    for (var j = 0; j < msgs.length && tried < 5; j++) {
+      tried++;
+      if (rfcId(msgs[j])) ok++;
+    }
+  }
+  Logger.log('Message-ID header readable on ' + ok + ' of ' + tried + ' sampled messages.');
+  Logger.log(ok === tried && tried > 0
+    ? '✓ SAFE to run this mailbox alongside others — cross-mailbox dedup will work.'
+    : '✗ NOT SAFE as an additional mailbox: without the RFC id, shared threads will be stored once per inbox. Report this before installing.');
 }
 
 // ── Show the current cursor + trigger state (diagnostic) ────────────────────
@@ -106,6 +169,15 @@ function status() {
 
 // ── Main: pull recent inbox messages → Supabase ─────────────────────────────
 function pullGmailToSupabase() {
+  // Refuse to scan the wrong inbox. A copy of this file pasted into the wrong
+  // project would otherwise pull someone else's mail and file it under this
+  // mailbox — worse than not running at all, because it looks like it worked.
+  var me = currentMailbox();
+  if (me && me !== EXPECTED_MAILBOX.toLowerCase()) {
+    Logger.log('ABORT: running as ' + me + ' but EXPECTED_MAILBOX is ' + EXPECTED_MAILBOX + '. Nothing pushed.');
+    return;
+  }
+
   var props = PropertiesService.getScriptProperties();
   var now = Date.now();
   var minCutoff = now - MAX_WINDOW_HOURS * 3600 * 1000;   // never look back further than the cap
@@ -150,6 +222,8 @@ function pullGmailToSupabase() {
         var body = trimQuoted(rawBody);
         out.push({
           message_id: m.getId(),
+          rfc_message_id: rfcId(m),
+          mailbox: EXPECTED_MAILBOX,
           thread_id: tid,
           subject: m.getSubject(),
           from_addr: from,
@@ -215,7 +289,7 @@ function postBatch(messages) {
   var res = UrlFetchApp.fetch(SUPABASE_FN + '?token=' + INGEST_TOKEN, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ messages: messages }),
+    payload: JSON.stringify({ mailbox: EXPECTED_MAILBOX, messages: messages }),
     muteHttpExceptions: true
   });
   var code = res.getResponseCode();

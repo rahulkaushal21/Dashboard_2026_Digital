@@ -335,8 +335,11 @@ Run the scan at the **start and end** of each day. End-of-scan sanity (live stre
 processed; when unsure, leave it for the next run (all writes dedup on thread_id).
 
 ## FY backfill stream (archived=true)
-A one-time backfill (`scripts/routine/gmail-backfill.gs`, run under web@uplers.com → `gmail-ingest?backfill=1`)
-loads mail from **1 Apr** as `archived=true, processed=false`. It builds the full-FY opportunity &
+A backfill (`scripts/routine/gmail-backfill.gs`, run under the mailbox being loaded → `gmail-ingest?backfill=1`)
+loads history as `archived=true, processed=false`. Two passes exist: the original FY load from
+**1 Apr** under web@uplers.com, and a **4 Aug 2026** load of **reviewweb@uplers.com** (`after:2026/05/03`,
+though Gmail matches whole THREADS so older messages in a matching thread come along too). Together they
+build the full-FY opportunity &
 client-health picture but is worked as a **separate backlog** so it never blocks the live scan.
 Process it in batches: `email_inbox where processed=false and has_external=true and archived=true`,
 oldest-first by thread — same classify/dedup rules as the live scan. Heartbeat those runs under
