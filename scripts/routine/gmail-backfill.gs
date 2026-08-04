@@ -46,21 +46,37 @@ var INTERNAL_DOMAINS = ['uplers.com', 'mavlers.com', 'mavlers.agency', 'uplers.i
 // So the backfill now stops itself well before the ceiling and leaves the rest for
 // the live pull. It resumes automatically the next day from the same cursor — a
 // backfill spread over three days costs nothing; a dead inbox does.
-var DAILY_THREAD_BUDGET = 3000;          // threads this script may read per day
+//
+// Budget in MESSAGES, not threads: the ceiling is 50,000 Gmail read/write calls a
+// day on Workspace (20,000 on consumer), and ONE message costs many of them —
+// getSubject, getFrom, getTo, getCc, getDate, getId, getPlainBody, getHeader. Call
+// it ~8-9 each, so ~5,000-6,000 messages is the true daily ceiling for the whole
+// account. Today's 11,172-message run was roughly double it. 2,500 leaves clear
+// headroom for the live 30-min pull, which must never be the thing that starves.
+var DAILY_MSG_BUDGET = 2500;
 var BUDGET_DAY_KEY  = 'bf_budget_day';   // yyyy-mm-dd the counter belongs to
 var BUDGET_USED_KEY = 'bf_budget_used';
 
-// Returns true if there is still room today, and books the spend.
-function budgetOk(props, threadsWanted) {
+// Machine senders whose bodies we would fetch and then discard within minutes.
+// Tested against the CHEAP getFrom() so the expensive getPlainBody() is never made:
+// on this mailbox ProofHub, Disprz and HROne alone accounted for over 1,800
+// messages, i.e. a third of a day's entire message budget spent on mail that is
+// swept as noise on arrival.
+var SKIP_SENDERS = /(proofhubmail|disprz|hronecloud|drive-shares|newsletters@|yourstory|cloudcodes|frontendnation|comments-noreply@docs|mailer-daemon|theresanaiforthat|coursera|chat-noreply|projectcode\.dev|beehiiv|webflow\.com|upgrad|accounts\.google|gohighlevel|glassdoor|mindvalley|browserstack|zohobooks|skool\.com|pressable\.com|meetings-noreply|googlecloud@google|ifttt|duplicator|linkedin|wpengine|kinsta|wordfence|easemytrip|shopify\.com|websummit|clickup|signeasy|dropbox|anthropic|openai|supabase\.com|unlearn\.dev|liquidweb|slack|figma|atlassian|asana|trello|calendly|zoom\.us|eventbrite|substack|producthunt|indeed|naukri|blackbaud|cloudhq|twilio|microsoft\.com|amazon\.com|cursor\.com|grammarly|canva|taskade|wrike|memberful|allevents|godaddy|adobe\.com|lovable\.dev|finsweet|uxpilot|theorg|macaly|byq\.supply|enkash|alison\.com|cooperpress|granth\.info|granth\.in|atharvasystem\.com)/i;
+
+// Day-rolling counter. Returns how many of `wanted` messages may still be read.
+function budgetLeft(props) {
   var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   if (props.getProperty(BUDGET_DAY_KEY) !== today) {
     props.setProperty(BUDGET_DAY_KEY, today);
     props.setProperty(BUDGET_USED_KEY, '0');
   }
+  return DAILY_MSG_BUDGET - parseInt(props.getProperty(BUDGET_USED_KEY) || '0', 10);
+}
+
+function budgetSpend(props, n) {
   var used = parseInt(props.getProperty(BUDGET_USED_KEY) || '0', 10);
-  if (used + threadsWanted > DAILY_THREAD_BUDGET) return false;
-  props.setProperty(BUDGET_USED_KEY, String(used + threadsWanted));
-  return true;
+  props.setProperty(BUDGET_USED_KEY, String(used + n));
 }
 
 // ---- main -----------------------------------------------------------------
@@ -69,9 +85,10 @@ function backfillRun() {
   var start = parseInt(props.getProperty('bf_start') || '0', 10);
   var totalPushed = parseInt(props.getProperty('bf_pushed') || '0', 10);
 
-  if (!budgetOk(props, THREADS_PER_RUN)) {
-    Logger.log('Daily thread budget (' + DAILY_THREAD_BUDGET + ') reached — pausing so the live ' +
-               'pull keeps its Gmail quota. Resumes tomorrow from thread ' + start + '.');
+  var remaining = budgetLeft(props);
+  if (remaining <= 0) {
+    Logger.log('Daily Gmail budget (' + DAILY_MSG_BUDGET + ' msgs) spent — pausing so the live ' +
+               'pull keeps its quota. Resumes tomorrow from thread ' + start + '.');
     return;
   }
 
@@ -83,21 +100,35 @@ function backfillRun() {
   }
 
   var buf = [];
-  var pushed = 0;
+  var pushed = 0, read = 0, skipped = 0, threadsDone = 0;
   for (var t = 0; t < threads.length; t++) {
+    // Stop mid-page rather than overshoot: the cursor only advances past threads
+    // actually finished, so the next run picks up exactly where this one stopped.
+    if (read >= remaining) break;
     var msgs = threads[t].getMessages();
     for (var m = 0; m < msgs.length; m++) {
+      // getFrom() is one cheap call; getPlainBody() on a 60k quoted chain is the
+      // expensive one. Test the sender FIRST and never touch the body of noise.
+      if (SKIP_SENDERS.test(msgs[m].getFrom() || '')) { skipped++; continue; }
       buf.push(toRow(msgs[m], threads[t].getId()));
+      read++;
       if (buf.length >= POST_BATCH) { pushed += flush(buf); buf = []; }
     }
+    threadsDone++;
   }
   if (buf.length) pushed += flush(buf);
+  budgetSpend(props, read);
+  Logger.log('read ' + read + ' msgs, skipped ' + skipped + ' noise, budget left today ' +
+             (remaining - read) + '/' + DAILY_MSG_BUDGET);
 
-  start += threads.length;
+  start += threadsDone;
   totalPushed += pushed;
   props.setProperty('bf_start', String(start));
   props.setProperty('bf_pushed', String(totalPushed));
-  Logger.log('Batch done: +' + threads.length + ' threads (offset now ' + start + '), +' + pushed +
+  // threadsDone, NOT threads.length — a run that stopped on budget finished fewer
+  // threads than it fetched, and logging the fetched count would claim progress the
+  // cursor did not make.
+  Logger.log('Batch done: +' + threadsDone + ' threads (offset now ' + start + '), +' + pushed +
              ' msgs this run, ' + totalPushed + ' cumulative.');
 }
 
@@ -171,7 +202,7 @@ function installBackfillTrigger() {
   // work per run is unchanged, it just stops racing the feed it depends on.
   ScriptApp.newTrigger('backfillRun').timeBased().everyMinutes(10).create();
   Logger.log('Trigger installed: backfillRun every 10 min (self-removes when complete, ' +
-             'pauses daily at ' + DAILY_THREAD_BUDGET + ' threads).');
+             'pauses daily at ' + DAILY_MSG_BUDGET + ' messages).');
 }
 
 function removeBackfillTrigger() {
@@ -186,7 +217,7 @@ function backfillStatus() {
   Logger.log('threads processed: ' + (p.getProperty('bf_start') || '0') +
              ' | messages pushed: ' + (p.getProperty('bf_pushed') || '0'));
   Logger.log('today\'s Gmail budget: ' + (p.getProperty(BUDGET_USED_KEY) || '0') + '/' +
-             DAILY_THREAD_BUDGET + ' threads (day ' + (p.getProperty(BUDGET_DAY_KEY) || 'n/a') + ')');
+             DAILY_MSG_BUDGET + ' messages (day ' + (p.getProperty(BUDGET_DAY_KEY) || 'n/a') + ')');
 }
 
 function backfillReset() {
