@@ -37,11 +37,43 @@ var THREADS_PER_RUN = 400;               // ~1.5 min/run, safely under the 6-min
 var POST_BATCH = 50;                     // messages per POST to the edge function
 var INTERNAL_DOMAINS = ['uplers.com', 'mavlers.com', 'mavlers.agency', 'uplers.in', 'uplers.io'];
 
+// Gmail read calls are a DAILY quota shared by every script on this account — the
+// live 30-min pull included. On 4 Aug 2026 this backfill ran every minute for two
+// hours, drained the day's allowance, and took the live feed down with it:
+// "Exception: Service invoked too many times for one day: premium gmail". Mail
+// capture stopped for the rest of the day.
+//
+// So the backfill now stops itself well before the ceiling and leaves the rest for
+// the live pull. It resumes automatically the next day from the same cursor — a
+// backfill spread over three days costs nothing; a dead inbox does.
+var DAILY_THREAD_BUDGET = 3000;          // threads this script may read per day
+var BUDGET_DAY_KEY  = 'bf_budget_day';   // yyyy-mm-dd the counter belongs to
+var BUDGET_USED_KEY = 'bf_budget_used';
+
+// Returns true if there is still room today, and books the spend.
+function budgetOk(props, threadsWanted) {
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (props.getProperty(BUDGET_DAY_KEY) !== today) {
+    props.setProperty(BUDGET_DAY_KEY, today);
+    props.setProperty(BUDGET_USED_KEY, '0');
+  }
+  var used = parseInt(props.getProperty(BUDGET_USED_KEY) || '0', 10);
+  if (used + threadsWanted > DAILY_THREAD_BUDGET) return false;
+  props.setProperty(BUDGET_USED_KEY, String(used + threadsWanted));
+  return true;
+}
+
 // ---- main -----------------------------------------------------------------
 function backfillRun() {
   var props = PropertiesService.getScriptProperties();
   var start = parseInt(props.getProperty('bf_start') || '0', 10);
   var totalPushed = parseInt(props.getProperty('bf_pushed') || '0', 10);
+
+  if (!budgetOk(props, THREADS_PER_RUN)) {
+    Logger.log('Daily thread budget (' + DAILY_THREAD_BUDGET + ') reached — pausing so the live ' +
+               'pull keeps its Gmail quota. Resumes tomorrow from thread ' + start + '.');
+    return;
+  }
 
   var threads = GmailApp.search(SEARCH_QUERY, start, THREADS_PER_RUN);
   if (threads.length === 0) {
@@ -133,9 +165,13 @@ function flush(rows) {
 // ---- triggers / ops -------------------------------------------------------
 function installBackfillTrigger() {
   removeBackfillTrigger();
-  // Apps Script time triggers allow only 1, 5, 10, 15, or 30 min. 1 = fastest.
-  ScriptApp.newTrigger('backfillRun').timeBased().everyMinutes(1).create();
-  Logger.log('Trigger installed: backfillRun every 1 min (self-removes when complete).');
+  // Apps Script time triggers allow only 1, 5, 10, 15, or 30 min. Every-minute was
+  // the original setting and it is what drained the shared Gmail quota on 4 Aug,
+  // killing the live 30-min pull for the rest of the day. 10 min is plenty: the
+  // work per run is unchanged, it just stops racing the feed it depends on.
+  ScriptApp.newTrigger('backfillRun').timeBased().everyMinutes(10).create();
+  Logger.log('Trigger installed: backfillRun every 10 min (self-removes when complete, ' +
+             'pauses daily at ' + DAILY_THREAD_BUDGET + ' threads).');
 }
 
 function removeBackfillTrigger() {
@@ -149,6 +185,8 @@ function backfillStatus() {
   var p = PropertiesService.getScriptProperties();
   Logger.log('threads processed: ' + (p.getProperty('bf_start') || '0') +
              ' | messages pushed: ' + (p.getProperty('bf_pushed') || '0'));
+  Logger.log('today\'s Gmail budget: ' + (p.getProperty(BUDGET_USED_KEY) || '0') + '/' +
+             DAILY_THREAD_BUDGET + ' threads (day ' + (p.getProperty(BUDGET_DAY_KEY) || 'n/a') + ')');
 }
 
 function backfillReset() {
