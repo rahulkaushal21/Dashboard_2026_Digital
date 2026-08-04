@@ -78,10 +78,17 @@ Deno.serve(async (req) => {
     // Collapse repeats WITHIN the payload first — one push can carry the same message
     // twice when a thread is paged over, and Postgres rejects a batch that conflicts
     // with itself even under DO NOTHING.
-    const seen = new Set<string>();
-    const batchUnique = clean.filter((r: { dedup_key: string }) => {
-      if (seen.has(r.dedup_key)) return false;
-      seen.add(r.dedup_key);
+    //
+    // Must collapse on BOTH identities, not just dedup_key. If the RFC header reads on
+    // one occurrence of a message and not on another, the two get DIFFERENT dedup_keys
+    // ('<rfc@…>' vs 'gm:<id>'), both survive a dedup_key-only filter, and then collide
+    // on the message_id primary key — which killed three backfill batches on 4 Aug.
+    const seenKey = new Set<string>();
+    const seenMid = new Set<string>();
+    const batchUnique = clean.filter((r: { dedup_key: string; message_id: string }) => {
+      if (seenKey.has(r.dedup_key) || seenMid.has(r.message_id)) return false;
+      seenKey.add(r.dedup_key);
+      seenMid.add(r.message_id);
       return true;
     });
 
