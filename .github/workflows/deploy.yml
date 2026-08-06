@@ -40,3 +40,19 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # The action polls the Pages API and aborts with "Timeout reached,
+          # aborting!" when the deployment has not reported success. The default
+          # is 600000ms, and on 6 Aug 2026 two runs died at exactly 10m09s with
+          # the artifact uploaded fine (450 KB) — while the last good run, on
+          # 31 Jul, completed in 12 SECONDS.
+          #
+          # 20 minutes distinguishes the two explanations: if Pages is merely
+          # backlogged this now succeeds, and if it is genuinely wedged this
+          # still fails and the fix is server-side (Settings > Pages > flip
+          # Source away from GitHub Actions and back), which no workflow change
+          # can do.
+          timeout: 1200000
+          # Tolerate transient polling errors rather than treating the first
+          # blip as fatal.
+          error_count: 10
