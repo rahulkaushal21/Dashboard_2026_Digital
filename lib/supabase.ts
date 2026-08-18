@@ -81,6 +81,36 @@ if (data.length < PAGE) break
 return all.length ? all : null
 }
 
+// Every client on the Client-Backup tab of the business sheet (2,000+ rows across
+// both BUs), whether or not they have ever booked revenue. Revenue clients carry
+// `matched_client`, which is how the directory links back to `web_clients` without
+// listing the same company twice.
+export interface ClientDirectory {
+id: number
+company_name: string
+industry?: string
+industry_sheet?: string
+industry_source?: string
+industry_confidence?: string
+domain?: string
+website_url?: string
+bu?: string
+am_name?: string
+head?: string
+geo?: string
+direct_agency?: string
+technology?: string
+email?: string
+matched_client?: string
+is_revenue_client?: boolean
+notes?: string
+}
+
+export async function getClientDirectory(): Promise<ClientDirectory[]> {
+// >1000 rows, so an explicit stable order is required or pagination drops rows.
+return (await read<ClientDirectory>('web_client_directory', '*', 'id')) || []
+}
+
 export async function getClients(): Promise<Client[]> {
 const live = await read<Client>('web_clients')
 return live && live.length ? live : (await import('./mockData')).mockClients

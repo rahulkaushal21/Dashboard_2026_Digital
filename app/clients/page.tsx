@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback } from '@/lib/supabase'
+import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -80,10 +80,15 @@ export default function Clients() {
   const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [recentOnly, setRecentOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo' | 'activity'>('activity'); const [sortAsc, setSortAsc] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
+  // The Client-Backup directory: every client on the sheet, booked or not.
+  const [dir, setDir] = useState<ClientDirectory[]>([])
+  const [mode, setMode] = useState<'clients' | 'directory'>('clients')
+  const [bu, setBu] = useState(''); const [linked, setLinked] = useState<'' | 'yes' | 'no'>('')
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
   useEffect(() => {
     getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
+    getClientDirectory().then(setDir)
     // only email-sourced opportunities count as "active discussion" (sheet quotes live on the Opportunities page)
     getOpportunities().then(all => setOpps(all.filter(o => (o.source_tags || []).includes('email') || o.source === 'email')))
   }, [])
@@ -237,6 +242,30 @@ export default function Clients() {
   }, [clients])
   const maxIndCount = indCounts[0]?.[1] || 1
 
+  // ---- Client-Backup directory -------------------------------------------------
+  // Filtered with the same search/industry/GEO controls as the client table, plus
+  // BU and a "already a revenue client" filter. Nothing here is deduplicated away:
+  // a directory row that matches a booked client is flagged rather than hidden, so
+  // the same company can never be counted twice across the two views.
+  const dirIndustries = useMemo(() => uniq(dir.map(d => d.industry)), [dir])
+  const dirGeos = useMemo(() => uniq(dir.map(d => d.geo)), [dir])
+  const dirBus = useMemo(() => uniq(dir.map(d => d.bu)), [dir])
+  const dirRows = useMemo(() => {
+    const needle = q.toLowerCase()
+    return dir
+      .filter(d => !needle || `${d.company_name} ${d.domain || ''} ${d.am_name || ''}`.toLowerCase().includes(needle))
+      .filter(d => !ind || (d.industry || 'Other / Unclassified') === ind)
+      .filter(d => !geo || d.geo === geo)
+      .filter(d => !bu || d.bu === bu)
+      .filter(d => !linked || (linked === 'yes' ? d.is_revenue_client : !d.is_revenue_client))
+      .sort((a, b) => a.company_name.toLowerCase().localeCompare(b.company_name.toLowerCase()))
+  }, [dir, q, ind, geo, bu, linked])
+  const dirIndCounts = useMemo(() => {
+    const m: Record<string, number> = {}
+    dir.forEach(d => { const k = d.industry || 'Other / Unclassified'; m[k] = (m[k] || 0) + 1 })
+    return Object.entries(m).sort((a, b) => b[1] - a[1])
+  }, [dir])
+
   const rows = useMemo(() => {
     // date-range filter runs on each client's last-activity date; a client with no
     // activity is excluded whenever any date filter (range or "recent") is active.
@@ -297,9 +326,11 @@ export default function Clients() {
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
-        <select value={ind} onChange={e => setInd(e.target.value)} className={sel}><option value="">All industries</option>{industries.map(i => <option key={i} value={i}>{i}</option>)}</select>
+        <select value={ind} onChange={e => setInd(e.target.value)} className={sel}><option value="">All industries</option>{(mode === 'clients' ? industries : dirIndustries).map(i => <option key={i} value={i}>{i}</option>)}</select>
         <select value={owner} onChange={e => setOwner(e.target.value)} className={sel}><option value="">All owners</option>{owners.map(o => <option key={o} value={o}>{o}</option>)}</select>
-        <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}><option value="">All GEOs</option>{geos.map(g => <option key={g} value={g}>{g}</option>)}</select>
+        <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}><option value="">All GEOs</option>{(mode === 'clients' ? geos : dirGeos).map(g => <option key={g} value={g}>{g}</option>)}</select>
+        {mode === 'directory' && <select value={bu} onChange={e => setBu(e.target.value)} className={sel}><option value="">All BUs</option>{dirBus.map(b => <option key={b} value={b}>{b}</option>)}</select>}
+        {mode === 'directory' && <select value={linked} onChange={e => setLinked(e.target.value as '' | 'yes' | 'no')} className={sel}><option value="">Booked &amp; not booked</option><option value="yes">Booked revenue</option><option value="no">No revenue yet</option></select>}
         <select value={stat} onChange={e => setStat(e.target.value)} className={sel}>
           <option value="">All health</option>
           <option value="At risk">🔴 At risk ({statCount('At risk')})</option>
@@ -310,7 +341,13 @@ export default function Clients() {
         </select>
         <button onClick={() => setAiOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI &amp; Automation{aiCount ? ` (${aiCount})` : ''}</button>
         <button onClick={() => setRecentOnly(v => !v)} title="Clients with an email, escalation or quote in the last 14 days" className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🔥 Active discussions</button>
-        <span className="text-xs text-mav-muted ml-auto">{rows.length} clients</span>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="flex rounded-md border border-mav-line overflow-hidden">
+            <button onClick={() => setMode('clients')} className={`text-xs px-3 py-2 transition-colors ${mode === 'clients' ? 'bg-mav-yellow text-black font-medium' : 'text-mav-muted hover:text-white'}`}>Revenue clients ({clients.length})</button>
+            <button onClick={() => setMode('directory')} className={`text-xs px-3 py-2 transition-colors ${mode === 'directory' ? 'bg-mav-yellow text-black font-medium' : 'text-mav-muted hover:text-white'}`}>Full directory ({dir.length})</button>
+          </div>
+          <span className="text-xs text-mav-muted">{mode === 'clients' ? rows.length : dirRows.length} shown</span>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -327,12 +364,12 @@ export default function Clients() {
       <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
         <div className="flex items-baseline justify-between mb-4">
           <div className="text-sm font-medium">Clients by industry</div>
-          <div className="text-xs text-mav-muted">{clients.length} total · click a bar to filter{ind ? ` · showing ${ind}` : ''}</div>
+          <div className="text-xs text-mav-muted">{(mode === 'clients' ? clients.length : dir.length)} total · click a bar to filter{ind ? ` · showing ${ind}` : ''}</div>
         </div>
         <div className="space-y-1.5">
-          {indCounts.map(([name, n]) => {
+          {(mode === 'clients' ? indCounts : dirIndCounts).map(([name, n]) => {
             const active = ind === name
-            const pct = Math.round((n / maxIndCount) * 100)
+            const pct = Math.round((n / (mode === 'clients' ? maxIndCount : (dirIndCounts[0]?.[1] || 1))) * 100)
             return (
               <button key={name} onClick={() => setInd(active ? '' : name)} title={`${n} client${n === 1 ? '' : 's'} — click to ${active ? 'clear' : 'filter'}`}
                 className="w-full flex items-center gap-3 text-left group py-0.5">
@@ -348,6 +385,7 @@ export default function Clients() {
         {ind && <button onClick={() => setInd('')} className="mt-3 text-xs text-mav-muted hover:text-white">✕ Clear industry filter</button>}
       </div>
 
+      {mode === 'clients' ? (
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -390,6 +428,42 @@ export default function Clients() {
           </table>
         </div>
       </div>
+      ) : (
+      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
+              {['Client', 'Industry', 'BU', 'GEO', 'Account manager', 'Head', 'Type', 'Technology'].map((h, i) => (
+                <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {dirRows.map(d => (
+                <tr key={d.id} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 ${d.is_revenue_client ? 'bg-mav-yellow/5' : ''}`}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>{d.company_name}</span>
+                      {d.is_revenue_client && <span title={`Booked revenue as "${d.matched_client}"`} className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">£ booked</span>}
+                    </div>
+                    {d.domain && <div className="text-xs text-mav-muted">{d.domain}</div>}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={d.industry ? '' : 'text-mav-muted'}>{d.industry || '—'}</span>
+                    {d.industry_source === 'website' && <span title={d.industry_confidence === 'low' ? 'Read from the website, but the page was thin — worth a check' : 'Confirmed by reading the company website'} className="ml-2 text-[11px] text-mav-muted">{d.industry_confidence === 'low' ? '◌' : '✓'}</span>}
+                  </td>
+                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.bu || '—'}</td>
+                  <td className="px-4 py-3 text-mav-muted">{d.geo || '—'}</td>
+                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.am_name || '—'}</td>
+                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.head || '—'}</td>
+                  <td className="px-4 py-3 text-mav-muted">{d.direct_agency || '—'}</td>
+                  <td className="px-4 py-3 text-mav-muted text-xs max-w-[16rem] truncate" title={d.technology || ''}>{d.technology || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )}
 
       {selC && (() => {
         const r = riskOf(selC); const convos = sigByClient.get(selC.company_name) || []; const ten = tenureOf(selC)
