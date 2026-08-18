@@ -88,7 +88,8 @@ return all.length ? all : null
 export interface ClientDirectory {
 id: number
 company_name: string
-industry?: string
+industry?: string          // the 13-bucket group the UI filters on
+industry_detail?: string   // the granular industry it was merged from
 industry_sheet?: string
 industry_source?: string
 industry_confidence?: string

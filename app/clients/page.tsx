@@ -450,6 +450,7 @@ export default function Clients() {
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span className={d.industry ? '' : 'text-mav-muted'}>{d.industry || '—'}</span>
                     {d.industry_source === 'website' && <span title={d.industry_confidence === 'low' ? 'Read from the website, but the page was thin — worth a check' : 'Confirmed by reading the company website'} className="ml-2 text-[11px] text-mav-muted">{d.industry_confidence === 'low' ? '◌' : '✓'}</span>}
+                    {d.industry_detail && d.industry_detail !== d.industry && <div className="text-xs text-mav-muted">{d.industry_detail}</div>}
                   </td>
                   <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.bu || '—'}</td>
                   <td className="px-4 py-3 text-mav-muted">{d.geo || '—'}</td>
