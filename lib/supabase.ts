@@ -31,6 +31,10 @@ email_lost?: boolean; email_lost_reason?: string; email_lost_at?: string; email_
 // Confirmed Won from the dashboard — the mirror image of email_lost, and held apart
 // from `won`/`status` for the same reason: the sheet sync overwrites both.
 email_won?: boolean; email_won_reason?: string; email_won_at?: string; email_won_by?: string
+// Matched to a line in the revenue sheet while the Quotes row still reads Open —
+// i.e. delivered and invoiced, but nobody set the sheet to Confirmed. Derived every
+// load by matchBookedQuotes(); nothing is written to the database.
+booked_month?: string; booked_amount?: number; booked_ambiguous?: boolean
 }
 
 // Group the many raw quote "technology" values into a handful of service lines.
@@ -184,6 +188,84 @@ const maxLen = Math.max(s1.length, s2.length)
 return maxLen === 0 ? 1 : 1 - (matrix[s2.length][s1.length] / maxLen)
 }
 
+// ---- Booked, but the Quotes sheet still says Open -------------------------
+// The Quotes tab is maintained by hand, so a deal that has already been delivered
+// and INVOICED (it shows up in the revenue sheet) can sit there reading "Quote
+// Shared" indefinitely. The money is then counted twice — once as booked revenue,
+// once as live pipeline. This matches open quote lines against revenue lines so
+// the deal drops out of the pipeline and the team gets told to fix the sheet row.
+//
+// Matching is deliberately strict, because a false positive silently removes a
+// LIVE deal while a false negative only costs us an alert:
+//   • same client (name key) and the same amount to the dollar, and
+//   • the booking lands in the quote's own month or one of the 6 months after, and
+//   • the booking is not already explained by a quote that is already Won — those
+//     claim their bookings first, oldest quote to earliest booking.
+// If more open quotes compete for a free booking than there are bookings (a client
+// re-quoting the same price — Telfer's two $1,200 lines), nothing is auto-closed:
+// every candidate is marked ambiguous so a human says which one shipped.
+export interface BookedMatch { month?: string; amount: number; ambiguous: boolean }
+const BOOKED_WINDOW_MONTHS = 6
+type MatchOpp = { id: number; company_name?: string; est_value?: number; status?: string; won?: boolean; origin?: string; first_date?: string; source_date?: string }
+type MatchRev = { company_name?: string; booking_amount?: number; booking_month?: string }
+export function matchBookedQuotes(opps: MatchOpp[], revenue: MatchRev[]): Map<number, BookedMatch> {
+const out = new Map<number, BookedMatch>()
+const key = (name?: string, amt?: number) => `${(name || '').toLowerCase().replace(/[^a-z0-9]/g, '')}|${Math.round(amt || 0)}`
+// 'YYYY-MM-…' -> a comparable month ordinal. Revenue rows carry booking_month only.
+const monthNo = (d?: string) => { const m = /^(\d{4})-(\d{2})/.exec(d || ''); return m ? Number(m[1]) * 12 + Number(m[2]) : null }
+
+const bookings = new Map<string, { month: number; raw: string; taken: boolean }[]>()
+for (const r of revenue) {
+const mo = monthNo(r.booking_month)
+if (!r.company_name || !r.booking_amount || mo == null) continue
+const k = key(r.company_name, r.booking_amount)
+if (!bookings.has(k)) bookings.set(k, [])
+bookings.get(k)!.push({ month: mo, raw: r.booking_month!, taken: false })
+}
+if (!bookings.size) return out
+for (const list of bookings.values()) list.sort((a, b) => a.month - b.month)
+
+// group the sheet quotes that carry a real price by client+amount
+const groups = new Map<string, MatchOpp[]>()
+for (const o of opps) {
+if (o.origin !== 'sheet' || !o.company_name || !o.est_value) continue
+const k = key(o.company_name, o.est_value)
+if (!bookings.has(k)) continue
+if (!groups.has(k)) groups.set(k, [])
+groups.get(k)!.push(o)
+}
+
+const isWon = (o: MatchOpp) => o.won === true || /^(won|confirmed)$/i.test((o.status || '').trim())
+const isLost = (o: MatchOpp) => /lost|cancel/i.test(o.status || '')
+const quoteMonth = (o: MatchOpp) => monthNo(o.first_date || o.source_date)
+
+for (const [k, list] of groups) {
+const free = bookings.get(k)!
+const claim = (from: number | null) => {          // earliest untaken booking at/after `from`
+const hit = free.find(b => !b.taken && (from == null || b.month >= from))
+if (hit) hit.taken = true
+return hit
+}
+// 1. deals already Won take their booking first — oldest quote, earliest booking
+for (const o of list.filter(isWon).sort((a, b) => (quoteMonth(a) ?? 0) - (quoteMonth(b) ?? 0))) claim(quoteMonth(o))
+// 2. whatever revenue is left over is unexplained — an open quote may have caused it
+const open = list.filter(o => !isWon(o) && !isLost(o))
+const eligible = open.filter(o => {
+const qm = quoteMonth(o)
+return qm != null && free.some(b => !b.taken && b.month >= qm && b.month <= qm + BOOKED_WINDOW_MONTHS)
+})
+if (!eligible.length) continue
+const spare = free.filter(b => !b.taken).length
+const ambiguous = eligible.length > spare
+for (const o of eligible) {
+const b = ambiguous ? free.find(x => !x.taken) : claim(quoteMonth(o))
+if (!b) continue
+out.set(o.id, { month: b.raw, amount: Math.round(o.est_value || 0), ambiguous })
+}
+}
+return out
+}
+
 export async function getOpportunities(): Promise<Opportunity[]> {
 // SINGLE SOURCE OF TRUTH: the opportunities table. One row per DEAL.
 //  • origin='sheet'  — one row per line in the Business-Sheet "Quotes" tab
@@ -203,8 +285,9 @@ if (/\bus\b|us\/|usa|u\.s|united states|canada|north america/.test(v)) return 'U
 return 'UK'
 }
 // companies anywhere in the revenue sheet = existing/repeat clients
-const booked = (await read<{ company_name: string; booking_amount: number }>('web_revenue', 'company_name, booking_amount', 'id')) || []
+const booked = (await read<{ company_name: string; booking_amount: number; booking_month: string }>('web_revenue', 'company_name, booking_amount, booking_month', 'id')) || []
 const revenueSet = new Set(booked.map(b => norm(b.company_name)).filter(Boolean))
+const bookedMatch = matchBookedQuotes(rows, booked)
 const confirmedLike = /(\bapproved\b|\bretainer\b|existing client|already a client|migration complete|signed off|renewed|go ?ahead given)/i
 // A deal the EMAIL scan judged confirmed/approved (email origin only, so the sheet
 // never false-triggers). rfq_status set by the scan, or a >=90% email deal.
@@ -230,6 +313,7 @@ const repeat = taggedRepeat || inRevenue || o.is_new_client === false
 //  5. STALE       — no dated movement in >21d; chase or confirm it's still live
 //  6. text        — brief reads like existing/confirmed work
 let flag: string | undefined
+const bm = bookedMatch.get(o.id)
 if (!o.won && norm(o.status) !== 'lost' && !norm(o.status).includes('cancel')) {
 const emailConfirmed = o.origin === 'email' && (emailWon.test(norm(o.rfq_status)) || (o.win_probability || 0) >= 90)
 // Only sheet-origin rows can be "out of sync with the sheet" — an email-origin deal has
@@ -237,7 +321,9 @@ const emailConfirmed = o.origin === 'email' && (emailWon.test(norm(o.rfq_status)
 const lostLag = o.email_lost && o.origin === 'sheet'
 const confirmLag = o.email_won && o.origin === 'sheet'
 const age = daysSince(o.source_date || o.first_date)
-if (confirmLag) flag = '⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set that row to Confirmed so it books as revenue.'
+if (bm && !bm.ambiguous) flag = `⚠ ALREADY BOOKED, OPEN IN SHEET — $${bm.amount.toLocaleString('en-US')} for this client was invoiced in the revenue sheet (${(bm.month || '').slice(0, 7)}), but its Quotes-sheet line still reads Open. Set that row to Confirmed — until you do, this money is counted twice.`
+else if (bm) flag = `⚠ POSSIBLY ALREADY BOOKED — a $${bm.amount.toLocaleString('en-US')} booking for this client (${(bm.month || '').slice(0, 7)}) matches this quote AND another open quote at the same price. Check which one shipped and set that Quotes row to Confirmed.`
+else if (confirmLag) flag = '⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set that row to Confirmed so it books as revenue.'
 else if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set that row to Cancelled so it stops counting as live pipeline.'
 else if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
@@ -261,6 +347,9 @@ quote_ref: o.quote_key || o.quote_ref || undefined,
 is_new_client: !repeat,
 business_type: o.business_type || undefined,
 first_date: o.first_date || o.source_date,
+booked_month: bm && !bm.ambiguous ? bm.month : undefined,
+booked_amount: bm ? bm.amount : undefined,
+booked_ambiguous: bm ? bm.ambiguous : undefined,
 flag,
 } as Opportunity
 })

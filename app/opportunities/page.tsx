@@ -24,6 +24,7 @@ const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
 const oppStatus = (x: Opportunity) => {
 if (x.won) return 'Won'                       // a booking always wins
 if (x.email_won) return 'Won'                 // confirmed here; the sheet may not know yet
+if (x.booked_month) return 'Won'              // already invoiced in the revenue sheet
 const s = (x.status || '').toLowerCase()
 if (s.includes('cancel') || s === 'lost') return 'Lost'
 if (x.email_lost) return 'Lost'               // marked Lost here; likewise ahead of the sheet
@@ -34,7 +35,11 @@ return 'Open'
 // sheet-origin deals can drift like this, and only until someone edits the sheet.
 const lostLag = (x: Opportunity) => !!x.email_lost && !x.won && x.origin === 'sheet' && !/lost|cancel/i.test(x.status || '')
 const confirmLag = (x: Opportunity) => !!x.email_won && !x.won && x.origin === 'sheet' && !/won|confirm/i.test(x.status || '')
-const sheetLag = (x: Opportunity) => lostLag(x) || confirmLag(x)
+// Delivered and invoiced — the revenue sheet has the money, the Quotes row still says
+// Open. Same fix as a confirm-lag (set the row to Confirmed), but nobody made a call
+// here: the revenue sheet did. Kept out of the pipeline until the sheet catches up.
+const bookedLag = (x: Opportunity) => !!x.booked_month && !x.won && x.origin === 'sheet' && !/won|confirm/i.test(x.status || '')
+const sheetLag = (x: Opportunity) => lostLag(x) || confirmLag(x) || bookedLag(x)
 // Every manual call, whatever its verdict — the set you'd look through to change your mind.
 const markedByHand = (x: Opportunity) => !!(x.email_won || x.email_lost || x.unlikely)
 const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : 'bg-mav-line text-mav-muted'
@@ -214,7 +219,7 @@ const flagged = all.filter(x => x.flag).length
 // Deals whose Lost call hasn't reached the Quotes sheet yet — computed over ALL rows,
 // not the date-filtered set, so the alert can't hide behind a narrow From/To window.
 const lagRows = useMemo(() => all.filter(sheetLag), [all])
-const lagWon = lagRows.filter(confirmLag)
+const lagWon = lagRows.filter(x => confirmLag(x) || bookedLag(x))
 const lagLost = lagRows.filter(lostLag)
 const markedRows = useMemo(() => all.filter(markedByHand), [all])
 
@@ -354,7 +359,7 @@ return (
 <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
 <div className="flex flex-wrap items-center justify-between gap-3">
 <div>
-<div className="text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} decided here {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet</div>
+<div className="text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} already decided or invoiced {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet</div>
 <div className="text-xs text-mav-muted mt-0.5">The sheet is the master record, so nothing books or drops out of pipeline until you update it there. This alert clears itself on the next sync.</div>
 </div>
 <button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setMarkedOnly(false); setSearch('') }}
@@ -453,7 +458,7 @@ return (
 <td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.email_won && <span className="mr-1.5 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>✓</span>}{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
 <td className={`px-4 py-3 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (confirmLag(x) ? '✓ Won · sheet open' : `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
+<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (bookedLag(x) ? '✓ Booked · sheet open' : confirmLag(x) ? '✓ Won · sheet open' : `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span></td>
 <td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager (AM / NBD)">AM: {x.sales_person}</span> : <span className="text-mav-muted">AM: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
@@ -462,7 +467,7 @@ return (
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>
 {/* lostLag is checked directly, not just via x.flag: flag comes from the last data
     load, so a deal marked Lost in this session must still show the alert instantly. */}
-<td className="px-4 py-3">{(x.flag || sheetLag(x)) ? <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? '⚠ Update sheet' : '⚠ Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+<td className="px-4 py-3">{(x.flag || sheetLag(x)) ? <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={bookedLag(x) ? 'Already invoiced in the revenue sheet — the Quotes sheet still shows it Open. Set that row to Confirmed.' : confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? '⚠ Update sheet' : '⚠ Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
 </tr>
 )
 })}</tbody>
@@ -563,15 +568,16 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 )}
 {sheetLag(sel) && (
 <div className="mt-2.5 pt-2 border-t border-amber-500/30 text-xs text-amber-300">
-⚠ The Quotes sheet still shows this Open — set that row to <span className="font-semibold">{confirmLag(sel) ? 'Confirmed' : 'Cancelled'}</span>.
-{confirmLag(sel) ? ' Until you do, it will not book as revenue.' : ' Until you do, it keeps counting as live pipeline in every sheet-driven report.'}
+⚠ The Quotes sheet still shows this Open — set that row to <span className="font-semibold">{confirmLag(sel) || bookedLag(sel) ? 'Confirmed' : 'Cancelled'}</span>.
+{bookedLag(sel) ? ` It is already invoiced in the revenue sheet (${money(sel.booked_amount)}${sel.booked_month ? ' · ' + sel.booked_month.slice(0, 7) : ''}), so until you do it is counted twice — once as revenue, once as live pipeline.`
+: confirmLag(sel) ? ' Until you do, it will not book as revenue.' : ' Until you do, it keeps counting as live pipeline in every sheet-driven report.'}
 </div>
 )}
 </div>
 )}
 
 {sel.flag && !sheetLag(sel) && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
-{oppStatus(sel) === 'Won' && !sel.email_won && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
+{oppStatus(sel) === 'Won' && !sel.email_won && !bookedLag(sel) && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
 {oppStatus(sel) === 'Lost' && !sel.email_lost && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">✗ Lost — cancelled in the Quotes sheet. Won always overrides if the client later books.</div>}
 
 <div className="mb-5">
