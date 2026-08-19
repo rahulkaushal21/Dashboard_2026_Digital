@@ -277,10 +277,19 @@ Deno.serve(async (req) => {
       if (error) throw new Error("snapshots upsert: " + error.message);
       upserted += chunk.length;
     }
+    // The sheet can list the same learner+module twice (it did on 18 Aug 2026, and
+    // every hourly sync failed from 13:23 with "ON CONFLICT DO UPDATE command cannot
+    // affect row a second time" until this dedup landed). Postgres refuses an upsert
+    // batch that carries one conflict key twice, so collapse to last-wins here and
+    // report the count instead of letting a sheet typo stop the whole sync.
+    const modByKey = new Map<string, typeof mods[number]>();
+    for (const m of mods) modByKey.set(`${m.learner_full_name}|${m.module_name_raw}`, m);
+    const dupModules = mods.length - modByKey.size;
+    const modRows = [...modByKey.values()];
     let modUpserted = 0;
-    if (mods.length) {
-      for (let i = 0; i < mods.length; i += 500) {
-        const chunk = mods.slice(i, i + 500);
+    if (modRows.length) {
+      for (let i = 0; i < modRows.length; i += 500) {
+        const chunk = modRows.slice(i, i + 500);
         const { error } = await supa.from("lnd_modules").upsert(chunk, { onConflict: "learner_full_name,module_name_raw" });
         if (error) throw new Error("modules upsert: " + error.message);
         modUpserted += chunk.length;
@@ -295,7 +304,7 @@ Deno.serve(async (req) => {
     const summary = (added || changed) ? `${added} new, ${changed} changed` : "no change";
     await supa.from("sync_runs").insert({
       source: "lnd-sync", rows_upserted: upserted + modUpserted, ok: true,
-      message: `${summary} · ${tabsRead.length} tabs · ${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete · ${modUpserted} module rows${unresolved.length ? ` · ${unresolved.length} UNRESOLVED names` : ""}`,
+      message: `${summary} · ${tabsRead.length} tabs · ${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete · ${modUpserted} module rows${dupModules ? ` · ${dupModules} DUPLICATE learner+module rows in sheet` : ""}${unresolved.length ? ` · ${unresolved.length} UNRESOLVED names` : ""}`,
     });
 
     return new Response(JSON.stringify({
