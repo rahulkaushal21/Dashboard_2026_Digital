@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
     };
 
     const snaps = new Map<string, Snap>();
-    const modsRaw: (Omit<Mod, "learner_key"> & { learner_key?: string | null })[] = [];
+    const modsRaw: (Omit<Mod, "learner_key"> & { learner_key?: string | null; shortName?: boolean })[] = [];
     const tabsRead: string[] = [];
     const tabsSkipped: string[] = [];
     let skippedExcluded = 0;
@@ -144,20 +144,28 @@ Deno.serve(async (req) => {
       const rows = parseCSV(txt);
       if (rows.length < 2) { tabsSkipped.push(`${gid} (empty)`); continue; }
 
-      // Header-driven, because the two module tabs order their columns differently
-      // (one puts Email before Sub-department, the other after).
-      const headerRow = rows.find((row) => row.some((c) => /module\s*name/i.test(c || "")) && row.some((c) => /full\s*name/i.test(c || "")));
+      // Header-driven, because the module tabs order their columns differently
+      // (one puts Email before Sub-department, the other after) — and because they are
+      // not all the same export. The enriched Disprz export carries a "Full Name"
+      // column; a RAW export carries only "User Name". On 19 Aug 2026 someone re-pasted
+      // one tab as a raw export, "Full Name" vanished, and the tab silently dropped out
+      // as an unrecognised layout — taking 135 module rows with it and leaving 147
+      // summary learners unresolvable. Accept either heading, preferring Full Name.
+      const headerRow = rows.find((row) => row.some((c) => /module\s*name/i.test(c || "")) && row.some((c) => /full\s*name/i.test(c || "") || /user\s*name/i.test(c || "")));
 
       if (headerRow) {
         tabsRead.push(`${gid} (modules)`);
         const head = headerRow.map((h) => (h || "").trim().toLowerCase());
+        // A raw export gives the SHORT name. Flag it so those rows get resolved onto
+        // the legal name later instead of minting a second identity for the person.
+        const shortNamesOnly = !head.some((h) => h.includes("full name"));
         const col = (...names: string[]) => {
           for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; }
           for (const n of names) { const i = head.findIndex((h) => h.includes(n)); if (i >= 0) return i; }
           return -1;
         };
         const c = {
-          name: col("full name"), uid: col("user id"), email: col("email"),
+          name: col("full name", "user name"), uid: col("user id"), email: col("email"),
           dept: col("sub-department", "sub department"), mod: col("module name"),
           started: col("started on"), accessed: col("last accessed on"),
           status: col("module status"), pct: col("completion percentage"),
@@ -191,6 +199,7 @@ Deno.serve(async (req) => {
             last_accessed_on: c.accessed >= 0 ? parseUsDate(row[c.accessed] || "") : null,
             completed_on: c.done >= 0 ? parseUsDate(row[c.done] || "") : null,
             source_gid: gid,
+            shortName: shortNamesOnly,
           });
         }
         continue;
@@ -234,10 +243,9 @@ Deno.serve(async (req) => {
     //
     // A match needs >= 2 shared name tokens AND exactly one candidate. Anything
     // ambiguous or unmatched keeps its own name and is reported — never guessed.
-    const canon = [...new Set(modsRaw.map((m) => m.learner_full_name))]
-      .map((n) => ({ full: n, key: flatKey(n), t: tokens(n) }));
-    const unresolved: string[] = [];
-    const resolve = (name: string): { key: string; full: string } | null => {
+    const mkCanon = (names: string[]) =>
+      [...new Set(names)].map((n) => ({ full: n, key: flatKey(n), t: tokens(n) }));
+    const match = (canon: ReturnType<typeof mkCanon>, name: string): { key: string; full: string } | null => {
       const exact = canon.find((c) => c.key === flatKey(name));
       if (exact) return { key: exact.key, full: exact.full };
       const nt = tokens(name);
@@ -245,7 +253,30 @@ Deno.serve(async (req) => {
       return hits.length === 1 ? { key: hits[0].key, full: hits[0].full } : null;
     };
 
-    const mods: Mod[] = modsRaw.map((m) => ({ ...m, learner_key: flatKey(m.learner_full_name) }));
+    // Fold the short names from any raw tab onto the legal name the person is already
+    // stored under. Without this, "Devalsinh Zala" from a raw export becomes a second
+    // learner alongside "Devalsinh Jayrajsinh Zala" and every module count doubles.
+    const legalNames = mkCanon(modsRaw.filter((m) => !m.shortName).map((m) => m.learner_full_name));
+    const { data: knownRows } = await supa.from("lnd_modules").select("learner_full_name");
+    const knownNames = mkCanon([...legalNames.map((c) => c.full), ...(knownRows || []).map((r: { learner_full_name: string }) => r.learner_full_name)]);
+    let foldedShortNames = 0;
+    for (const m of modsRaw) {
+      if (!m.shortName) continue;
+      // Deliberately NOT match(): an exact hit would just be the short name itself,
+      // which is already in the table from before this fold existed. Look only for a
+      // LONGER name — the legal name always carries the extra middle/father name — and
+      // only fold when exactly one candidate matches, never on a guess.
+      const nt = tokens(m.learner_full_name);
+      const hits = knownNames.filter((c) =>
+        c.full.length > m.learner_full_name.length && [...c.t].filter((x) => nt.has(x)).length >= 2);
+      if (hits.length === 1) { m.learner_full_name = hits[0].full; foldedShortNames++; }
+    }
+
+    const canon = mkCanon(modsRaw.map((m) => m.learner_full_name));
+    const unresolved: string[] = [];
+    const resolve = (name: string) => match(canon, name);
+
+    const mods: Mod[] = modsRaw.map(({ shortName: _drop, ...m }) => ({ ...m, learner_key: flatKey(m.learner_full_name) }));
 
     for (const s of snapData) {
       const r = resolve(s.learner_name);
@@ -304,7 +335,7 @@ Deno.serve(async (req) => {
     const summary = (added || changed) ? `${added} new, ${changed} changed` : "no change";
     await supa.from("sync_runs").insert({
       source: "lnd-sync", rows_upserted: upserted + modUpserted, ok: true,
-      message: `${summary} · ${tabsRead.length} tabs · ${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete · ${modUpserted} module rows${dupModules ? ` · ${dupModules} DUPLICATE learner+module rows in sheet` : ""}${unresolved.length ? ` · ${unresolved.length} UNRESOLVED names` : ""}`,
+      message: `${summary} · ${tabsRead.length} tabs · ${dates.length} snapshots · latest ${latest} · ${cur.length} learners · ${done}/${modules} modules complete · ${modUpserted} module rows${dupModules ? ` · ${dupModules} DUPLICATE learner+module rows in sheet` : ""}${foldedShortNames ? ` · ${foldedShortNames} short names folded onto legal names` : ""}${unresolved.length ? ` · ${unresolved.length} UNRESOLVED names` : ""}`,
     });
 
     return new Response(JSON.stringify({
@@ -314,6 +345,8 @@ Deno.serve(async (req) => {
       snapshots: dates, latest_snapshot: latest, learners_latest: cur.length,
       modules_total: modules, modules_completed: done,
       added, changed,
+      duplicate_module_rows: dupModules,
+      folded_short_names: foldedShortNames,
       unresolved_learner_names: [...new Set(unresolved)],
       skipped_excluded_learners: skippedExcluded,
     }), { headers: { ...cors, "Content-Type": "application/json" } });
