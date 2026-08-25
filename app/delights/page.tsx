@@ -10,7 +10,7 @@ const day = (s?: string) => (s || '').slice(0, 10)
 export default function Delights() {
   const [rows, setRows] = useState<Delight[]>([])
   const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState(''); const [geo, setGeo] = useState('')
+  const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [src, setSrc] = useState<'' | 'sheet' | 'email'>('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<Delight | null>(null)
 
@@ -19,21 +19,28 @@ export default function Delights() {
 
   const geos = useMemo(() => uniq(rows.map(r => r.geo)), [rows])
 
+  const srcCounts = useMemo(() => ({
+    sheet: rows.filter(r => (r.sheet_count || 0) > 0).length,
+    email: rows.filter(r => (r.email_count || 0) > 0).length,
+  }), [rows])
+
   const filtered = useMemo(() => rows.filter(r => {
     if (geo && (r.geo || '') !== geo) return false
+    if (src === 'sheet' && !(r.sheet_count || 0)) return false
+    if (src === 'email' && !(r.email_count || 0)) return false
     if (q) { const hay = `${r.company_name} ${r.headline || ''} ${r.items.map(i => `${i.quote || ''} ${i.project || ''}`).join(' ')}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
     const d = day(r.date)
     if (from && (!d || d < from)) return false
     if (to && (!d || d > to)) return false
     return true
-  }), [rows, q, geo, from, to])
+  }), [rows, q, geo, src, from, to])
 
   return (
     <div>
       <Header title="Delights" subtitle="Clients who shared genuinely great appreciation — the standout testimonials from the feedback sheet, worth celebrating and reusing." />
 
       <div className="mb-4 rounded-lg border border-green-500/30 bg-green-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-green-300 font-semibold">✨ Real appreciation only:</span> curated testimonials logged in the feedback sheet (e.g. Tanium, Cohort, Poloko). Everyday &ldquo;thanks / looks good&rdquo; email replies are intentionally excluded. One card per client — a ready source for testimonials, case studies and cross-sell.
+        <span className="text-green-300 font-semibold">✨ Real appreciation only:</span> two sources — curated testimonials from the feedback sheet (Tanium, Cohort, Poloko), and praise picked up in the email review and marked <span className="text-sky-300">✉ email</span>. Email counts only when the client actually paid a compliment (&ldquo;brilliant service&rdquo;, &ldquo;particularly impressed&rdquo;, &ldquo;looking forward to working with you again&rdquo;); everyday &ldquo;thanks / looks good / approved&rdquo; replies stay out. One card per client — a ready source for testimonials, case studies and cross-sell.
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
@@ -42,11 +49,14 @@ export default function Delights() {
           <option value="">All GEOs</option>
           {geos.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
+        {(['sheet', 'email'] as const).map(k => (
+          <button key={k} onClick={() => setSrc(v => v === k ? '' : k)} className={`text-xs px-2.5 py-2 rounded-md border transition-colors ${src === k ? (k === 'email' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-green-500/20 text-green-300 border-green-500/50') : 'border-mav-line text-mav-muted hover:text-white'}`}>{k === 'email' ? '✉ From email' : '📋 From sheet'} ({srcCounts[k]})</button>
+        ))}
         <span className="text-xs text-mav-muted">From</span>
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo || from || to) && <button onClick={() => { setQ(''); setGeo(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
+        {(q || geo || src || from || to) && <button onClick={() => { setQ(''); setGeo(''); setSrc(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
         <span className="text-xs text-mav-muted ml-auto">{filtered.length} happy clients</span>
       </div>
 
@@ -62,6 +72,7 @@ export default function Delights() {
                 <span className="font-semibold">{r.company_name}</span>
                 {r.geo && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-mav-line text-mav-muted">{r.geo}</span>}
                 {r.count > 1 && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">{r.count} testimonials</span>}
+                {!!r.email_count && <span title={`${r.email_count} picked up in the email review`} className="text-[11px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300">✉ {r.email_count} from email</span>}
               </div>
               {r.headline
                 ? <p className="text-sm leading-relaxed line-clamp-4 text-white/90">&ldquo;{r.headline}&rdquo;</p>
@@ -101,6 +112,7 @@ export default function Delights() {
                     ? <p className="text-sm leading-relaxed">&ldquo;{it.quote}&rdquo;</p>
                     : <p className="text-sm text-mav-muted italic">{it.evidence ? 'Feedback captured as a screenshot.' : 'Positive feedback on record.'}</p>}
                   <div className="mt-2 flex items-center gap-2 flex-wrap text-[11px] text-mav-muted">
+                    <span className={`px-1.5 py-0.5 rounded-full ${it.source === 'email' ? 'bg-sky-500/15 text-sky-300' : 'bg-green-500/15 text-green-400'}`} title={it.source === 'email' ? `From the email review${it.subject ? ` — “${it.subject}”` : ''}` : 'Logged in the feedback sheet'}>{it.source === 'email' ? '✉ email' : '📋 sheet'}</span>
                     {it.project && <span className="px-1.5 py-0.5 rounded-full bg-mav-line">{it.project}</span>}
                     {it.type && <span>{it.type}</span>}
                     {it.date && <span>· {it.date}</span>}

@@ -501,16 +501,25 @@ export async function dismissEscalation(threadIds: string[], opts?: { actor?: st
 // praise (ZULU 8, C7, BEGE, Aurelian…) does NOT clutter this board. One card per client;
 // the detail lists every testimonial. When the praise lives in a screenshot rather than
 // text, `evidence` carries the image link and `project` names the work.
-export interface DelightItem { quote?: string; project?: string; evidence?: string; date?: string; type?: string }
+export interface DelightItem { quote?: string; project?: string; evidence?: string; date?: string; type?: string; source?: 'sheet' | 'email'; subject?: string }
 export interface Delight {
   company_name: string; geo?: string; count: number
   headline?: string; headline_project?: string; headline_evidence?: string
   items: DelightItem[]; date?: string; client_email?: string
+  sheet_count?: number; email_count?: number
 }
+// Real appreciation as it reads in a client's own email. The bar is deliberately
+// narrow: a client saying "looks good", "thanks!" or "approved" is doing their job,
+// not paying a compliment, and letting those in is what buried the sheet testimonials
+// the first time. Every word here is one a client only writes when they mean it.
+// "outstanding" is NOT on the list — in this inbox it means an unpaid invoice far more
+// often than praise (YLP Legal, 29 Jul).
+const PRAISE_RE = /(brilliant|impressed|amazing|fantastic|excellent|superb|exceptional|delighted|great (work|job|service)|thank you so much|really appreciate|appreciate (your|the) (help|effort|support|work|quick)|above and beyond|best (agency|partner|team)|working with you again|pleasure to work|top[- ]notch|nailed it|love (it|the))/i
 export async function getDelights(): Promise<Delight[]> {
   if (!supabase) return []
-  const [fbRes, clients] = await Promise.all([
+  const [fbRes, sigRes, clients] = await Promise.all([
     supabase.from('feedback').select('agency, nature, feedback_type, geo, comments, evidence, project_names, client_email, added_date').ilike('nature', 'positive'),
+    supabase.from('email_signals').select('company_name, client_email, signal_type, summary, source_subject, source_date').eq('sentiment', 'Positive'),
     getClients(),
   ])
   const geoBy = new Map<string, string>()
@@ -540,9 +549,33 @@ export async function getDelights(): Promise<Delight[]> {
     if (!g) groups.set(key, { company_name: f.agency || '', geo: geoFor(f.agency, f.geo), count: 1, items: [item], date: item.date, client_email: f.client_email || undefined })
     else { g.count++; g.items.push(item); if (!g.geo) g.geo = geoFor(f.agency, f.geo); if (!g.client_email && f.client_email) g.client_email = f.client_email; if ((item.date || '') > (g.date || '')) g.date = item.date }
   }
+  const bySheet = new Map([...groups].map(([k, g]) => [k, g.items.length]))
+  // Praise read out of the email review — the same appreciation, just never typed into
+  // the feedback sheet. Merged into the client's existing card so one company is still
+  // one card; the item carries source:'email' and the subject line it came from, so a
+  // testimonial can always be traced back to the thread.
+  for (const g of (sigRes.data as { company_name?: string; client_email?: string; signal_type?: string; summary?: string; source_subject?: string; source_date?: string }[]) || []) {
+    const key = ckey(g.company_name); if (!key) continue
+    const summary = (g.summary || '').trim()
+    if (!PRAISE_RE.test(summary)) continue
+    const item: DelightItem = { quote: summary, project: g.source_subject || undefined, date: (g.source_date || '').slice(0, 10), type: g.signal_type, source: 'email', subject: g.source_subject || undefined }
+    const ex = groups.get(key)
+    if (!ex) groups.set(key, { company_name: g.company_name || '', geo: geoFor(g.company_name), count: 1, items: [item], date: item.date, client_email: g.client_email || undefined })
+    else { ex.count++; ex.items.push(item); if (!ex.client_email && g.client_email) ex.client_email = g.client_email; if ((item.date || '') > (ex.date || '')) ex.date = item.date }
+  }
   // headline = the strongest testimonial (longest quote); fall back to a screenshot one
+  for (const [k, g] of groups) {
+    g.items.forEach(i => { if (!i.source) i.source = 'sheet' })
+    g.sheet_count = bySheet.get(k) || 0
+    g.email_count = g.items.length - g.sheet_count
+  }
   for (const g of groups.values()) {
-    const withQuote = g.items.filter(i => i.quote).sort((a, b) => (b.quote?.length || 0) - (a.quote?.length || 0))
+    // A curated sheet testimonial always outranks an email summary for the headline —
+    // it's the client's polished words, whereas an email item is our own write-up of
+    // the thread. Email only carries the headline when the sheet has nothing.
+    const byLen = (a: DelightItem, b: DelightItem) => (b.quote?.length || 0) - (a.quote?.length || 0)
+    const quoted = g.items.filter(i => i.quote)
+    const withQuote = [...quoted.filter(i => i.source !== 'email').sort(byLen), ...quoted.filter(i => i.source === 'email').sort(byLen)]
     const pick = withQuote[0] || g.items.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0]
     g.headline = pick?.quote; g.headline_project = pick?.project; g.headline_evidence = pick?.evidence
   }
