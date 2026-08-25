@@ -69,7 +69,7 @@ const sigTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/risk|e
 const impactTone = (i?: string) => /critical|sev1|sev 1/i.test(i || '') ? 'bg-red-500/20 text-red-300' : /major/i.test(i || '') ? 'bg-red-500/15 text-red-400' : /minor/i.test(i || '') ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
 const dotCls = (b: string) => b === 'At risk' ? 'bg-red-500' : b === 'Watch' ? 'bg-orange-400' : b === 'Positive' ? 'bg-green-400' : b === 'Negative' ? 'bg-red-400' : b === 'Neutral' ? 'bg-amber-400' : 'bg-mav-muted'
 
-type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[]; recovered: boolean; recoveryNote?: string; unresolved: boolean }
+type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[]; recovered: boolean; recoveryNote?: string; unresolved: boolean; dip?: { last: number; prior: number; dropPct: number; stopped: boolean } }
 // A feedback-table row counts as positive when its Nature/type reads positive (praise, happy, great…)
 const isPosFeedback = (f: Feedback) => sentBucket(f.nature) === 'Positive' || /positive|praise|apprec|happy|great|delight|testimonial/i.test(`${f.nature || ''} ${f.feedback_type || ''}`)
 // the escalation report also logs positive feedback, tagged "Not An Escalation" — those must NOT count as risk
@@ -86,6 +86,8 @@ export default function Clients() {
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [allOpps, setAllOpps] = useState<Opportunity[]>([])
   const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
+  // Clients whose billing has fallen off a cliff in the last two completed months.
+  const [dipOnly, setDipOnly] = useState(false)
   const [owner, setOwner] = useState(''); const [geo, setGeo] = useState('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [recentOnly, setRecentOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo' | 'activity'>('activity'); const [sortAsc, setSortAsc] = useState(false)
@@ -190,6 +192,34 @@ export default function Clients() {
     return m
   }, [bookings])
 
+  // A steep, recent fall in billing. Compares the last two COMPLETED months against the
+  // two before them — the month in progress is excluded, since a half-billed month looks
+  // like a collapse in every account. "Steep" is a halving or worse on a client who was
+  // billing at least $2,000 over those two months, so a $300 one-off going quiet doesn't
+  // cry wolf. This is a business signal, not a sentiment one: the client may be perfectly
+  // happy and simply have stopped spending, which is exactly what's worth knowing early.
+  const DIP_FLOOR = 2000, DIP_RATIO = 0.5
+  const dipByClient = useMemo(() => {
+    const last2 = [monthsAgoYM(1), monthsAgoYM(2)]
+    const prior2 = [monthsAgoYM(3), monthsAgoYM(4)]
+    const acc = new Map<string, { last: number; prior: number }>()
+    for (const b of bookings) {
+      const k = norm(b.company_name); if (!k) continue
+      const m = ym(b.booking_month); const amt = b.booking_amount || 0
+      if (!last2.includes(m) && !prior2.includes(m)) continue
+      const e = acc.get(k) || { last: 0, prior: 0 }
+      if (last2.includes(m)) e.last += amt; else e.prior += amt
+      acc.set(k, e)
+    }
+    const out = new Map<string, { last: number; prior: number; dropPct: number; stopped: boolean }>()
+    for (const [k, e] of acc) {
+      if (e.prior < DIP_FLOOR || e.last > e.prior * DIP_RATIO) continue
+      out.set(k, { last: Math.round(e.last), prior: Math.round(e.prior), dropPct: Math.round((1 - e.last / e.prior) * 100), stopped: e.last <= 0 })
+    }
+    return out
+  }, [bookings])
+  const dipWindow = `${monLabel(monthsAgoYM(2))}–${monLabel(monthsAgoYM(1))} vs ${monLabel(monthsAgoYM(4))}–${monLabel(monthsAgoYM(3))}`
+
   const tenureOf = (c: Client): Tenure | null => {
     const list = (bookingsByClient.get(norm(c.company_name)) || []).filter(b => (b.booking_amount || 0) !== 0)
     if (!list.length) return null
@@ -250,7 +280,16 @@ export default function Clients() {
       }
     }
     if (unresolved) { level = level || 'Watch'; reasons.unshift('escalation marked Unresolved — looked at, still broken') }
-    return { level, reasons, escs: list, posFb, negSigs, recovered, recoveryNote, unresolved }
+    // A revenue collapse stands on its own — it applies even to a "recovered" client,
+    // because a happy client who has stopped spending is still a client walking away.
+    const dip = dipByClient.get(norm(c.company_name))
+    if (dip) {
+      level = level || 'Watch'
+      reasons.push(dip.stopped
+        ? `billing stopped — ${fmtUsd(dip.prior)} over ${dipWindow.split(' vs ')[1]}, nothing since`
+        : `revenue down ${dip.dropPct}% — ${fmtUsd(dip.prior)} → ${fmtUsd(dip.last)} (${dipWindow})`)
+    }
+    return { level, reasons, escs: list, posFb, negSigs, recovered, recoveryNote, unresolved, dip }
   }
 
   // Genuine risk wins; a date-based recovery or positive feedback (with no later negative)
@@ -425,6 +464,7 @@ export default function Clients() {
       .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
       .filter(c => !stat || statusOf(c) === stat)
       .filter(c => !aiOnly || c.ai_focus)
+      .filter(c => !dipOnly || dipByClient.has(norm(c.company_name)))
       .filter(c => !owner || c.pc_sme === owner)
       .filter(c => !geo || c.geo === geo)
       .filter(c => {
@@ -453,14 +493,14 @@ export default function Clients() {
     })
 
     return result
-  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient, verdicts])
+  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient, verdicts, dipOnly, dipByClient])
 
   // ---- Paging ------------------------------------------------------------------
   // Any change to what is being listed sends you back to page 1 — otherwise you filter
   // 2,000 rows down to 12 while sitting on page 8 and the table looks empty.
   const total = mode === 'clients' ? rows.length : dirRows.length
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  useEffect(() => { setPage(1) }, [mode, q, ind, stat, aiOnly, owner, geo, bu, linked, aiStance, from, to, recentOnly, sortBy, sortAsc])
+  useEffect(() => { setPage(1) }, [mode, q, ind, stat, aiOnly, dipOnly, owner, geo, bu, linked, aiStance, from, to, recentOnly, sortBy, sortAsc])
   const safePage = Math.min(page, pageCount)
   const pageRows = useMemo(() => rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [rows, safePage])
   const pageDirRows = useMemo(() => dirRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [dirRows, safePage])
@@ -529,6 +569,7 @@ export default function Clients() {
           <option value="Neutral">🟡 Neutral ({statCount('Neutral')})</option>
         </select>
         <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
+        <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${dipOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>📉 Revenue dip{dipByClient.size ? ` (${dipByClient.size})` : ''}</button>
         <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
         <div className="ml-auto flex items-center gap-2">
           <div className="flex rounded-md border border-mav-line overflow-hidden">
@@ -548,7 +589,7 @@ export default function Clients() {
         <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">📉 revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
         <div className="flex items-baseline justify-between mb-4">
@@ -601,7 +642,7 @@ export default function Clients() {
                 return (
                   <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
                     <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${r.unresolved ? 'bg-amber-400' : dotCls(st)}`} title={r.unresolved ? 'Escalation marked Unresolved on Critical Escalations' : undefined} /></td>
-                    <td className="px-4 py-3">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="Someone looked at this client's escalation and it is still broken">⚑ Unresolved</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                    <td className="px-4 py-3">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="Someone looked at this client's escalation and it is still broken">⚑ Unresolved</span>}{r.dip && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-semibold whitespace-nowrap" title={`${fmtUsd(r.dip.prior)} → ${fmtUsd(r.dip.last)} (${dipWindow})`}>📉 {r.dip.stopped ? 'Billing stopped' : `Revenue −${r.dip.dropPct}%`}</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
