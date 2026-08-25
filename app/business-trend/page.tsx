@@ -318,8 +318,15 @@ export default function BusinessTrendPage() {
     if (!pushSel) return null
     const k = ckey(pushSel)
     const slip = plan.slipped.find(c => ckey(c.name) === k)
-    return { name: pushSel, slip, deal: lastDealBy.get(k) || null, tech: techBy.get(k) || null }
-  }, [pushSel, plan, lastDealBy, techBy])
+    // What this client actually buys, all-time, by technology — biggest spend first.
+    const mix = new Map<string, number>()
+    for (const b of bookings) {
+      if (ckey(b.company_name) !== k || !b.technology) continue
+      mix.set(b.technology, (mix.get(b.technology) || 0) + (b.booking_amount || 0))
+    }
+    const techMix = [...mix.entries()].map(([name, amount]) => ({ name, amount: Math.round(amount) })).sort((a, b) => b.amount - a.amount)
+    return { name: pushSel, slip, deal: lastDealBy.get(k) || null, tech: techBy.get(k) || null, techMix }
+  }, [pushSel, plan, lastDealBy, techBy, bookings])
 
   const quotesAnalysis = useMemo(() => {
     const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
@@ -704,7 +711,10 @@ export default function BusinessTrendPage() {
                     {pushDetail.deal.lines.map((l, i) => (
                       <div key={i} className="text-sm border-t border-mav-line/60 pt-2 first:border-0 first:pt-0">
                         <div className="flex justify-between gap-2">
-                          <span className="px-1.5 py-0.5 rounded-full bg-mav-line text-xs">{l.service_name || 'no department'}</span>
+                          <span className="flex flex-wrap gap-1">
+                            <span className="px-1.5 py-0.5 rounded-full bg-mav-line text-xs">{l.service_name || 'no department'}</span>
+                            {l.technology && <span className="px-1.5 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow text-xs">{l.technology}</span>}
+                          </span>
                           <span>{fmtUsd(Math.round(l.booking_amount || 0))}</span>
                         </div>
                         <div className="mt-1 text-xs text-mav-muted">
@@ -716,11 +726,16 @@ export default function BusinessTrendPage() {
                   </div>
                 </div>
                 <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-3 mb-4">
-                  <div className="text-xs text-mav-muted mb-1">Technology</div>
-                  {pushDetail.tech
-                    ? <><span className="text-sm">{pushDetail.tech.technology}</span>
-                        <p className="text-[11px] text-mav-muted mt-1">From their most recent quote{pushDetail.tech.when ? ` (${ymd(pushDetail.tech.when)})` : ''} — the revenue sheet records the service department, not the technology.</p></>
-                    : <p className="text-sm text-mav-muted">Not recorded. The revenue sheet carries no technology field, and this client has no quote on the Quotes tab that names one.</p>}
+                  <div className="text-xs text-mav-muted mb-1">Technology they buy</div>
+                  {pushDetail.techMix.length
+                    ? <><div className="flex flex-wrap gap-1">
+                          {pushDetail.techMix.map(t => <span key={t.name} className="px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow text-xs">{t.name} · {fmtUsd(t.amount)}</span>)}
+                        </div>
+                        <p className="text-[11px] text-mav-muted mt-2">All-time billing by technology, from column F of the revenue sheet.</p></>
+                    : pushDetail.tech
+                      ? <><span className="text-sm">{pushDetail.tech.technology}</span>
+                          <p className="text-[11px] text-mav-muted mt-1">No technology on their revenue lines — taken from their most recent quote{pushDetail.tech.when ? ` (${ymd(pushDetail.tech.when)})` : ''}.</p></>
+                      : <p className="text-sm text-mav-muted">Not recorded on their revenue lines or on any quote.</p>}
                 </div>
                 <div className="text-xs uppercase tracking-wide text-mav-yellow mb-2">Billing, last {pushDetail.deal.history.length} months</div>
                 <table className="w-full text-sm">
