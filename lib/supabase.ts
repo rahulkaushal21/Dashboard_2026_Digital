@@ -65,7 +65,7 @@ if (/on hold/.test(v)) return { prob: 25, read: 'On hold — stalled and at risk
 return { prob: 45, read: 'Open quote — outcome not yet clear from the sheet.' }
 }
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
-export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
+export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sme?: string; sales_person?: string; contact_email?: string }
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
 export interface EmailSignal { id: number; thread_id?: string; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
 
@@ -380,7 +380,7 @@ const live = await read<{ company_name: string; booking_month: string; booking_a
 if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount }))
 return (await import('./mockData')).mockRevenue
 }
-export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, geo, sales_person, contact_email', 'id')) || [] }
+export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, geo, sme, sales_person, contact_email', 'id')) || [] }
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
 export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, thread_id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
 

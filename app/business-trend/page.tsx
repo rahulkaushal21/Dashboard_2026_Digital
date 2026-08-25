@@ -82,6 +82,10 @@ export default function BusinessTrendPage() {
   const [toMonth, setToMonth] = useState('')
   const [revenue, setRevenue] = useState<RevenueRow[]>([])
   const [opportunitiesRaw, setOpportunitiesRaw] = useState<Opportunity[]>([])
+  // Line-level revenue rows: the monthly series aggregates these and loses the service
+  // department, SME and owner, which is exactly what you need before ringing a client.
+  const [bookings, setBookings] = useState<BookingRow[]>([])
+  const [pushSel, setPushSel] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // Set after mount so the server-rendered HTML doesn't bake in a build-time date.
   const [thisMonth, setThisMonth] = useState(''); const [todayMs, setTodayMs] = useState(0)
@@ -89,12 +93,14 @@ export default function BusinessTrendPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [rev, opp] = await Promise.all([
+        const [rev, opp, bk] = await Promise.all([
           getRevenue(),
           getOpportunities(),
+          getBookingsFull(),
         ])
         setRevenue(rev || [])
         setOpportunitiesRaw(opp || [])
+        setBookings(bk || [])
         setLoading(false)
       } catch (e) {
         console.error('Error loading business trend data:', e)
@@ -271,6 +277,49 @@ export default function BusinessTrendPage() {
     })
     return out
   }, [plan])
+
+
+  // ---- What we last sold a client, for the "clients to push" drawer -----------------
+  // The revenue sheet carries the service department (HUB, WEB-US…), the delivery SME
+  // and the owner, but NOT the technology — that lives on the Quotes tab, so it is read
+  // from the client's most recent quote and labelled as such rather than implied.
+  const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  const lastDealBy = useMemo(() => {
+    const by = new Map<string, BookingRow[]>()
+    for (const b of bookings) {
+      const k = ckey(b.company_name); if (!k) continue
+      const arr = by.get(k); if (arr) arr.push(b); else by.set(k, [b])
+    }
+    const out = new Map<string, { name: string; month: string; total: number; lines: BookingRow[]; history: { month: string; amount: number }[]; geo?: string }>()
+    for (const [k, rows] of by) {
+      const dated = rows.filter(r => ym(r.booking_month))
+      if (!dated.length) continue
+      const months = [...new Set(dated.map(r => ym(r.booking_month)))].sort()
+      const last = months[months.length - 1]
+      const lines = dated.filter(r => ym(r.booking_month) === last).sort((a, b) => (b.booking_amount || 0) - (a.booking_amount || 0))
+      const history = months.slice(-6).map(m => ({ month: m, amount: Math.round(dated.filter(r => ym(r.booking_month) === m).reduce((sm, r) => sm + (r.booking_amount || 0), 0)) }))
+      out.set(k, { name: rows[0].company_name || '', month: last, total: Math.round(lines.reduce((sm, r) => sm + (r.booking_amount || 0), 0)), lines, history, geo: dated.map(r => r.geo).filter(Boolean).pop() })
+    }
+    return out
+  }, [bookings])
+
+  // Technology is a Quotes-tab field; take the client's most recent quote that names one.
+  const techBy = useMemo(() => {
+    const out = new Map<string, { technology: string; when?: string; company?: string }>()
+    const sorted = [...opportunities].sort((a, b) => (b.source_date || b.first_date || '').localeCompare(a.source_date || a.first_date || ''))
+    for (const o of sorted) {
+      const k = ckey(o.company_name); if (!k || !o.technology) continue
+      if (!out.has(k)) out.set(k, { technology: o.technology, when: o.source_date || o.first_date, company: o.company_name })
+    }
+    return out
+  }, [opportunities])
+
+  const pushDetail = useMemo(() => {
+    if (!pushSel) return null
+    const k = ckey(pushSel)
+    const slip = plan.slipped.find(c => ckey(c.name) === k)
+    return { name: pushSel, slip, deal: lastDealBy.get(k) || null, tech: techBy.get(k) || null }
+  }, [pushSel, plan, lastDealBy, techBy])
 
   const quotesAnalysis = useMemo(() => {
     const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
@@ -535,7 +584,7 @@ export default function BusinessTrendPage() {
 
           <div>
             <div className="text-xs font-medium text-mav-yellow mb-1">Clients to push</div>
-            <p className="text-xs text-mav-muted mb-3">Accounts that billed materially less in the last three completed months than the three before. &ldquo;Was billing&rdquo; is their old monthly average — what comes back if the account is re-activated, worth {fmtUsd(plan.recoverable)}/month in total.</p>
+            <p className="text-xs text-mav-muted mb-3">Accounts that billed materially less in the last three completed months than the three before. &ldquo;Was billing&rdquo; is their old monthly average — what comes back if the account is re-activated, worth {fmtUsd(plan.recoverable)}/month in total. <span className="text-mav-yellow">Click a client</span> to see the last business we closed with them.</p>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-mav-muted border-b border-mav-line">
@@ -549,8 +598,8 @@ export default function BusinessTrendPage() {
                 </thead>
                 <tbody>
                   {plan.slipped.slice(0, 12).map(c => (
-                    <tr key={c.name} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                      <td className="px-3 py-2">{c.name}</td>
+                    <tr key={c.name} onClick={() => setPushSel(c.name)} title="What did we last sell them? — service department, SME, owner and technology" className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
+                      <td className="px-3 py-2 text-mav-yellow">{c.name}</td>
                       <td className="px-3 py-2 text-right text-mav-muted">{fmtUsd(Math.round(c.prior3))}</td>
                       <td className="px-3 py-2 text-right">{fmtUsd(Math.round(c.last3))}</td>
                       <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(c.perMonth)}/mo</td>
@@ -619,6 +668,78 @@ export default function BusinessTrendPage() {
           </div>
         </div>
       </div>
+
+      {pushDetail && (
+        <div className="fixed inset-0 z-40" onClick={() => setPushSel(null)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-xl font-semibold">{pushDetail.name}</h2>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {pushDetail.deal?.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{pushDetail.deal.geo}</span>}
+                  {pushDetail.slip && <span className={`text-xs px-2 py-1 rounded-full ${pushDetail.slip.lapsed ? 'bg-red-500/15 text-red-400' : 'bg-orange-500/15 text-orange-300'}`}>{pushDetail.slip.lapsed ? 'Stopped billing' : 'Slowing'}</span>}
+                </div>
+              </div>
+              <button onClick={() => setPushSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+            </div>
+
+            {pushDetail.slip && (
+              <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-3 mb-4 text-sm">
+                <div className="flex justify-between"><span className="text-mav-muted">Prior 3 months</span><span>{fmtUsd(Math.round(pushDetail.slip.prior3))}</span></div>
+                <div className="flex justify-between"><span className="text-mav-muted">Last 3 months</span><span>{fmtUsd(Math.round(pushDetail.slip.last3))}</span></div>
+                <div className="flex justify-between mt-1 pt-1 border-t border-mav-line"><span className="text-mav-muted">Was billing</span><span className="text-mav-yellow font-medium">{fmtUsd(pushDetail.slip.perMonth)}/mo</span></div>
+              </div>
+            )}
+
+            <div className="text-xs uppercase tracking-wide text-mav-yellow mb-2">Last business we closed</div>
+            {pushDetail.deal ? (
+              <>
+                <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-3 mb-3">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <span className="font-medium">{monLabel(pushDetail.deal.month)}</span>
+                    <span className="text-lg font-bold text-mav-yellow">{fmtUsd(pushDetail.deal.total)}</span>
+                  </div>
+                  <div className="space-y-2">
+                    {pushDetail.deal.lines.map((l, i) => (
+                      <div key={i} className="text-sm border-t border-mav-line/60 pt-2 first:border-0 first:pt-0">
+                        <div className="flex justify-between gap-2">
+                          <span className="px-1.5 py-0.5 rounded-full bg-mav-line text-xs">{l.service_name || 'no department'}</span>
+                          <span>{fmtUsd(Math.round(l.booking_amount || 0))}</span>
+                        </div>
+                        <div className="mt-1 text-xs text-mav-muted">
+                          {l.sme ? <>SME <span className="text-white">{l.sme}</span></> : 'SME —'}
+                          {l.sales_person ? <> · Owner <span className="text-white">{l.sales_person}</span></> : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-3 mb-4">
+                  <div className="text-xs text-mav-muted mb-1">Technology</div>
+                  {pushDetail.tech
+                    ? <><span className="text-sm">{pushDetail.tech.technology}</span>
+                        <p className="text-[11px] text-mav-muted mt-1">From their most recent quote{pushDetail.tech.when ? ` (${ymd(pushDetail.tech.when)})` : ''} — the revenue sheet records the service department, not the technology.</p></>
+                    : <p className="text-sm text-mav-muted">Not recorded. The revenue sheet carries no technology field, and this client has no quote on the Quotes tab that names one.</p>}
+                </div>
+                <div className="text-xs uppercase tracking-wide text-mav-yellow mb-2">Billing, last {pushDetail.deal.history.length} months</div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {pushDetail.deal.history.slice().reverse().map(h => (
+                      <tr key={h.month} className="border-b border-mav-line/60">
+                        <td className="py-1.5 text-mav-muted">{monLabel(h.month)}</td>
+                        <td className="py-1.5 text-right">{h.amount ? fmtUsd(h.amount) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <p className="text-sm text-mav-muted">No line-level revenue rows found for this client name.</p>
+            )}
+          </aside>
+        </div>
+      )}
     </div>
   )
 }
