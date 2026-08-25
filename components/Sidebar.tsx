@@ -66,6 +66,12 @@ export default function Sidebar() {
   )
 }
 
+// The GitHub Pages build sets trailingSlash, so usePathname() hands back "/clients/"
+// while the nav holds "/clients" — an exact compare never matched and no tab ever lit
+// up. Normalise both sides (keeping "/" for the root) before comparing.
+const trim = (p?: string | null) => { const v = (p || '/').split(/[?#]/)[0]; return v.length > 1 ? v.replace(/\/+$/, '') : '/' }
+const samePath = (path: string | null, href: string) => trim(path) === trim(href)
+
 const linkCls = (active: boolean, indent = false) =>
   `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-sm transition-colors
    ${active ? 'bg-mav-yellow text-black font-medium' : 'text-mav-muted hover:text-white hover:bg-mav-panel'}`
@@ -73,7 +79,7 @@ const linkCls = (active: boolean, indent = false) =>
 function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
   const { href, label, icon: Icon } = leaf
   return (
-    <Link href={href} className={linkCls(path === href, indent)}>
+    <Link href={href} className={linkCls(samePath(path, href), indent)}>
       <Icon size={16} /> {label}
     </Link>
   )
@@ -81,7 +87,7 @@ function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: bo
 
 function NavGroup({ group, path }: { group: Group; path: string }) {
   const { label, icon: Icon, children } = group
-  const hasActive = children.some(c => path === c.href)
+  const hasActive = children.some(c => samePath(path, c.href))
   // Open when you're inside it; otherwise remember what you last toggled.
   const [open, setOpen] = useState(hasActive)
   const expanded = open || hasActive
@@ -90,7 +96,7 @@ function NavGroup({ group, path }: { group: Group; path: string }) {
       <button
         onClick={() => setOpen(o => !o)}
         aria-expanded={expanded}
-        className={`w-full ${linkCls(false)} justify-between`}
+        className={`w-full ${linkCls(false)} justify-between ${hasActive ? 'text-white' : ''}`}
       >
         <span className="flex items-center gap-3"><Icon size={16} /> {label}</span>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
