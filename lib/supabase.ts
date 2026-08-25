@@ -514,7 +514,17 @@ export interface Delight {
 // the first time. Every word here is one a client only writes when they mean it.
 // "outstanding" is NOT on the list — in this inbox it means an unpaid invoice far more
 // often than praise (YLP Legal, 29 Jul).
-const PRAISE_RE = /(brilliant|impressed|amazing|fantastic|excellent|superb|exceptional|delighted|great (work|job|service)|thank you so much|really appreciate|appreciate (your|the) (help|effort|support|work|quick)|above and beyond|best (agency|partner|team)|working with you again|pleasure to work|top[- ]notch|nailed it|love (it|the))/i
+const PRAISE_RE = /(brilliant|impressed|amazing|fantastic|excellent|superb|exceptional|delighted|great (work|job|service)|thank you so much|really appreciate|appreciate (your|the) (help|effort|support|work|quick)|above and beyond|best (agency|partner|team)|pleasure to work|top[- ]notch|nailed it|love (it|the))/i
+// Clients this board never features, however warm a single line reads. Matched on a
+// token so every spelling of the name is covered ("Sprung", "Made by Sprung").
+// Sprung — the "Excellent!" was an acknowledgement inside the thread where staging sat
+//   exposed, the sync queue ran to 61M rows and the disk went critical. A fix confirmed
+//   mid-incident is not a testimonial.
+// ScholarStack — "looking forward to working with you again" is a client restarting,
+//   which is good news but not praise. ("working with you again" is also off PRAISE_RE
+//   now, so no other account can qualify on that line alone.)
+const NOT_DELIGHTS = ['sprung', 'scholarstack']
+const isNotDelight = (name?: string) => { const k = ckey(name); return !!k && NOT_DELIGHTS.some(n => k.includes(n)) }
 export async function getDelights(): Promise<Delight[]> {
   if (!supabase) return []
   const [fbRes, sigRes, clients] = await Promise.all([
@@ -539,7 +549,7 @@ export async function getDelights(): Promise<Delight[]> {
   const isGeneric = (c?: string) => /appreciation received|positive feedback logged|feedback logged/i.test(c || '')
   const groups = new Map<string, Delight>()
   for (const f of (fbRes.data as { agency?: string; feedback_type?: string; geo?: string; comments?: string; evidence?: string; project_names?: string; client_email?: string; added_date?: string }[]) || []) {
-    const key = ckey(f.agency); if (!key) continue
+    const key = ckey(f.agency); if (!key || isNotDelight(f.agency)) continue
     const comment = (f.comments || '').trim()
     const realQuote = comment && !isGeneric(comment) ? comment : ''
     const realEvidence = /^https?:\/\//i.test((f.evidence || '').trim()) ? (f.evidence || '').trim() : ''
@@ -555,7 +565,7 @@ export async function getDelights(): Promise<Delight[]> {
   // one card; the item carries source:'email' and the subject line it came from, so a
   // testimonial can always be traced back to the thread.
   for (const g of (sigRes.data as { company_name?: string; client_email?: string; signal_type?: string; summary?: string; source_subject?: string; source_date?: string }[]) || []) {
-    const key = ckey(g.company_name); if (!key) continue
+    const key = ckey(g.company_name); if (!key || isNotDelight(g.company_name)) continue
     const summary = (g.summary || '').trim()
     if (!PRAISE_RE.test(summary)) continue
     const item: DelightItem = { quote: summary, project: g.source_subject || undefined, date: (g.source_date || '').slice(0, 10), type: g.signal_type, source: 'email', subject: g.source_subject || undefined }
