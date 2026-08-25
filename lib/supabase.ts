@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { isNbdOwner } from './nbd'
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 export const supabase = url && anon ? createClient(url, anon, {
@@ -19,6 +20,10 @@ rfq_status?: string; geo?: string; sales_person?: string; source_subject?: strin
 source_date?: string; first_date?: string; summary?: string; source?: string; sources?: string[]; pm_owner?: string
 gist?: string; win_probability?: number; win_reason?: string; company_note?: string
 won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?: string[]; business_type?: string
+// Owner is on the NBD team (lib/nbd.ts), so this deal can be genuinely new business.
+// `mis_tagged_new` marks a row the Quotes sheet calls "New" under a non-NBD owner —
+// shown as Repeat, with an error flag asking for the sheet to be corrected.
+nbd_owner?: boolean; mis_tagged_new?: boolean
 value?: number; technology?: string; service?: string; journey?: string; quote_ref?: string
 quote_date?: string; origin?: string; est_value?: number; next_step?: string; enriched?: boolean
 // "Might not come" — a human call that this open quote probably won't convert.
@@ -310,7 +315,12 @@ const inRevenue = revenueSet.has(norm(o.company_name))
 const bt = norm(o.business_type)
 const taggedRepeat = bt.includes('repeat')       // 'repeat' or 'new repeat'
 const taggedNewOnly = bt === 'new'               // pure "New"
-const repeat = taggedRepeat || inRevenue || o.is_new_client === false
+// NBD gate: only the new-business team opens genuinely new accounts. A deal the
+// sheet tags "New" under an account manager is repeat work on an existing client,
+// so it counts as Repeat here and the row carries a MIS-TAGGED flag — see nbd.ts.
+const nbd = isNbdOwner(o.sales_person)
+const wrongNew = !nbd && (taggedNewOnly || o.is_new_client === true) && !taggedRepeat
+const repeat = taggedRepeat || inRevenue || o.is_new_client === false || !nbd
 // Review flags for still-open deals, in priority order (one flag shown, most urgent first):
 //  1. CONFIRM-LAG — someone confirmed it Won here but the sheet line is still Open
 //  2. LOST-LAG    — someone marked it Lost here but the sheet line is still Open
@@ -332,6 +342,7 @@ else if (bm) flag = `⚠ POSSIBLY ALREADY BOOKED — a $${bm.amount.toLocaleStri
 else if (confirmLag) flag = '⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set that row to Confirmed so it books as revenue.'
 else if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set that row to Cancelled so it stops counting as live pipeline.'
 else if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
+else if (wrongNew) flag = `⚠ NOT NBD, TAGGED “NEW” — this quote is tagged New Business in the Quotes sheet (col P) but its owner${o.sales_person ? ` (${o.sales_person})` : ' is blank and'} is not on the NBD team, so it is being counted as Repeat. Either fix col P to Repeat, or set the NBD owner who actually opened the account.`
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
 else if (age !== null && age > STALE_DAYS) flag = `⚠ Stale — no movement in ${age} days. Follow up or confirm the deal is still live.`
 else if (confirmedLike.test(`${o.summary || ''} ${o.gist || ''}`)) flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities'
@@ -351,6 +362,8 @@ source_tags: (o.origin === 'sheet' && o.email_tracked) ? ['sheet', 'email'] : [o
 service: serviceOf(o.technology),
 quote_ref: o.quote_key || o.quote_ref || undefined,
 is_new_client: !repeat,
+nbd_owner: nbd,
+mis_tagged_new: wrongNew,
 business_type: o.business_type || undefined,
 first_date: o.first_date || o.source_date,
 booked_month: bm && !bm.ambiguous ? bm.month : undefined,
