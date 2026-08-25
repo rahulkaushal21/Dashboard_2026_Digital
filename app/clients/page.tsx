@@ -51,9 +51,14 @@ const plural = (n: number, w: string) => `${n} ${w}${Math.abs(n) === 1 ? '' : 's
 // Derived engagement history for a client, computed from the revenue/bookings rows.
 type Tenure = { first?: string; last?: string; activeMonths: number; spanMonths: number; total: number; avgActive: number; sinceLast: number | null; services: string[] }
 
+// clients.sentiment is written by compute_client_sentiment() as one of
+// 'Positive' | 'At Risk' | 'Watch' | 'Neutral'. 'Watch' is checked BEFORE the negative
+// pattern — it means an escalation is logged but nothing negative is live, which is not
+// the same as an at-risk account and shouldn't be coloured like one.
 const sentBucket = (s?: string) => {
   const v = (s || '').toLowerCase()
   if (/(positive|happy|good|great|strong|delight)/.test(v)) return 'Positive'
+  if (/watch/.test(v)) return 'Watch'
   if (/(negative|unhappy|poor|bad|risk|frustrat|churn|escalat)/.test(v)) return 'Negative'
   if (/(neutral|stable|ok|mixed)/.test(v)) return 'Neutral'
   return ''
@@ -515,13 +520,13 @@ export default function Clients() {
         {mode === 'directory' && <select value={bu} onChange={e => setBu(e.target.value)} className={sel}><option value="">All BUs</option>{dirBus.map(b => <option key={b} value={b}>{b}</option>)}</select>}
         {mode === 'directory' && <select value={linked} onChange={e => setLinked(e.target.value as '' | 'yes' | 'no')} className={sel}><option value="">Booked &amp; not booked</option><option value="yes">Booked revenue</option><option value="no">No revenue yet</option></select>}
         {mode === 'directory' && <select value={aiStance} onChange={e => setAiStance(e.target.value as '' | 'native' | 'adjacent')} title="Classified from each company's own site title and meta description, already cached on the directory row" className={sel}><option value="">Any AI stance</option><option value="native">AI-native ({dirAi.native})</option><option value="adjacent">AI/automation positioning ({dirAi.adjacent})</option></select>}
-        <select value={stat} onChange={e => setStat(e.target.value)} className={sel}>
+        <select value={stat} onChange={e => setStat(e.target.value)} title="Two things sit in one list. “Live” is computed here and now from escalations, email tone and booking gaps. “Recorded” is the sentiment stored on the client record by the nightly sentiment pass — a client can carry an at-risk sentiment without anything live against them today." className={sel}>
           <option value="">All health</option>
-          <option value="At risk">🔴 At risk ({statCount('At risk')})</option>
-          <option value="Watch">🟠 Watch ({statCount('Watch')})</option>
+          <option value="At risk">🔴 At risk — live ({statCount('At risk')})</option>
+          <option value="Watch">🟠 Watch — live ({statCount('Watch')})</option>
+          <option value="Negative">🔴 At risk — recorded ({statCount('Negative')})</option>
           <option value="Positive">🟢 Positive ({statCount('Positive')})</option>
           <option value="Neutral">🟡 Neutral ({statCount('Neutral')})</option>
-          <option value="Negative">🔴 Negative ({statCount('Negative')})</option>
         </select>
         <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
         <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
@@ -543,7 +548,7 @@ export default function Clients() {
         <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. A negative email signal stops counting here once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
         <div className="flex items-baseline justify-between mb-4">
