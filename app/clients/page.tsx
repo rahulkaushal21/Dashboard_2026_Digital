@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
+import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -86,6 +87,9 @@ export default function Clients() {
   const [bu, setBu] = useState(''); const [linked, setLinked] = useState<'' | 'yes' | 'no'>('')
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
+  // Automation section: which industry card is expanded, and an optional play-type filter
+  const [openPlayInd, setOpenPlayInd] = useState<string>('')
+  const [playType, setPlayType] = useState<PlayType | ''>('')
   useEffect(() => {
     getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
     getClientDirectory().then(setDir)
@@ -265,6 +269,39 @@ export default function Clients() {
     dir.forEach(d => { const k = d.industry || 'Other / Unclassified'; m[k] = (m[k] || 0) + 1 })
     return Object.entries(m).sort((a, b) => b[1] - a[1])
   }, [dir])
+
+  // ---- Automation opportunity rows ---------------------------------------------
+  // One row per directory industry: how many companies sit in it, how many of those
+  // already buy from us, and the lifetime value those buyers represent. Sorted by
+  // company count, because the pitch is "here is the size of the addressable list",
+  // not "here is where the revenue already is".
+  const autoRows = useMemo(() => {
+    const ltv: Record<string, number> = {}
+    clients.forEach(c => { const k = c.industry || 'Other / Unclassified'; ltv[k] = (ltv[k] || 0) + (Number(c.ltv_usd) || 0) })
+    const m: Record<string, { companies: number; booked: number }> = {}
+    dir.forEach(d => {
+      const k = d.industry || 'Other / Unclassified'
+      if (!m[k]) m[k] = { companies: 0, booked: 0 }
+      m[k].companies++
+      if (d.is_revenue_client) m[k].booked++
+    })
+    return Object.entries(m)
+      .map(([name, v]) => ({ name, ...v, ltv: ltv[name] || 0, book: AUTOMATION_PLAYS[name] }))
+      .filter(r => r.book)
+      .sort((a, b) => b.companies - a.companies)
+  }, [dir, clients])
+  const autoTotals = useMemo(() => autoRows.reduce((a, r) => ({ companies: a.companies + r.companies, booked: a.booked + r.booked }), { companies: 0, booked: 0 }), [autoRows])
+  // What "AI & Automation" has actually billed, and how concentrated it is. Computed
+  // rather than written down, so the argument below can't quietly go stale — and the
+  // concentration number is the point: one client currently IS this service line.
+  const aiBook = useMemo(() => {
+    const rows = bookings.filter(b => /ai\s*&?\s*automation/i.test(b.service_name || ''))
+    const total = rows.reduce((s, b) => s + (Number(b.booking_amount) || 0), 0)
+    const byClient: Record<string, number> = {}
+    rows.forEach(b => { const k = displayName(b.company_name) || '—'; byClient[k] = (byClient[k] || 0) + (Number(b.booking_amount) || 0) })
+    const top = Object.entries(byClient).sort((a, b) => b[1] - a[1])[0]
+    return { total, count: rows.length, topName: top?.[0] || '', topShare: total > 0 && top ? Math.round((top[1] / total) * 100) : 0 }
+  }, [bookings])
 
   const rows = useMemo(() => {
     // date-range filter runs on each client's last-activity date; a client with no
@@ -465,6 +502,102 @@ export default function Clients() {
         </div>
       </div>
       )}
+
+      {/* ---- Automation opportunities by industry --------------------------------
+          Sits below the client list because it reads off the same directory: every
+          industry group, what still runs on people and spreadsheets in it, and the
+          builds we could sell against that. The counts are live; the plays are a
+          fixed catalogue in lib/automation-plays.ts. */}
+      <div className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-3 mb-1">
+          <h2 className="text-lg font-semibold">⚡ Automation opportunities by industry</h2>
+          <div className="text-xs text-mav-muted">{autoTotals.companies.toLocaleString()} companies in the directory · {autoTotals.booked} already buying · {autoRows.length} industries</div>
+        </div>
+        <p className="text-xs text-mav-muted mb-4 max-w-4xl leading-relaxed">
+          Where each industry still runs on a person, a spreadsheet and an inbox — and what Mavlers.ai could sell against it.
+          {aiBook.count > 0 && <>Booked <span className="text-mav-yellow">AI &amp; Automation</span> revenue is <span className="text-white">{fmtUsd(aiBook.total)} across {aiBook.count} booking{aiBook.count === 1 ? '' : 's'}</span>
+          {aiBook.topName && <>, and <span className="text-white">{aiBook.topShare}% of it is one client</span> ({aiBook.topName} — timesheet sync, warranty accounting, a nightly SAP cleanse, an AI translation plugin)</>}. </>}
+          Against a directory of {autoTotals.companies.toLocaleString()} companies who already trust us with their websites, that is the gap this section is about.
+          Click an industry to open its plays.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-xs text-mav-muted">Filter by build type:</span>
+          {(Object.keys(PLAY_TYPE_TONE) as PlayType[]).map(t => (
+            <button key={t} onClick={() => setPlayType(playType === t ? '' : t)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${playType === t ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>{t}</button>
+          ))}
+          {playType && <button onClick={() => setPlayType('')} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
+        </div>
+
+        <div className="space-y-2">
+          {autoRows.map(r => {
+            const open = openPlayInd === r.name
+            const plays = playType ? r.book.plays.filter(p => p.type === playType) : r.book.plays
+            if (playType && !plays.length) return null
+            const pct = Math.round((r.companies / (autoRows[0]?.companies || 1)) * 100)
+            return (
+              <div key={r.name} className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+                <button onClick={() => setOpenPlayInd(open ? '' : r.name)} className="w-full text-left px-5 py-4 hover:bg-white/[0.02] transition-colors">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className={`text-sm font-medium ${open ? 'text-mav-yellow' : ''}`}>{r.name}</span>
+                    <span className="text-xs text-mav-muted">{r.companies.toLocaleString()} companies · {r.booked} booked · {fmtUsd(r.ltv)} LTV</span>
+                    <div className="flex gap-1 ml-auto">
+                      {r.book.plays.map(p => <span key={p.name} className={`text-[10px] px-1.5 py-0.5 rounded-full ${PLAY_TYPE_TONE[p.type]}`}>{p.type}</span>)}
+                      <span className="text-mav-muted text-xs ml-1">{open ? '▾' : '▸'}</span>
+                    </div>
+                  </div>
+                  <span className="mt-2 block h-1 rounded bg-mav-dark overflow-hidden">
+                    <span className={`block h-full rounded ${open ? 'bg-mav-yellow' : 'bg-mav-yellow/40'}`} style={{ width: `${pct}%` }} />
+                  </span>
+                </button>
+                {open && (
+                  <div className="px-5 pb-5 border-t border-mav-line pt-4">
+                    <p className="text-xs leading-relaxed text-mav-muted mb-4 max-w-4xl"><span className="text-white font-medium">Where the manual effort sits: </span>{r.book.pain}</p>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {plays.map(p => (
+                        <div key={p.name} className="rounded-lg border border-mav-line bg-mav-dark/40 p-4">
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="text-sm font-medium leading-snug">{p.name}</div>
+                            <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${PLAY_TYPE_TONE[p.type]}`}>{p.type}</span>
+                          </div>
+                          <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Replaces</div>
+                          <p className="text-xs leading-relaxed text-mav-muted mb-3">{p.replaces}</p>
+                          <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Example build</div>
+                          <p className="text-xs leading-relaxed">{p.example}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => { setInd(r.name); setMode('directory'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                      className="mt-4 text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors">
+                      → See the {r.companies.toLocaleString()} {r.name} companies in the directory
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mt-4">
+          <div className="text-sm font-medium mb-1">Sells into any industry</div>
+          <p className="text-xs text-mav-muted mb-4">Structural rather than sectoral — start here on an account whose industry you are not sure about.</p>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {(playType ? UNIVERSAL_PLAYS.filter(p => p.type === playType) : UNIVERSAL_PLAYS).map(p => (
+              <div key={p.name} className="rounded-lg border border-mav-line bg-mav-dark/40 p-4">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <div className="text-sm font-medium leading-snug">{p.name}</div>
+                  <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${PLAY_TYPE_TONE[p.type]}`}>{p.type}</span>
+                </div>
+                <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Replaces</div>
+                <p className="text-xs leading-relaxed text-mav-muted mb-3">{p.replaces}</p>
+                <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Example build</div>
+                <p className="text-xs leading-relaxed">{p.example}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {selC && (() => {
         const r = riskOf(selC); const convos = sigByClient.get(selC.company_name) || []; const ten = tenureOf(selC)
