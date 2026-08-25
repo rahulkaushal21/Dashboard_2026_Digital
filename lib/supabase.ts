@@ -67,7 +67,7 @@ return { prob: 45, read: 'Open quote — outcome not yet clear from the sheet.' 
 export interface RevenueRow { client_name: string; month: string; amount_usd: number }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; geo?: string; sales_person?: string; contact_email?: string }
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
-export interface EmailSignal { id: number; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
+export interface EmailSignal { id: number; thread_id?: string; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
 
 async function read<T>(table: string, cols = '*', orderBy?: string): Promise<T[] | null> {
 if (!supabase) return null
@@ -382,7 +382,27 @@ return (await import('./mockData')).mockRevenue
 }
 export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, geo, sales_person, contact_email', 'id')) || [] }
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
-export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
+export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, thread_id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
+
+// The human verdicts recorded on Critical Escalations, so every board can honour them.
+// Without this the Clients page kept calling a client At risk off the same email signal
+// someone had already dismissed as "not our escalation" one screen away.
+//   settled   — thread marked fixed or the client turned positive: real, and over.
+//   dismissed — "Not an issue": never ours to begin with, so it should leave no trace.
+// A thread marked 'unresolved' appears in NEITHER set: it is still live risk.
+export async function getEscalationVerdicts(): Promise<{ dismissed: Set<string>; settled: Set<string> }> {
+  const empty = { dismissed: new Set<string>(), settled: new Set<string>() }
+  if (!supabase) return empty
+  const { data, error } = await supabase.from('critical_escalations').select('thread_id, status, dismissed')
+  if (error || !data) return empty
+  const out = { dismissed: new Set<string>(), settled: new Set<string>() }
+  for (const r of data as { thread_id: string; status?: string; dismissed?: boolean }[]) {
+    if (!r.thread_id) continue
+    if (r.dismissed) out.dismissed.add(r.thread_id)
+    else if (r.status === 'fixed' || r.status === 'positive') out.settled.add(r.thread_id)
+  }
+  return out
+}
 
 // ---- Critical escalations (customer-side major negative feedback) ----
 // A PERSISTENT record of client-triggered red flags. A DB trigger captures every
@@ -403,12 +423,19 @@ export interface EscalationItem {
 export interface CriticalEscalation {
   company_name: string; geo?: string; client_email?: string; signal_type?: string
   items: EscalationItem[]; threadIds: string[]; count: number
-  status: 'open' | 'resolved'          // open if ANY underlying thread is still open
+  // Rolled up across the client's threads, worst-first: any thread still untriaged makes
+  // the client 'open'; else any thread a human marked still-broken makes it 'unresolved';
+  // only when every thread is fixed or turned positive does the client read 'resolved'.
+  status: 'open' | 'unresolved' | 'resolved'
   headline?: string                    // most-recent escalation text (the card summary)
   latest_summary?: string; latest_sentiment?: string
   first_flagged_date?: string; last_flagged_date?: string; resolved_at?: string; resolved_by?: string
 }
 const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+// The table stores 'open' | 'unresolved' | 'fixed' | 'positive'; the board shows the last
+// two as one settled state. RANK orders them worst-first for the roll-up and the sort.
+const rollUp = (s?: string): 'open' | 'unresolved' | 'resolved' => s === 'open' ? 'open' : s === 'unresolved' ? 'unresolved' : 'resolved'
+const RANK: Record<'open' | 'unresolved' | 'resolved', number> = { open: 0, unresolved: 1, resolved: 2 }
 export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
   if (!supabase) return []
   const [escRes, sigRes, clients] = await Promise.all([
@@ -435,20 +462,22 @@ export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
     const item: EscalationItem = { thread_id: r.thread_id, signal_type: r.signal_type, escalation_summary: r.escalation_summary, source_subject: r.source_subject, client_email: r.client_email, first_flagged_date: r.first_flagged_date, status: r.status, resolution_note: r.resolution_note, resolved_at: r.resolved_at, resolved_by: r.resolved_by, latest_summary: l?.summary, latest_sentiment: l?.sentiment }
     const g = groups.get(key)
     if (!g) {
-      groups.set(key, { company_name: r.company_name || '(unknown client)', geo: geoFor(r.company_name), client_email: r.client_email, signal_type: r.signal_type, items: [item], threadIds: [r.thread_id], count: 1, status: r.status === 'open' ? 'open' : 'resolved', headline: r.escalation_summary, latest_summary: l?.summary, latest_sentiment: l?.sentiment, first_flagged_date: r.first_flagged_date, last_flagged_date: r.first_flagged_date, resolved_at: r.resolved_at, resolved_by: r.resolved_by })
+      groups.set(key, { company_name: r.company_name || '(unknown client)', geo: geoFor(r.company_name), client_email: r.client_email, signal_type: r.signal_type, items: [item], threadIds: [r.thread_id], count: 1, status: rollUp(r.status), headline: r.escalation_summary, latest_summary: l?.summary, latest_sentiment: l?.sentiment, first_flagged_date: r.first_flagged_date, last_flagged_date: r.first_flagged_date, resolved_at: r.resolved_at, resolved_by: r.resolved_by })
     } else {
       g.items.push(item); g.threadIds.push(r.thread_id); g.count++
-      if (r.status === 'open') g.status = 'open'
+      // worst status across the client's threads wins
+      if (RANK[rollUp(r.status)] < RANK[g.status]) g.status = rollUp(r.status)
       // rows arrive newest-first, so the first seen is the headline; track the date span
       if ((r.first_flagged_date || '') < (g.first_flagged_date || '')) g.first_flagged_date = r.first_flagged_date
       if ((r.first_flagged_date || '') > (g.last_flagged_date || '')) g.last_flagged_date = r.first_flagged_date
     }
   }
   // sort: open clients first, then by most-recent activity
-  return [...groups.values()].sort((a, b) => (a.status === b.status ? (b.last_flagged_date || '').localeCompare(a.last_flagged_date || '') : a.status === 'open' ? -1 : 1))
+  return [...groups.values()].sort((a, b) => (a.status === b.status ? (b.last_flagged_date || '').localeCompare(a.last_flagged_date || '') : RANK[a.status] - RANK[b.status]))
 }
-// Mark ALL of a client's escalation threads. status: 'open' | 'fixed' | 'positive'. They stay in the list.
-export async function markEscalationStatus(threadIds: string[], status: 'open' | 'fixed' | 'positive', opts?: { actor?: string; note?: string }): Promise<boolean> {
+// Mark ALL of a client's escalation threads. They stay in the list either way.
+// 'unresolved' is the deliberate middle: someone looked and it is still broken.
+export async function markEscalationStatus(threadIds: string[], status: 'open' | 'unresolved' | 'fixed' | 'positive', opts?: { actor?: string; note?: string }): Promise<boolean> {
   if (!supabase || !threadIds.length) return false
   const { error } = await supabase.rpc('mark_escalations_status', { p_thread_ids: threadIds, p_status: status, p_actor: opts?.actor ?? null, p_note: opts?.note ?? null })
   return !error

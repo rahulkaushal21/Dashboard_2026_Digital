@@ -7,6 +7,9 @@ import { currentEmail } from '@/lib/access'
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const day = (s?: string) => (s || '').slice(0, 10)
+// open = nobody has triaged it · unresolved = looked at, still broken · resolved = done
+const statusLabel = (s: string) => s === 'resolved' ? '✓ Resolved' : s === 'unresolved' ? '⚑ Unresolved' : '● Open'
+const statusTone = (s: string) => s === 'resolved' ? 'bg-green-500/20 text-green-300' : s === 'unresolved' ? 'bg-orange-500/20 text-orange-300' : 'bg-red-500/20 text-red-300'
 const sentBucket = (s?: string) => { const v = (s || '').toLowerCase(); if (/posit|happy|great|delight/.test(v)) return 'Positive'; if (/negat|risk|churn|frustrat/.test(v)) return 'Negative'; if (/neutral|stable|mixed/.test(v)) return 'Neutral'; return '' }
 const kindTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/complaint|churn/.test(v)) return 'bg-red-500/15 text-red-400'; if (/risk|escalat/.test(v)) return 'bg-orange-500/15 text-orange-300'; return 'bg-mav-line text-mav-muted' }
 const kindLabel = (t?: string) => { const v = (t || '').toLowerCase(); if (/complaint/.test(v)) return 'Complaint'; if (/churn/.test(v)) return 'Churn risk'; if (/risk|escalat/.test(v)) return 'At risk'; return t || 'Negative' }
@@ -14,7 +17,7 @@ const kindLabel = (t?: string) => { const v = (t || '').toLowerCase(); if (/comp
 export default function CriticalEscalations() {
   const [rows, setRows] = useState<CriticalEscalation[]>([])
   const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('all')
+  const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [status, setStatus] = useState<'all' | 'open' | 'unresolved' | 'resolved'>('all')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<CriticalEscalation | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -24,6 +27,7 @@ export default function CriticalEscalations() {
 
   const geos = useMemo(() => uniq(rows.map(r => r.geo)), [rows])
   const openCount = rows.filter(r => r.status === 'open').length
+  const unresolvedCount = rows.filter(r => r.status === 'unresolved').length
 
   const filtered = useMemo(() => rows.filter(r => {
     if (status !== 'all' && r.status !== status) return false
@@ -41,12 +45,13 @@ export default function CriticalEscalations() {
     setSel(prev => prev && key(prev) === key(r) ? { ...prev, ...fields } : prev)
   }
 
-  async function setStatusOf(r: CriticalEscalation, st: 'open' | 'fixed' | 'positive') {
+  async function setStatusOf(r: CriticalEscalation, st: 'open' | 'unresolved' | 'fixed' | 'positive') {
     setBusy(key(r))
     const ok = await markEscalationStatus(r.threadIds, st, { actor: currentEmail() || undefined })
     setBusy(null)
     if (!ok) { alert('Could not update — please try again.'); return }
-    patch(r, { status: st === 'open' ? 'open' : 'resolved', resolved_at: st === 'open' ? undefined : new Date().toISOString(), resolved_by: st === 'open' ? undefined : (currentEmail() || undefined) })
+    const settled = st === 'fixed' || st === 'positive'
+    patch(r, { status: settled ? 'resolved' : st, resolved_at: settled ? new Date().toISOString() : undefined, resolved_by: settled ? (currentEmail() || undefined) : undefined })
   }
 
   async function remove(r: CriticalEscalation) {
@@ -65,14 +70,15 @@ export default function CriticalEscalations() {
       <Header title="Critical Escalations" subtitle="Major negative feedback raised by clients over email — one row per client. Escalations stay here even after they're resolved; mark them Fixed or Positive yourself." />
 
       <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-red-300 font-semibold">How this works:</span> one entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="text-white">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-300">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Use <span className="text-mav-muted">Remove</span> only for a false alarm.
+        <span className="text-red-300 font-semibold">How this works:</span> one entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="text-white">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-300">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-orange-300">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="text-mav-muted">Remove</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or detail…" className={`${sel} min-w-[220px] flex-1`} />
-        <select value={status} onChange={e => setStatus(e.target.value as 'all' | 'open' | 'resolved')} className={sel}>
+        <select value={status} onChange={e => setStatus(e.target.value as 'all' | 'open' | 'unresolved' | 'resolved')} className={sel}>
           <option value="all">All statuses</option>
           <option value="open">● Open only</option>
+          <option value="unresolved">⚑ Unresolved only</option>
           <option value="resolved">✓ Resolved only</option>
         </select>
         <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}>
@@ -84,7 +90,7 @@ export default function CriticalEscalations() {
         <span className="text-xs text-mav-muted">to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
         {(q || geo || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo(''); setFrom(''); setTo(''); setStatus('all') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
-        <span className="text-xs text-mav-muted ml-auto">{filtered.length} clients · {openCount} open</span>
+        <span className="text-xs text-mav-muted ml-auto">{filtered.length} clients · {openCount} open · {unresolvedCount} unresolved</span>
       </div>
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p>
@@ -100,7 +106,7 @@ export default function CriticalEscalations() {
               <button onClick={() => setSel(r)} className="text-left flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold">{r.company_name}</span>
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${resolved ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>{resolved ? '✓ Resolved' : '● Open'}</span>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${statusTone(r.status)}`}>{statusLabel(r.status)}</span>
                   {r.count > 1 && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-mav-line text-mav-muted">{r.count} escalations</span>}
                   <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${kindTone(r.signal_type)}`}>{kindLabel(r.signal_type)}</span>
                   {r.geo && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-mav-line text-mav-muted">{r.geo}</span>}
@@ -114,6 +120,7 @@ export default function CriticalEscalations() {
                   ? <>
                       <button onClick={() => setStatusOf(r, 'fixed')} disabled={busy === key(r)} className="text-xs px-2.5 py-1 rounded-md border border-green-500/40 text-green-300 hover:bg-green-500/10 disabled:opacity-50">Mark fixed</button>
                       <button onClick={() => setStatusOf(r, 'positive')} disabled={busy === key(r)} className="text-xs px-2.5 py-1 rounded-md border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50">Positive</button>
+                      {r.status !== 'unresolved' && <button onClick={() => setStatusOf(r, 'unresolved')} disabled={busy === key(r)} title="Looked at, still broken — keeps it as live risk here and on Clients" className="text-xs px-2.5 py-1 rounded-md border border-orange-500/40 text-orange-300 hover:bg-orange-500/10 disabled:opacity-50">Unresolved</button>}
                     </>
                   : <button onClick={() => setStatusOf(r, 'open')} disabled={busy === key(r)} className="text-xs px-2.5 py-1 rounded-md border border-mav-line text-mav-muted hover:text-orange-300 disabled:opacity-50">Reopen</button>}
                 <button onClick={() => remove(r)} disabled={busy === key(r)} title="Not really our escalation — e.g. client frustrated for external reasons. Removes it from the list." className="text-xs px-2.5 py-1 rounded-md border border-mav-line text-mav-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-50">Not an issue</button>
@@ -130,11 +137,11 @@ export default function CriticalEscalations() {
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${sel_.status === 'resolved' ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className={`inline-block w-2.5 h-2.5 rounded-full ${sel_.status === 'resolved' ? 'bg-green-500' : sel_.status === 'unresolved' ? 'bg-orange-400' : 'bg-red-500'}`} />
                   <h2 className="text-xl font-semibold">{sel_.company_name}</h2>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
-                  <span className={`text-xs px-2 py-1 rounded-full ${sel_.status === 'resolved' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>{sel_.status === 'resolved' ? '✓ Resolved' : '● Open'}</span>
+                  <span className={`text-xs px-2 py-1 rounded-full ${statusTone(sel_.status)}`}>{statusLabel(sel_.status)}</span>
                   {sel_.count > 1 && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.count} escalations</span>}
                   {sel_.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.geo}</span>}
                 </div>
@@ -164,6 +171,7 @@ export default function CriticalEscalations() {
                 <div className="flex gap-2">
                   <button onClick={() => setStatusOf(sel_, 'fixed')} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-green-500/40 text-green-300 hover:bg-green-500/10 disabled:opacity-50">✓ Mark fixed</button>
                   <button onClick={() => setStatusOf(sel_, 'positive')} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50">★ Mark positive</button>
+                  {sel_.status !== 'unresolved' && <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Looked at, still broken — stays as live risk here and on Clients" className="text-sm px-3 py-2 rounded-md border border-orange-500/40 text-orange-300 hover:bg-orange-500/10 disabled:opacity-50">⚑ Unresolved</button>}
                 </div>
               ) : (
                 <button onClick={() => setStatusOf(sel_, 'open')} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-orange-300 disabled:opacity-50">↺ Reopen</button>

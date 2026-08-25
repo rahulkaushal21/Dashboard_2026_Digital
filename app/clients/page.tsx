@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
+import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
 
@@ -75,6 +75,9 @@ export default function Clients() {
   const [clients, setClients] = useState<Client[]>([])
   const [signals, setSignals] = useState<EmailSignal[]>([])
   const [escs, setEscs] = useState<Escalation[]>([])
+  // Verdicts a human recorded on Critical Escalations. Honoured here so a client can't be
+  // called At risk off the same signal that was dismissed or closed out one screen away.
+  const [verdicts, setVerdicts] = useState<{ dismissed: Set<string>; settled: Set<string> }>({ dismissed: new Set(), settled: new Set() })
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [allOpps, setAllOpps] = useState<Opportunity[]>([])
   const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
@@ -98,7 +101,7 @@ export default function Clients() {
   const PAGE_SIZE = 50
   const [page, setPage] = useState(1)
   useEffect(() => {
-    getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
+    getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getEscalationVerdicts().then(setVerdicts); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
     getClientDirectory().then(setDir)
     // only email-sourced opportunities count as "active discussion" (sheet quotes live on the Opportunities page)
     // — but keep the full list too, because the automation-demand scan below needs to
@@ -204,7 +207,12 @@ export default function Clients() {
     const maxMonth = maxKey ? byMonth[maxKey] : 0
     const cutoff = monthsAgoYM(2)
     const recentMajor = list.filter(e => (ym(e.tracking_date) >= cutoff) && /major|critical|high|sev/i.test(`${e.business_impact || ''} ${e.escalation_type || ''}`))
-    const negSigs = (sigByClient.get(c.company_name) || []).filter(s => sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || ''))
+    // A negative signal stops counting once someone has ruled on it in Critical
+    // Escalations — dismissed ("not our escalation") or closed out as fixed/positive.
+    // A thread marked Unresolved is in neither set, so it still counts: that is the
+    // whole point of the Unresolved tag.
+    const judged = (s: EmailSignal) => !!s.thread_id && (verdicts.dismissed.has(s.thread_id) || verdicts.settled.has(s.thread_id))
+    const negSigs = (sigByClient.get(c.company_name) || []).filter(s => (sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || '')) && !judged(s))
     const posSigs = (sigByClient.get(c.company_name) || []).filter(s => sentBucket(s.sentiment) === 'Positive')
     const posFbTbl = posFbByClient.get(c.company_name) || []
     const lb = ym(c.last_booking_month)
@@ -436,7 +444,7 @@ export default function Clients() {
     })
 
     return result
-  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient])
+  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient, verdicts])
 
   // ---- Paging ------------------------------------------------------------------
   // Any change to what is being listed sends you back to page 1 — otherwise you filter
@@ -531,7 +539,7 @@ export default function Clients() {
         <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. A negative email signal stops counting here once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-orange-300">Unresolved</span> there keeps counting. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
         <div className="flex items-baseline justify-between mb-4">
