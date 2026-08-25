@@ -84,7 +84,7 @@ export default function Escalations() {
 
   return (
     <div>
-      <Header title="Escalations" subtitle="Client escalations & experience triggers — filter by type, GEO and date, click headers to sort" />
+      <Header title="Major Process Gap" subtitle="Client escalations & experience triggers — filter by type, GEO and date, click headers to sort" />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company…" className={`${selCls} w-44`} />
         <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option>{uniq(all.map(x => x.escalation_type)).map(t => <option key={t} value={t}>{t}</option>)}</select>
@@ -96,7 +96,7 @@ export default function Escalations() {
         <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <KPICard label="Escalations" value={String(e.length)} />
+        <KPICard label="Major process gaps" value={String(e.length)} />
         <KPICard label="Major impact" value={String(e.filter(isMajor).length)} />
         <KPICard label="Companies" value={String(uniq(e.map(x => x.company_name)).length)} />
         <KPICard label="Types" value={String(uniq(e.map(x => x.escalation_type)).length)} />
@@ -152,9 +152,9 @@ function EscalationDetail({ e, onClose }: { e: Escalation; onClose: () => void }
       <div onClick={ev => ev.stopPropagation()} className="bg-mav-panel border border-mav-line rounded-xl w-full max-w-2xl my-4 shadow-2xl">
         <div className="flex items-start justify-between gap-4 p-5 border-b border-mav-line">
           <div>
-            <div className="text-lg font-semibold text-white">{e.company_name || 'Escalation'}</div>
+            <div className="text-lg font-semibold text-white">{e.company_name || 'Major process gap'}</div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-              <span className={`px-2 py-0.5 rounded-full border ${major ? 'border-red-500/50 text-red-400' : 'border-mav-line text-mav-muted'}`}>{e.escalation_type || 'Escalation'}</span>
+              <span className={`px-2 py-0.5 rounded-full border ${major ? 'border-red-500/50 text-red-400' : 'border-mav-line text-mav-muted'}`}>{e.escalation_type || 'Major process gap'}</span>
               {e.business_impact && <span className="px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">{e.business_impact} impact</span>}
               {e.geo && <span className="px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">{e.geo}</span>}
               <span className="text-mav-muted">{e.tracking_date || e.month || ''}</span>

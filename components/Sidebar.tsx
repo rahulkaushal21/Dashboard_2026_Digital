@@ -18,7 +18,7 @@ const nav: Entry[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   { href: '/clients', label: 'Clients', icon: Users },
-  { href: '/escalations', label: 'Escalations', icon: AlertTriangle },
+  { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
   { href: '/delights', label: 'Delights', icon: Sparkles },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
