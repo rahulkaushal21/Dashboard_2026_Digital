@@ -76,6 +76,7 @@ export default function Clients() {
   const [signals, setSignals] = useState<EmailSignal[]>([])
   const [escs, setEscs] = useState<Escalation[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
+  const [allOpps, setAllOpps] = useState<Opportunity[]>([])
   const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
   const [owner, setOwner] = useState(''); const [geo, setGeo] = useState('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [recentOnly, setRecentOnly] = useState(false)
@@ -94,7 +95,9 @@ export default function Clients() {
     getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
     getClientDirectory().then(setDir)
     // only email-sourced opportunities count as "active discussion" (sheet quotes live on the Opportunities page)
-    getOpportunities().then(all => setOpps(all.filter(o => (o.source_tags || []).includes('email') || o.source === 'email')))
+    // — but keep the full list too, because the automation-demand scan below needs to
+    // see sheet quote lines as well ("Barton Automation", "Klaviyo integration"…).
+    getOpportunities().then(all => { setAllOpps(all); setOpps(all.filter(o => (o.source_tags || []).includes('email') || o.source === 'email')) })
   }, [])
 
   // The client LIST comes only from booking data (as before). Signals/escalations/
@@ -270,6 +273,58 @@ export default function Clients() {
     return Object.entries(m).sort((a, b) => b[1] - a[1])
   }, [dir])
 
+  // ---- Automation demand we have already heard ---------------------------------
+  // The ⚡ AI-native flag is NOT an opportunity signal — it was set by a one-off
+  // classification pass and means "this client's own business is AI" (accessiBe,
+  // Sensen.ai, Omniscient Neurotechnology). Only 13 booked clients carry it, and
+  // reading that as the size of the automation opportunity badly understates it.
+  //
+  // This is the honest version: scan every quote line and every logged conversation
+  // for automation-shaped language, and surface the clients who have ALREADY asked us
+  // for this kind of work. Evidence-backed, so each name comes with the line that
+  // matched rather than a score nobody can check.
+  const DEMAND_RE = /(automat|chatbot|integration|zapier|make\.com|\bn8n\b|dashboard|spreadsheet|google sheet|workflow|\bapi\b|klaviyo|gohighlevel)/i
+  const demandByCompany = useMemo(() => {
+    const m = new Map<string, { company: string; evidence: string[] }>()
+    const add = (company?: string, ev?: string) => {
+      const name = (company || '').trim()
+      if (!name || !ev) return
+      const k = name.toLowerCase()
+      if (!m.has(k)) m.set(k, { company: name, evidence: [] })
+      const bucket = m.get(k)!
+      const line = ev.trim().slice(0, 90)
+      if (line && !bucket.evidence.includes(line)) bucket.evidence.push(line)
+    }
+    for (const o of allOpps) {
+      const hay = `${o.source_subject || ''} ${o.summary || ''} ${o.gist || ''}`
+      if (DEMAND_RE.test(hay)) add(o.company_name, o.source_subject || o.summary)
+    }
+    for (const s of signals) {
+      const hay = `${s.source_subject || ''} ${s.summary || ''}`
+      if (DEMAND_RE.test(hay)) add(s.company_name, s.source_subject || s.summary)
+    }
+    return m
+  }, [allOpps, signals])
+  // Attach each demand hit to a directory industry, so the per-industry rows can show
+  // "N companies here have already asked". Matched on the same name keys the rest of
+  // this page uses, so "Enphase (Solargraf)" still lands on the right row.
+  const demandByIndustry = useMemo(() => {
+    const tagged = [...demandByCompany.values()].map(d => ({ d, keys: nameKeys(d.company) }))
+    const out: Record<string, { company: string; evidence: string[] }[]> = {}
+    const seen = new Set<string>()
+    for (const entry of tagged) {
+      const hit = dir.find(x => keyMatch(nameKeys(x.company_name), entry.keys))
+        || clients.find(x => keyMatch(nameKeys(x.company_name), entry.keys))
+      const k = hit ? ((hit as ClientDirectory | Client).industry || 'Other / Unclassified') : ''
+      if (!k) continue
+      if (seen.has(entry.d.company.toLowerCase())) continue
+      seen.add(entry.d.company.toLowerCase())
+      ;(out[k] = out[k] || []).push(entry.d)
+    }
+    for (const k of Object.keys(out)) out[k].sort((a, b) => b.evidence.length - a.evidence.length)
+    return out
+  }, [demandByCompany, dir, clients])
+
   // ---- Automation opportunity rows ---------------------------------------------
   // One row per directory industry: how many companies sit in it, how many of those
   // already buy from us, and the lifetime value those buyers represent. Sorted by
@@ -285,12 +340,17 @@ export default function Clients() {
       m[k].companies++
       if (d.is_revenue_client) m[k].booked++
     })
+    const aiNative: Record<string, number> = {}
+    clients.forEach(c => { if (c.ai_focus) { const k = c.industry || 'Other / Unclassified'; aiNative[k] = (aiNative[k] || 0) + 1 } })
     return Object.entries(m)
-      .map(([name, v]) => ({ name, ...v, ltv: ltv[name] || 0, book: AUTOMATION_PLAYS[name] }))
+      .map(([name, v]) => ({ name, ...v, ltv: ltv[name] || 0, book: AUTOMATION_PLAYS[name], demand: demandByIndustry[name] || [], aiNative: aiNative[name] || 0 }))
       .filter(r => r.book)
       .sort((a, b) => b.companies - a.companies)
-  }, [dir, clients])
-  const autoTotals = useMemo(() => autoRows.reduce((a, r) => ({ companies: a.companies + r.companies, booked: a.booked + r.booked }), { companies: 0, booked: 0 }), [autoRows])
+  }, [dir, clients, demandByIndustry])
+  const autoTotals = useMemo(() => autoRows.reduce((a, r) => ({
+    companies: a.companies + r.companies, booked: a.booked + r.booked,
+    demand: a.demand + r.demand.length, aiNative: a.aiNative + r.aiNative,
+  }), { companies: 0, booked: 0, demand: 0, aiNative: 0 }), [autoRows])
   // What "AI & Automation" has actually billed, and how concentrated it is. Computed
   // rather than written down, so the argument below can't quietly go stale — and the
   // concentration number is the point: one client currently IS this service line.
@@ -376,8 +436,8 @@ export default function Clients() {
           <option value="Neutral">🟡 Neutral ({statCount('Neutral')})</option>
           <option value="Negative">🔴 Negative ({statCount('Negative')})</option>
         </select>
-        <button onClick={() => setAiOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI &amp; Automation{aiCount ? ` (${aiCount})` : ''}</button>
-        <button onClick={() => setRecentOnly(v => !v)} title="Clients with an email, escalation or quote in the last 14 days" className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🔥 Active discussions</button>
+        <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
+        <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
         <div className="ml-auto flex items-center gap-2">
           <div className="flex rounded-md border border-mav-line overflow-hidden">
             <button onClick={() => setMode('clients')} className={`text-xs px-3 py-2 transition-colors ${mode === 'clients' ? 'bg-mav-yellow text-black font-medium' : 'text-mav-muted hover:text-white'}`}>Revenue clients ({clients.length})</button>
@@ -521,6 +581,25 @@ export default function Clients() {
           Click an industry to open its plays.
         </p>
 
+        {/* The four numbers that size this, from widest to warmest. The last one is the
+            trap: ⚡ AI-native counts clients whose OWN business is AI — it is not the
+            opportunity, and reading it as such understates the list by two orders of
+            magnitude. */}
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 mb-5">
+          {[
+            { n: autoTotals.companies.toLocaleString(), label: 'Addressable', sub: 'companies in the directory, all with an industry playbook below', cls: 'text-white' },
+            { n: autoTotals.booked.toLocaleString(), label: 'Warm', sub: 'already buying from us — we hold the relationship and built the site', cls: 'text-mav-yellow' },
+            { n: autoTotals.demand.toLocaleString(), label: 'Demand already heard', sub: 'have asked us for automation, integration or dashboard work in a quote or a conversation', cls: 'text-green-400' },
+            { n: autoTotals.aiNative.toLocaleString(), label: 'AI-native', sub: 'clients whose own business is AI — a conversation starter, NOT the size of the opportunity', cls: 'text-blue-400' },
+          ].map(s => (
+            <div key={s.label} className="bg-mav-panel border border-mav-line rounded-xl p-4">
+              <div className={`text-2xl font-semibold ${s.cls}`}>{s.n}</div>
+              <div className="text-xs font-medium mt-0.5">{s.label}</div>
+              <div className="text-[11px] text-mav-muted leading-relaxed mt-1">{s.sub}</div>
+            </div>
+          ))}
+        </div>
+
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <span className="text-xs text-mav-muted">Filter by build type:</span>
           {(Object.keys(PLAY_TYPE_TONE) as PlayType[]).map(t => (
@@ -542,6 +621,8 @@ export default function Clients() {
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className={`text-sm font-medium ${open ? 'text-mav-yellow' : ''}`}>{r.name}</span>
                     <span className="text-xs text-mav-muted">{r.companies.toLocaleString()} companies · {r.booked} booked · {fmtUsd(r.ltv)} LTV</span>
+                    {r.demand.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium" title={`${r.demand.length} client${r.demand.length === 1 ? ' has' : 's have'} already asked for automation-shaped work`}>{r.demand.length} asked</span>}
+                    {r.aiNative > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400" title="Clients whose own business is AI">{r.aiNative} AI-native</span>}
                     <div className="flex gap-1 ml-auto">
                       {r.book.plays.map(p => <span key={p.name} className={`text-[10px] px-1.5 py-0.5 rounded-full ${PLAY_TYPE_TONE[p.type]}`}>{p.type}</span>)}
                       <span className="text-mav-muted text-xs ml-1">{open ? '▾' : '▸'}</span>
@@ -568,6 +649,20 @@ export default function Clients() {
                         </div>
                       ))}
                     </div>
+                    {r.demand.length > 0 && (
+                      <div className="mt-4 rounded-lg border border-green-500/25 bg-green-500/5 p-4">
+                        <div className="text-xs font-medium text-green-400 mb-1">Start here — {r.demand.length} client{r.demand.length === 1 ? ' has' : 's have'} already asked</div>
+                        <p className="text-[11px] text-mav-muted mb-3">Automation-shaped language found in their own quote lines or logged conversations. Quoted below so you can judge each one rather than trust a score.</p>
+                        <div className="flex flex-wrap gap-2">
+                          {r.demand.slice(0, 12).map(d => (
+                            <span key={d.company} title={d.evidence.join(' · ')} className="text-xs px-2 py-1 rounded-md bg-mav-dark/60 border border-mav-line">
+                              <span className="font-medium">{d.company}</span>
+                              <span className="text-mav-muted"> — {d.evidence[0]}{d.evidence.length > 1 ? ` (+${d.evidence.length - 1})` : ''}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <button onClick={() => { setInd(r.name); setMode('directory'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
                       className="mt-4 text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors">
                       → See the {r.companies.toLocaleString()} {r.name} companies in the directory
