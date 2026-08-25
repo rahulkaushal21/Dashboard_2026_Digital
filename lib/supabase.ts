@@ -109,6 +109,12 @@ email?: string
 matched_client?: string
 is_revenue_client?: boolean
 notes?: string
+// AI stance, classified from the site title/description already cached on the
+// directory row. 'native' = the company's own product is AI; 'adjacent' = its
+// positioning leans on AI or automation; 'none' = neither; undefined = no site
+// text was captured, so unknown rather than no.
+ai_stance?: 'native' | 'adjacent' | 'none'
+ai_evidence?: string
 }
 
 export async function getClientDirectory(): Promise<ClientDirectory[]> {

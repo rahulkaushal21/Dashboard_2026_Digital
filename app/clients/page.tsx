@@ -86,11 +86,17 @@ export default function Clients() {
   const [dir, setDir] = useState<ClientDirectory[]>([])
   const [mode, setMode] = useState<'clients' | 'directory'>('clients')
   const [bu, setBu] = useState(''); const [linked, setLinked] = useState<'' | 'yes' | 'no'>('')
+  // Directory-only: filter by the AI stance classified from each company's own site text
+  const [aiStance, setAiStance] = useState<'' | 'native' | 'adjacent'>('')
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [feedback, setFeedback] = useState<Feedback[]>([])
   // Automation section: which industry card is expanded, and an optional play-type filter
   const [openPlayInd, setOpenPlayInd] = useState<string>('')
   const [playType, setPlayType] = useState<PlayType | ''>('')
+  // Both tables page at 50. The directory is ~2,000 rows and was rendering every one
+  // of them into the DOM on every keystroke of the search box.
+  const PAGE_SIZE = 50
+  const [page, setPage] = useState(1)
   useEffect(() => {
     getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
     getClientDirectory().then(setDir)
@@ -265,8 +271,14 @@ export default function Clients() {
       .filter(d => !geo || d.geo === geo)
       .filter(d => !bu || d.bu === bu)
       .filter(d => !linked || (linked === 'yes' ? d.is_revenue_client : !d.is_revenue_client))
+      .filter(d => !aiStance || d.ai_stance === aiStance)
       .sort((a, b) => a.company_name.toLowerCase().localeCompare(b.company_name.toLowerCase()))
-  }, [dir, q, ind, geo, bu, linked])
+  }, [dir, q, ind, geo, bu, linked, aiStance])
+  const dirAi = useMemo(() => ({
+    native: dir.filter(d => d.ai_stance === 'native').length,
+    adjacent: dir.filter(d => d.ai_stance === 'adjacent').length,
+    unknown: dir.filter(d => !d.ai_stance).length,
+  }), [dir])
   const dirIndCounts = useMemo(() => {
     const m: Record<string, number> = {}
     dir.forEach(d => { const k = d.industry || 'Other / Unclassified'; m[k] = (m[k] || 0) + 1 })
@@ -340,10 +352,17 @@ export default function Clients() {
       m[k].companies++
       if (d.is_revenue_client) m[k].booked++
     })
+    // AI stance per industry, read across the WHOLE directory rather than the booked
+    // clients only — this is what the old ⚡ flag could never do.
     const aiNative: Record<string, number> = {}
-    clients.forEach(c => { if (c.ai_focus) { const k = c.industry || 'Other / Unclassified'; aiNative[k] = (aiNative[k] || 0) + 1 } })
+    const aiAdj: Record<string, number> = {}
+    dir.forEach(d => {
+      const k = d.industry || 'Other / Unclassified'
+      if (d.ai_stance === 'native') aiNative[k] = (aiNative[k] || 0) + 1
+      else if (d.ai_stance === 'adjacent') aiAdj[k] = (aiAdj[k] || 0) + 1
+    })
     return Object.entries(m)
-      .map(([name, v]) => ({ name, ...v, ltv: ltv[name] || 0, book: AUTOMATION_PLAYS[name], demand: demandByIndustry[name] || [], aiNative: aiNative[name] || 0 }))
+      .map(([name, v]) => ({ name, ...v, ltv: ltv[name] || 0, book: AUTOMATION_PLAYS[name], demand: demandByIndustry[name] || [], aiNative: aiNative[name] || 0, aiAdj: aiAdj[name] || 0 }))
       .filter(r => r.book)
       .sort((a, b) => b.companies - a.companies)
   }, [dir, clients, demandByIndustry])
@@ -403,6 +422,45 @@ export default function Clients() {
     return result
   }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient])
 
+  // ---- Paging ------------------------------------------------------------------
+  // Any change to what is being listed sends you back to page 1 — otherwise you filter
+  // 2,000 rows down to 12 while sitting on page 8 and the table looks empty.
+  const total = mode === 'clients' ? rows.length : dirRows.length
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  useEffect(() => { setPage(1) }, [mode, q, ind, stat, aiOnly, owner, geo, bu, linked, aiStance, from, to, recentOnly, sortBy, sortAsc])
+  const safePage = Math.min(page, pageCount)
+  const pageRows = useMemo(() => rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [rows, safePage])
+  const pageDirRows = useMemo(() => dirRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [dirRows, safePage])
+  const firstShown = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1
+  const lastShown = Math.min(safePage * PAGE_SIZE, total)
+  // Page numbers with ellipses: always first and last, plus a window around the current
+  // page, so 41 pages of directory don't render 41 buttons.
+  const pageNums = useMemo(() => {
+    const out: (number | '…')[] = []
+    for (let i = 1; i <= pageCount; i++) {
+      if (i === 1 || i === pageCount || Math.abs(i - safePage) <= 1) out.push(i)
+      else if (out[out.length - 1] !== '…') out.push('…')
+    }
+    return out
+  }, [pageCount, safePage])
+  const Pager = () => total === 0 ? null : (
+    <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-mav-line text-xs">
+      <span className="text-mav-muted">Showing {firstShown.toLocaleString()}–{lastShown.toLocaleString()} of {total.toLocaleString()}</span>
+      {pageCount > 1 && (
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
+            className="px-2 py-1 rounded border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 disabled:hover:text-mav-muted">← Prev</button>
+          {pageNums.map((n, i) => n === '…'
+            ? <span key={`e${i}`} className="px-1 text-mav-muted">…</span>
+            : <button key={n} onClick={() => setPage(n)}
+                className={`px-2.5 py-1 rounded border transition-colors ${n === safePage ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>{n}</button>)}
+          <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={safePage === pageCount}
+            className="px-2 py-1 rounded border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 disabled:hover:text-mav-muted">Next →</button>
+        </div>
+      )}
+    </div>
+  )
+
   const handleSort = (field: 'name' | 'ltv' | 'owner' | 'geo' | 'activity') => {
     if (sortBy === field) {
       setSortAsc(!sortAsc)
@@ -428,6 +486,7 @@ export default function Clients() {
         <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}><option value="">All GEOs</option>{(mode === 'clients' ? geos : dirGeos).map(g => <option key={g} value={g}>{g}</option>)}</select>
         {mode === 'directory' && <select value={bu} onChange={e => setBu(e.target.value)} className={sel}><option value="">All BUs</option>{dirBus.map(b => <option key={b} value={b}>{b}</option>)}</select>}
         {mode === 'directory' && <select value={linked} onChange={e => setLinked(e.target.value as '' | 'yes' | 'no')} className={sel}><option value="">Booked &amp; not booked</option><option value="yes">Booked revenue</option><option value="no">No revenue yet</option></select>}
+        {mode === 'directory' && <select value={aiStance} onChange={e => setAiStance(e.target.value as '' | 'native' | 'adjacent')} title="Classified from each company's own site title and meta description, already cached on the directory row" className={sel}><option value="">Any AI stance</option><option value="native">AI-native ({dirAi.native})</option><option value="adjacent">AI/automation positioning ({dirAi.adjacent})</option></select>}
         <select value={stat} onChange={e => setStat(e.target.value)} className={sel}>
           <option value="">All health</option>
           <option value="At risk">🔴 At risk ({statCount('At risk')})</option>
@@ -500,7 +559,7 @@ export default function Clients() {
               ].map((h, i) => <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody>
-              {rows.map(c => {
+              {pageRows.map(c => {
                 const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByClient.get(c.company_name) || []).length
                 const act = activityOf(c); const isRecent = !!act.last && act.last >= recentCutoff
                 const rowBg = r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
@@ -524,18 +583,19 @@ export default function Clients() {
             </tbody>
           </table>
         </div>
+        <Pager />
       </div>
       ) : (
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-              {['Client', 'Industry', 'BU', 'GEO', 'Account manager', 'Head', 'Type', 'Technology'].map((h, i) => (
+              {['Client', 'Industry', 'AI stance', 'BU', 'GEO', 'Account manager', 'Head', 'Type', 'Technology'].map((h, i) => (
                 <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
             <tbody>
-              {dirRows.map(d => (
+              {pageDirRows.map(d => (
                 <tr key={d.id} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 ${d.is_revenue_client ? 'bg-mav-yellow/5' : ''}`}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -549,6 +609,12 @@ export default function Clients() {
                     {d.industry_source === 'website' && <span title={d.industry_confidence === 'low' ? 'Read from the website, but the page was thin — worth a check' : 'Confirmed by reading the company website'} className="ml-2 text-[11px] text-mav-muted">{d.industry_confidence === 'low' ? '◌' : '✓'}</span>}
                     {d.industry_detail && d.industry_detail !== d.industry && <div className="text-xs text-mav-muted">{d.industry_detail}</div>}
                   </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    {d.ai_stance === 'native' ? <span title={d.ai_evidence ? `Matched on: “${d.ai_evidence}”` : ''} className="text-[11px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">AI-native</span>
+                      : d.ai_stance === 'adjacent' ? <span title={d.ai_evidence ? `Matched on: “${d.ai_evidence}”` : ''} className="text-[11px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">AI/automation</span>
+                      : d.ai_stance === 'none' ? <span className="text-mav-muted text-xs">—</span>
+                      : <span title="No site text was captured for this company, so its stance is unknown rather than no" className="text-mav-muted text-xs">?</span>}
+                  </td>
                   <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.bu || '—'}</td>
                   <td className="px-4 py-3 text-mav-muted">{d.geo || '—'}</td>
                   <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.am_name || '—'}</td>
@@ -560,6 +626,7 @@ export default function Clients() {
             </tbody>
           </table>
         </div>
+        <Pager />
       </div>
       )}
 
@@ -590,7 +657,7 @@ export default function Clients() {
             { n: autoTotals.companies.toLocaleString(), label: 'Addressable', sub: 'companies in the directory, all with an industry playbook below', cls: 'text-white' },
             { n: autoTotals.booked.toLocaleString(), label: 'Warm', sub: 'already buying from us — we hold the relationship and built the site', cls: 'text-mav-yellow' },
             { n: autoTotals.demand.toLocaleString(), label: 'Demand already heard', sub: 'have asked us for automation, integration or dashboard work in a quote or a conversation', cls: 'text-green-400' },
-            { n: autoTotals.aiNative.toLocaleString(), label: 'AI-native', sub: 'clients whose own business is AI — a conversation starter, NOT the size of the opportunity', cls: 'text-blue-400' },
+            { n: `${dirAi.native} + ${dirAi.adjacent}`, label: 'AI-native / AI-positioned', sub: `across the whole directory, read from each company's own site text — ${dirAi.unknown} more have no site text and are unknown, not no`, cls: 'text-blue-400' },
           ].map(s => (
             <div key={s.label} className="bg-mav-panel border border-mav-line rounded-xl p-4">
               <div className={`text-2xl font-semibold ${s.cls}`}>{s.n}</div>
@@ -622,7 +689,8 @@ export default function Clients() {
                     <span className={`text-sm font-medium ${open ? 'text-mav-yellow' : ''}`}>{r.name}</span>
                     <span className="text-xs text-mav-muted">{r.companies.toLocaleString()} companies · {r.booked} booked · {fmtUsd(r.ltv)} LTV</span>
                     {r.demand.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium" title={`${r.demand.length} client${r.demand.length === 1 ? ' has' : 's have'} already asked for automation-shaped work`}>{r.demand.length} asked</span>}
-                    {r.aiNative > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400" title="Clients whose own business is AI">{r.aiNative} AI-native</span>}
+                    {r.aiNative > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400" title="Companies whose own product is AI">{r.aiNative} AI-native</span>}
+                    {r.aiAdj > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400" title="Companies whose own positioning leans on AI or automation — they already speak the language">{r.aiAdj} AI-positioned</span>}
                     <div className="flex gap-1 ml-auto">
                       {r.book.plays.map(p => <span key={p.name} className={`text-[10px] px-1.5 py-0.5 rounded-full ${PLAY_TYPE_TONE[p.type]}`}>{p.type}</span>)}
                       <span className="text-mav-muted text-xs ml-1">{open ? '▾' : '▸'}</span>
