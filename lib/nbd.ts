@@ -14,7 +14,7 @@ export const NBD_TEAM = [
   { name: 'Aman Acharya', aliases: ['aman acharya'] },
 ] as const
 
-const ALIAS = new Set(NBD_TEAM.flatMap(m => m.aliases))
+const ALIAS: Set<string> = new Set(NBD_TEAM.flatMap(m => m.aliases as readonly string[]))
 
 // One Quotes cell can carry several owners ("Malav Modi / Kalgi Shah").
 const owners = (s?: string) => (s || '').split(/[,/&]|\band\b/i).map(x => x.trim().toLowerCase()).filter(Boolean)

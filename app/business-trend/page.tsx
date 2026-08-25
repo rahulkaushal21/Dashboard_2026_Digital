@@ -6,6 +6,10 @@ import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getQuotes, getConversions, getBookingsFull, getOpportunities, type RevenueRow, type Quote, type QuoteConversion, type BookingRow, type Opportunity } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
+// FY 2026-27 revenue goal. One constant — the progress bar, the shortfall line and
+// the plan below it all read from here, so the number can never disagree with itself.
+const FY_TARGET = 3200000
+const FY_TARGET_LABEL = '$3.2M'
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow text-white font-medium cursor-pointer'
 const ym = (s?: string) => (s || '').slice(0, 7)
 const ymd = (s?: string) => (s || '').slice(0, 10)
@@ -79,6 +83,8 @@ export default function BusinessTrendPage() {
   const [revenue, setRevenue] = useState<RevenueRow[]>([])
   const [opportunitiesRaw, setOpportunitiesRaw] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
+  // Set after mount so the server-rendered HTML doesn't bake in a build-time date.
+  const [thisMonth, setThisMonth] = useState(''); const [todayMs, setTodayMs] = useState(0)
 
   useEffect(() => {
     (async () => {
@@ -96,6 +102,8 @@ export default function BusinessTrendPage() {
       }
     })()
   }, [])
+
+  useEffect(() => { const d = new Date(); setThisMonth(d.toISOString().slice(0, 7)); setTodayMs(d.getTime()) }, [])
 
   const opportunities = useMemo(() => deduplicateOpportunities(opportunitiesRaw), [opportunitiesRaw])
 
@@ -138,7 +146,7 @@ export default function BusinessTrendPage() {
     const monthsRemaining = Math.max(0, 12 - completedMonths)
     const avgMonthly = completedMonths > 0 ? totalRev / completedMonths : 0
     const projected = totalRev + (avgMonthly * monthsRemaining)
-    const target = 3500000
+    const target = FY_TARGET
     const onTrack = projected >= target
     const projectedPercent = Math.round((projected / target) * 100)
     return {
@@ -153,6 +161,116 @@ export default function BusinessTrendPage() {
       data: fy26Rev,
     }
   }, [revenue])
+
+
+  // ---- Closing the gap to the FY target -------------------------------------
+  // Everything below is computed from the same revenue and pipeline the rest of the
+  // page uses. Nothing is estimated by hand: if a number isn't in the data it isn't
+  // shown. The run-rate deliberately EXCLUDES the month in progress — a half-billed
+  // month drags the average down and would overstate the shortfall by ~$100k.
+  const plan = useMemo(() => {
+    const fy = fy26Analysis.data
+    const complete = fy.filter(r => ym(r.month) !== thisMonth)
+    const partial = fy.find(r => ym(r.month) === thisMonth)
+    const runRate = complete.length ? complete.reduce((s, r) => s + r.revenue, 0) / complete.length : 0
+    const booked = fy.reduce((s, r) => s + r.revenue, 0)
+    // Months still to bill, counting the one in progress as still winnable.
+    const monthsLeft = Math.max(0, 12 - complete.length)
+    const gap = Math.max(0, FY_TARGET - booked)
+    const needPerMonth = monthsLeft ? gap / monthsLeft : 0
+    const upliftPerMonth = Math.max(0, needPerMonth - runRate)
+
+    // Deals to close: open quotes with a real number on them, ranked by what they're
+    // actually worth — value × the win probability someone recorded — not by headline
+    // size. Age is shown because a 30%-probability deal from last year is not the same
+    // prospect as a 30% deal from last week.
+    const today = todayMs
+    const openDeals = opportunities
+      .filter(o => !o.won && !/lost|cancel/i.test(o.status || '') && (o.value || 0) > 0)
+      .map(o => {
+        const d = Date.parse(o.source_date || o.first_date || '')
+        const age = Number.isFinite(d) && today ? Math.floor((today - d) / 86400000) : null
+        const win = o.win_probability ?? 0
+        return { ...o, age, win, expected: Math.round((o.value || 0) * win / 100) }
+      })
+      .sort((a, b) => b.expected - a.expected)
+    const pipelineValue = openDeals.reduce((s, o) => s + (o.value || 0), 0)
+    const weighted = openDeals.reduce((s, o) => s + o.expected, 0)
+    const fresh = openDeals.filter(o => o.age !== null && o.age <= 90)
+    const stale = openDeals.filter(o => o.age !== null && o.age > 90)
+    const staleValue = stale.reduce((s, o) => s + (o.value || 0), 0)
+
+    // Clients to push: accounts that were billing and then stopped or slowed. Compares
+    // the last three completed months against the three before them, per client. The
+    // "recoverable" figure is what they used to bill per month — not a forecast, a
+    // statement of what they were worth before they went quiet.
+    const keys = complete.map(r => ym(r.month))
+    const last3 = new Set(keys.slice(-3)), prior3 = new Set(keys.slice(-6, -3))
+    const byClient = new Map<string, { name: string; last3: number; prior3: number }>()
+    revenue.forEach(r => {
+      const k = ym(r.month), name = (r.client_name || '').trim()
+      if (!name) return
+      const e = byClient.get(name.toLowerCase()) || { name, last3: 0, prior3: 0 }
+      if (last3.has(k)) e.last3 += r.amount_usd || 0
+      else if (prior3.has(k)) e.prior3 += r.amount_usd || 0
+      byClient.set(name.toLowerCase(), e)
+    })
+    const slipped = [...byClient.values()]
+      .filter(c => c.prior3 > 0 && c.last3 < c.prior3 * 0.7)
+      .map(c => ({ ...c, drop: Math.round(c.prior3 - c.last3), perMonth: Math.round(c.prior3 / 3), lapsed: c.last3 === 0 }))
+      .sort((a, b) => b.drop - a.drop)
+    const recoverable = slipped.reduce((s, c) => s + c.perMonth, 0)
+
+    // Concentration: how much of the year so far rests on the ten biggest accounts.
+    const fyByClient = new Map<string, number>()
+    revenue.forEach(r => { const k = ym(r.month); if (!isInFY26(k)) return; const n = (r.client_name || '').trim(); if (n) fyByClient.set(n, (fyByClient.get(n) || 0) + (r.amount_usd || 0)) })
+    const ranked = [...fyByClient.entries()].sort((a, b) => b[1] - a[1])
+    const top10 = ranked.slice(0, 10).reduce((s, [, v]) => s + v, 0)
+    const activeClients = ranked.length
+
+    return {
+      runRate: Math.round(runRate), booked: Math.round(booked), gap: Math.round(gap),
+      monthsLeft, needPerMonth: Math.round(needPerMonth), upliftPerMonth: Math.round(upliftPerMonth),
+      completeMonths: complete.length, partialMonth: partial ? partial.monthLabel : '',
+      openDeals, pipelineValue, weighted, fresh, stale, staleValue,
+      slipped, recoverable, top10, top10Share: booked > 0 ? Math.round((top10 / (ranked.reduce((s, [, v]) => s + v, 0) || 1)) * 100) : 0,
+      activeClients,
+    }
+  }, [fy26Analysis, opportunities, revenue, thisMonth, todayMs])
+
+  // Plain readings of the numbers above — each one is a fact from the data plus the
+  // action it implies. No projection is invented here that the figures don't support.
+  const insights = useMemo(() => {
+    const out: { tone: 'good' | 'warn' | 'bad'; head: string; body: string }[] = []
+    if (!plan.completeMonths) return out
+    const cover = plan.gap > 0 ? Math.round((plan.weighted / plan.gap) * 100) : 100
+    out.push({
+      tone: cover >= 100 ? 'good' : cover >= 50 ? 'warn' : 'bad',
+      head: `Open pipeline covers ${cover}% of the gap`,
+      body: `${fmtUsd(plan.pipelineValue)} is open across ${plan.openDeals.length} quotes; weighted by the win probability on each, that is ${fmtUsd(plan.weighted)} against a ${fmtUsd(plan.gap)} gap. ${cover >= 100 ? 'The pipeline is large enough — this is a conversion problem, not a lead problem.' : `Closing everything open still leaves ${fmtUsd(Math.max(0, plan.gap - plan.weighted))}, so new demand has to come from somewhere else.`}`,
+    })
+    if (plan.staleValue > 0) out.push({
+      tone: 'warn',
+      head: `${fmtUsd(plan.staleValue)} is sitting in deals older than 90 days`,
+      body: `${plan.stale.length} of ${plan.openDeals.length} open quotes have had no dated movement in over three months. Some are dead and are inflating the pipeline; the rest need a decision. Working this list costs nothing and makes every other number on this page honest.`,
+    })
+    if (plan.recoverable > 0) out.push({
+      tone: 'bad',
+      head: `${fmtUsd(plan.recoverable)}/month walked out of accounts we already have`,
+      body: `${plan.slipped.length} clients billed materially less in the last three months than the three before — ${plan.slipped.filter(c => c.lapsed).length} stopped entirely. Winning back a client who already bought is cheaper than any new logo, and at ${fmtUsd(plan.recoverable)}/month this alone would cover ${Math.round((plan.recoverable / Math.max(1, plan.upliftPerMonth)) * 100)}% of the monthly uplift needed.`,
+    })
+    out.push({
+      tone: plan.upliftPerMonth > plan.runRate * 0.4 ? 'bad' : 'warn',
+      head: `The number needs ${fmtUsd(plan.needPerMonth)}/month for ${plan.monthsLeft} months`,
+      body: `The run-rate across ${plan.completeMonths} completed months is ${fmtUsd(plan.runRate)}/month, so this is an uplift of ${fmtUsd(plan.upliftPerMonth)}/month — about ${plan.runRate ? Math.round((plan.upliftPerMonth / plan.runRate) * 100) : 0}% above where the business runs today.${plan.partialMonth ? ` ${plan.partialMonth} is still billing and is excluded from the run-rate.` : ''}`,
+    })
+    if (plan.top10Share >= 30) out.push({
+      tone: 'warn',
+      head: `Top 10 clients are ${plan.top10Share}% of the year so far`,
+      body: `${fmtUsd(plan.top10)} of FY revenue comes from ten of ${plan.activeClients} active clients. That concentration cuts both ways: it is the fastest place to grow — one upsell moves the number — and the biggest single risk to the target if one of them goes quiet.`,
+    })
+    return out
+  }, [plan])
 
   const quotesAnalysis = useMemo(() => {
     const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
@@ -261,7 +379,7 @@ export default function BusinessTrendPage() {
             <div className="text-xs font-medium text-mav-yellow mb-3">Definitions</div>
             <div className="text-xs text-mav-muted space-y-1">
               <p><strong className="text-white">Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
-              <p><strong className="text-white">Target:</strong> $3.5M total revenue</p>
+              <p><strong className="text-white">Target:</strong> {FY_TARGET_LABEL} total revenue</p>
               <p><strong className="text-white">Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
               <p><strong className="text-white">Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
             </div>
@@ -288,7 +406,7 @@ export default function BusinessTrendPage() {
             </div>
           </div>
           <div>
-            <div className="text-xs font-medium text-mav-yellow mb-3">Progress Toward $3.5M Target</div>
+            <div className="text-xs font-medium text-mav-yellow mb-3">Progress Toward {FY_TARGET_LABEL} Target</div>
             <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-4">
               <div className="flex justify-between mb-3">
                 <span className="text-sm font-medium">Projected vs Target</span>
@@ -302,11 +420,11 @@ export default function BusinessTrendPage() {
               </div>
               <div className="flex justify-between mt-3 text-xs text-mav-muted">
                 <span>Projected: <span className="text-white font-medium">{fmtUsd(fy26Analysis.projected)}</span></span>
-                <span>Target: <span className="text-white font-medium">$3.5M</span></span>
+                <span>Target: <span className="text-white font-medium">{FY_TARGET_LABEL}</span></span>
               </div>
               {!fy26Analysis.onTrack && (
                 <p className="text-xs text-red-400 mt-3">
-                  Shortfall: {fmtUsd(3500000 - fy26Analysis.projected)} | Need {fmtUsd(Math.ceil((3500000 - fy26Analysis.projected) / Math.max(1, fy26Analysis.monthsRemaining)))}/month average
+                  Shortfall: {fmtUsd(FY_TARGET - fy26Analysis.projected)} | Need {fmtUsd(Math.ceil((FY_TARGET - fy26Analysis.projected) / Math.max(1, fy26Analysis.monthsRemaining)))}/month average
                 </p>
               )}
             </div>
@@ -338,6 +456,113 @@ export default function BusinessTrendPage() {
             <p className="text-xs text-mav-muted mt-3">
               {fy26Analysis.completedMonths} months completed
             </p>
+          </div>
+        </div>
+      </div>
+      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
+        <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
+          <div className="text-sm font-medium">How we get to {FY_TARGET_LABEL}</div>
+          <div className="text-xs text-mav-muted">{plan.monthsLeft} months left · {fmtUsd(plan.gap)} to go</div>
+        </div>
+        <div className="p-5 space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
+              <div className="text-xs text-mav-muted mb-1">Booked so far</div>
+              <div className="text-xl font-bold">{fmtUsd(plan.booked)}</div>
+            </div>
+            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
+              <div className="text-xs text-mav-muted mb-1" title={`Average of the ${plan.completeMonths} completed months. ${plan.partialMonth || 'The month in progress'} is excluded — a half-billed month would understate it.`}>Run-rate / month</div>
+              <div className="text-xl font-bold">{fmtUsd(plan.runRate)}</div>
+            </div>
+            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
+              <div className="text-xs text-mav-muted mb-1">Needed / month</div>
+              <div className="text-xl font-bold text-mav-yellow">{fmtUsd(plan.needPerMonth)}</div>
+            </div>
+            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
+              <div className="text-xs text-mav-muted mb-1">Uplift required</div>
+              <div className="text-xl font-bold text-red-400">+{fmtUsd(plan.upliftPerMonth)}</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-medium text-mav-yellow mb-1">🤖 AI insights</div>
+            <p className="text-xs text-mav-muted mb-3">Read straight off the revenue and pipeline on this page — each line is a fact and the action it points to, not a forecast.</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              {insights.map((i, n) => (
+                <div key={n} className={`rounded-lg border p-3 ${i.tone === 'good' ? 'border-green-500/30 bg-green-500/[0.05]' : i.tone === 'warn' ? 'border-mav-yellow/30 bg-mav-yellow/[0.05]' : 'border-red-500/30 bg-red-500/[0.05]'}`}>
+                  <div className={`text-sm font-semibold mb-1 ${i.tone === 'good' ? 'text-green-300' : i.tone === 'warn' ? 'text-mav-yellow' : 'text-red-300'}`}>{i.head}</div>
+                  <p className="text-xs text-mav-muted leading-relaxed">{i.body}</p>
+                </div>
+              ))}
+              {!insights.length && <p className="text-sm text-mav-muted">Not enough completed months in FY 2026-27 yet.</p>}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-medium text-mav-yellow mb-1">Deals to close</div>
+            <p className="text-xs text-mav-muted mb-3">Open quotes ranked by what they are actually worth — value × the win probability on the deal. {fmtUsd(plan.weighted)} weighted out of {fmtUsd(plan.pipelineValue)} open.</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-mav-muted border-b border-mav-line">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Client</th>
+                    <th className="px-3 py-2 font-medium text-right">Value</th>
+                    <th className="px-3 py-2 font-medium text-right">Win %</th>
+                    <th className="px-3 py-2 font-medium text-right">Weighted</th>
+                    <th className="px-3 py-2 font-medium">Owner</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium text-right">Age</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {plan.openDeals.slice(0, 12).map(o => (
+                    <tr key={o.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                      <td className="px-3 py-2">{o.company_name}</td>
+                      <td className="px-3 py-2 text-right">{fmtUsd(o.value || 0)}</td>
+                      <td className="px-3 py-2 text-right">{o.win ? `${o.win}%` : '—'}</td>
+                      <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(o.expected)}</td>
+                      <td className="px-3 py-2 text-mav-muted">{o.sales_person || '—'}</td>
+                      <td className="px-3 py-2 text-mav-muted">{o.status || '—'}</td>
+                      <td className={`px-3 py-2 text-right ${o.age !== null && o.age > 90 ? 'text-red-400' : 'text-mav-muted'}`}>{o.age !== null ? `${o.age}d` : '—'}</td>
+                    </tr>
+                  ))}
+                  {!plan.openDeals.length && <tr><td colSpan={7} className="px-3 py-4 text-mav-muted">No open quotes carry a value yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {plan.stale.length > 0 && <p className="text-xs text-red-400 mt-2">{plan.stale.length} of these have not moved in over 90 days ({fmtUsd(plan.staleValue)}). Chase or close them — a dead quote in the pipeline hides the real gap.</p>}
+          </div>
+
+          <div>
+            <div className="text-xs font-medium text-mav-yellow mb-1">Clients to push</div>
+            <p className="text-xs text-mav-muted mb-3">Accounts that billed materially less in the last three completed months than the three before. &ldquo;Was billing&rdquo; is their old monthly average — what comes back if the account is re-activated, worth {fmtUsd(plan.recoverable)}/month in total.</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-mav-muted border-b border-mav-line">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Client</th>
+                    <th className="px-3 py-2 font-medium text-right">Prior 3 mo</th>
+                    <th className="px-3 py-2 font-medium text-right">Last 3 mo</th>
+                    <th className="px-3 py-2 font-medium text-right">Was billing</th>
+                    <th className="px-3 py-2 font-medium">State</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {plan.slipped.slice(0, 12).map(c => (
+                    <tr key={c.name} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                      <td className="px-3 py-2">{c.name}</td>
+                      <td className="px-3 py-2 text-right text-mav-muted">{fmtUsd(Math.round(c.prior3))}</td>
+                      <td className="px-3 py-2 text-right">{fmtUsd(Math.round(c.last3))}</td>
+                      <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(c.perMonth)}/mo</td>
+                      <td className="px-3 py-2">{c.lapsed
+                        ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">Stopped</span>
+                        : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300">Slowing</span>}</td>
+                    </tr>
+                  ))}
+                  {!plan.slipped.length && <tr><td colSpan={5} className="px-3 py-4 text-mav-muted">No client has slowed materially in the last three months.</td></tr>}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
