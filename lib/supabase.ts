@@ -319,7 +319,12 @@ const taggedNewOnly = bt === 'new'               // pure "New"
 // sheet tags "New" under an account manager is repeat work on an existing client,
 // so it counts as Repeat here and the row carries a MIS-TAGGED flag — see nbd.ts.
 const nbd = isNbdOwner(o.sales_person)
-const wrongNew = !nbd && (taggedNewOnly || o.is_new_client === true) && !taggedRepeat
+// Only a SHEET row can be mis-tagged: it has a Business Type cell someone can correct.
+// An email deal has no Quotes line, and its `is_new_client` is the scan's guess rather
+// than a recorded decision — the NBD gate still reads it as Repeat, but quietly, because
+// there is nothing to go and fix. (Email rows also put a client CATEGORY in this column
+// — 'Agency', 'Direct' — a different axis entirely, so it must not be read as New.)
+const wrongNew = !nbd && taggedNewOnly && o.origin === 'sheet'
 const repeat = taggedRepeat || inRevenue || o.is_new_client === false || !nbd
 // Review flags for still-open deals, in priority order (one flag shown, most urgent first):
 //  1. CONFIRM-LAG — someone confirmed it Won here but the sheet line is still Open
@@ -342,11 +347,7 @@ else if (bm) flag = `⚠ POSSIBLY ALREADY BOOKED — a $${bm.amount.toLocaleStri
 else if (confirmLag) flag = '⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set that row to Confirmed so it books as revenue.'
 else if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set that row to Cancelled so it stops counting as live pipeline.'
 else if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
-// An email-origin deal has no Quotes line, so "fix col P" is advice that can't be
-// followed — its New/Repeat call came from the email scan, not the sheet.
-else if (wrongNew) flag = o.origin === 'sheet'
-? `⚠ NOT NBD, TAGGED “NEW” — Quotes row ${o.quote_key || o.quote_ref || '(no ref)'} is tagged New Business (col P) but its owner${o.sales_person ? ` (${o.sales_person})` : ' is blank and'} is not on the NBD team, so it counts as Repeat. Either set col P to Repeat, or put the NBD owner who actually opened the account in the Account/Sales Person column.`
-: `⚠ NOT NBD, READ AS “NEW” — the email scan judged this new business, but ${o.sales_person || 'nobody'} is not on the NBD team and there is no Quotes line to correct. It counts as Repeat. If it really is new business, raise it in the Quotes tab under its NBD owner.`
+else if (wrongNew) flag = `⚠ NOT NBD, TAGGED “NEW” — Quotes row ${o.quote_key || o.quote_ref || '(no ref)'} is tagged New Business (col P) but its owner${o.sales_person ? ` (${o.sales_person})` : ' is blank and'} is not on the NBD team, so it counts as Repeat. Either set col P to Repeat, or put the NBD owner who actually opened the account in the Account/Sales Person column.`
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
 else if (age !== null && age > STALE_DAYS) flag = `⚠ Stale — no movement in ${age} days. Follow up or confirm the deal is still live.`
 else if (confirmedLike.test(`${o.summary || ''} ${o.gist || ''}`)) flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities'

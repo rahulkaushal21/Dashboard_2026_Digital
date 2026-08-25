@@ -225,7 +225,8 @@ const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
 const flagged = all.filter(x => x.flag).length
 // Quotes rows tagged New Business under an owner who isn't on the NBD team. Counted
 // across every status, not just open deals — a mis-tagged Won deal still misreports
-// how much new business the team actually landed.
+// how much new business the team actually landed. Sheet rows only: an email deal has
+// no Business Type cell to correct, so listing it here would be an errand with no end.
 const misTagged = useMemo(() => all.filter(x => x.mis_tagged_new), [all])
 // Deals whose Lost call hasn't reached the Quotes sheet yet — computed over ALL rows,
 // not the date-filtered set, so the alert can't hide behind a narrow From/To window.
@@ -443,7 +444,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
 <button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
 {misTagged.length > 0 && (
-<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Tagged "New" in the Quotes sheet (Business Type, col P) but the owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. These are shown as Repeat until the sheet is corrected.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Tagged New, not NBD ({misTagged.length})</button>
+<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Quotes-sheet rows tagged "New" in Business Type (col P) whose owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. Each one is fixable in the sheet; they read as Repeat until it is. Email-only deals are not listed: they have no Business Type cell to correct.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Tagged New, not NBD ({misTagged.length})</button>
 )}
 {lagRows.length > 0 && (
 <button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Sheet not updated ({lagRows.length})</button>
