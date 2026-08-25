@@ -274,6 +274,22 @@ export default function Clients() {
       .filter(d => !aiStance || d.ai_stance === aiStance)
       .sort((a, b) => a.company_name.toLowerCase().localeCompare(b.company_name.toLowerCase()))
   }, [dir, q, ind, geo, bu, linked, aiStance])
+  // The window the LTV figures actually cover. LTV is all-time billed revenue per
+  // client — every booking row we hold, not a rolling 12 months — so the honest way to
+  // present it is to say which months we hold. Computed from the loaded revenue rows.
+  const ltvWindow = useMemo(() => {
+    const ms = bookings.map(b => ym(b.booking_month)).filter(Boolean).sort()
+    if (!ms.length) return null
+    const lo = ms[0], hi = ms[ms.length - 1]
+    const a = ymIdx(lo), b = ymIdx(hi)
+    return { lo, hi, months: a != null && b != null ? b - a + 1 : 0 }
+  }, [bookings])
+  // How each directory row's industry was arrived at — drives the legend above the table.
+  const dirSrc = useMemo(() => ({
+    verified: dir.filter(d => d.industry_source === 'website' && d.industry_confidence !== 'low').length,
+    thin: dir.filter(d => d.industry_source === 'website' && d.industry_confidence === 'low').length,
+    sheet: dir.filter(d => d.industry_source !== 'website').length,
+  }), [dir])
   const dirAi = useMemo(() => ({
     native: dir.filter(d => d.ai_stance === 'native').length,
     adjacent: dir.filter(d => d.ai_stance === 'adjacent').length,
@@ -555,7 +571,7 @@ export default function Clients() {
                 <button key="activity" onClick={() => handleSort('activity')} className="hover:text-white cursor-pointer">Last activity{getSortIndicator('activity')}</button>,
                 'Escal.',
                 'Convos',
-                <button key="ltv" onClick={() => handleSort('ltv')} className="hover:text-white cursor-pointer">LTV{getSortIndicator('ltv')}</button>
+                <button key="ltv" onClick={() => handleSort('ltv')} title={`All-time billed revenue for this client${ltvWindow ? ` — every booking we hold, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)} (${ltvWindow.months} months)` : ''}. Not a rolling 12 months and not a forecast.`} className="hover:text-white cursor-pointer">LTV{getSortIndicator('ltv')}</button>
               ].map((h, i) => <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody>
@@ -587,6 +603,15 @@ export default function Clients() {
       </div>
       ) : (
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+        {/* Legend for the marks in the Industry column. These were previously explained
+            only on hover, which meant nobody knew the tick was there to be hovered. */}
+        <div className="px-4 py-3 border-b border-mav-line flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+          <span className="text-mav-muted">How each industry was decided:</span>
+          <span><span className="text-white">✓</span> <span className="text-mav-muted">read from the company&rsquo;s own website &mdash; confirmed ({dirSrc.verified.toLocaleString()})</span></span>
+          <span><span className="text-white">◌</span> <span className="text-mav-muted">read from the website, but the page was thin &mdash; worth a check ({dirSrc.thin.toLocaleString()})</span></span>
+          <span><span className="text-white">no mark</span> <span className="text-mav-muted">taken from the sheet, never verified against the site ({dirSrc.sheet.toLocaleString()})</span></span>
+          <span className="text-mav-muted">Smaller grey text under the group name is the granular industry it was merged from.</span>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
@@ -647,6 +672,14 @@ export default function Clients() {
           Against a directory of {autoTotals.companies.toLocaleString()} companies who already trust us with their websites, that is the gap this section is about.
           Click an industry to open its plays.
         </p>
+        <p className="text-[11px] text-mav-muted mb-4 max-w-4xl leading-relaxed">
+          <span className="text-white">How the LTV figure on each industry is calculated:</span> it is the sum of every dollar we have billed
+          the <em>already-booked</em> clients in that industry &mdash; all-time, not a rolling window, and not a projection for the whole industry.
+          It comes from the bookings master (all business units), plus any client that appears only in the web-revenue feed, so nothing is double-counted.
+          {ltvWindow && <> The revenue we hold runs <span className="text-white">{monLabel(ltvWindow.lo)} &rarr; {monLabel(ltvWindow.hi)}</span> ({ltvWindow.months} months),
+          so &ldquo;lifetime&rdquo; means that window &mdash; a client who spent with us before {monLabel(ltvWindow.lo)} will read low here.</>}
+          {' '}The {autoTotals.companies.toLocaleString()}-company count beside it is the whole directory, booked or not, which is why a big list can sit next to a small LTV.
+        </p>
 
         {/* The four numbers that size this, from widest to warmest. The last one is the
             trap: ⚡ AI-native counts clients whose OWN business is AI — it is not the
@@ -687,7 +720,7 @@ export default function Clients() {
                 <button onClick={() => setOpenPlayInd(open ? '' : r.name)} className="w-full text-left px-5 py-4 hover:bg-white/[0.02] transition-colors">
                   <div className="flex items-center gap-3 flex-wrap">
                     <span className={`text-sm font-medium ${open ? 'text-mav-yellow' : ''}`}>{r.name}</span>
-                    <span className="text-xs text-mav-muted">{r.companies.toLocaleString()} companies · {r.booked} booked · {fmtUsd(r.ltv)} LTV</span>
+                    <span className="text-xs text-mav-muted" title={`${r.companies} companies in the directory · ${r.booked} of them have booked revenue · ${fmtUsd(r.ltv)} is all-time billings from those ${r.booked}, not a forecast for the industry`}>{r.companies.toLocaleString()} companies · {r.booked} booked · {fmtUsd(r.ltv)} LTV</span>
                     {r.demand.length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400 font-medium" title={`${r.demand.length} client${r.demand.length === 1 ? ' has' : 's have'} already asked for automation-shaped work`}>{r.demand.length} asked</span>}
                     {r.aiNative > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400" title="Companies whose own product is AI">{r.aiNative} AI-native</span>}
                     {r.aiAdj > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400" title="Companies whose own positioning leans on AI or automation — they already speak the language">{r.aiAdj} AI-positioned</span>}
@@ -793,7 +826,7 @@ export default function Clients() {
                 <div><div className="text-xs text-mav-muted">Type</div>{selC.client_type || '—'}</div>
                 <div><div className="text-xs text-mav-muted">GEO</div>{selC.geo || '—'}</div>
                 <div><div className="text-xs text-mav-muted">Owner</div>{selC.pc_sme || selC.sales_person || '—'}</div>
-                <div><div className="text-xs text-mav-muted">Lifetime value</div>{selC.ltv_usd ? fmtUsd(selC.ltv_usd) : '—'}</div>
+                <div><div className="text-xs text-mav-muted" title={`Sum of every booking recorded for this client${ltvWindow ? `, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)}` : ''}`}>Lifetime value{ltvWindow ? <span className="ml-1 opacity-60">({ltvWindow.months}mo)</span> : null}</div>{selC.ltv_usd ? fmtUsd(selC.ltv_usd) : '—'}</div>
                 <div><div className="text-xs text-mav-muted">Last booking</div>{ym(selC.last_booking_month) || '—'}</div>
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
               </div>
