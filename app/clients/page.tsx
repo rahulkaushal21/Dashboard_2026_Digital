@@ -64,7 +64,7 @@ const sigTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/risk|e
 const impactTone = (i?: string) => /critical|sev1|sev 1/i.test(i || '') ? 'bg-red-500/20 text-red-300' : /major/i.test(i || '') ? 'bg-red-500/15 text-red-400' : /minor/i.test(i || '') ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
 const dotCls = (b: string) => b === 'At risk' ? 'bg-red-500' : b === 'Watch' ? 'bg-orange-400' : b === 'Positive' ? 'bg-green-400' : b === 'Negative' ? 'bg-red-400' : b === 'Neutral' ? 'bg-amber-400' : 'bg-mav-muted'
 
-type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[]; recovered: boolean; recoveryNote?: string }
+type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[]; recovered: boolean; recoveryNote?: string; unresolved: boolean }
 // A feedback-table row counts as positive when its Nature/type reads positive (praise, happy, great…)
 const isPosFeedback = (f: Feedback) => sentBucket(f.nature) === 'Positive' || /positive|praise|apprec|happy|great|delight|testimonial/i.test(`${f.nature || ''} ${f.feedback_type || ''}`)
 // the escalation report also logs positive feedback, tagged "Not An Escalation" — those must NOT count as risk
@@ -77,7 +77,7 @@ export default function Clients() {
   const [escs, setEscs] = useState<Escalation[]>([])
   // Verdicts a human recorded on Critical Escalations. Honoured here so a client can't be
   // called At risk off the same signal that was dismissed or closed out one screen away.
-  const [verdicts, setVerdicts] = useState<{ dismissed: Set<string>; settled: Set<string> }>({ dismissed: new Set(), settled: new Set() })
+  const [verdicts, setVerdicts] = useState<{ dismissed: Set<string>; settled: Set<string>; unresolved: Set<string> }>({ dismissed: new Set(), settled: new Set(), unresolved: new Set() })
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [allOpps, setAllOpps] = useState<Opportunity[]>([])
   const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
@@ -213,6 +213,9 @@ export default function Clients() {
     // whole point of the Unresolved tag.
     const judged = (s: EmailSignal) => !!s.thread_id && (verdicts.dismissed.has(s.thread_id) || verdicts.settled.has(s.thread_id))
     const negSigs = (sigByClient.get(c.company_name) || []).filter(s => (sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || '')) && !judged(s))
+    // Someone has looked at this client's escalation and it is STILL broken. Worth calling
+    // out in its own colour: it is not an untriaged alert, it is a standing promise to fix.
+    const unresolved = negSigs.some(s => !!s.thread_id && verdicts.unresolved.has(s.thread_id))
     const posSigs = (sigByClient.get(c.company_name) || []).filter(s => sentBucket(s.sentiment) === 'Positive')
     const posFbTbl = posFbByClient.get(c.company_name) || []
     const lb = ym(c.last_booking_month)
@@ -241,7 +244,8 @@ export default function Clients() {
         if (gap) { level = 'Watch'; reasons.push(`no new booking since ${monLabel(lb)} — contract may be winding down`) }
       }
     }
-    return { level, reasons, escs: list, posFb, negSigs, recovered, recoveryNote }
+    if (unresolved) { level = level || 'Watch'; reasons.unshift('escalation marked Unresolved — looked at, still broken') }
+    return { level, reasons, escs: list, posFb, negSigs, recovered, recoveryNote, unresolved }
   }
 
   // Genuine risk wins; a date-based recovery or positive feedback (with no later negative)
@@ -539,7 +543,7 @@ export default function Clients() {
         <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
       </div>
 
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. A negative email signal stops counting here once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-orange-300">Unresolved</span> there keeps counting. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
+      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, or a contract winding down (no recent booking). Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. A negative email signal stops counting here once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
         <div className="flex items-baseline justify-between mb-4">
@@ -586,11 +590,13 @@ export default function Clients() {
               {pageRows.map(c => {
                 const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByClient.get(c.company_name) || []).length
                 const act = activityOf(c); const isRecent = !!act.last && act.last >= recentCutoff
-                const rowBg = r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
+                // Amber wins over the risk tint: an Unresolved tag is a human's call and
+                // should be findable by eye when scanning the list.
+                const rowBg = r.unresolved ? 'bg-amber-500/10' : r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
                 return (
                   <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
-                    <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${dotCls(st)}`} /></td>
-                    <td className="px-4 py-3">{displayName(c.company_name)}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                    <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${r.unresolved ? 'bg-amber-400' : dotCls(st)}`} title={r.unresolved ? 'Escalation marked Unresolved on Critical Escalations' : undefined} /></td>
+                    <td className="px-4 py-3">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="Someone looked at this client's escalation and it is still broken">⚑ Unresolved</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
@@ -819,7 +825,7 @@ export default function Clients() {
                 <button onClick={() => setSelC(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
               </div>
 
-              {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.level === 'At risk' ? '🔴 At risk' : '🟠 Watch'}:</span> {r.reasons.join(' · ')}</div>}
+              {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.unresolved ? 'border-amber-500/50 bg-amber-500/10 text-amber-300' : r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.unresolved ? '⚑ Unresolved' : r.level === 'At risk' ? '🔴 At risk' : '🟠 Watch'}:</span> {r.reasons.join(' · ')}</div>}
 
               {!r.level && r.recovered && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 px-3 py-2 text-sm"><span className="font-semibold">🟢 Recovered:</span> {r.recoveryNote}</div>}
 

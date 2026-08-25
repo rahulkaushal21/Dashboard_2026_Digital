@@ -390,16 +390,17 @@ export async function getEmailSignals(): Promise<EmailSignal[]> { return (await 
 //   settled   — thread marked fixed or the client turned positive: real, and over.
 //   dismissed — "Not an issue": never ours to begin with, so it should leave no trace.
 // A thread marked 'unresolved' appears in NEITHER set: it is still live risk.
-export async function getEscalationVerdicts(): Promise<{ dismissed: Set<string>; settled: Set<string> }> {
-  const empty = { dismissed: new Set<string>(), settled: new Set<string>() }
+export async function getEscalationVerdicts(): Promise<{ dismissed: Set<string>; settled: Set<string>; unresolved: Set<string> }> {
+  const empty = { dismissed: new Set<string>(), settled: new Set<string>(), unresolved: new Set<string>() }
   if (!supabase) return empty
   const { data, error } = await supabase.from('critical_escalations').select('thread_id, status, dismissed')
   if (error || !data) return empty
-  const out = { dismissed: new Set<string>(), settled: new Set<string>() }
+  const out = { dismissed: new Set<string>(), settled: new Set<string>(), unresolved: new Set<string>() }
   for (const r of data as { thread_id: string; status?: string; dismissed?: boolean }[]) {
     if (!r.thread_id) continue
     if (r.dismissed) out.dismissed.add(r.thread_id)
     else if (r.status === 'fixed' || r.status === 'positive') out.settled.add(r.thread_id)
+    else if (r.status === 'unresolved') out.unresolved.add(r.thread_id)
   }
   return out
 }
