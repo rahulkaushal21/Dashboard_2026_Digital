@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
-import { LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, History, Settings, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Settings, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
@@ -23,6 +23,7 @@ const nav: Entry[] = [
   { href: '/delights', label: 'Delights', icon: Sparkles },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
+  { href: '/forecast', label: 'Forecast', icon: LineChart },
   { href: '/last-year', label: 'Last Year Review', icon: History },
   {
     label: 'Operations', icon: Cog, children: [
