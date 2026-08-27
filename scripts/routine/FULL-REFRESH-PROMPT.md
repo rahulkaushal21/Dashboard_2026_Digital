@@ -52,6 +52,31 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   **Orphans are not only an open-pipeline problem — check WON rows hardest**, because a phantom
 >   Won inflates booked revenue and nobody notices it in the open list.
 >
+> - **Client-name merges (sister companies) — `select * from public.canonicalise_client_names();`**
+>   Two trading names for one company split its revenue AND its health across two client
+>   rows, which is how "Project Centre Ltd" ($50,884) and "Project Centre" ($950) sat as
+>   separate clients for months. `client_aliases` gained a third kind for this:
+>     - `name` — matches a quote agency / email subject (quotes path, applied by the sync)
+>     - `domain` — matches a sender domain (email path)
+>     - `merge` — **these ARE the same company, everywhere, revenue included**
+>   Only `merge` rows are applied by `canonicalise_client_names()`, deliberately: the
+>   `name` rows were written to match email subjects (`hy-tec` -> Art One, `sunrise` ->
+>   Sunrise Technologies) and applying those to revenue would merge accounts nobody asked
+>   to merge.
+>   It covers `web_revenue`, `bookings`, `email_signals`, `escalations`,
+>   `critical_escalations`, `feedback`, `client_directory`, `sql_leads`, and
+>   **email-origin `opportunities`** (sheet-origin rows belong to the 30-min sync).
+>   It runs on pg_cron at **:20** and **:03/:33** — straight after the revenue full-replace
+>   (:17) and the sheet sync (:00/:30) — and `rebuild_clients()` calls it before aggregating,
+>   so a merge can never be undone for more than a few minutes. Running it by hand is
+>   idempotent and free.
+>   **To merge two companies:** insert a `merge` row (and a matching `name` row so the
+>   Quotes path agrees), then run the function. Never rename rows by hand — `web_revenue`
+>   is a FULL REPLACE and `bookings` is rewritten every 30 minutes.
+>   **Do NOT rewrite `web_revenue.src_row_hash`** when renaming: it fingerprints the SOURCE
+>   row and carries a UNIQUE constraint, so two trading names that billed the same
+>   month/service/technology collapse to the same hash and the update dies.
+>
 > - **Check the revenue sync dropped nothing.**
 >   `select ran_at, message from sync_runs where source='web-revenue-sync' order by ran_at desc limit 1;`
 >   The message ends with either `· 0 dropped` or `· DROPPED n unusable rows worth $X`. **If it
@@ -220,6 +245,9 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 > **5. Client health (client section).** Update `email_signals` where a client's brief,
 > sentiment, or relationship materially changed this run (Positive|Neutral|Negative|At Risk),
 > then `select rebuild_clients();` to refresh the Clients/Business-Trends rollups.
+> **ALWAYS follow `rebuild_clients()` with `select compute_client_sentiment();`** — the rebuild
+> DELETES and reinserts `clients` and does not set sentiment, so on its own it silently drops
+> every At Risk flag to zero. `rebuild_clients()` now canonicalises merged names first.
 > **ALWAYS write `thread_id` on an `email_signals` row.** The Critical-Escalations trigger keys
 > off it, and a signal without one used to be dropped in silence — a Negative sentiment that
 > never reached the board (this happened to Innovative Capital). The trigger now falls back to
@@ -355,6 +383,9 @@ source `gmail-backfill-classify` so the live freshness clock stays clean.
 | Delights | `feedback` (Positive) | 3 |
 | Business Trends / Clients | `clients` (derived) | 5 `rebuild_clients()` |
 | Operations → L&D | `lnd_snapshots` | 1 `sync-lnd` |
+| Home AI Insights | `web_revenue` + `opportunities` (computed in-page) | nothing — live on load |
+| Forecast | `web_revenue` + `quotes` (computed in-page) | nothing — live on load |
+| Client-name merges | `client_aliases` kind='merge' | 1 `canonicalise_client_names()` |
 | Freshness clock | `sync_runs` | 8 heartbeat |
 
 ## Tokens (keep private, never echo)
