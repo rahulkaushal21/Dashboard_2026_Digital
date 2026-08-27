@@ -3,10 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, requestScan, getLatestScanRequest, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, requestScan, getLatestScanRequest, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
-import { RefreshCw, Sparkles } from 'lucide-react'
+import { buildInsights, type Tone } from '@/lib/insights'
+import { RefreshCw, Sparkles, ArrowRight } from 'lucide-react'
+import Link from 'next/link'
 
 // --- date helpers ------------------------------------------------------------
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -37,6 +39,15 @@ const PRESETS: { key: string; label: string }[] = [
   { key: 'ytd', label: 'YTD' },
 ]
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+
+// Severity is carried in colour AND in a word, so an insight that needs attention
+// reads at a glance without relying on the reader distinguishing red from amber.
+const TONE: Record<Tone, { dot: string; text: string; ring: string; word: string }> = {
+  critical: { dot: 'bg-red-500', text: 'text-red-400', ring: 'border-red-500/35', word: 'Acting on this' },
+  watch: { dot: 'bg-amber-400', text: 'text-amber-300', ring: 'border-amber-400/30', word: 'Worth watching' },
+  neutral: { dot: 'bg-sky-400', text: 'text-sky-300', ring: 'border-sky-400/25', word: 'Context' },
+  good: { dot: 'bg-green-400', text: 'text-green-300', ring: 'border-green-400/25', word: 'Going well' },
+}
 
 // Supabase returns timestamps like "2026-06-26 21:44:18.160673+00" — normalise so every browser parses it.
 const parseTs = (ts: string | null) => {
@@ -78,6 +89,9 @@ export default function Dashboard() {
   const [clients, setClients] = useState<Client[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [bookingRows, setBookingRows] = useState<BookingRow[]>([])
+  // 90th-percentile days-to-confirm, so the stale-pipeline insight argues from evidence.
+  const [closeSpeed, setCloseSpeed] = useState<{ median: number; p90: number; n: number } | null>(null)
+  const [insightsOpen, setInsightsOpen] = useState<string | null>(null)
 
   const init = presetRange('mtd')
   const [from, setFrom] = useState(init.from)
@@ -120,11 +134,11 @@ export default function Dashboard() {
   const load = async () => {
     setRefreshing(true)
     try {
-      const [r, c, o, b, srA, srB, so] = await Promise.all([
-        getRevenue(), getClients(), getOpportunities(), getBookingsFull(),
+      const [r, c, o, b, cs, srA, srB, so] = await Promise.all([
+        getRevenue(), getClients(), getOpportunities(), getBookingsFull(), getQuoteCloseSpeed(),
         getLastSync('web-revenue-appscript'), getLastSync('web-revenue-sync'), getLastSyncStatus('email-opportunities-scan'),
       ])
-      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setSyncRev(later(srA, srB))
+      setRev(r); setClients(c); setOpps(o); setBookingRows(b); setCloseSpeed(cs); setSyncRev(later(srA, srB))
       setSyncOpp(so?.ran_at ?? null); setSyncOppFailed(so ? !so.ok : false)
       setLastRefreshed(new Date()); setNowMs(Date.now())
     } finally { setRefreshing(false) }
@@ -212,6 +226,14 @@ export default function Dashboard() {
   const openOpps = opps.filter(o => inDayRange(o.source_date) && (o.rfq_status === 'pending' || o.rfq_status === 'received')).length
   const bookings = rangeRev.length
 
+  // AI Insights read the WHOLE history, not the date filter — a six-month trend
+  // cannot be computed from a one-month window, and silently narrowing it to the
+  // filter would make the panel say something different (and wrong) on every click.
+  const insights = useMemo(
+    () => buildInsights(bookingRows, opps, closeSpeed?.p90 ?? null),
+    [bookingRows, opps, closeSpeed],
+  )
+
   return (
     <div>
       <Header title="Dashboard" subtitle="Revenue, clients and pipeline at a glance" />
@@ -259,6 +281,66 @@ export default function Dashboard() {
         <KPICard label="Open opportunities" value={String(openOpps)} />
         <KPICard label="Bookings (period)" value={String(bookings)} />
       </div>
+
+      {insights.length > 0 && (
+        <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+            <div className="text-sm font-medium inline-flex items-center gap-2">
+              <Sparkles size={15} className="text-mav-yellow" /> AI Insights
+            </div>
+            <div className="text-xs text-mav-muted">
+              Full history · recomputed every load{closeSpeed ? ` · close speed from ${closeSpeed.n} quotes` : ''}
+            </div>
+          </div>
+          <p className="text-xs text-mav-muted mb-4">
+            What the numbers above don&apos;t say. Ignores the date filter — these read the whole revenue and quote history.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {insights.map(ins => {
+              const t = TONE[ins.tone]
+              const open = insightsOpen === ins.key
+              return (
+                <div key={ins.key} className={`bg-mav-dark/50 border ${t.ring} rounded-lg p-4 flex flex-col gap-2.5`}>
+                  <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide">
+                    <span className={`w-1.5 h-1.5 rounded-full ${t.dot}`} />
+                    <span className="text-mav-muted">{ins.topic}</span>
+                    <span className={`ml-auto ${t.text}`}>{t.word}</span>
+                  </div>
+
+                  <div className={`text-2xl font-semibold tabular-nums leading-none ${t.text}`}>{ins.figure}</div>
+                  <div className="text-sm leading-snug">{ins.headline}</div>
+                  <p className="text-xs text-mav-muted leading-relaxed">{ins.detail}</p>
+
+                  {ins.examples && ins.examples.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => setInsightsOpen(open ? null : ins.key)}
+                        className="text-xs text-mav-yellow hover:underline">
+                        {open ? 'Hide the numbers' : `Show the numbers (${ins.examples.length})`}
+                      </button>
+                      {open && (
+                        <ul className="mt-2 space-y-1.5 border-t border-mav-line pt-2">
+                          {ins.examples.map((e, i) => (
+                            <li key={i} className="text-xs text-mav-muted tabular-nums leading-snug">{e}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {ins.link && (
+                    <Link href={ins.link.href}
+                      className="mt-auto pt-1 text-xs text-mav-muted hover:text-white inline-flex items-center gap-1 w-fit">
+                      {ins.link.label} <ArrowRight size={12} />
+                    </Link>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className="lg:col-span-2"><RevenueChart data={trendSeries} /></div>

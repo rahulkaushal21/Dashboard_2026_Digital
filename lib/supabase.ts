@@ -732,3 +732,20 @@ export async function getLndModules(): Promise<LndModule[]> {
   )
   return l || []
 }
+
+// How fast quotes actually close, from the Quotes tab's own days-to-confirm column.
+// This is what lets the AI Insights panel argue that an ageing deal is stale from
+// evidence rather than from a threshold someone picked: if nine in ten confirmed
+// quotes land inside N days, a deal sitting at 20N is not "in progress".
+export async function getQuoteCloseSpeed(): Promise<{ median: number; p90: number; n: number } | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('quotes').select('confirmed_in_days').not('confirmed_in_days', 'is', null)
+  if (error || !data) return null
+  const days = data
+    .map((r: any) => Number(r.confirmed_in_days))
+    .filter((n: number) => Number.isFinite(n) && n >= 0 && n < 400)
+    .sort((a: number, b: number) => a - b)
+  if (days.length < 30) return null
+  const at = (q: number) => days[Math.min(days.length - 1, Math.floor(days.length * q))]
+  return { median: at(0.5), p90: at(0.9), n: days.length }
+}
