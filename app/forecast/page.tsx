@@ -238,23 +238,14 @@ export default function ForecastPage() {
           {/* ---------------- seasonal profile ---------------- */}
           <Card title="Seasonal shape" note="100 = an average month">
             <div className="px-5 pb-5">
-              <div className="flex items-end gap-1.5 h-32">
-                {fc.seasonal.map(s => {
-                  const h = Math.max(4, ((s.index - 70) / 50) * 100)
-                  return (
-                    <div key={s.month} className="flex-1 flex flex-col items-center gap-1.5" title={`${s.label}: index ${s.index.toFixed(0)} from ${s.years} year${s.years === 1 ? '' : 's'}`}>
-                      <span className="text-[10px] text-mav-muted tabular-nums">{s.index.toFixed(0)}</span>
-                      <div className={`w-full rounded-t ${s.index >= 100 ? 'bg-mav-yellow/70' : 'bg-mav-yellow/25'} ${s.years <= 1 ? 'opacity-60' : ''}`}
-                        style={{ height: `${h}%` }} />
-                      <span className="text-[10px] text-mav-muted">{s.label}</span>
-                    </div>
-                  )
-                })}
-              </div>
+              <SeasonChart seasonal={fc.seasonal} />
               <p className="text-xs text-mav-muted mt-4 leading-relaxed max-w-3xl">
-                Faded bars rest on a single year of data. A March peak and a January trough fit a client base weighted to
-                the UK and Australia, where the financial year ends in March — but with this much history that is a
-                plausible explanation, not a proven one.
+                Bars run above and below the 100 line, because the index measures a month against a typical one — a
+                March at {fc.seasonal[2] ? fc.seasonal[2].index.toFixed(0) : '—'} bills that much above average, a
+                January at {fc.seasonal[0] ? fc.seasonal[0].index.toFixed(0) : '—'} that much below. Hatched bars rest
+                on a single year of data. A March peak and a January trough fit a client base weighted to the UK and
+                Australia, where the financial year ends in March — but on this much history that is a plausible
+                explanation, not a proven one.
               </p>
             </div>
           </Card>
@@ -395,6 +386,59 @@ function TrendChart({ fc }: { fc: Forecast }) {
         <span className="inline-flex items-center gap-1.5"><i className="w-4 h-0.5 bg-mav-yellow inline-block" /> Forecast</span>
         <span className="inline-flex items-center gap-1.5"><i className="w-4 h-2 bg-mav-yellow/20 inline-block rounded-sm" /> Likely range</span>
         <span className="inline-flex items-center gap-1.5"><i className="w-4 h-0.5 bg-red-400 inline-block" /> Pace needed for target</span>
+      </div>
+    </div>
+  )
+}
+
+/* --------------------------------------------------------- seasonal shape --- */
+// Diverging bars around the 100 line. An index says "this month runs N% above or
+// below a typical one", so a chart growing from zero would be mostly dead space and
+// would make an 86 and a 113 look far more alike than they are.
+//
+// Heights are in PIXELS against halves with a definite height. The first cut used a
+// percentage height inside an auto-height flex column — a percentage resolves against
+// an auto parent as `auto`, which on an empty div is zero, so every bar rendered
+// invisible and the whole chart came out blank.
+const HALF = 62   // px available above and below the centre line
+
+function SeasonChart({ seasonal }: { seasonal: Forecast['seasonal'] }) {
+  const maxDev = Math.max(6, ...seasonal.map(s => Math.abs(s.index - 100)))
+  return (
+    <div>
+      <div className="flex gap-1.5">
+        {seasonal.map(s => {
+          const dev = s.index - 100
+          const px = Math.max(3, Math.round((Math.abs(dev) / maxDev) * HALF))
+          const thin = s.years <= 1
+          return (
+            <div key={s.month} className="flex-1 flex flex-col items-center"
+              title={`${s.label}: index ${s.index.toFixed(0)} — ${dev >= 0 ? 'above' : 'below'} an average month by ${Math.abs(dev).toFixed(0)}%, from ${s.years} year${s.years === 1 ? '' : 's'} of data`}>
+              <span className="text-[10px] text-mav-muted tabular-nums mb-1">{s.index.toFixed(0)}</span>
+              {/* upper half */}
+              <div className="w-full flex items-end justify-center" style={{ height: HALF }}>
+                {dev > 0 && (
+                  <div className={`w-full rounded-t bg-mav-yellow ${thin ? 'opacity-40' : 'opacity-80'}`}
+                    style={{ height: px }} />
+                )}
+              </div>
+              <div className="w-full h-px bg-mav-line" />
+              {/* lower half */}
+              <div className="w-full flex items-start justify-center" style={{ height: HALF }}>
+                {dev < 0 && (
+                  <div className={`w-full rounded-b bg-red-400 ${thin ? 'opacity-30' : 'opacity-60'}`}
+                    style={{ height: px }} />
+                )}
+              </div>
+              <span className="text-[10px] text-mav-muted mt-1">{s.label}</span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex flex-wrap gap-4 text-xs text-mav-muted mt-3">
+        <span className="inline-flex items-center gap-1.5"><i className="w-4 h-2 bg-mav-yellow/80 inline-block rounded-sm" /> Above average</span>
+        <span className="inline-flex items-center gap-1.5"><i className="w-4 h-2 bg-red-400/60 inline-block rounded-sm" /> Below average</span>
+        <span className="inline-flex items-center gap-1.5"><i className="w-4 h-2 bg-mav-yellow/40 inline-block rounded-sm" /> One year of data only</span>
       </div>
     </div>
   )
