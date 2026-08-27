@@ -314,8 +314,13 @@ function newLogoShare(bookings: BookingRow[]): Insight | null {
 }
 
 /**
- * Revenue concentration. Answers "how much of this business would survive losing
- * our best relationships", which no other page asks.
+ * How exposed the business is to losing a handful of relationships.
+ *
+ * The measure people actually understand is the top-10 share — "these ten names
+ * are X% of everything we bill" — so that leads. The regular-versus-one-off split
+ * is the second half of the same story and is spelled out in words rather than
+ * left behind a term like "always-on", which means nothing to a reader who did
+ * not write the query.
  */
 function concentration(bookings: BookingRow[]): Insight | null {
   const byClient = clientMonths(bookings)
@@ -328,24 +333,45 @@ function concentration(bookings: BookingRow[]): Insight | null {
     months.forEach((v, k) => { if (k < cur) { rev += v; active++ } })
     if (rev > 0) rows.push({ name, rev, active })
   })
-  if (!rows.length) return null
+  if (rows.length < 20) return null
+  rows.sort((a, b) => b.rev - a.rev)
 
   const total = rows.reduce((s, r) => s + r.rev, 0)
-  const totalMonths = new Set(bookings.map(b => keyOf(b.booking_month)).filter(k => k && k < cur)).size
-  const alwaysOn = rows.filter(r => r.active >= Math.max(6, Math.round(totalMonths * 0.7)))
-  const onceOnly = rows.filter(r => r.active === 1)
-  if (!alwaysOn.length) return null
+  if (!total) return null
 
-  const alwaysRev = alwaysOn.reduce((s, r) => s + r.rev, 0)
-  const pct = (alwaysRev / total) * 100
+  // Top-10 share: the plain-English version of "concentration".
+  const TOP = 10
+  const top = rows.slice(0, TOP)
+  const topRev = top.reduce((s, r) => s + r.rev, 0)
+  const topPct = (topRev / total) * 100
+
+  // Regulars vs one-offs. The threshold is stated in the copy so the reader can
+  // judge it rather than take it on trust.
+  const totalMonths = new Set(bookings.map(b => keyOf(b.booking_month)).filter(k => k && k < cur)).size
+  const regularMin = Math.max(6, Math.round(totalMonths * 0.7))
+  const regulars = rows.filter(r => r.active >= regularMin)
+  const onceOnly = rows.filter(r => r.active === 1)
+  const regularPct = regulars.length ? (regulars.reduce((s, r) => s + r.rev, 0) / total) * 100 : 0
+  const oncePct = onceOnly.length ? (onceOnly.reduce((s, r) => s + r.rev, 0) / total) * 100 : 0
+
+  // Running share, so "the top 5 alone are a quarter of it" is readable at a glance.
+  let run = 0
+  const examples = top.map((r, i) => {
+    run += r.rev
+    return `${i + 1}. ${r.name} · ${usdShort(r.rev)} · ${((r.rev / total) * 100).toFixed(1)}% (top ${i + 1} = ${((run / total) * 100).toFixed(0)}%)`
+  })
+  if (regulars.length) {
+    examples.push(`— "Regular" means billing in ${regularMin}+ of the ${totalMonths} months on record. ${regulars.length} clients qualify.`)
+  }
 
   return {
     key: 'concentration',
-    tone: pct > 50 ? 'watch' : 'neutral',
-    topic: 'Concentration',
-    figure: pct.toFixed(0) + '%',
-    headline: `${alwaysOn.length} always-on clients produce ${pct.toFixed(0)}% of all revenue.`,
-    detail: `They are ${((alwaysOn.length / rows.length) * 100).toFixed(0)}% of the ${rows.length} clients who have ever billed us, averaging ${usdShort(alwaysRev / alwaysOn.length)} each. At the other end, ${onceOnly.length} clients billed in exactly one month ever. These are two different businesses reported as one number, and they need different targets.`,
+    tone: topPct > 40 ? 'watch' : 'neutral',
+    topic: 'Client mix',
+    figure: topPct.toFixed(0) + '%',
+    headline: `The 10 biggest clients are ${topPct.toFixed(0)}% of all revenue — ${usdShort(topRev)} of ${usdShort(total)}.`,
+    detail: `This is how exposed we are to losing a few relationships: ${topPct > 40 ? `lose these ten and ${topPct.toFixed(0)}% of the business goes with them` : 'no single client dominates, which is a healthy position'}. Underneath, ${regulars.length} clients bill in most months and produce ${regularPct.toFixed(0)}% of revenue, while ${onceOnly.length} billed in a single month ever and produce ${oncePct.toFixed(0)}%. The regulars are the business; the long tail is mostly churn passing through.`,
+    examples,
     link: { href: '/clients', label: 'Clients' },
   }
 }
