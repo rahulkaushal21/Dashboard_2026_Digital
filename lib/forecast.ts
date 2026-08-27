@@ -59,6 +59,12 @@ export interface Forecast {
   historyMonths: number
   /** Calendar months that have only one year of observations behind their index. */
   thinSeasonality: number
+  /** Every complete month on record, oldest first — the line the forecast continues. */
+  history: { key: string; label: string; value: number }[]
+  /** Seasonal index for all 12 calendar months, with how many years back each one. */
+  seasonal: { month: number; label: string; index: number; years: number }[]
+  /** Flat-line test: the newest six complete months against the six before them. */
+  drift: { recent: number; prior: number; pct: number }
 }
 
 const label = (k: string) =>
@@ -165,6 +171,16 @@ export function buildForecast(
 
   // Band on the FY total: independent monthly errors, so the standard deviation of
   // the sum grows with the square root of the number of forecast months, not linearly.
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const seasonal = Array.from({ length: 12 }, (_, i) => ({
+    month: i + 1, label: MON[i], index: indexOf(i + 1), years: (byCal.get(i + 1) || []).length,
+  }))
+  const history = complete.map(([k, v]) => ({ key: k, label: label(k), value: v }))
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+  const recentAvg = avg(complete.slice(-6).map(([, v]) => v))
+  const priorAvg = avg(complete.slice(-12, -6).map(([, v]) => v))
+  const drift = { recent: recentAvg, prior: priorAvg, pct: priorAvg ? ((recentAvg - priorAvg) / priorAvg) * 100 : 0 }
+
   const spread = sd * Math.sqrt(Math.max(1, futureCount + 1))
   const best = complete.reduce((b, [k, v]) => (v > b[1] ? [k, v] : b), ['', 0] as [string, number])
 
@@ -192,7 +208,70 @@ export function buildForecast(
     sd,
     historyMonths: complete.length,
     thinSeasonality,
+    history,
+    seasonal,
+    drift,
   }
+}
+
+/**
+ * Walk-forward backtest: how wrong has this method been in the past?
+ *
+ * For each of the last `folds` complete months, refit the level and seasonal index
+ * using ONLY the months before it, predict that month, and compare against what it
+ * actually billed. Nothing after the predicted month is allowed into the fit, so
+ * this is an honest out-of-sample test rather than the model marking its own
+ * homework. Returns null when there is not enough history to hold months back.
+ *
+ * A forecast that cannot say how accurate it has been is asking to be trusted on
+ * faith, which for a number that will drive a target is not good enough.
+ */
+export function backtest(bookings: BookingRow[], today: Date = new Date(), folds = 6) {
+  const totals = new Map<string, number>()
+  for (const b of bookings) {
+    const k = keyOf(b.booking_month)
+    if (!k) continue
+    totals.set(k, (totals.get(k) || 0) + (b.booking_amount || 0))
+  }
+  const curKey = mk(today.getFullYear(), today.getMonth() + 1)
+  const all = [...totals.entries()]
+    .filter(([k, v]) => k < curKey && v > 20000)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+  // Need a decent training window before the first held-out month.
+  const MIN_TRAIN = 9
+  if (all.length < MIN_TRAIN + 2) return null
+
+  const usable = Math.min(folds, all.length - MIN_TRAIN)
+  const results: { key: string; label: string; predicted: number; actual: number; errPct: number }[] = []
+
+  for (let i = all.length - usable; i < all.length; i++) {
+    const train = all.slice(0, i)
+    const [k, actual] = all[i]
+    const vals = train.map(([, v]) => v)
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length
+    const byCal = new Map<number, number[]>()
+    for (const [tk, tv] of train) {
+      const m = Number(tk.slice(5, 7))
+      byCal.set(m, [...(byCal.get(m) || []), tv])
+    }
+    const idx = (m: number) => {
+      const xs = byCal.get(m)
+      if (!xs || !xs.length || !mean) return 100
+      return (xs.reduce((a, b) => a + b, 0) / xs.length / mean) * 100
+    }
+    const recent = train.slice(-6)
+    const level = recent.reduce((s, [rk, rv]) => s + rv / (idx(Number(rk.slice(5, 7))) / 100), 0) / recent.length
+    const predicted = level * (idx(Number(k.slice(5, 7))) / 100)
+    results.push({
+      key: k, label: label(k), predicted, actual,
+      errPct: actual ? ((predicted - actual) / actual) * 100 : 0,
+    })
+  }
+
+  const mape = results.reduce((s, r) => s + Math.abs(r.errPct), 0) / results.length
+  const bias = results.reduce((s, r) => s + r.errPct, 0) / results.length
+  const worst = results.reduce((w, r) => (Math.abs(r.errPct) > Math.abs(w.errPct) ? r : w), results[0])
+  return { results, mape, bias, worst, folds: results.length }
 }
 
 /**
@@ -214,8 +293,8 @@ export function churnDrag(bookings: BookingRow[], today: Date = new Date()) {
   const gapMonths = (a: string, b: string) =>
     (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + (Number(b.slice(5, 7)) - Number(a.slice(5, 7)))
 
-  let clients = 0, perMonth = 0, trailing = 0
-  byClient.forEach(months => {
+  const accounts: { name: string; perMonth: number; trailing: number; silentFor: number; cadence: number; lastMonth: string }[] = []
+  byClient.forEach((months, name) => {
     const keys = [...months.keys()].sort()
     if (keys.length < 3) return
     const silentFor = gapMonths(keys[keys.length - 1], curKey)
@@ -228,9 +307,16 @@ export function churnDrag(bookings: BookingRow[], today: Date = new Date()) {
     const last12 = keys.slice(-12)
     const rev = last12.reduce((s, k) => s + (months.get(k) || 0), 0)
     if (rev < 3000) return
-    clients++
-    trailing += rev
-    perMonth += rev / last12.length
+    accounts.push({
+      name, perMonth: rev / last12.length, trailing: rev, silentFor, cadence,
+      lastMonth: label(keys[keys.length - 1]),
+    })
   })
-  return { clients, perMonth, trailing }
+  accounts.sort((a, b) => b.trailing - a.trailing)
+  return {
+    clients: accounts.length,
+    perMonth: accounts.reduce((s, a) => s + a.perMonth, 0),
+    trailing: accounts.reduce((s, a) => s + a.trailing, 0),
+    accounts,
+  }
 }

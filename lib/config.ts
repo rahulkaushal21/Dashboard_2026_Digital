@@ -1,4 +1,12 @@
 import { supabase } from './supabase'
+
+// The financial-year revenue target, in USD. ONE definition, because Business Trend
+// and Forecast both report progress against it and two copies drift the moment one
+// is edited — leaving the two pages quietly disagreeing about what we are chasing.
+// FY runs April to March.
+export const FY_TARGET = 3200000
+export const FY_TARGET_LABEL = '$3.2M'
+
 export interface Settings { business_sheet_url?: string; scan_gmail_address?: string; updated_at?: string }
 export async function getSettings(): Promise<Settings> {
   if (!supabase) return {}

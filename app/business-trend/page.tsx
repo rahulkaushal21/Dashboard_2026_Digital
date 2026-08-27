@@ -4,12 +4,11 @@ import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getQuotes, getConversions, getBookingsFull, getOpportunities, type RevenueRow, type Quote, type QuoteConversion, type BookingRow, type Opportunity } from '@/lib/supabase'
+import { FY_TARGET, FY_TARGET_LABEL } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
 
 // FY 2026-27 revenue goal. One constant — the progress bar, the shortfall line and
 // the plan below it all read from here, so the number can never disagree with itself.
-const FY_TARGET = 3200000
-const FY_TARGET_LABEL = '$3.2M'
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow text-white font-medium cursor-pointer'
 const ym = (s?: string) => (s || '').slice(0, 7)
 const ymd = (s?: string) => (s || '').slice(0, 10)
