@@ -242,6 +242,23 @@ export default function RevenueHistory() {
                 {src.last_message && <div className="text-[11px] text-mav-muted">{src.last_message}</div>}
               </div>
             ) : <p className="text-sm text-mav-muted">No source registered.</p>}
+            <div className="mt-4 pt-3 border-t border-mav-line">
+              <div className="text-xs uppercase tracking-wide text-mav-muted mb-1.5">Basis, and a known variance</div>
+              <p className="text-[11px] text-mav-muted leading-relaxed">
+                Projects marked <span className="text-mav-muted">Pending</span>,{' '}
+                <span className="text-mav-muted">On Hold</span>, <span className="text-mav-muted">Cancelled</span> or{' '}
+                <span className="text-mav-muted">Awaiting Information</span> are excluded, matching the live revenue sync
+                so both sides of the April-2025 seam mean the same thing.
+              </p>
+              <p className="mt-2 text-[11px] text-mav-muted leading-relaxed">
+                The separately reported FY24-25 figures count all of those except On Hold, so they read higher here:
+                Web <span className="tabular-nums">$2,457,588</span> against a reported{' '}
+                <span className="tabular-nums">$2,481,187</span> — a{' '}
+                <span className="tabular-nums">$23,599</span> difference that is entirely those statuses, not the
+                Web/HUB/LP classification. On the same basis HUB and LP reconcile to within $3 and $42. This is a
+                deliberate choice of basis, not a gap in the data.
+              </p>
+            </div>
             <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
               Add another year by inserting a row into <code className="text-mav-yellow">revenue_sources</code> with its
               published CSV URL and a column map — no code change needed. Rows are replaced per source, so reloading one
