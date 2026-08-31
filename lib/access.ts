@@ -20,7 +20,7 @@ export const PAGES: { href: string; label: string }[] = [
 // (individual learning progress against a reporting manager), so they are admin-only
 // and cannot be granted to a viewer from Settings. Move an entry into PAGES above if
 // that ever needs to change.
-const ADMIN_ONLY = ['/operations/lnd']
+const ADMIN_ONLY = ['/operations/lnd', '/operations/revenue-history']
 
 export interface Profile {
   email: string

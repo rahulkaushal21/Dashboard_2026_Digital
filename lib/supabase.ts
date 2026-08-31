@@ -749,3 +749,29 @@ export async function getQuoteCloseSpeed(): Promise<{ median: number; p90: numbe
   const at = (q: number) => days[Math.min(days.length - 1, Math.floor(days.length * q))]
   return { median: at(0.5), p90: at(0.9), n: days.length }
 }
+
+// ---------------------------------------------------------------------------
+// Historical revenue (pre-FY25-26), loaded from the yearly spreadsheets listed
+// in revenue_sources. Deliberately separate from web_revenue — see
+// supabase/migrations/010_revenue_history.sql for why.
+// ---------------------------------------------------------------------------
+export interface RevenueHistoryRow {
+  id: number; source_key: string; company_name: string; booking_month: string
+  booking_amount: number; engagement_model?: string; technology?: string
+  geo?: string; project_id?: string; project_status?: string; client_name?: string
+}
+export interface RevenueSource {
+  key: string; label: string; csv_url: string; enabled: boolean; immutable: boolean
+  last_synced_at?: string; last_rows?: number; last_total?: number; last_message?: string
+}
+// `id` is the stable ordering column the paginator needs — this table is well
+// over the 1000-row page cap.
+export async function getRevenueHistory(): Promise<RevenueHistoryRow[]> {
+  return (await read<RevenueHistoryRow>('revenue_history',
+    'id, source_key, company_name, booking_month, booking_amount, engagement_model, technology, geo, project_id, project_status, client_name',
+    'id')) || []
+}
+export async function getRevenueSources(): Promise<RevenueSource[]> {
+  return (await read<RevenueSource>('revenue_sources',
+    'key, label, csv_url, enabled, immutable, last_synced_at, last_rows, last_total, last_message', 'key')) || []
+}
