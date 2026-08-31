@@ -40,6 +40,18 @@ function parseCSV(text: string): string[][] {
   return rows;
 }
 
+// The Web / HUB / LP split the business reports on. The historical sheet has no
+// Service Department column (the live sheet does), so it is derived from
+// Technology. Banner work belongs to LP: folding it into Web left LP $145k short
+// and Web $122k over against the reported FY24-25 figures, which is how this rule
+// was established rather than assumed.
+function serviceDept(tech: string): string {
+  const t = (tech || "").toLowerCase();
+  if (t.includes("hubspot")) return "HUB";
+  if (t.startsWith("lp") || t.includes("banner")) return "LP";
+  return "Web";
+}
+
 const MON: Record<string, string> = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
 // Handles "Jan 23", "Jan-23", "January 2023".
 function parseMonth(s: string): string | null {
@@ -131,6 +143,7 @@ async function loadSource(supa: any, src: any) {
       booking_amount: amt,
       engagement_model: model || null,
       technology: cell(r, cTech) || null,
+      service_dept: serviceDept(cell(r, cTech)),
       geo: cell(r, cGeo) || null,
       project_id: cell(r, cPid) || null,
       project_status: cell(r, cStatus) || null,

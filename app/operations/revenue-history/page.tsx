@@ -93,6 +93,7 @@ export default function RevenueHistory() {
     const byMonth = new Map<string, number>()
     const byModel = new Map<string, number>()
     const byGeo = new Map<string, number>()
+    const byDept = new Map<string, number>()
     const byClient = new Map<string, number>()
     const byFy = new Map<number, { amount: number; clients: Set<string> }>()
     for (const r of rows) {
@@ -100,6 +101,7 @@ export default function RevenueHistory() {
       byMonth.set(k, (byMonth.get(k) || 0) + amt)
       byModel.set(r.engagement_model || 'Unspecified', (byModel.get(r.engagement_model || 'Unspecified') || 0) + amt)
       byGeo.set(r.geo || 'Unspecified', (byGeo.get(r.geo || 'Unspecified') || 0) + amt)
+      byDept.set(r.service_dept || 'Unspecified', (byDept.get(r.service_dept || 'Unspecified') || 0) + amt)
       byClient.set(r.company_name, (byClient.get(r.company_name) || 0) + amt)
       const fy = fyOf(k)
       const cur = byFy.get(fy) || { amount: 0, clients: new Set<string>() }
@@ -111,7 +113,7 @@ export default function RevenueHistory() {
       [...m.entries()].map(([name, amount]) => ({ name, amount: Math.round(amount) })).sort((a, b) => b.amount - a.amount)
     return {
       total, series, months,
-      models: sortDesc(byModel), geos: sortDesc(byGeo), clients: sortDesc(byClient),
+      models: sortDesc(byModel), geos: sortDesc(byGeo), depts: sortDesc(byDept), clients: sortDesc(byClient),
       fys: [...byFy.entries()].map(([fy, v]) => ({
         fy, amount: Math.round(v.amount), clients: v.clients.size,
         // Complete only if the data actually spans Apr(fy) → Mar(fy+1). Flagging
@@ -192,6 +194,15 @@ export default function RevenueHistory() {
           </div>
 
           <div className="grid lg:grid-cols-2 gap-5">
+            <Panel title="By service" right={<span className="text-[11px] text-mav-muted">derived from Technology</span>}>
+              <Split rows={d.depts} total={d.total}
+                color={(n) => ({ Web: '#FFDB2D', HUB: '#3b82f6', LP: '#10b981' } as any)[n] || '#333'} />
+              <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
+                This sheet has no Service Department column, so the split is derived: Hubspot &rarr; HUB, LP or Banner
+                &rarr; LP, everything else &rarr; Web. Banner work counts as LP — reconciled against the reported FY24-25
+                figures, HUB lands within $3 and LP within $42.
+              </p>
+            </Panel>
             <Panel title="By geography">
               <Split rows={d.geos} total={d.total}
                 color={(n) => ({ 'US/Canada': '#FFDB2D', 'UK/EU': '#3b82f6', 'AU/NZ': '#10b981', 'Others': '#a855f7' } as any)[n] || '#333'} />

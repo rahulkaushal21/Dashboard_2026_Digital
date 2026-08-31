@@ -757,7 +757,7 @@ export async function getQuoteCloseSpeed(): Promise<{ median: number; p90: numbe
 // ---------------------------------------------------------------------------
 export interface RevenueHistoryRow {
   id: number; source_key: string; company_name: string; booking_month: string
-  booking_amount: number; engagement_model?: string; technology?: string
+  booking_amount: number; engagement_model?: string; technology?: string; service_dept?: string
   geo?: string; project_id?: string; project_status?: string; client_name?: string
 }
 export interface RevenueSource {
@@ -768,7 +768,7 @@ export interface RevenueSource {
 // over the 1000-row page cap.
 export async function getRevenueHistory(): Promise<RevenueHistoryRow[]> {
   return (await read<RevenueHistoryRow>('revenue_history',
-    'id, source_key, company_name, booking_month, booking_amount, engagement_model, technology, geo, project_id, project_status, client_name',
+    'id, source_key, company_name, booking_month, booking_amount, engagement_model, technology, service_dept, geo, project_id, project_status, client_name',
     'id')) || []
 }
 export async function getRevenueSources(): Promise<RevenueSource[]> {
