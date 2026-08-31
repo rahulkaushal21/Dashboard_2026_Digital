@@ -4,6 +4,7 @@ import Header from '@/components/Header'
 import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -41,7 +42,15 @@ const displayName = (name?: string) => DISPLAY_ALIAS[akey(name)] || name || ''
 const ym = (s?: string) => (s || '').slice(0, 7)
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const now = new Date()
-const monthsAgoYM = (n: number) => { const d = new Date(now); d.setMonth(d.getMonth() - n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+// n months back from today, as 'YYYY-MM'. Done with month arithmetic rather than
+// Date.setMonth: on the 31st, setMonth(-11) asks for "Sep 31", which JS rolls
+// forward into October — so on a 31-day month this returned only 7 distinct
+// months out of 12, duplicating some and dropping others. That skewed the dip
+// windows and would have mislabelled the 12-month billing chart.
+const monthsAgoYM = (n: number) => {
+  const i = now.getFullYear() * 12 + now.getMonth() - n
+  return `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`
+}
 const monLabel = (y?: string) => { const p = (y || '').split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0]}` : (y || '') }
 // month key 'YYYY-MM' -> absolute month index (year*12 + month) for span/recency math
 const ymIdx = (k?: string) => { const p = (k || '').slice(0, 7).split('-'); return p.length >= 2 && p[0] && p[1] ? +p[0] * 12 + (+p[1] - 1) : null }
@@ -67,6 +76,20 @@ const tone = (b: string) => b === 'Positive' ? 'bg-green-500/15 text-green-400' 
   : b === 'At risk' ? 'bg-red-500/20 text-red-300' : b === 'Watch' ? 'bg-orange-500/20 text-orange-300' : 'bg-mav-line text-mav-muted'
 const sigTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/risk|escalat|churn/.test(v)) return 'bg-red-500/15 text-red-400'; if (/oppo|lead|upsell|cross/.test(v)) return 'bg-blue-500/15 text-blue-400'; if (/positive|win|prais/.test(v)) return 'bg-green-500/15 text-green-400'; return 'bg-mav-line text-mav-muted' }
 const impactTone = (i?: string) => /critical|sev1|sev 1/i.test(i || '') ? 'bg-red-500/20 text-red-300' : /major/i.test(i || '') ? 'bg-red-500/15 text-red-400' : /minor/i.test(i || '') ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
+// Colour per engagement model, shared by the proportion bar and its legend.
+// Dedicated work carries the brand yellow so the thing this panel is asked about
+// reads first; the rest sit muted around it.
+const modelBar = (name: string) => {
+  const v = (name || '').toLowerCase()
+  if (/partial dedicated/.test(v)) return 'bg-amber-500'
+  if (/dedicated/.test(v)) return 'bg-mav-yellow'
+  if (/new development/.test(v)) return 'bg-blue-500'
+  if (/maintan|mainten/.test(v)) return 'bg-emerald-500'
+  if (/ad-?hoc/.test(v)) return 'bg-purple-500'
+  if (/additional pages/.test(v)) return 'bg-sky-600'
+  if (/change request/.test(v)) return 'bg-rose-500'
+  return 'bg-mav-line'
+}
 const dotCls = (b: string) => b === 'At risk' ? 'bg-red-500' : b === 'Watch' ? 'bg-orange-400' : b === 'Positive' ? 'bg-green-400' : b === 'Negative' ? 'bg-red-400' : b === 'Neutral' ? 'bg-amber-400' : 'bg-mav-muted'
 
 type Risk = { level: '' | 'At risk' | 'Watch'; reasons: string[]; escs: Escalation[]; posFb: Escalation[]; negSigs: EmailSignal[]; recovered: boolean; recoveryNote?: string; unresolved: boolean; dip?: { last: number; prior: number; dropPct: number; stopped: boolean } }
@@ -230,6 +253,55 @@ export default function Clients() {
     const spanMonths = fi != null && li != null ? li - fi + 1 : activeMonths
     const total = list.reduce((s, b) => s + (b.booking_amount || 0), 0)
     return { first, last, activeMonths, spanMonths, total, avgActive: activeMonths ? total / activeMonths : 0, sinceLast: li != null ? nowIdx - li : null, services: uniq(list.map(b => b.service_name)) }
+  }
+
+  // Last 12 months of billing for one client, plus the split by engagement model
+  // (the sheet's "Project Type"). Both come from web_revenue — the same table
+  // behind LTV, the dip check and every other page — so the chart total and the
+  // split total are always the same money.
+  //
+  // Every one of the 12 buckets is emitted even when nothing was billed: a
+  // client who went quiet for four months should show four empty columns, not a
+  // compressed chart that hides the gap.
+  const MONTHS_BACK = 12
+  type Billing = {
+    series: { key: string; label: string; full: string; amount: number }[]
+    total: number; activeMonths: number
+    models: { name: string; amount: number; pct: number }[]
+    dedicated: number; dedicatedPct: number
+    firstLabel: string; lastLabel: string
+  }
+  const billingOf = (c: Client): Billing | null => {
+    const keys: string[] = []
+    for (let i = MONTHS_BACK - 1; i >= 0; i--) keys.push(monthsAgoYM(i))
+    const lo = keys[0], hi = keys[keys.length - 1]
+    const byMonth = new Map<string, number>(keys.map(k => [k, 0]))
+    const byModel = new Map<string, number>()
+    for (const b of bookingsByClient.get(norm(c.company_name)) || []) {
+      const k = ym(b.booking_month)
+      if (!k || k < lo || k > hi) continue
+      const amt = Number(b.booking_amount) || 0
+      byMonth.set(k, (byMonth.get(k) || 0) + amt)
+      // A blank Project Type is shown as its own line rather than folded into a
+      // neighbour — inventing a model for it would misstate the dedicated share.
+      const m = (b.engagement_model || '').trim() || 'Unspecified'
+      byModel.set(m, (byModel.get(m) || 0) + amt)
+    }
+    const series = keys.map(k => ({ key: k, label: SHORT[+k.slice(5, 7)] || k, full: monLabel(k), amount: Math.round(byMonth.get(k) || 0) }))
+    const total = series.reduce((sum, p) => sum + p.amount, 0)
+    if (total <= 0) return null
+    const models = [...byModel.entries()]
+      .map(([name, amount]) => ({ name, amount: Math.round(amount), pct: total ? (amount / total) * 100 : 0 }))
+      .filter(m => m.amount !== 0)
+      .sort((a, b) => b.amount - a.amount)
+    // "Partial Dedicated" counts toward dedicated work but is kept as its own
+    // line below, so the headline number and the breakdown agree.
+    const dedicated = models.filter(m => /dedicated/i.test(m.name)).reduce((sum, m) => sum + m.amount, 0)
+    return {
+      series, total, activeMonths: series.filter(p => p.amount > 0).length, models,
+      dedicated, dedicatedPct: total ? (dedicated / total) * 100 : 0,
+      firstLabel: monLabel(lo), lastLabel: monLabel(hi),
+    }
   }
 
   const riskOf = (c: Client): Risk => {
@@ -857,6 +929,7 @@ export default function Clients() {
 
       {selC && (() => {
         const r = riskOf(selC); const convos = sigByClient.get(selC.company_name) || []; const ten = tenureOf(selC)
+        const bill = billingOf(selC)
         const cOpps = oppByClient.get(selC.company_name) || []
         return (
           <div className="fixed inset-0 z-40" onClick={() => setSelC(null)}>
@@ -890,6 +963,67 @@ export default function Clients() {
                 <div><div className="text-xs text-mav-muted">Last booking</div>{ym(selC.last_booking_month) || '—'}</div>
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
               </div>
+
+              {bill && (
+                <div className="mt-6 border-t border-mav-line pt-4">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-xs uppercase tracking-wide text-mav-muted">Billing &middot; last 12 months</span>
+                    <span className="text-base font-semibold tabular-nums">{fmtUsd(bill.total)}</span>
+                  </div>
+                  <div className="text-[11px] text-mav-muted mt-1">
+                    {bill.firstLabel} &rarr; {bill.lastLabel} &middot; billed in {bill.activeMonths} of {MONTHS_BACK} months
+                    {bill.activeMonths > 0 && <> &middot; {fmtUsd(Math.round(bill.total / bill.activeMonths))} per billed month</>}
+                  </div>
+                  <div className="mt-3 -ml-2">
+                    <ResponsiveContainer width="100%" height={150}>
+                      <BarChart data={bill.series} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
+                        <XAxis dataKey="label" stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} interval={0} />
+                        <YAxis stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} width={44}
+                          tickFormatter={(v: number) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`} />
+                        <Tooltip
+                          cursor={{ fill: '#ffffff08' }}
+                          contentStyle={{ background: '#1B1B1B', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
+                          labelFormatter={(_l: any, pl: any) => pl?.[0]?.payload?.full || ''}
+                          formatter={(v: number) => [fmtUsd(v), 'Billed']} />
+                        <Bar dataKey="amount" fill="#FFDB2D" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="flex items-baseline justify-between gap-3 mb-2">
+                      <span className="text-xs uppercase tracking-wide text-mav-muted">By engagement model</span>
+                      {bill.dedicated > 0 && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">
+                          {Math.round(bill.dedicatedPct)}% dedicated
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex h-2 rounded-full overflow-hidden bg-mav-line mb-3">
+                      {bill.models.map(m => (
+                        <div key={m.name} className={modelBar(m.name)} style={{ width: `${m.pct}%` }} title={`${m.name} — ${fmtUsd(m.amount)} (${m.pct.toFixed(0)}%)`} />
+                      ))}
+                    </div>
+                    <div className="space-y-1.5">
+                      {bill.models.map(m => (
+                        <div key={m.name} className="flex items-center gap-2.5 text-sm">
+                          <span className={`w-2 h-2 rounded-sm shrink-0 ${modelBar(m.name)}`} />
+                          <span className="flex-1 truncate">{m.name}</span>
+                          <span className="tabular-nums">{fmtUsd(m.amount)}</span>
+                          <span className="w-9 text-right text-xs text-mav-muted tabular-nums">{Math.round(m.pct)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                    {bill.dedicated > 0 && (
+                      <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
+                        {fmtUsd(bill.dedicated)} of the last 12 months is dedicated work
+                        {bill.models.some(m => /^partial dedicated$/i.test(m.name)) && <> (Dedicated + Partial Dedicated)</>}.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {cOpps.length > 0 && (
                 <div className="mt-6 border-t border-mav-line pt-4">

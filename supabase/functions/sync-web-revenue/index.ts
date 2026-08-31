@@ -91,6 +91,12 @@ Deno.serve(async (req) => {
     // Column F. The stack the work was actually built on — the one field that tells you
     // what a client buys, not just which department billed them.
     const cTech = idx(["technology"]);
+    // The sheet's "Project Type" — Dedicated / Partial Dedicated / Ad-hoc /
+    // New Development / Maintanance / Additional Pages. `bookings` already
+    // carried this; web_revenue needs it so the Clients page can split a
+    // client's billing by engagement model against the same numbers every
+    // other page shows.
+    const cEngagement = idx(["project type", "engagement model", "engagement"]);
     const cStatus = idx(["project status"]);
     const cProject = idx(["project name"]);
     const cClient = idx(["client name"]);
@@ -99,7 +105,7 @@ Deno.serve(async (req) => {
     const cStartDate = idx(["start date"]);
     if (cAgency < 0 || cMonth < 0) throw new Error("required columns not found");
 
-    type R = { company_name: string; contact_email: string | null; booking_amount: number; booking_month: string; service_name: string | null; technology: string | null; geo: string | null; sme: string | null; sales_person: string | null; src_row_hash: string };
+    type R = { company_name: string; contact_email: string | null; booking_amount: number; booking_month: string; service_name: string | null; technology: string | null; engagement_model: string | null; geo: string | null; sme: string | null; sales_person: string | null; src_row_hash: string };
     const agg = new Map<string, R>();
     const cell = (row: string[], i: number) => (i >= 0 ? (row[i] || "").trim() : "");
     let excluded = 0;
@@ -139,12 +145,19 @@ Deno.serve(async (req) => {
       // them into one line would throw away the answer to "what do they buy from us".
       // Totals are unaffected — the same money, split across more lines.
       const tech = cTech >= 0 ? (row[cTech] || "").trim() : "";
-      const key = `${company}|${month}|${svc}|${tech}`;
+      // Engagement model joins the key for the same reason technology did:
+      // 14.8% of company|month|service|technology groups mix more than one
+      // Project Type, and collapsing them would stamp ~1 in 7 rows with a model
+      // that isn't theirs — enough to make a client's dedicated split wrong.
+      // Totals don't move; the same money is just split across more lines.
+      const eng = cEngagement >= 0 ? (row[cEngagement] || "").trim() : "";
+      const key = `${company}|${month}|${svc}|${tech}|${eng}`;
       const cur = agg.get(key);
       if (cur) cur.booking_amount += amt;
       else agg.set(key, {
         company_name: company, booking_month: month, service_name: svc || null,
         technology: tech || null,
+        engagement_model: eng || null,
         booking_amount: amt,
         contact_email: cEmail >= 0 ? ((row[cEmail] || "").trim() || null) : null,
         geo: cGeo >= 0 ? ((row[cGeo] || "").trim() || null) : null,
