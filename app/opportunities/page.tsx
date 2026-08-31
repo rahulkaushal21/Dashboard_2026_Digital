@@ -12,6 +12,17 @@ const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x
 const splitNames = (s?: string) => (s || '').split(/[,/&]/).map(x => x.trim()).filter(Boolean)
 const uniqNames = (arr: (string | undefined)[]) => Array.from(new Set(arr.flatMap(splitNames))).sort((a, b) => a.localeCompare(b))
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+
+// Quote-size bands, kept as strings because that is what the number inputs hold —
+// so a preset and a typed value are the same state and the active highlight is a
+// plain string compare. The cuts mirror the deal-size split on the home AI
+// Insights card, where the big-quote conversion rate is the thing worth chasing.
+const VALUE_BANDS = [
+{ label: 'under $1k', min: '', max: '1000' },
+{ label: '$1k–$5k', min: '1000', max: '5000' },
+{ label: '$5k–$10k', min: '5000', max: '10000' },
+{ label: '$10k+', min: '10000', max: '' },
+]
 const badge = (s?: string) => {
 const map: Record<string, string> = { pending: 'bg-amber-500/15 text-amber-400', received: 'bg-blue-500/15 text-blue-400', quoted: 'bg-purple-500/15 text-purple-300', won: 'bg-green-500/15 text-green-400', lost: 'bg-red-500/15 text-red-400' }
 return map[(s || '').toLowerCase()] || 'bg-mav-line text-mav-muted'
@@ -92,6 +103,11 @@ const [search, setSearch] = useState(''); const [fType, setFType] = useState('')
 const [misTagOnly, setMisTagOnly] = useState(false)
 const [fAM, setFAM] = useState(''); const [fPM, setFPM] = useState(''); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
 const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
+// Quote-value band. Held as strings so "empty" is distinguishable from 0: an
+// empty box means the bound is not set, while a typed 0 still switches the band
+// on — and switching it on is what drops the value-less rows, so "min 0" is not
+// the same as no filter at all.
+const [vMin, setVMin] = useState(''); const [vMax, setVMax] = useState('')
 // Today's date, resolved on the client. Drives the fixed "last 2 months" window,
 // which must not move when the user edits the From/To filter.
 const [today, setToday] = useState('')
@@ -116,6 +132,22 @@ useEffect(() => { const d = new Date().toISOString().slice(0, 10); setTo(d); set
 
 // Undated rows always show; otherwise honour the From/To range.
 const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return true; if (from && v < from) return false; if (to && v > to) return false; return true }
+
+// Quote-value band. Unlike the date filter, a row with NO value is EXCLUDED the
+// moment either bound is set: the question being asked is "which pending quotes
+// sit between $X and $Y", and a deal we never put a number on cannot answer it.
+// That exclusion is deliberate but invisible, so the count of dropped rows is
+// surfaced next to the inputs rather than left for someone to discover.
+const vMinN = vMin === '' ? null : Number(vMin)
+const vMaxN = vMax === '' ? null : Number(vMax)
+const bandOn = (vMinN !== null && !Number.isNaN(vMinN)) || (vMaxN !== null && !Number.isNaN(vMaxN))
+const inBand = (v?: number | null) => {
+if (!bandOn) return true
+if (v === null || v === undefined || v === 0) return false
+if (vMinN !== null && !Number.isNaN(vMinN) && v < vMinN) return false
+if (vMaxN !== null && !Number.isNaN(vMaxN) && v > vMaxN) return false
+return true
+}
 const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' || k === 'value' ? -1 : 1 })
 
 const o = useMemo(() => {
@@ -134,13 +166,37 @@ const rows = all
 .filter(x => !markedOnly || markedByHand(x))
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
+.filter(x => inBand(x.value))
 return rows.sort((a, b) => {
 const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
 if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, vMin, vMax, sort])
+
+// How many rows the band is hiding purely because they carry no quoted value.
+// Counted against everything the OTHER filters already allow, so it answers
+// "what am I not seeing" rather than "how many value-less deals exist".
+const hiddenNoValue = useMemo(() => {
+if (!bandOn) return 0
+return all
+.filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
+.filter(x => !fType || typeLabel(x).includes(fType))
+.filter(x => !fGeo || (x.geo || '') === fGeo)
+.filter(x => !fAM || splitNames(x.sales_person).includes(fAM))
+.filter(x => !fPM || splitNames(x.pm_owner).includes(fPM))
+.filter(x => !fStatus || oppStatus(x) === fStatus)
+.filter(x => !fSvc || svcOf(x) === fSvc)
+.filter(x => !fTech || (x.technology || '') === fTech)
+.filter(x => !flagOnly || x.flag)
+.filter(x => !unlikelyOnly || x.unlikely)
+.filter(x => !lagOnly || sheetLag(x))
+.filter(x => !markedOnly || markedByHand(x))
+.filter(x => !misTagOnly || x.mis_tagged_new)
+.filter(x => inRange(x.source_date || x.first_date))
+.filter(x => !x.value).length
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, vMin, vMax])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -215,10 +271,10 @@ window.alert('Could not save that — please try again.')
 }
 }
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false) }
+const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setVMin(''); setVMax('') }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, sort, perPage])
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, vMin, vMax, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
@@ -454,8 +510,28 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 )}
 <span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
 <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
+<span className="text-xs text-mav-muted ml-1" title="Quoted value in USD. Deals with no quoted figure drop out while a band is set.">Value $</span>
+<input type="number" min="0" step="100" inputMode="numeric" value={vMin} onChange={e => setVMin(e.target.value)} placeholder="min" aria-label="Minimum quoted value" className={`${selCls} w-24`} />
+<span className="text-xs text-mav-muted">–</span>
+<input type="number" min="0" step="100" inputMode="numeric" value={vMax} onChange={e => setVMax(e.target.value)} placeholder="max" aria-label="Maximum quoted value" className={`${selCls} w-24`} />
+{/* Presets are always visible — hiding them until a bound is typed would mean
+    you could never reach them by clicking, which is the whole point of a preset.
+    The bands mirror the deal-size split on the home AI Insights card. */}
+{VALUE_BANDS.map(b => {
+const active = b.min === vMin && b.max === vMax
+return (
+<button key={b.label} onClick={() => { setVMin(active ? '' : b.min); setVMax(active ? '' : b.max) }}
+className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+{b.label}
+</button>
+)
+})}
+{bandOn && <button onClick={() => { setVMin(''); setVMax('') }} className="text-xs px-2 py-1 rounded-md border border-mav-line text-mav-muted hover:text-white">clear</button>}
 <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
-<span className="text-xs text-mav-muted ml-auto">{o.length} shown · {money(o.reduce((s, x) => s + (x.value || 0), 0))}</span>
+<span className="text-xs text-mav-muted ml-auto">
+{o.length} shown · {money(o.reduce((s, x) => s + (x.value || 0), 0))}
+{hiddenNoValue > 0 && <span className="text-amber-300/80" title="These match every other filter but carry no quoted figure, so a value band cannot place them. Clear the band to see them."> · {hiddenNoValue} hidden (no quoted value)</span>}
+</span>
 </div>
 
 <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
