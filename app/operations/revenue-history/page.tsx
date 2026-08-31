@@ -81,6 +81,24 @@ const Split = ({ rows, total, color }: { rows: { name: string; amount: number }[
   </>
 )
 
+// One movement in the revenue bridge, as a signed bar scaled against the largest
+// of the four — so which force actually moved the year reads at a glance.
+const Move = ({ label, amount, n, max }: { label: string; amount: number; n: number; max: number }) => {
+  const up = amount >= 0
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      <span className="w-28 shrink-0 text-xs text-mav-muted">{label}</span>
+      <div className="flex-1 h-2 rounded-full bg-mav-line overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${max ? (Math.abs(amount) / max) * 100 : 0}%`, background: up ? '#10b981' : '#f43f5e' }} />
+      </div>
+      <span className={`w-24 text-right tabular-nums ${up ? 'text-green-400' : 'text-red-400'}`}>
+        {up ? '+' : '\u2212'}{fmtUsd(Math.abs(amount))}
+      </span>
+      <span className="w-20 text-right text-xs text-mav-muted tabular-nums">{n} {n === 1 ? 'client' : 'clients'}</span>
+    </div>
+  )
+}
+
 export default function RevenueHistory() {
   const [rows, setRows] = useState<RevenueHistoryRow[]>([])
   const [live, setLive] = useState<BookingRow[]>([])
@@ -163,6 +181,99 @@ export default function RevenueHistory() {
     }
   }, [all])
 
+  // ---------------------------------------------------------------------------
+  // Year-on-year. Every comparison here is WINDOW-MATCHED: the selected year's
+  // covered months are the window, and the prior year is restricted to the same
+  // months. For a finished year that is all twelve and changes nothing; for the
+  // year in progress it is the only honest comparison — Apr-Aug against Apr-Aug,
+  // not five months against twelve.
+  // ---------------------------------------------------------------------------
+  const [selFy, setSelFy] = useState<number | null>(null)
+
+  const ya = useMemo(() => {
+    const years = [...new Set(all.map(r => fyOf(r.month)))].sort((a, b) => a - b)
+    const cur = selFy != null && years.includes(selFy) ? selFy : years[years.length - 1]
+    const prev = cur - 1
+    const wnd = new Set(all.filter(r => fyOf(r.month) === cur).map(r => +r.month.slice(5, 7)))
+    const partial = wnd.size < 12
+
+    const key = (n: string) => n.trim().toLowerCase()
+    const label = new Map<string, string>()
+    const sum = (fy: number) => {
+      const clients = new Map<string, number>()
+      let total = 0
+      for (const r of all) {
+        if (fyOf(r.month) !== fy || !wnd.has(+r.month.slice(5, 7))) continue
+        const k = key(r.client)
+        if (!label.has(k)) label.set(k, r.client)
+        clients.set(k, (clients.get(k) || 0) + r.amount)
+        total += r.amount
+      }
+      return { clients, total }
+    }
+    const a = sum(cur), b = sum(prev)
+
+    // Split the change into the four movements that actually explain it. They
+    // sum exactly to (this year - last year), which is what makes it a bridge
+    // and not four unrelated numbers.
+    let nw = 0, nwN = 0, ch = 0, chN = 0, ex = 0, exN = 0, co = 0, coN = 0
+    let retainedPrev = 0, retainedCur = 0
+    const moves: { name: string; prev: number; cur: number; delta: number }[] = []
+    for (const k of new Set([...a.clients.keys(), ...b.clients.keys()])) {
+      const c = a.clients.get(k) || 0, p = b.clients.get(k) || 0
+      moves.push({ name: label.get(k) || k, prev: p, cur: c, delta: c - p })
+      if (p <= 0) { nw += c; nwN++; continue }
+      retainedPrev += p; retainedCur += c
+      if (c <= 0) { ch -= p; chN++ }
+      else if (c > p) { ex += c - p; exN++ }
+      else if (c < p) { co += c - p; coN++ }
+    }
+    moves.sort((x, y) => y.delta - x.delta)
+
+    // Concentration and mix, per full financial year.
+    const mix = years.map(fy => {
+      const byClient = new Map<string, number>()
+      let total = 0
+      for (const r of all) {
+        if (fyOf(r.month) !== fy) continue
+        byClient.set(key(r.client), (byClient.get(key(r.client)) || 0) + r.amount)
+        total += r.amount
+      }
+      const amts = [...byClient.values()].sort((x, y) => y - x)
+      const top10 = amts.slice(0, 10).reduce((s, v) => s + v, 0)
+      return {
+        fy, total, clients: byClient.size,
+        perClient: byClient.size ? total / byClient.size : 0,
+        top10Pct: total ? (top10 / total) * 100 : 0,
+        big: amts.filter(v => v >= 50000).length,
+        complete: d.fys.find(f => f.fy === fy)?.complete ?? false,
+      }
+    })
+
+    // Engagement model across every year, so a shift in mix is visible as a row.
+    const modelNames = [...new Set(all.map(r => r.model))]
+    const byModel = modelNames.map(name => ({
+      name,
+      cells: years.map(fy => all.reduce((s, r) => s + (fyOf(r.month) === fy && r.model === name ? r.amount : 0), 0)),
+    })).sort((x, y) => y.cells.reduce((s, v) => s + v, 0) - x.cells.reduce((s, v) => s + v, 0))
+
+    return {
+      years, cur, prev, partial, windowLabel: (() => {
+        // Order by position in the financial year (Apr = 0), then name the span.
+        const o = [...wnd].sort((x, y) => ((x + 8) % 12) - ((y + 8) % 12))
+        return o.length ? (o.length === 1 ? SHORT[o[0]] : `${SHORT[o[0]]}–${SHORT[o[o.length - 1]]}`) : ''
+      })(),
+      curTotal: a.total, prevTotal: b.total, hasPrev: years.includes(prev),
+      nw, nwN, ch, chN, ex, exN, co, coN,
+      nrr: retainedPrev ? (retainedCur / retainedPrev) * 100 : 0,
+      logoRet: b.clients.size ? ((b.clients.size - chN) / b.clients.size) * 100 : 0,
+      curClients: a.clients.size, prevClients: b.clients.size,
+      gains: moves.filter(m => m.delta > 0).slice(0, 6),
+      losses: moves.filter(m => m.delta < 0).slice(-6).reverse(),
+      mix, byModel, modelYears: years,
+    }
+  }, [all, selFy, d.fys])
+
   const src = sources[0]
 
   return (
@@ -192,14 +303,224 @@ export default function RevenueHistory() {
                 <XAxis dataKey="label" stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} interval={1} />
                 <YAxis stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} width={48}
                   tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} />
-                <Tooltip cursor={{ fill: '#ffffff08' }}
-                  contentStyle={{ background: '#1B1B1B', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
+                {/* The bars get their colour from <Cell>, so the Bar itself has no
+                    `fill` — and recharts then falls back to #000 for the tooltip
+                    item text, which is unreadable on the dark panel. Set the text
+                    colours explicitly rather than relying on the series colour. */}
+                <Tooltip cursor={{ fill: '#ffffff14' }}
+                  contentStyle={{ background: '#2e2e2e', border: '1px solid #4a4a4a', borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: '#9a9a9a', marginBottom: 2 }}
+                  itemStyle={{ color: '#f2f2f2' }}
                   formatter={(v: number) => [fmtUsd(v), 'Billed']} />
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
                   {d.series.map(p => <Cell key={p.key} fill={p.era === 'live' ? '#FFDB2D' : '#b99a1f'} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+          </Panel>
+
+          <div className="flex flex-wrap items-baseline justify-between gap-3 pt-2">
+            <div>
+              <h2 className="text-base font-medium">Year on year</h2>
+              <p className="text-xs text-mav-muted mt-0.5">
+                {ya.partial
+                  ? `${fyLabel(ya.cur)} is still running, so every figure below compares ${ya.windowLabel} against ${ya.windowLabel} of ${fyLabel(ya.prev)}.`
+                  : `${fyLabel(ya.cur)} against ${fyLabel(ya.prev)}, full year against full year.`}
+              </p>
+            </div>
+            <div className="flex gap-1.5">
+              {ya.years.filter(y => ya.years.includes(y - 1)).map(y => (
+                <button key={y} onClick={() => setSelFy(y)}
+                  className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
+                    y === ya.cur ? 'bg-mav-yellow text-black border-mav-yellow font-medium'
+                                 : 'border-mav-line text-mav-muted hover:text-white'}`}>
+                  {fyLabel(y)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {!ya.hasPrev ? (
+            <Panel title="What moved the year"><p className="text-sm text-mav-muted">No prior year to compare against.</p></Panel>
+          ) : (
+          <Panel title="What moved the year" right={
+            <span className="text-[11px] text-mav-muted">
+              {ya.partial ? `${ya.windowLabel} like-for-like` : 'full year'}
+            </span>
+          }>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-5">
+              <span className="text-mav-muted text-sm tabular-nums">{fyLabel(ya.prev)} {fmtUsd(ya.prevTotal)}</span>
+              <span className="text-mav-muted">&rarr;</span>
+              <span className="text-2xl font-semibold tabular-nums">{fmtUsd(ya.curTotal)}</span>
+              {ya.prevTotal > 0 && (() => {
+                const pc = ((ya.curTotal - ya.prevTotal) / ya.prevTotal) * 100
+                return <span className={`text-sm font-medium tabular-nums ${pc >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {pc >= 0 ? '+' : ''}{pc.toFixed(1)}%
+                </span>
+              })()}
+            </div>
+
+            <div className="space-y-2.5">
+              {(() => {
+                const max = Math.max(Math.abs(ya.nw), Math.abs(ya.ex), Math.abs(ya.co), Math.abs(ya.ch))
+                return <>
+                  <Move label="New clients" amount={ya.nw} n={ya.nwN} max={max} />
+                  <Move label="Grew" amount={ya.ex} n={ya.exN} max={max} />
+                  <Move label="Shrank" amount={ya.co} n={ya.coN} max={max} />
+                  <Move label="Stopped billing" amount={ya.ch} n={ya.chN} max={max} />
+                </>
+              })()}
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-mav-line grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <div className="text-[11px] text-mav-muted">Net revenue retention</div>
+                <div className={`text-lg font-semibold tabular-nums ${ya.nrr >= 100 ? 'text-green-400' : 'text-red-400'}`}>
+                  {ya.nrr.toFixed(0)}%
+                </div>
+                <div className="text-[10px] text-mav-muted">last year's clients, this year</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-mav-muted">Client retention</div>
+                <div className="text-lg font-semibold tabular-nums">{ya.logoRet.toFixed(0)}%</div>
+                <div className="text-[10px] text-mav-muted">{ya.prevClients - ya.chN} of {ya.prevClients} came back</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-mav-muted">Billing clients</div>
+                <div className="text-lg font-semibold tabular-nums">{ya.curClients}</div>
+                <div className="text-[10px] text-mav-muted">was {ya.prevClients}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-mav-muted">New this year</div>
+                <div className="text-lg font-semibold tabular-nums">{ya.nwN}</div>
+                <div className="text-[10px] text-mav-muted">{fmtUsd(ya.nw)} billed</div>
+              </div>
+            </div>
+
+            <p className="mt-4 text-[11px] text-mav-muted leading-relaxed">
+              The four movements add up exactly to the change in the total, so they explain it rather than merely
+              describe it. A client counts as <span className="text-mav-muted">new</span> when it billed nothing in the
+              comparison window last year, and as <span className="text-mav-muted">stopped billing</span> when it billed
+              nothing in it this year — over a part-year window that can mean quiet rather than lost.
+            </p>
+          </Panel>
+          )}
+
+          <div className="grid lg:grid-cols-2 gap-5">
+            <Panel title="Grew the most" right={<span className="text-[11px] text-mav-muted">vs {fyLabel(ya.prev)}</span>}>
+              <div className="space-y-1.5">
+                {ya.gains.length === 0 && <p className="text-sm text-mav-muted">Nothing grew in this window.</p>}
+                {ya.gains.map(m => (
+                  <div key={m.name} className="flex items-center gap-3 text-sm py-1">
+                    <span className="flex-1 truncate">{m.name}</span>
+                    <span className="text-xs text-mav-muted tabular-nums w-32 text-right">
+                      {fmtUsd(m.prev)} &rarr; {fmtUsd(m.cur)}
+                    </span>
+                    <span className="w-24 text-right tabular-nums text-green-400">+{fmtUsd(m.delta)}</span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+            <Panel title="Fell the most" right={<span className="text-[11px] text-mav-muted">vs {fyLabel(ya.prev)}</span>}>
+              <div className="space-y-1.5">
+                {ya.losses.length === 0 && <p className="text-sm text-mav-muted">Nothing fell in this window.</p>}
+                {ya.losses.map(m => (
+                  <div key={m.name} className="flex items-center gap-3 text-sm py-1">
+                    <span className="flex-1 truncate">{m.name}</span>
+                    <span className="text-xs text-mav-muted tabular-nums w-32 text-right">
+                      {fmtUsd(m.prev)} &rarr; {fmtUsd(m.cur)}
+                    </span>
+                    <span className="w-24 text-right tabular-nums text-red-400">&minus;{fmtUsd(-m.delta)}</span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+
+          <Panel title="Engagement model by year" right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
+            <div className="overflow-x-auto -mx-1 px-1">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-wide text-mav-muted">
+                    <th className="text-left font-medium pb-2">Model</th>
+                    {ya.modelYears.map(y => (
+                      <th key={y} className="text-right font-medium pb-2 px-3 whitespace-nowrap">
+                        {fyLabel(y)}
+                        {!(d.fys.find(f => f.fy === y)?.complete) && <span className="text-mav-muted"> *</span>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ya.byModel.map(m => (
+                    <tr key={m.name} className="border-t border-mav-line/60">
+                      <td className="py-2 pr-3">
+                        <span className="inline-flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: colorFor(m.name) }} />
+                          {m.name}
+                        </span>
+                      </td>
+                      {m.cells.map((v, i) => {
+                        const prev = i > 0 ? m.cells[i - 1] : null
+                        const complete = d.fys.find(f => f.fy === ya.modelYears[i])?.complete
+                        const prevComplete = i > 0 && d.fys.find(f => f.fy === ya.modelYears[i - 1])?.complete
+                        const pc = prev && prev > 0 && complete && prevComplete ? ((v - prev) / prev) * 100 : null
+                        return (
+                          <td key={i} className="py-2 px-3 text-right tabular-nums whitespace-nowrap">
+                            {v > 0 ? fmtUsd(v) : <span className="text-mav-muted">—</span>}
+                            {pc != null && (
+                              <span className={`block text-[10px] ${pc >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {pc >= 0 ? '+' : ''}{pc.toFixed(0)}%
+                              </span>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
+              Years marked <span className="text-mav-muted">*</span> do not cover a full Apr–Mar span, so no percentage is
+              shown into or out of them. Model names are reproduced as the source spreadsheet spells them.
+            </p>
+          </Panel>
+
+          <Panel title="Client mix" right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
+            <div className="overflow-x-auto -mx-1 px-1">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-wide text-mav-muted">
+                    <th className="text-left font-medium pb-2">Year</th>
+                    <th className="text-right font-medium pb-2 px-3">Billed</th>
+                    <th className="text-right font-medium pb-2 px-3">Clients</th>
+                    <th className="text-right font-medium pb-2 px-3">Per client</th>
+                    <th className="text-right font-medium pb-2 px-3 whitespace-nowrap">Top 10 share</th>
+                    <th className="text-right font-medium pb-2 pl-3 whitespace-nowrap">Clients &ge; $50k</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ya.mix.map(m => (
+                    <tr key={m.fy} className="border-t border-mav-line/60">
+                      <td className="py-2 pr-3 font-medium whitespace-nowrap">
+                        {fyLabel(m.fy)}
+                        {!m.complete && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-mav-line text-mav-muted">partial</span>}
+                      </td>
+                      <td className="py-2 px-3 text-right tabular-nums">{fmtUsd(m.total)}</td>
+                      <td className="py-2 px-3 text-right tabular-nums">{m.clients}</td>
+                      <td className="py-2 px-3 text-right tabular-nums">{fmtUsd(m.perClient)}</td>
+                      <td className="py-2 px-3 text-right tabular-nums">{m.top10Pct.toFixed(0)}%</td>
+                      <td className="py-2 pl-3 text-right tabular-nums">{m.big}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
+              Top-10 share is the concentration risk: the higher it climbs, the more of the year rests on a handful of
+              accounts, and the harder a single one leaving lands.
+            </p>
           </Panel>
 
           <div className="grid lg:grid-cols-2 gap-5">
