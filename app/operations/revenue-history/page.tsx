@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts'
 import Header from '@/components/Header'
-import { getRevenueHistory, getRevenueSources, type RevenueHistoryRow, type RevenueSource } from '@/lib/supabase'
+import { getRevenueHistory, getRevenueSources, getBookingsFull, type RevenueHistoryRow, type RevenueSource, type BookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Re-reads the yearly spreadsheets on demand, the same pattern the L&D page uses.
@@ -24,6 +24,20 @@ const MODEL_COLOR: Record<string, string> = {
   'Maintanance': '#10b981', 'Ad-hoc': '#a855f7', 'Additional Pages': '#0284c7', 'Change Request': '#f43f5e',
 }
 const colorFor = (m: string) => MODEL_COLOR[m] || '#333333'
+
+// The history table owns everything up to its last month; web_revenue owns
+// everything after. web_revenue holds 13 stray rows in Jan and Mar 2025 that the
+// history sheet also covers, so the cut has to be applied to the live side or
+// those two months double-count.
+type Row = { month: string; amount: number; client: string; model: string; dept: string; geo: string; era: 'history' | 'live' }
+// web_revenue records the department as WEB-US / WEB-AU / WEB-UK / LP / HUB;
+// revenue_history stores it already reduced to Web / HUB / LP.
+const deptOfService = (s?: string) => {
+  const v = (s || '').toUpperCase()
+  if (v.startsWith('HUB')) return 'HUB'
+  if (v.startsWith('LP')) return 'LP'
+  return 'Web'
+}
 
 const Panel = ({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) => (
   <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
@@ -69,13 +83,14 @@ const Split = ({ rows, total, color }: { rows: { name: string; amount: number }[
 
 export default function RevenueHistory() {
   const [rows, setRows] = useState<RevenueHistoryRow[]>([])
+  const [live, setLive] = useState<BookingRow[]>([])
   const [sources, setSources] = useState<RevenueSource[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [note, setNote] = useState('')
 
-  const load = () => Promise.all([getRevenueHistory(), getRevenueSources()])
-    .then(([r, s]) => { setRows(r); setSources(s) }).finally(() => setLoading(false))
+  const load = () => Promise.all([getRevenueHistory(), getRevenueSources(), getBookingsFull()])
+    .then(([r, s, w]) => { setRows(r); setSources(s); setLive(w) }).finally(() => setLoading(false))
   useEffect(() => { load() }, [])
 
   const resync = async () => {
@@ -88,27 +103,50 @@ export default function RevenueHistory() {
     } catch (e) { setNote('Failed: ' + String(e)) } finally { setSyncing(false) }
   }
 
+  // One combined series: the history sheet up to its last month, the live
+  // revenue table from the month after. Nothing is written to web_revenue and
+  // nothing about it changes — it is read here exactly as the other pages read it.
+  const all = useMemo<Row[]>(() => {
+    const cut = rows.reduce((mx, r) => (ym(r.booking_month) > mx ? ym(r.booking_month) : mx), '')
+    const hist: Row[] = rows.map(r => ({
+      month: ym(r.booking_month), amount: Number(r.booking_amount || 0), client: r.company_name,
+      model: r.engagement_model || 'Unspecified', dept: r.service_dept || 'Unspecified',
+      geo: r.geo || 'Unspecified', era: 'history',
+    }))
+    const liveRows: Row[] = live
+      .filter(b => !!b.booking_month && (!cut || ym(b.booking_month) > cut))
+      .map(b => ({
+        month: ym(b.booking_month), amount: Number(b.booking_amount || 0), client: b.company_name || '—',
+        model: b.engagement_model || 'Unspecified', dept: deptOfService(b.service_name),
+        geo: b.geo || 'Unspecified', era: 'live',
+      }))
+    return [...hist, ...liveRows]
+  }, [rows, live])
+
   const d = useMemo(() => {
-    const total = rows.reduce((s, r) => s + Number(r.booking_amount || 0), 0)
+    const total = all.reduce((s, r) => s + r.amount, 0)
     const byMonth = new Map<string, number>()
+    const eraOf = new Map<string, Row['era']>()
     const byModel = new Map<string, number>()
     const byGeo = new Map<string, number>()
     const byDept = new Map<string, number>()
     const byClient = new Map<string, number>()
     const byFy = new Map<number, { amount: number; clients: Set<string> }>()
-    for (const r of rows) {
-      const k = ym(r.booking_month), amt = Number(r.booking_amount || 0)
-      byMonth.set(k, (byMonth.get(k) || 0) + amt)
-      byModel.set(r.engagement_model || 'Unspecified', (byModel.get(r.engagement_model || 'Unspecified') || 0) + amt)
-      byGeo.set(r.geo || 'Unspecified', (byGeo.get(r.geo || 'Unspecified') || 0) + amt)
-      byDept.set(r.service_dept || 'Unspecified', (byDept.get(r.service_dept || 'Unspecified') || 0) + amt)
-      byClient.set(r.company_name, (byClient.get(r.company_name) || 0) + amt)
-      const fy = fyOf(k)
+    for (const r of all) {
+      byMonth.set(r.month, (byMonth.get(r.month) || 0) + r.amount)
+      eraOf.set(r.month, r.era)
+      byModel.set(r.model, (byModel.get(r.model) || 0) + r.amount)
+      byGeo.set(r.geo, (byGeo.get(r.geo) || 0) + r.amount)
+      byDept.set(r.dept, (byDept.get(r.dept) || 0) + r.amount)
+      byClient.set(r.client, (byClient.get(r.client) || 0) + r.amount)
+      const fy = fyOf(r.month)
       const cur = byFy.get(fy) || { amount: 0, clients: new Set<string>() }
-      cur.amount += amt; cur.clients.add(r.company_name.toLowerCase()); byFy.set(fy, cur)
+      cur.amount += r.amount; cur.clients.add(r.client.toLowerCase()); byFy.set(fy, cur)
     }
     const months = [...byMonth.keys()].sort()
-    const series = months.map(k => ({ key: k, label: monLabel(k), fy: fyOf(k), amount: Math.round(byMonth.get(k) || 0) }))
+    const series = months.map(k => ({
+      key: k, label: monLabel(k), fy: fyOf(k), era: eraOf.get(k), amount: Math.round(byMonth.get(k) || 0),
+    }))
     const sortDesc = (m: Map<string, number>) =>
       [...m.entries()].map(([name, amount]) => ({ name, amount: Math.round(amount) })).sort((a, b) => b.amount - a.amount)
     return {
@@ -116,20 +154,20 @@ export default function RevenueHistory() {
       models: sortDesc(byModel), geos: sortDesc(byGeo), depts: sortDesc(byDept), clients: sortDesc(byClient),
       fys: [...byFy.entries()].map(([fy, v]) => ({
         fy, amount: Math.round(v.amount), clients: v.clients.size,
-        // Complete only if the data actually spans Apr(fy) → Mar(fy+1). Flagging
-        // by position instead would have called FY24-25 partial when it ends
-        // exactly on the FY boundary, and its +14% is a real comparison.
+        // Complete only if the data actually spans Apr(fy) -> Mar(fy+1).
         complete: months[0] <= `${fy}-04` && months[months.length - 1] >= `${fy + 1}-03`,
       })).sort((a, b) => a.fy - b.fy),
       clientCount: byClient.size,
+      histMonths: [...new Set(all.filter(r => r.era === 'history').map(r => r.month))].sort(),
+      liveMonths: [...new Set(all.filter(r => r.era === 'live').map(r => r.month))].sort(),
     }
-  }, [rows])
+  }, [all])
 
   const src = sources[0]
 
   return (
     <div>
-      <Header title="Revenue history" subtitle="Earlier years loaded from the yearly revenue spreadsheets. Held separately from the live revenue table, so nothing on the other pages moves." />
+      <Header title="Revenue history" subtitle="April 2023 to current. Earlier months come from the historical spreadsheet; from April 2025 the live revenue table takes over, read exactly as the other pages read it." />
 
       {loading ? <p className="text-mav-muted text-sm">Loading…</p> : rows.length === 0 ? (
         <p className="text-mav-muted text-sm">No historical revenue loaded yet.</p>
@@ -139,10 +177,15 @@ export default function RevenueHistory() {
             <Kpi label="Total billed" value={fmtUsd(d.total)} sub={`${d.months.length} months`} />
             <Kpi label="Period" value={`${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}`} sub="by confirmation month" />
             <Kpi label="Clients" value={String(d.clientCount)} sub="distinct agencies" />
-            <Kpi label="Rows" value={rows.length.toLocaleString()} sub="project lines" />
+            <Kpi label="Rows" value={all.length.toLocaleString()} sub={`${rows.length.toLocaleString()} sheet · ${(all.length - rows.length).toLocaleString()} live`} />
           </div>
 
-          <Panel title="Monthly billing" right={<span className="text-[11px] text-mav-muted">bars tinted by financial year (Apr–Mar)</span>}>
+          <Panel title="Monthly billing" right={
+            <span className="text-[11px] text-mav-muted flex items-center gap-3">
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#b99a1f' }} />spreadsheet</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#FFDB2D' }} />live table</span>
+            </span>
+          }>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={d.series} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -153,7 +196,7 @@ export default function RevenueHistory() {
                   contentStyle={{ background: '#1B1B1B', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
                   formatter={(v: number) => [fmtUsd(v), 'Billed']} />
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
-                  {d.series.map(p => <Cell key={p.key} fill={p.fy % 2 === 0 ? '#FFDB2D' : '#b99a1f'} />)}
+                  {d.series.map(p => <Cell key={p.key} fill={p.era === 'live' ? '#FFDB2D' : '#b99a1f'} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -186,21 +229,22 @@ export default function RevenueHistory() {
                 })}
               </div>
               <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
-                A year is marked <span className="text-mav-muted">partial</span> when this source does not cover its full
-                Apr–Mar span; FY22-23 starts at Sep 2022. Year-on-year is shown only where both years are complete, so a
-                partial year never produces a growth figure that is really just a shorter window.
+                A year is marked <span className="text-mav-muted">partial</span> when the data does not cover its full
+                Apr–Mar span — FY26-27 is still in progress. Year-on-year is shown only between two complete years, so a
+                part-finished year never produces a growth figure that is really just a shorter window.
               </p>
             </Panel>
           </div>
 
           <div className="grid lg:grid-cols-2 gap-5">
-            <Panel title="By service" right={<span className="text-[11px] text-mav-muted">derived from Technology</span>}>
+            <Panel title="By service" right={<span className="text-[11px] text-mav-muted">Web / HUB / LP</span>}>
               <Split rows={d.depts} total={d.total}
                 color={(n) => ({ Web: '#FFDB2D', HUB: '#3b82f6', LP: '#10b981' } as any)[n] || '#333'} />
               <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
-                This sheet has no Service Department column, so the split is derived: Hubspot &rarr; HUB, LP or Banner
-                &rarr; LP, everything else &rarr; Web. Banner work counts as LP — reconciled against the reported FY24-25
-                figures, HUB lands within $3 and LP within $42.
+                From April 2025 this comes straight from the live table's Service Department (WEB-US / WEB-AU / WEB-UK
+                roll up to Web). The earlier spreadsheet has no such column, so those months are derived from Technology:
+                Hubspot &rarr; HUB, LP or Banner &rarr; LP, everything else &rarr; Web. Banner counts as LP — against the
+                reported FY24-25 figures that derivation puts HUB within $3 and LP within $42.
               </p>
             </Panel>
             <Panel title="By geography">
@@ -257,6 +301,16 @@ export default function RevenueHistory() {
                 <span className="tabular-nums">$23,599</span> difference that is entirely those statuses, not the
                 Web/HUB/LP classification. On the same basis HUB and LP reconcile to within $3 and $42. This is a
                 deliberate choice of basis, not a gap in the data.
+              </p>
+            </div>
+            <div className="mt-4 pt-3 border-t border-mav-line">
+              <div className="text-xs uppercase tracking-wide text-mav-muted mb-1.5">From April 2025: the live table</div>
+              <p className="text-[11px] text-mav-muted leading-relaxed">
+                Months after {d.histMonths.length ? monLabel(d.histMonths[d.histMonths.length - 1]) : '—'} come from{' '}
+                <code className="text-mav-yellow">web_revenue</code>, unchanged and read the same way the Dashboard,
+                Business Trend and Forecast pages read it. Each month is taken from exactly one source, so the handover
+                cannot double-count — the live table holds a few stray Jan and Mar 2025 rows that the spreadsheet also
+                covers, and those are ignored here in favour of the spreadsheet.
               </p>
             </div>
             <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">

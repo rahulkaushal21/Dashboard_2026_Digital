@@ -115,8 +115,13 @@ async function loadSource(supa: any, src: any) {
   if (cAgency < 0 && cClient < 0) throw new Error(`${src.key}: no client column in column_map`);
 
   const cell = (r: string[], i: number) => (i >= 0 && i < r.length ? (r[i] || "").trim() : "");
+  // The window this source is authoritative for. Rows outside it are the
+  // spreadsheet's own stragglers, not this source's data, and would otherwise
+  // overlap whatever owns those months.
+  const from = src.month_from ? String(src.month_from).slice(0, 7) : null;
+  const to = src.month_to ? String(src.month_to).slice(0, 7) : null;
   const out: any[] = [];
-  let padding = 0, excluded = 0, noMonth = 0, noClient = 0, droppedValue = 0;
+  let padding = 0, excluded = 0, noMonth = 0, noClient = 0, outside = 0, droppedValue = 0;
 
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -135,6 +140,8 @@ async function loadSource(supa: any, src: any) {
     const amt = parseFloat(rawAmt.replace(/[$,\s]/g, "")) || 0;
     if (!month) { noMonth++; droppedValue += amt; continue; }
     if (!company) { noClient++; droppedValue += amt; continue; }
+    const mk = month.slice(0, 7);
+    if ((from && mk < from) || (to && mk > to)) { outside++; continue; }
 
     out.push({
       source_key: src.key,
@@ -168,7 +175,8 @@ async function loadSource(supa: any, src: any) {
   }
 
   const months = out.map((r) => r.booking_month).sort();
-  const message = `${padding} padding · ${excluded} excluded by status · ${noMonth} no-month · ${noClient} no-client · dropped $${Math.round(droppedValue)}`;
+  const window = from || to ? ` · ${outside} outside ${from || "…"}..${to || "…"}` : "";
+  const message = `${padding} padding · ${excluded} excluded by status · ${noMonth} no-month · ${noClient} no-client${window} · dropped $${Math.round(droppedValue)}`;
   await supa.from("revenue_sources").update({
     last_synced_at: new Date().toISOString(), last_rows: out.length,
     last_total: Number(total.toFixed(2)), last_message: message,
@@ -179,6 +187,7 @@ async function loadSource(supa: any, src: any) {
     source: src.key, rows: out.length, total: Math.round(total),
     first_month: months[0], last_month: months[months.length - 1],
     clients: new Set(out.map((r) => r.company_name.toLowerCase())).size,
-    padding_skipped: padding, excluded_by_status: excluded, dropped_rows: noMonth + noClient, dropped_value: Math.round(droppedValue),
+    padding_skipped: padding, excluded_by_status: excluded, outside_window: outside,
+    dropped_rows: noMonth + noClient, dropped_value: Math.round(droppedValue),
   };
 }
