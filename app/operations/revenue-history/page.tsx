@@ -18,6 +18,10 @@ const monLabel = (k: string) => { const p = k.split('-'); return p.length >= 2 ?
 // boundary the moment this is compared with Business Trend or Forecast.
 const fyOf = (k: string) => { const [y, m] = k.split('-').map(Number); return m >= 4 ? y : y - 1 }
 const fyLabel = (fy: number) => `FY${String(fy).slice(2)}-${String(fy + 1).slice(2)}`
+// The month we are currently in is only part-billed, so it is never a fair
+// half of a like-for-like comparison — on the 1st it is a rounding error against
+// a full month last year. It stays in the chart, and out of the year-on-year.
+const thisYm = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}` }
 
 const MODEL_COLOR: Record<string, string> = {
   'Dedicated': '#FFDB2D', 'Partial Dedicated': '#f59e0b', 'New Development': '#3b82f6',
@@ -194,7 +198,14 @@ export default function RevenueHistory() {
     const years = [...new Set(all.map(r => fyOf(r.month)))].sort((a, b) => a - b)
     const cur = selFy != null && years.includes(selFy) ? selFy : years[years.length - 1]
     const prev = cur - 1
-    const wnd = new Set(all.filter(r => fyOf(r.month) === cur).map(r => +r.month.slice(5, 7)))
+    // Window-match on completed months only. Dropping the month in progress is
+    // what keeps the comparison honest: with it in, the current year is measured
+    // on a part-month against a whole one and reads far worse than it is.
+    const now = thisYm()
+    const curMonths = all.filter(r => fyOf(r.month) === cur).map(r => r.month)
+    const done = curMonths.filter(m => m !== now)
+    const wnd = new Set((done.length ? done : curMonths).map(m => +m.slice(5, 7)))
+    const droppedNow = done.length > 0 && curMonths.some(m => m === now)
     const partial = wnd.size < 12
 
     const key = (n: string) => n.trim().toLowerCase()
@@ -258,7 +269,7 @@ export default function RevenueHistory() {
     })).sort((x, y) => y.cells.reduce((s, v) => s + v, 0) - x.cells.reduce((s, v) => s + v, 0))
 
     return {
-      years, cur, prev, partial, windowLabel: (() => {
+      years, cur, prev, partial, droppedNow, nowLabel: monLabel(thisYm()), windowLabel: (() => {
         // Order by position in the financial year (Apr = 0), then name the span.
         const o = [...wnd].sort((x, y) => ((x + 8) % 12) - ((y + 8) % 12))
         return o.length ? (o.length === 1 ? SHORT[o[0]] : `${SHORT[o[0]]}–${SHORT[o[o.length - 1]]}`) : ''
@@ -295,6 +306,7 @@ export default function RevenueHistory() {
             <span className="text-[11px] text-mav-muted flex items-center gap-3">
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#b99a1f' }} />spreadsheet</span>
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#FFDB2D' }} />live table</span>
+              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#5c5015' }} />month in progress</span>
             </span>
           }>
             <ResponsiveContainer width="100%" height={260}>
@@ -313,7 +325,11 @@ export default function RevenueHistory() {
                   itemStyle={{ color: '#f2f2f2' }}
                   formatter={(v: number) => [fmtUsd(v), 'Billed']} />
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
-                  {d.series.map(p => <Cell key={p.key} fill={p.era === 'live' ? '#FFDB2D' : '#b99a1f'} />)}
+                  {/* The current month is only part-billed; dim it so the last bar
+                      is not read as a collapse. */}
+                  {d.series.map(p => (
+                    <Cell key={p.key} fill={p.key === thisYm() ? '#5c5015' : p.era === 'live' ? '#FFDB2D' : '#b99a1f'} />
+                  ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -324,7 +340,7 @@ export default function RevenueHistory() {
               <h2 className="text-base font-medium">Year on year</h2>
               <p className="text-xs text-mav-muted mt-0.5">
                 {ya.partial
-                  ? `${fyLabel(ya.cur)} is still running, so every figure below compares ${ya.windowLabel} against ${ya.windowLabel} of ${fyLabel(ya.prev)}.`
+                  ? `${fyLabel(ya.cur)} is still running, so every figure below compares ${ya.windowLabel} against ${ya.windowLabel} of ${fyLabel(ya.prev)}${ya.droppedNow ? `, leaving out ${ya.nowLabel} while it is still being billed` : ''}.`
                   : `${fyLabel(ya.cur)} against ${fyLabel(ya.prev)}, full year against full year.`}
               </p>
             </div>
@@ -403,6 +419,12 @@ export default function RevenueHistory() {
               comparison window last year, and as <span className="text-mav-muted">stopped billing</span> when it billed
               nothing in it this year — over a part-year window that can mean quiet rather than lost.
             </p>
+            {ya.droppedNow && (
+              <p className="mt-2 text-[11px] text-mav-muted leading-relaxed">
+                {ya.nowLabel} is excluded on both sides. It is still being billed, so measuring a part-month against a
+                whole one would show a fall that is only the calendar.
+              </p>
+            )}
           </Panel>
           )}
 
