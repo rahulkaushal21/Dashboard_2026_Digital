@@ -70,6 +70,27 @@ var MAX_WINDOW_HOURS = 72;                        // safety cap: even after a lo
 var MAX_BODY_CHARS = 8000;                        // machine reports (Wordfence, scans) carry no quote markers
 var MIN_KEPT_CHARS = 200;                         // below this, assume we cut too hard and keep the original
 
+// Cut to n characters WITHOUT splitting an emoji.
+//
+// JavaScript strings are UTF-16, and an emoji is two code units (a surrogate
+// pair). A plain slice(0, n) that lands between the two leaves a lone high
+// surrogate on the end. JSON.stringify happily emits it, but Postgres rejects
+// the request with "invalid input syntax for type json" — and because postBatch
+// holds the cursor on any non-200, the same poisoned message is re-sent every 30
+// minutes forever. That is exactly what stopped capture for six hours on 2 Sep
+// 2026: eleven consecutive failed runs, all on one message whose emoji happened
+// to sit on a cut boundary.
+//
+// A high surrogate is D800-DBFF. If the last kept unit is one, drop it.
+function sliceSafe(s, n) {
+  s = String(s || '');
+  if (s.length <= n) return s;
+  var cut = s.slice(0, n);
+  var last = cut.charCodeAt(cut.length - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) cut = cut.slice(0, -1);
+  return cut;
+}
+
 // Reply-chain boundaries. Each must be anchored to a line start AND look like a
 // real header — matching a bare "On " would slice mid-sentence on prose like
 // "On Monday we shipped the fix".
@@ -230,8 +251,8 @@ function pullGmailToSupabase() {
           to_addrs: to,
           cc_addrs: cc,
           msg_date: m.getDate().toISOString(),
-          snippet: body.slice(0, 300),
-          body: body.slice(0, MAX_BODY_CHARS),
+          snippet: sliceSafe(body, 300),
+          body: sliceSafe(body, MAX_BODY_CHARS),
           has_external: external
         });
         if (epoch > maxPushedEpoch) maxPushedEpoch = epoch;

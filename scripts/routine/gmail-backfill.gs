@@ -133,6 +133,21 @@ function backfillRun() {
 }
 
 // ---- helpers --------------------------------------------------------------
+// Cut to n characters WITHOUT splitting an emoji. An emoji is two UTF-16 code
+// units, and a plain slice landing between them leaves a lone high surrogate
+// (D800-DBFF), which Postgres rejects as "invalid input syntax for type json".
+// The live puller hit exactly this on 2 Sep 2026 and stopped capturing for six
+// hours, because a failed push holds the cursor and re-sends the same message
+// forever. Keep this identical to sliceSafe in pull-gmail-to-supabase.gs.
+function sliceSafe(s, n) {
+  s = String(s || '');
+  if (s.length <= n) return s;
+  var cut = s.slice(0, n);
+  var last = cut.charCodeAt(cut.length - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) cut = cut.slice(0, -1);
+  return cut;
+}
+
 function toRow(msg, threadId) {
   var to = msg.getTo() || '';
   var cc = msg.getCc() || '';
@@ -147,8 +162,8 @@ function toRow(msg, threadId) {
     to_addrs: to,
     cc_addrs: cc,
     msg_date: msg.getDate().toISOString(),
-    snippet: (msg.getPlainBody() || '').slice(0, 300),
-    body: (msg.getPlainBody() || '').slice(0, 60000),
+    snippet: sliceSafe(msg.getPlainBody(), 300),
+    body: sliceSafe(msg.getPlainBody(), 60000),
     has_external: hasExternal(from + ' ' + to + ' ' + cc)
   };
 }
