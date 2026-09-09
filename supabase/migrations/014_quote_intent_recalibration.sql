@@ -1,0 +1,26 @@
+-- Two corrections to the intent score from 013, both found by asking why a month
+-- with $118,896 pending showed almost nothing above a coin flip.
+--
+-- 1. NORMALISATION. The score multiplies three factors but divided by the 72.7%
+--    base rate only once, so a deal that was average on all three scored 48
+--    rather than 73 and every mid-pack deal fell a tier. Each factor is now a
+--    lift against its own measured mean (mean_rel 0.7227, mean_band 0.7289) and
+--    the product multiplies the base rate:
+--        score = 0.7274 * (rel/0.7227) * (band/0.7289) * recency
+--    Recency is deliberately not mean-normalised — anchoring it at 1.0 for a live
+--    deal keeps "stale" meaningful in a pipeline where most things are stale.
+--
+-- 2. RECENCY MEASURES SILENCE, NOT AGE. The "90% of wins close within 11 days"
+--    figure measures quote date -> confirmation. It was being applied to
+--    days-since-last-touch, which taxed conversations that are actively alive: 17
+--    August deals worth $51,752 sat at ~48, just under tier B, purely for having
+--    last been emailed 5-9 days ago. Decay now starts only once a deal has
+--    genuinely gone quiet.
+--
+-- Caveat worth keeping: unlike the relationship and value factors, this decay
+-- curve is NOT fitted. Historical silence cannot be reconstructed, since
+-- email_inbox holds only a rolling window plus the backfill. It is a reasoned
+-- curve anchored on the close-time distribution, not a measured rate.
+--
+-- The full view definition as applied to production lives in the
+-- quote_intent_recency_measures_silence migration; this file records why.
