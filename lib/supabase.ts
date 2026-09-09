@@ -331,9 +331,6 @@ const confirmedLike = /(\bapproved\b|\bretainer\b|existing client|already a clie
 // A deal the EMAIL scan judged confirmed/approved (email origin only, so the sheet
 // never false-triggers). rfq_status set by the scan, or a >=90% email deal.
 const emailWon = /approv|go-?ahead|email-?confirmed|verbal go|\bwon\b/
-const STALE_DAYS = 21
-const nowMs = Date.now()
-const daysSince = (d?: string) => { const t = Date.parse(d || ''); return Number.isFinite(t) ? Math.floor((nowMs - t) / 86400000) : null }
 const out: Opportunity[] = rows.map((o: any) => {
 const iq = intent.get(o.id)
 const value = o.est_value ?? o.won_amount
@@ -360,8 +357,13 @@ const repeat = taggedRepeat || inRevenue || o.is_new_client === false || !nbd
 //  2. LOST-LAG    — someone marked it Lost here but the sheet line is still Open
 //  3. WON-LAG     — email reads confirmed but the deal is still Open (sheet not updated yet)
 //  4. type        — booked/existing client mislabelled pure "New" in the sheet
-//  5. STALE       — no dated movement in >21d; chase or confirm it's still live
-//  6. text        — brief reads like existing/confirmed work
+//  5. text        — brief reads like existing/confirmed work
+//
+// Review means "the sheet and the dashboard disagree, and a person must reconcile
+// them". It is NOT a chase list. An age-based "stale, follow up" flag used to live
+// here and fired on 169 of 203 open deals — 83% — which buried the handful of real
+// mismatches it exists to surface. Ageing is a sales signal, not a data defect, and
+// now lives in the intent score's recency factor and its stale badge instead.
 let flag: string | undefined
 const bm = bookedMatch.get(o.id)
 if (!o.won && norm(o.status) !== 'lost' && !norm(o.status).includes('cancel')) {
@@ -370,7 +372,6 @@ const emailConfirmed = o.origin === 'email' && (emailWon.test(norm(o.rfq_status)
 // no Quotes line to correct, so a call made there needs no follow-up action.
 const lostLag = o.email_lost && o.origin === 'sheet'
 const confirmLag = o.email_won && o.origin === 'sheet'
-const age = daysSince(o.source_date || o.first_date)
 if (bm && !bm.ambiguous) flag = `⚠ ALREADY BOOKED, OPEN IN SHEET — $${bm.amount.toLocaleString('en-US')} for this client was invoiced in the revenue sheet (${(bm.month || '').slice(0, 7)}), but its Quotes-sheet line still reads Open. Set that row to Confirmed — until you do, this money is counted twice.`
 else if (bm) flag = `⚠ POSSIBLY ALREADY BOOKED — a $${bm.amount.toLocaleString('en-US')} booking for this client (${(bm.month || '').slice(0, 7)}) matches this quote AND another open quote at the same price. Check which one shipped and set that Quotes row to Confirmed.`
 else if (confirmLag) flag = '⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set that row to Confirmed so it books as revenue.'
@@ -378,7 +379,6 @@ else if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked L
 else if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
 else if (wrongNew) flag = `⚠ NOT NBD, TAGGED “NEW” — Quotes row ${o.quote_key || o.quote_ref || '(no ref)'} is tagged New Business (col P) but its owner${o.sales_person ? ` (${o.sales_person})` : ' is blank and'} is not on the NBD team, so it counts as Repeat. Either set col P to Repeat, or put the NBD owner who actually opened the account in the Account/Sales Person column.`
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
-else if (age !== null && age > STALE_DAYS) flag = `⚠ Stale — no movement in ${age} days. Follow up or confirm the deal is still live.`
 else if (confirmedLike.test(`${o.summary || ''} ${o.gist || ''}`)) flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities'
 }
 return {
