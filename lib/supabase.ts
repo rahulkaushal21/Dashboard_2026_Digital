@@ -41,9 +41,11 @@ email_won?: boolean; email_won_reason?: string; email_won_at?: string; email_won
 // load by matchBookedQuotes(); nothing is written to the database.
 booked_month?: string; booked_amount?: number; booked_ambiguous?: boolean
 // Buying-intent score, 1-97, from the `web_quote_intent` view (open deals only).
-// Fitted on the 675 quotes that have actually been decided, on three factors:
-// the client's own confirm history, the price band, and how recently the deal was
-// touched. It answers "will this convert", which is NOT what win_probability
+// Fitted on the 515 quotes decided since April 2026 — the window where the business
+// actually converts at 89%, rather than all 675, which included a Jan-Mar era running
+// at 0-47% and dragged every score down. Four factors: the client's own confirm
+// history, the price band, what the client has said in email, and how long the deal
+// has been silent. It answers "will this convert", which is NOT what win_probability
 // records — that is a human's judgement of the deal and is left untouched.
 // `intent_basis` says whether recency came from email or from the sheet's own
 // date; the sheet is logged over a week late on 22% of rows, so email wins where
@@ -51,6 +53,15 @@ booked_month?: string; booked_amount?: number; booked_ambiguous?: boolean
 intent_score?: number; intent_tier?: 'A' | 'B' | 'C' | 'D' | 'E'
 intent_basis?: 'email' | 'sheet-date' | 'none'; days_since_touch?: number
 intent_relationship?: number; intent_value_factor?: number; intent_recency?: number
+// Fourth factor, read from the client's own words rather than sheet metadata.
+// Fitted on April-2026+ decided quotes: invoice/payment talk 96.3%, "approved /
+// please proceed" 95.9%, access handed over 92.5%, kickoff returned 89.5% — against
+// 71.1% for a thread showing none of them. Only mail from outside mavlers/uplers is
+// scanned, so our own chasing cannot manufacture a positive.
+intent_signal?: number; signal_label?: string
+// Open in the sheet, but the client has already committed in writing. The sheet
+// lags email by over a week on 22% of rows, so these are the likeliest unlogged wins.
+flag_committed_in_email?: boolean
 client_decided_quotes?: number; client_confirmed_quotes?: number
 flag_no_agency?: boolean; flag_stale?: boolean
 }
@@ -399,6 +410,9 @@ days_since_touch: iq?.days_since_touch ?? undefined,
 intent_relationship: iq?.relationship_factor ?? undefined,
 intent_value_factor: iq?.value_factor ?? undefined,
 intent_recency: iq?.recency_factor ?? undefined,
+intent_signal: iq?.signal_factor ?? undefined,
+signal_label: iq?.signal_label ?? undefined,
+flag_committed_in_email: iq?.flag_committed_in_email || undefined,
 client_decided_quotes: iq?.client_decided_quotes ?? undefined,
 client_confirmed_quotes: iq?.client_confirmed_quotes ?? undefined,
 flag_no_agency: iq?.flag_no_agency || undefined,

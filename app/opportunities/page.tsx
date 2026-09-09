@@ -98,8 +98,9 @@ if (x.client_decided_quotes >= 20) bits.push('20+ quotes = reseller pattern, his
 const v = x.value
 if (v != null) bits.push(v >= 10000 ? 'over $10k — only 1 of 15 has ever closed'
 : v >= 2500 ? 'mid-value band, ~50-56%' : 'small-value band, 77-91%')
+if (x.signal_label) bits.push(`email: ${x.signal_label}`)
 if (x.days_since_touch != null) {
-bits.push(`last touched ${x.days_since_touch}d ago (90% of wins close within 11)`)
+bits.push(`silent ${x.days_since_touch}d`)
 bits.push(x.intent_basis === 'email' ? 'recency from email' : 'recency from the sheet date — may be logged late')
 }
 return bits.join(' · ')
@@ -621,6 +622,7 @@ return (
 <span title={intentWhy(x)} className={`inline-flex items-baseline gap-1 text-xs font-semibold px-2 py-1 rounded ${TIER_STYLE[x.intent_tier]}`}>
 <span>{x.intent_tier}</span><span className="font-normal tabular-nums opacity-80">{x.intent_score}</span>
 {x.flag_stale && <span title="Past 60 days — beyond the 95th-percentile close time of 25 days. Needs a chase or a Cancelled." className="opacity-70">⏳</span>}
+{x.flag_committed_in_email && <span title="The client has already said approved / please proceed, or discussed the invoice, while the Quotes sheet still reads Open. Threads like these confirmed 96% of the time. Most likely a win nobody has logged yet.">✍</span>}
 {x.flag_no_agency && <span title="No Agency recorded. Quotes with a blank Agency confirm at 13.5% against 80% when it is filled in — and that holds independently of price." className="opacity-70">⚑</span>}
 </span>
 ) : <span className="text-xs text-mav-muted">—</span>}</td>
@@ -766,16 +768,24 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 <span className="text-amber-300"> This is {sel.win_probability > sel.intent_score ? 'well below' : 'well above'} the {sel.win_probability}% on the deal — worth a second look at which is right.</span>
 )}
 </p>
-<div className="grid grid-cols-3 gap-2 text-xs">
+<div className="grid grid-cols-4 gap-2 text-xs">
 <div><div className="text-mav-muted mb-0.5">Relationship</div><div className="font-semibold tabular-nums">{sel.intent_relationship}</div>
 <div className="text-mav-muted mt-0.5">{sel.client_decided_quotes != null ? `${sel.client_confirmed_quotes}/${sel.client_decided_quotes} confirmed` : 'no history'}</div></div>
 <div><div className="text-mav-muted mb-0.5">Value band</div><div className="font-semibold tabular-nums">{sel.intent_value_factor}</div>
 <div className="text-mav-muted mt-0.5">{sel.value ? money(sel.value) : 'no value'}</div></div>
-<div><div className="text-mav-muted mb-0.5">Recency</div><div className="font-semibold tabular-nums">{sel.intent_recency}</div>
-<div className="text-mav-muted mt-0.5">{sel.days_since_touch != null ? `${sel.days_since_touch}d ago` : 'unknown'}</div></div>
+<div><div className="text-mav-muted mb-0.5">Email</div><div className="font-semibold tabular-nums">{sel.intent_signal}</div>
+<div className="text-mav-muted mt-0.5">{sel.signal_label ? sel.signal_label.split(' ').slice(0,2).join(' ') : 'no thread'}</div></div>
+<div><div className="text-mav-muted mb-0.5">Silence</div><div className="font-semibold tabular-nums">{sel.intent_recency}</div>
+<div className="text-mav-muted mt-0.5">{sel.days_since_touch != null ? `${sel.days_since_touch}d quiet` : 'unknown'}</div></div>
 </div>
 {sel.intent_basis === 'sheet-date' && (
 <p className="mt-2 text-xs text-mav-muted">Recency is from the sheet&apos;s own date — no email found for this deal. The sheet is logged more than a week late on 22% of rows, so this deal may be fresher than it looks.</p>
+)}
+{sel.flag_committed_in_email && (
+<p className="mt-2 text-xs text-emerald-300">✍ The client has already committed in writing — {sel.signal_label}. Threads like these confirmed 96% of the time. The Quotes sheet still reads Open, so this is most likely a win nobody has logged.</p>
+)}
+{sel.signal_label === 'no commitment signal in the thread' && (
+<p className="mt-2 text-xs text-mav-muted">No approval, invoice, access or kickoff signal anywhere in the client&apos;s replies. Threads like that confirm 71% of the time against 96% when one is present.</p>
 )}
 {sel.flag_stale && <p className="mt-2 text-xs text-amber-300">⏳ Past 60 days. 95% of quotes that convert do so within 25 — this needs a chase or a Cancelled.</p>}
 {sel.flag_no_agency && <p className="mt-2 text-xs text-amber-300">⚑ No Agency recorded. Blank-Agency quotes confirm at 13.5% against 80% when filled in, independently of price.</p>}
