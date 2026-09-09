@@ -33,7 +33,9 @@ const AGE_BANDS: { label: string; min: number; max: number }[] = [
 { label: 'over 90 days', min: 90, max: Infinity },
 ]
 const quoteAge = (x: Opportunity): number | null => {
-const t = Date.parse(x.source_date || x.first_date || '')
+// Same precedence as lib/supabase.ts uses when it builds first_date. The two
+// disagreed on 30 rows, which made this filter's ages differ from the Date column.
+const t = Date.parse(x.first_date || x.source_date || '')
 return Number.isFinite(t) ? Math.floor((Date.now() - t) / 86400000) : null
 }
 const inAgeBand = (x: Opportunity, label: string): boolean => {
@@ -603,7 +605,11 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 <select value={fAge} onChange={e => setFAge(e.target.value)} className={selCls} title="How long ago the quote was raised. Use it to work the backlog down — pick a band, then mark each row Confirmed or Cancelled.">
 <option value="">Any age</option>
 {AGE_BANDS.map(b => {
-const n = all.filter(x => oppStatus(x) === 'Open' || oppStatus(x) === 'On Hold').filter(x => inAgeBand(x, b.label)).length
+// Count under the status filter that is actually applied, so the number in the
+// dropdown is the number of rows you get when you pick it. Counting all
+// undecided deals here while the table showed Open only made the two disagree.
+const n = all.filter(x => fStatus ? oppStatus(x) === fStatus
+  : (oppStatus(x) === 'Open' || oppStatus(x) === 'On Hold')).filter(x => inAgeBand(x, b.label)).length
 return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</option>
 })}
 </select>
