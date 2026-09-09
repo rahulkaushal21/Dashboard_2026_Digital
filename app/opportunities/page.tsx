@@ -154,6 +154,10 @@ const [savingLost, setSavingLost] = useState(false)
 const [savingWon, setSavingWon] = useState(false)
 // Every deal someone marked by hand, so a call can always be found again and reversed.
 const [markedOnly, setMarkedOnly] = useState(false)
+// Deals still Open in the sheet where the client has already committed in writing —
+// said "approved / please proceed", or started discussing the invoice. Threads like
+// these confirmed 96% of the time, so each is likely a win nobody has logged yet.
+const [committedOnly, setCommittedOnly] = useState(false)
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
@@ -197,6 +201,7 @@ const rows = all
 .filter(x => !unlikelyOnly || x.unlikely)
 .filter(x => !lagOnly || sheetLag(x))
 .filter(x => !markedOnly || markedByHand(x))
+.filter(x => !committedOnly || !!x.flag_committed_in_email)
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => inBand(x.value))
@@ -206,7 +211,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, vMin, vMax, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, from, to, vMin, vMax, sort])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -226,10 +231,11 @@ return all
 .filter(x => !unlikelyOnly || x.unlikely)
 .filter(x => !lagOnly || sheetLag(x))
 .filter(x => !markedOnly || markedByHand(x))
+.filter(x => !committedOnly || !!x.flag_committed_in_email)
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => !x.value).length
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, vMin, vMax])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, from, to, vMin, vMax])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -307,7 +313,7 @@ window.alert('Could not save that — please try again.')
 const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setVMin(''); setVMax('') }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, misTagOnly, from, to, vMin, vMax, sort, perPage])
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, from, to, vMin, vMax, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
@@ -323,6 +329,9 @@ const lagRows = useMemo(() => all.filter(sheetLag), [all])
 const lagWon = lagRows.filter(x => confirmLag(x) || bookedLag(x))
 const lagLost = lagRows.filter(lostLag)
 const markedRows = useMemo(() => all.filter(markedByHand), [all])
+// Open in the sheet, client already committed in writing. Worth its own list: these
+// are the likeliest wins nobody has logged, and the sheet is the thing that has to change.
+const committedRows = useMemo(() => all.filter(x => x.flag_committed_in_email), [all])
 
 // Headline numbers follow the DATE range (independent of the other dropdowns so
 // the breakdown panels stay stable for click-to-filter).
@@ -573,6 +582,9 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 )}
 {lagRows.length > 0 && (
 <button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Sheet not updated ({lagRows.length})</button>
+)}
+{committedRows.length > 0 && (
+<button onClick={() => { setCommittedOnly(v => !v); setFStatus('') }} title="Still Open in the Quotes sheet, but the client has already said approved / please proceed, or has started discussing the invoice. Threads like these confirmed 96% of the time — these are most likely wins nobody has logged yet." className={`text-sm px-3 py-2 rounded-md border transition-colors ${committedOnly ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>✍ Client said yes ({committedRows.length})</button>
 )}
 {markedRows.length > 0 && (
 <button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-sm px-3 py-2 rounded-md border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>✎ Marked by hand ({markedRows.length})</button>
