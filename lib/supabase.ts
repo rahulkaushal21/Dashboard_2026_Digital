@@ -40,6 +40,19 @@ email_won?: boolean; email_won_reason?: string; email_won_at?: string; email_won
 // i.e. delivered and invoiced, but nobody set the sheet to Confirmed. Derived every
 // load by matchBookedQuotes(); nothing is written to the database.
 booked_month?: string; booked_amount?: number; booked_ambiguous?: boolean
+// Buying-intent score, 1-97, from the `web_quote_intent` view (open deals only).
+// Fitted on the 675 quotes that have actually been decided, on three factors:
+// the client's own confirm history, the price band, and how recently the deal was
+// touched. It answers "will this convert", which is NOT what win_probability
+// records — that is a human's judgement of the deal and is left untouched.
+// `intent_basis` says whether recency came from email or from the sheet's own
+// date; the sheet is logged over a week late on 22% of rows, so email wins where
+// it exists. Absent for won/lost rows.
+intent_score?: number; intent_tier?: 'A' | 'B' | 'C' | 'D' | 'E'
+intent_basis?: 'email' | 'sheet-date' | 'none'; days_since_touch?: number
+intent_relationship?: number; intent_value_factor?: number; intent_recency?: number
+client_decided_quotes?: number; client_confirmed_quotes?: number
+flag_no_agency?: boolean; flag_stale?: boolean
 }
 
 // Group the many raw quote "technology" values into a handful of service lines.
@@ -287,6 +300,10 @@ export async function getOpportunities(): Promise<Opportunity[]> {
 // No live re-derivation or per-company collapsing — each quote stands as its own deal.
 const rows = (await read<any>('opportunities')) || []
 const norm = (s?: string) => (s || '').trim().toLowerCase()
+// Buying-intent scores, open deals only. Keyed by opportunity id so a miss just
+// leaves the badge off rather than breaking the row.
+const intent = new Map<number, any>()
+for (const r of (await read<any>('web_quote_intent')) || []) intent.set(r.id, r)
 // collapse GEO into 3 buckets: US (incl. Canada/N.America), AU (incl. APAC/NZ), UK (rest)
 const geo3 = (g?: string) => {
 const v = (g || '').toLowerCase()
@@ -307,6 +324,7 @@ const STALE_DAYS = 21
 const nowMs = Date.now()
 const daysSince = (d?: string) => { const t = Date.parse(d || ''); return Number.isFinite(t) ? Math.floor((nowMs - t) / 86400000) : null }
 const out: Opportunity[] = rows.map((o: any) => {
+const iq = intent.get(o.id)
 const value = o.est_value ?? o.won_amount
 const inRevenue = revenueSet.has(norm(o.company_name))
 // Business Type from the Quotes tab (col P): 'New' | 'Repeat' | 'New Repeat' | null.
@@ -374,6 +392,17 @@ first_date: o.first_date || o.source_date,
 booked_month: bm && !bm.ambiguous ? bm.month : undefined,
 booked_amount: bm ? bm.amount : undefined,
 booked_ambiguous: bm ? bm.ambiguous : undefined,
+intent_score: iq?.intent_score ?? undefined,
+intent_tier: iq?.intent_tier ?? undefined,
+intent_basis: iq?.intent_basis ?? undefined,
+days_since_touch: iq?.days_since_touch ?? undefined,
+intent_relationship: iq?.relationship_factor ?? undefined,
+intent_value_factor: iq?.value_factor ?? undefined,
+intent_recency: iq?.recency_factor ?? undefined,
+client_decided_quotes: iq?.client_decided_quotes ?? undefined,
+client_confirmed_quotes: iq?.client_confirmed_quotes ?? undefined,
+flag_no_agency: iq?.flag_no_agency || undefined,
+flag_stale: iq?.flag_stale || undefined,
 flag,
 } as Opportunity
 })

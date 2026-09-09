@@ -57,9 +57,9 @@ const markedByHand = (x: Opportunity) => !!(x.email_won || x.email_lost || x.unl
 const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : 'bg-mav-line text-mav-muted'
 const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
 
-type SortKey = 'company' | 'value' | 'win' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
+type SortKey = 'company' | 'value' | 'win' | 'intent' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
-{ key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
+{ key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'intent', label: 'Intent' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
 { key: 'type', label: 'Type' }, { key: 'owner', label: 'AM / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
 { key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
 ]
@@ -73,11 +73,43 @@ if (!x.nbd_owner) return 'Repeat'
 if (bt === 'new repeat' || bt === 'repeat new') return 'New + Repeat'
 return x.is_new_client ? 'New' : 'Repeat'
 }
+// Intent tiers. Deliberately a different visual language from Win % — that is a
+// person's judgement of the deal, this is what the last 675 decided quotes say
+// about deals shaped like this one. They disagree often, and the disagreement is
+// the useful part, so they must not look like the same number twice.
+const TIER_STYLE: Record<string, string> = {
+A: 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30',
+B: 'bg-teal-500/15 text-teal-300 ring-1 ring-teal-500/30',
+C: 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30',
+D: 'bg-orange-500/15 text-orange-300 ring-1 ring-orange-500/30',
+E: 'bg-red-500/15 text-red-300 ring-1 ring-red-500/30',
+}
+const TIER_LABEL: Record<string, string> = {
+A: 'near-certain', B: 'likely', C: 'coin-flip', D: 'unlikely', E: 'long shot',
+}
+// Why this deal scored what it did, in one hoverable line.
+const intentWhy = (x: Opportunity): string => {
+if (x.intent_score == null) return ''
+const bits: string[] = []
+if (x.client_decided_quotes != null) {
+bits.push(`client has confirmed ${x.client_confirmed_quotes}/${x.client_decided_quotes} decided quotes`)
+if (x.client_decided_quotes >= 20) bits.push('20+ quotes = reseller pattern, historically 25%')
+} else bits.push('no decided quotes from this client yet')
+const v = x.value
+if (v != null) bits.push(v >= 10000 ? 'over $10k — only 1 of 15 has ever closed'
+: v >= 2500 ? 'mid-value band, ~50-56%' : 'small-value band, 77-91%')
+if (x.days_since_touch != null) {
+bits.push(`last touched ${x.days_since_touch}d ago (90% of wins close within 11)`)
+bits.push(x.intent_basis === 'email' ? 'recency from email' : 'recency from the sheet date — may be logged late')
+}
+return bits.join(' · ')
+}
 const sortVal = (x: Opportunity, k: SortKey): string | number => {
 switch (k) {
 case 'company': return (x.company_name || '').toLowerCase()
 case 'value': return x.value ?? -1
 case 'win': return x.win_probability ?? -1
+case 'intent': return x.intent_score ?? -1
 case 'status': return oppStatus(x)
 case 'source': return (x.sources || []).join(',')
 case 'type': return typeLabel(x)
@@ -549,6 +581,13 @@ return (
 <td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.email_won && <span className="mr-1.5 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>✓</span>}{x.company_name}{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
 <td className={`px-4 py-3 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+<td className="px-4 py-3">{x.intent_score != null && x.intent_tier ? (
+<span title={intentWhy(x)} className={`inline-flex items-baseline gap-1 text-xs font-semibold px-2 py-1 rounded ${TIER_STYLE[x.intent_tier]}`}>
+<span>{x.intent_tier}</span><span className="font-normal tabular-nums opacity-80">{x.intent_score}</span>
+{x.flag_stale && <span title="Past 60 days — beyond the 95th-percentile close time of 25 days. Needs a chase or a Cancelled." className="opacity-70">⏳</span>}
+{x.flag_no_agency && <span title="No Agency recorded. Quotes with a blank Agency confirm at 13.5% against 80% when it is filled in — and that holds independently of price." className="opacity-70">⚑</span>}
+</span>
+) : <span className="text-xs text-mav-muted">—</span>}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (bookedLag(x) ? '✓ Booked · sheet open' : confirmLag(x) ? '✓ Won · sheet open' : `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span>{x.mis_tagged_new && <span className="ml-1 text-xs text-red-400" title={`Sheet says New, but ${x.sales_person || 'no owner'} is not on the NBD team — counted as Repeat.`}>⚠</span>}</td>
@@ -678,6 +717,34 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 </div>
 <div className="h-2 w-full rounded-full bg-mav-dark overflow-hidden"><div className={`h-full ${probBar(sel.win_probability)}`} style={{ width: (sel.win_probability ?? 0) + '%' }} /></div>
 </div>
+
+{sel.intent_score != null && sel.intent_tier && (
+<div className="mb-5 rounded-lg border border-mav-line bg-mav-dark/40 p-3">
+<div className="flex items-baseline justify-between mb-2">
+<span className="text-xs uppercase tracking-wide text-mav-muted">Buying intent — what past quotes predict</span>
+<span className={`text-xs font-semibold px-2 py-1 rounded ${TIER_STYLE[sel.intent_tier]}`}>{sel.intent_tier} · {sel.intent_score}</span>
+</div>
+<p className="text-sm text-mav-muted mb-3">
+{TIER_LABEL[sel.intent_tier]} — of 675 quotes we have actually decided, ones shaped like this converted about {sel.intent_score}% of the time.
+{sel.win_probability != null && Math.abs(sel.win_probability - sel.intent_score) >= 25 && (
+<span className="text-amber-300"> This is {sel.win_probability > sel.intent_score ? 'well below' : 'well above'} the {sel.win_probability}% on the deal — worth a second look at which is right.</span>
+)}
+</p>
+<div className="grid grid-cols-3 gap-2 text-xs">
+<div><div className="text-mav-muted mb-0.5">Relationship</div><div className="font-semibold tabular-nums">{sel.intent_relationship}</div>
+<div className="text-mav-muted mt-0.5">{sel.client_decided_quotes != null ? `${sel.client_confirmed_quotes}/${sel.client_decided_quotes} confirmed` : 'no history'}</div></div>
+<div><div className="text-mav-muted mb-0.5">Value band</div><div className="font-semibold tabular-nums">{sel.intent_value_factor}</div>
+<div className="text-mav-muted mt-0.5">{sel.value ? money(sel.value) : 'no value'}</div></div>
+<div><div className="text-mav-muted mb-0.5">Recency</div><div className="font-semibold tabular-nums">{sel.intent_recency}</div>
+<div className="text-mav-muted mt-0.5">{sel.days_since_touch != null ? `${sel.days_since_touch}d ago` : 'unknown'}</div></div>
+</div>
+{sel.intent_basis === 'sheet-date' && (
+<p className="mt-2 text-xs text-mav-muted">Recency is from the sheet&apos;s own date — no email found for this deal. The sheet is logged more than a week late on 22% of rows, so this deal may be fresher than it looks.</p>
+)}
+{sel.flag_stale && <p className="mt-2 text-xs text-amber-300">⏳ Past 60 days. 95% of quotes that convert do so within 25 — this needs a chase or a Cancelled.</p>}
+{sel.flag_no_agency && <p className="mt-2 text-xs text-amber-300">⚑ No Agency recorded. Blank-Agency quotes confirm at 13.5% against 80% when filled in, independently of price.</p>}
+</div>
+)}
 
 {sel.win_reason && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Will it close?</div><p className="text-sm leading-relaxed text-mav-muted">{sel.win_reason}</p></div>}
 {(() => {

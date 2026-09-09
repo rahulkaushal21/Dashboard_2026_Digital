@@ -394,3 +394,38 @@ sheet-sync `syncWebHubLP_8f3a91` · scan-api `scanApiHub_5d9c31` · ingest `inge
 `email_inbox` is service-role only (confidential client mail). `sync-lnd` also accepts the public
 anon key, which is what the dashboard's Sync-now button uses — the token itself never ships to the
 browser.
+
+## Buying-intent score (`web_quote_intent`)
+Fitted on the 675 quotes that have actually been decided (72.7% confirm overall,
+but only 43% by value — we win small and lose big). Three factors, each an
+empirical rate, multiplied and renormalised by the base rate:
+- **relationship** — a blank Agency converts at **13.5%** and that holds
+  independently of price (small quotes: 80.2% named vs 21.1% blank). Depth is not
+  monotonic: first-timers 54%, 2–20 quotes 82–86%, **20+ quotes 24.6%** because
+  that bucket is resellers shopping us around.
+- **value band** — 91 / 84 / 77 / 60 / 56 / 49 / **6.7%** at $10k+ (1 win in 15,
+  a thin base — directional only).
+- **recency** — half of confirmed quotes close in 2 days, 90% within 11.
+
+**Recency source matters.** The sheet's own `Confirmed in Days` is team-typed and
+unverifiable, so it is NOT used. `added_date` is also sheet-entered: against the
+first email on the same subject the median lag is 1 day but the mean is 9.8 and
+p90 is 28 — 22% of rows land over a week late, 9% over a month. So recency prefers
+the **last email** on the deal and falls back to the sheet date; `intent_basis`
+records which, and a `sheet-date` score may be harsher than the deal deserves.
+
+`intent_score` answers "will a deal shaped like this convert". `win_probability`
+is a human's read of *this* deal. **They are different columns and neither
+overwrites the other** — a gap of 40+ points is the signal worth chasing.
+
+Two matviews (`email_subject_touch`, `email_thread_touch`) back the recency
+lookup because a plain view re-aggregated 76k mailbox rows per page load and timed
+out. `refresh_quote_intent_sources()` refreshes them, on pg_cron at **:26/:56**.
+Neither matview nor `quote_intent` is granted to `anon` — they carry subject lines
+out of `email_inbox` (service-role only); only `web_quote_intent` is exposed.
+
+**Add to the step-7 sweep:** report open deals flagged `flag_stale` (past 60 days,
+beyond the 95th-percentile close time of 25) and `flag_no_agency`. Stale rows are
+the single biggest distortion in the forecast — at the time of writing, 99 of 202
+open deals were stale, carrying $479k of the $554k face value against ~$17k
+expected.
