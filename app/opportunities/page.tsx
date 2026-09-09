@@ -17,6 +17,34 @@ const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm
 // so a preset and a typed value are the same state and the active highlight is a
 // plain string compare. The cuts mirror the deal-size split on the home AI
 // Insights card, where the big-quote conversion rate is the thing worth chasing.
+// Quote-age buckets, for working the backlog down: pick a band, then mark each row
+// Confirmed or Cancelled. Age is measured from the QUOTE DATE, which is what you are
+// deciding about — but note the sheet logs a fifth of rows over a week late, so a
+// deal can read older than it is. Sort by Intent inside a band to separate the
+// genuinely dead from the merely old: a 90-day quote emailed yesterday is not the
+// same as one nobody has touched since.
+const AGE_BANDS: { label: string; min: number; max: number }[] = [
+{ label: 'under 7 days', min: 0, max: 7 },
+{ label: '7-15 days', min: 7, max: 15 },
+{ label: '15-30 days', min: 15, max: 30 },
+{ label: '30-45 days', min: 30, max: 45 },
+{ label: '45-60 days', min: 45, max: 60 },
+{ label: '60-90 days', min: 60, max: 90 },
+{ label: 'over 90 days', min: 90, max: Infinity },
+]
+const quoteAge = (x: Opportunity): number | null => {
+const t = Date.parse(x.source_date || x.first_date || '')
+return Number.isFinite(t) ? Math.floor((Date.now() - t) / 86400000) : null
+}
+const inAgeBand = (x: Opportunity, label: string): boolean => {
+if (!label) return true
+const b = AGE_BANDS.find(v => v.label === label)
+if (!b) return true
+const a = quoteAge(x)
+if (a === null) return false
+return a >= b.min && a < b.max
+}
+
 const VALUE_BANDS = [
 { label: 'under $1k', min: '', max: '1000' },
 { label: '$1k–$5k', min: '1000', max: '5000' },
@@ -158,6 +186,7 @@ const [markedOnly, setMarkedOnly] = useState(false)
 // said "approved / please proceed", or started discussing the invoice. Threads like
 // these confirmed 96% of the time, so each is likely a win nobody has logged yet.
 const [committedOnly, setCommittedOnly] = useState(false)
+const [fAge, setFAge] = useState('')
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
@@ -202,6 +231,7 @@ const rows = all
 .filter(x => !lagOnly || sheetLag(x))
 .filter(x => !markedOnly || markedByHand(x))
 .filter(x => !committedOnly || !!x.flag_committed_in_email)
+.filter(x => inAgeBand(x, fAge))
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => inBand(x.value))
@@ -211,7 +241,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, from, to, vMin, vMax, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -232,10 +262,11 @@ return all
 .filter(x => !lagOnly || sheetLag(x))
 .filter(x => !markedOnly || markedByHand(x))
 .filter(x => !committedOnly || !!x.flag_committed_in_email)
+.filter(x => inAgeBand(x, fAge))
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => !x.value).length
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, from, to, vMin, vMax])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -310,10 +341,10 @@ window.alert('Could not save that — please try again.')
 }
 }
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setVMin(''); setVMax('') }
+const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setCommittedOnly(false); setMisTagOnly(false); setFAge(''); setVMin(''); setVMax('') }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, from, to, vMin, vMax, sort, perPage])
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
@@ -569,6 +600,13 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 <div className="flex flex-wrap items-center gap-2 mb-4">
 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client…" className={`${selCls} w-44`} />
 <select value={fStatus} onChange={e => setFStatus(e.target.value)} className={selCls}><option value="">All status</option><option value="Open">Open</option><option value="On Hold">On Hold</option><option value="Won">Won</option><option value="Lost">Lost</option></select>
+<select value={fAge} onChange={e => setFAge(e.target.value)} className={selCls} title="How long ago the quote was raised. Use it to work the backlog down — pick a band, then mark each row Confirmed or Cancelled.">
+<option value="">Any age</option>
+{AGE_BANDS.map(b => {
+const n = all.filter(x => oppStatus(x) === 'Open' || oppStatus(x) === 'On Hold').filter(x => inAgeBand(x, b.label)).length
+return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</option>
+})}
+</select>
 <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option><option value="New">New (NBD)</option><option value="Repeat">Repeat</option></select>
 <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>
 <select value={fSvc} onChange={e => setFSvc(e.target.value)} className={selCls}><option value="">All services</option>{uniq(all.map(svcOf)).map(s => <option key={s} value={s}>{s}</option>)}</select>
