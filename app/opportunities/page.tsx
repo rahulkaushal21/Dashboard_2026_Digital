@@ -366,6 +366,13 @@ const holdR = rows.filter(x => oppStatus(x) === 'On Hold')
 const pendR = [...openR, ...holdR]
 const lostR = rows.filter(x => oppStatus(x) === 'Lost')
 const unlikelyR = pendR.filter(x => x.unlikely)
+// The share of Pending the decided-quote history says is actually coming. A and B
+// are the two tiers above a coin flip (80%+ and 60-80%), so A+B is the part of the
+// month you can plan around; everything below is hope. Deliberately EXCLUDES anything
+// a human flagged "might not come" — a person who knows the deal outranks the model.
+const bankable = pendR.filter(x => !x.unlikely && (x.intent_tier === 'A' || x.intent_tier === 'B'))
+const tierA = bankable.filter(x => x.intent_tier === 'A')
+const tierB = bankable.filter(x => x.intent_tier === 'B')
 return {
 key, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
 shared: rows.length, sharedValue: sum(rows),
@@ -375,6 +382,12 @@ hold: holdR.length, holdValue: sum(holdR),
 won: wonR.length, wonValue: sum(wonR),
 lost: lostR.length, lostValue: sum(lostR),
 unlikely: unlikelyR.length, unlikelyValue: sum(unlikelyR),
+tierA: tierA.length, tierAValue: sum(tierA),
+tierB: tierB.length, tierBValue: sum(tierB),
+bankable: bankable.length, bankableValue: sum(bankable),
+// Risk-weighted rather than face value: each deal counted at its own score. This is
+// the number to forecast on — the A+B face value assumes every one of them lands.
+bankableExpected: bankable.reduce((s, x) => s + (x.value || 0) * ((x.intent_score ?? 0) / 100), 0),
 // Win rate over ALL quotes shared that month — won ÷ everything quoted. Recent
 // months read low by design because their quotes are still in play; `decidedRate`
 // is kept alongside so a month can also be judged on what has actually closed.
@@ -423,6 +436,29 @@ pending = <span className="text-amber-300 font-semibold">{money(m.openOnlyValue)
 {m.unlikely > 0 && (
 <div className="mt-2 text-xs text-mav-muted">
 of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)}</span> flagged “might not come” · {m.unlikely} {m.unlikely === 1 ? 'quote' : 'quotes'}
+</div>
+)}
+{/* How much of Pending the 675 decided quotes say is genuinely coming. Shown against
+    Pending, because the gap between the two is the point — most of a month's pending
+    value normally sits below a coin flip. */}
+{m.pending > 0 && (
+<div className="mt-2 text-xs text-mav-muted">
+{m.bankable > 0 ? (<>
+bankable <span className="text-emerald-300 font-semibold">{money(m.bankableValue)}</span>
+<span className="opacity-60"> of {money(m.pendingValue)} pending</span>
+{' · '}
+<span title="Tier A — 80%+. Deals shaped like these confirmed at least 4 times in 5." className="text-emerald-300">A {money(m.tierAValue)}</span>
+<span className="opacity-60"> ({m.tierA})</span>
+{' + '}
+<span title="Tier B — 60-80%. Likely, not certain." className="text-teal-300">B {money(m.tierBValue)}</span>
+<span className="opacity-60"> ({m.tierB})</span>
+{' · '}
+<span title="Each deal counted at its own intent score rather than at face value. The A+B total above assumes every one of them lands; this does not.">
+weighted <span className="text-emerald-300 font-semibold">{money(Math.round(m.bankableExpected))}</span>
+</span>
+</>) : (
+<span className="text-amber-300">nothing in Pending scores above a coin flip — all {money(m.pendingValue)} is tier C or below</span>
+)}
 </div>
 )}
 {/* share-of-quotes bar: won / pending / lost */}
