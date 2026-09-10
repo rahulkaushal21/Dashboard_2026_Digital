@@ -585,7 +585,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 
 <div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).
 {onHold.length > 0 && <> Open pipeline here excludes On Hold; the cards above count both as pending — <span className="text-white">{money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}</span> still undecided.</>}</div>
-<div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
 <KPICard label="Open opportunities" value={String(open.length)} />
 <KPICard label={unlikelyOpen.length ? `Open pipeline, excl. On Hold (${money(likelyValue)} likely)` : 'Open pipeline value (excl. On Hold)'} value={money(openValue)} />
 <KPICard label={`On Hold value (${onHold.length})`} value={money(onHoldValue)} />
@@ -661,7 +661,7 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 
 <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
 <div className="overflow-x-auto">
-<table className="w-full text-sm">
+<table className="w-full text-sm min-w-[1180px]">
 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{COLS.map(c => (
 <th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-white">
 {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>

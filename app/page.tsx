@@ -275,7 +275,7 @@ export default function Dashboard() {
         <input type="date" value={to} onChange={e => onTo(e.target.value)} className={selCls} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <KPICard label="Revenue (period)" value={fmtUsd(periodTotal)} change={mom} />
         <KPICard label="Active clients" value={String(activeClients)} />
         <KPICard label="Open opportunities" value={String(openOpps)} />
@@ -367,7 +367,7 @@ export default function Dashboard() {
           <div className="text-xs text-mav-muted">Service department · trailing 6 months · USD</div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-5 py-3 font-medium">Segment</th>

@@ -389,7 +389,7 @@ export default function BusinessTrendPage() {
           <div className="text-sm font-medium">Last 6 Months Analysis</div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-5 py-3 font-medium">Month</th>
@@ -557,7 +557,7 @@ export default function BusinessTrendPage() {
             <div className="text-xs font-medium text-mav-yellow mb-1">Deals to close</div>
             <p className="text-xs text-mav-muted mb-3">Open quotes ranked by what they are actually worth — value × the win probability on the deal. {fmtUsd(plan.weighted)} weighted out of {fmtUsd(plan.pipelineValue)} open.</p>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[720px]">
                 <thead className="text-left text-mav-muted border-b border-mav-line">
                   <tr>
                     <th className="px-3 py-2 font-medium">Client</th>
@@ -592,7 +592,7 @@ export default function BusinessTrendPage() {
             <div className="text-xs font-medium text-mav-yellow mb-1">Clients to push</div>
             <p className="text-xs text-mav-muted mb-3">Accounts that billed materially less in the last three completed months than the three before. &ldquo;Was billing&rdquo; is their old monthly average — what comes back if the account is re-activated, worth {fmtUsd(plan.recoverable)}/month in total. <span className="text-mav-yellow">Click a client</span> to see the last business we closed with them.</p>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[720px]">
                 <thead className="text-left text-mav-muted border-b border-mav-line">
                   <tr>
                     <th className="px-3 py-2 font-medium">Client</th>
@@ -646,7 +646,7 @@ export default function BusinessTrendPage() {
           <div>
             <div className="text-xs font-medium text-mav-yellow mb-3">Monthly Details</div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[720px]">
                 <thead className="text-left text-mav-muted border-b border-mav-line">
                   <tr>
                     <th className="px-5 py-3 font-medium">Month</th>
@@ -737,6 +737,7 @@ export default function BusinessTrendPage() {
                       : <p className="text-sm text-mav-muted">Not recorded on their revenue lines or on any quote.</p>}
                 </div>
                 <div className="text-xs uppercase tracking-wide text-mav-yellow mb-2">Billing, last {pushDetail.deal.history.length} months</div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <tbody>
                     {pushDetail.deal.history.slice().reverse().map(h => (
@@ -747,6 +748,7 @@ export default function BusinessTrendPage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </>
             ) : (
               <p className="text-sm text-mav-muted">No line-level revenue rows found for this client name.</p>

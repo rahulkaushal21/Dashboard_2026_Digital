@@ -1,8 +1,8 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
-import { LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, Settings, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, Settings, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
@@ -34,9 +34,20 @@ const nav: Entry[] = [
   { href: '/admin', label: 'Settings', icon: Settings },
 ]
 
+// Below lg the sidebar is a slide-in drawer rather than a permanent 240px column —
+// on a 375px phone a fixed sidebar left 135px for the content. `open` is lifted here
+// so the burger button and the drawer share it, and the drawer closes on navigation.
 export default function Sidebar() {
   const path = usePathname()
   const { profile, email, signOut } = useAuth()
+  const [open, setOpen] = useState(false)
+  // Close on route change, otherwise tapping a link leaves the drawer covering the page.
+  useEffect(() => { setOpen(false) }, [path])
+  // Don't let the page scroll behind an open drawer.
+  useEffect(() => {
+    document.body.style.overflow = open ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [open])
   // Drop any group the viewer can see no children of, so an empty header never shows.
   const items: Entry[] = []
   for (const e of nav) {
@@ -48,7 +59,27 @@ export default function Sidebar() {
     }
   }
   return (
-    <aside className="w-60 shrink-0 bg-mav-dark border-r border-mav-line h-screen overflow-y-auto p-4 flex flex-col">
+    <>
+      {/* Mobile top bar. Fixed so it survives the page's own scroll container. */}
+      <div className="lg:hidden fixed top-0 inset-x-0 z-40 flex items-center gap-3 h-14 px-4 bg-mav-dark border-b border-mav-line">
+        <button onClick={() => setOpen(true)} aria-label="Open menu" aria-expanded={open}
+          className="p-2 -ml-2 rounded-md text-mav-muted hover:text-white hover:bg-mav-panel">
+          <Menu size={20} />
+        </button>
+        <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
+        <span className="font-semibold tracking-tight truncate">Digital Dashboard</span>
+      </div>
+
+      {/* Scrim. Only rendered when open so it can never swallow taps on desktop. */}
+      {open && <div onClick={() => setOpen(false)} className="lg:hidden fixed inset-0 z-40 bg-black/60" aria-hidden="true" />}
+
+      <aside className={`w-60 shrink-0 bg-mav-dark border-r border-mav-line h-screen overflow-y-auto p-4 flex flex-col
+        fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0
+        ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+        <button onClick={() => setOpen(false)} aria-label="Close menu"
+          className="lg:hidden absolute top-3 right-3 p-2 rounded-md text-mav-muted hover:text-white hover:bg-mav-panel">
+          <X size={18} />
+        </button>
       <div className="flex items-center gap-2 px-2 py-3 mb-4">
         <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
         <span className="font-semibold tracking-tight">Digital Dashboard</span>
@@ -64,7 +95,8 @@ export default function Sidebar() {
           <LogOut size={13} /> Sign out
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
 

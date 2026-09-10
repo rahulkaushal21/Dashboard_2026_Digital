@@ -101,8 +101,8 @@ export default function Escalations() {
         <KPICard label="Companies" value={String(uniq(e.map(x => x.company_name)).length)} />
         <KPICard label="Types" value={String(uniq(e.map(x => x.escalation_type)).length)} />
       </div>
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
+        <table className="w-full text-sm min-w-[720px]">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
               {[

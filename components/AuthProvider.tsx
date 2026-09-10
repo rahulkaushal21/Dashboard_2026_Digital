@@ -40,7 +40,11 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     <AuthCtx.Provider value={{ profile, email: profile.email, signOut }}>
       <div className="flex h-screen overflow-hidden">
         <Sidebar />
-        <main className="flex-1 p-8 max-w-[1400px] h-screen overflow-y-auto">
+        {/* pt-20 on mobile clears the fixed top bar; padding tightens on small screens
+            so a phone is not spending 64px of a 375px width on margins. min-w-0 lets
+            the flex child actually shrink, without which wide tables push the whole
+            page sideways instead of scrolling inside their own container. */}
+        <main className="flex-1 min-w-0 px-4 pt-20 pb-8 sm:px-6 lg:p-8 max-w-[1400px] h-screen overflow-y-auto">
           <RouteGuard>{children}</RouteGuard>
         </main>
       </div>

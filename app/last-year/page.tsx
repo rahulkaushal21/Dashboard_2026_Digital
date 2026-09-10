@@ -163,7 +163,7 @@ export default function LastYearReview() {
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-5 py-3 font-medium sticky left-0 bg-mav-panel">Client</th>

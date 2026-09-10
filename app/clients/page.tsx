@@ -690,7 +690,7 @@ export default function Clients() {
       {mode === 'clients' ? (
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[980px]">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
               {['', 
                 <button key="client" onClick={() => handleSort('name')} className="hover:text-white cursor-pointer">Client{getSortIndicator('name')}</button>,
@@ -745,7 +745,7 @@ export default function Clients() {
           <span className="text-mav-muted">Smaller grey text under the group name is the granular industry it was merged from.</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[980px]">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
               {['Client', 'Industry', 'AI stance', 'BU', 'GEO', 'Account manager', 'Head', 'Type', 'Technology'].map((h, i) => (
                 <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>

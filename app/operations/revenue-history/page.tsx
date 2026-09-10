@@ -511,7 +511,7 @@ export default function RevenueHistory() {
 
           <Panel title="Client mix" right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
             <div className="overflow-x-auto -mx-1 px-1">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[720px]">
                 <thead>
                   <tr className="text-[11px] uppercase tracking-wide text-mav-muted">
                     <th className="text-left font-medium pb-2">Year</th>

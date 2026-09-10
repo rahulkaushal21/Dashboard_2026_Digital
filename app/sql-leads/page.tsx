@@ -51,8 +51,8 @@ export default function SqlLeads() {
         <KPICard label="Regions" value={String(uniq(s.map(x => x.prospect_region)).length)} />
         <KPICard label="Top industry" value={topIndustry} />
       </div>
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
+        <table className="w-full text-sm min-w-[720px]">
           <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Date', 'Company', 'Industry', 'Persona', 'Venture', 'Region', 'Owner'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
           <tbody>{s.map(x => (
             <tr key={x.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
