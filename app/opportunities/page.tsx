@@ -873,6 +873,8 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 <div><div className="text-xs text-mav-muted">RFQ / quote status</div><span className={`text-xs px-2 py-1 rounded-full ${badge(sel.rfq_status)}`}>{sel.status || sel.rfq_status || (sel.rfq ? 'RFQ' : '—')}</span></div>
 <div><div className="text-xs text-mav-muted">GEO</div>{sel.geo || '—'}</div>
 <div><div className="text-xs text-mav-muted">Date</div>{(sel.source_date || sel.first_date || '').slice(0, 10) || '—'}</div>
+{/* Where to go in the Quotes tab. Absent on email-origin deals, which have no line yet. */}
+<div><div className="text-xs text-mav-muted">Quotes sheet row</div>{sel.sheet_row ? <span className="tabular-nums">{sel.sheet_row}</span> : <span className="text-mav-muted">not in the sheet</span>}</div>
 <div className="col-span-2"><div className="text-xs text-mav-muted">{sel.quote_ref ? 'Quote / subject' : 'Subject'}</div>{sel.source_subject || '—'}</div>
 </div>
 </aside>

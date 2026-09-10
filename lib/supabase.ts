@@ -50,6 +50,9 @@ booked_month?: string; booked_amount?: number; booked_ambiguous?: boolean
 // `intent_basis` says whether recency came from email or from the sheet's own
 // date; the sheet is logged over a week late on 22% of rows, so email wins where
 // it exists. Absent for won/lost rows.
+// Row this deal occupies in the Quotes tab, so a flag can say where to go and
+// not just what is wrong. Sheet-origin rows only — an email-origin deal has no line yet.
+sheet_row?: number
 intent_score?: number; intent_tier?: 'A' | 'B' | 'C' | 'D' | 'E'
 intent_basis?: 'email' | 'sheet-date' | 'none'; days_since_touch?: number
 intent_relationship?: number; intent_value_factor?: number; intent_recency?: number
@@ -315,6 +318,9 @@ const norm = (s?: string) => (s || '').trim().toLowerCase()
 // leaves the badge off rather than breaking the row.
 const intent = new Map<number, any>()
 for (const r of (await read<any>('web_quote_intent')) || []) intent.set(r.id, r)
+// Quotes-tab row number per opportunity, so "fix the sheet" flags can name the row.
+const sheetRow = new Map<number, number>()
+for (const r of (await read<any>('web_quote_sheet_row')) || []) sheetRow.set(r.id, r.sheet_row)
 // collapse GEO into 3 buckets: US (incl. Canada/N.America), AU (incl. APAC/NZ), UK (rest)
 const geo3 = (g?: string) => {
 const v = (g || '').toLowerCase()
@@ -366,18 +372,21 @@ const repeat = taggedRepeat || inRevenue || o.is_new_client === false || !nbd
 // now lives in the intent score's recency factor and its stale badge instead.
 let flag: string | undefined
 const bm = bookedMatch.get(o.id)
+// "row 771" when we know it, "that row" when we don't, so the sentence always reads.
+const sr = sheetRow.get(o.id)
+const atRow = sr ? `row ${sr}` : 'that row'
 if (!o.won && norm(o.status) !== 'lost' && !norm(o.status).includes('cancel')) {
 const emailConfirmed = o.origin === 'email' && (emailWon.test(norm(o.rfq_status)) || (o.win_probability || 0) >= 90)
 // Only sheet-origin rows can be "out of sync with the sheet" — an email-origin deal has
 // no Quotes line to correct, so a call made there needs no follow-up action.
 const lostLag = o.email_lost && o.origin === 'sheet'
 const confirmLag = o.email_won && o.origin === 'sheet'
-if (bm && !bm.ambiguous) flag = `⚠ ALREADY BOOKED, OPEN IN SHEET — $${bm.amount.toLocaleString('en-US')} for this client was invoiced in the revenue sheet (${(bm.month || '').slice(0, 7)}), but its Quotes-sheet line still reads Open. Set that row to Confirmed — until you do, this money is counted twice.`
-else if (bm) flag = `⚠ POSSIBLY ALREADY BOOKED — a $${bm.amount.toLocaleString('en-US')} booking for this client (${(bm.month || '').slice(0, 7)}) matches this quote AND another open quote at the same price. Check which one shipped and set that Quotes row to Confirmed.`
-else if (confirmLag) flag = '⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set that row to Confirmed so it books as revenue.'
-else if (lostLag) flag = '⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set that row to Cancelled so it stops counting as live pipeline.'
-else if (emailConfirmed) flag = '⚠ REVIEW URGENT — client confirmed this in email but it is still Open. Mark it Confirmed in the Quotes sheet so it books as Won.'
-else if (wrongNew) flag = `⚠ NOT NBD, TAGGED “NEW” — Quotes row ${o.quote_key || o.quote_ref || '(no ref)'} is tagged New Business (col P) but its owner${o.sales_person ? ` (${o.sales_person})` : ' is blank and'} is not on the NBD team, so it counts as Repeat. Either set col P to Repeat, or put the NBD owner who actually opened the account in the Account/Sales Person column.`
+if (bm && !bm.ambiguous) flag = `⚠ ALREADY BOOKED, OPEN IN SHEET — $${bm.amount.toLocaleString('en-US')} for this client was invoiced in the revenue sheet (${(bm.month || '').slice(0, 7)}), but its Quotes-sheet line still reads Open. Set ${atRow} to Confirmed — until you do, this money is counted twice.`
+else if (bm) flag = `⚠ POSSIBLY ALREADY BOOKED — a $${bm.amount.toLocaleString('en-US')} booking for this client (${(bm.month || '').slice(0, 7)}) matches this quote AND another open quote at the same price. Check which one shipped and set ${atRow} to Confirmed.`
+else if (confirmLag) flag = `⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set ${atRow} to Confirmed so it books as revenue.`
+else if (lostLag) flag = `⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set ${atRow} to Cancelled so it stops counting as live pipeline.`
+else if (emailConfirmed) flag = '⚠ REVIEW URGENT — the client confirmed this in email, but this deal has no line in the Quotes sheet at all. Add it and set Status to Confirmed so it books as Won.'
+else if (wrongNew) flag = `⚠ NOT NBD, TAGGED “NEW” — Quotes ${atRow}${sr ? ` (${o.quote_key || o.quote_ref || 'no ref'})` : ` ${o.quote_key || o.quote_ref || '(no ref)'}`} is tagged New Business (col P) but its owner${o.sales_person ? ` (${o.sales_person})` : ' is blank and'} is not on the NBD team, so it counts as Repeat. Either set col P to Repeat, or put the NBD owner who actually opened the account in the Account/Sales Person column.`
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
 else if (confirmedLike.test(`${o.summary || ''} ${o.gist || ''}`)) flag = 'Reads as confirmed / existing business — verify it belongs under Opportunities'
 }
@@ -395,6 +404,7 @@ sources: (o.origin === 'sheet' && o.email_tracked) ? ['sheet', 'email'] : [o.ori
 source_tags: (o.origin === 'sheet' && o.email_tracked) ? ['sheet', 'email'] : [o.origin],
 service: serviceOf(o.technology),
 quote_ref: o.quote_key || o.quote_ref || undefined,
+sheet_row: sr,
 is_new_client: !repeat,
 nbd_owner: nbd,
 mis_tagged_new: wrongNew,

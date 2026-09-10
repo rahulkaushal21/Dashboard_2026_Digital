@@ -17,10 +17,19 @@ function pdate(s: string | undefined): string | null { if (!s) return null; s = 
 function pmonth(s: string | undefined): string | null { if (!s) return null; const m = String(s).trim().match(/^([A-Za-z]{3})[a-z]*[\s-]+(\d{2,4})$/); if (m) { const mo = MONTHS[m[1].toLowerCase()]; if (mo) { let y = m[2]; if (y.length === 2) y = "20" + y; return `${y}-${mo}-01`; } } return null; }
 
 // Turn a 2-D array (header row + data rows) into objects keyed by trimmed header.
-function toObjects(rows: string[][]): Record<string, string>[] {
+// Each row is returned with its TRUE sheet position, captured here before any
+// filtering: +1 for the header row, +1 because spreadsheets are 1-based. The row
+// object itself is left pristine, because src_row_hash hashes JSON.stringify(r)
+// and quote_key derives 'r:N' from that hash — adding a field would re-key every
+// quote that has no Quote ID and orphan its opportunity.
+function toObjects(rows: string[][]): { r: Record<string, string>; sheetRow: number }[] {
   if (!rows || rows.length < 2) return [];
   const headers = rows[0].map((x) => (x ?? "").toString().trim());
-  return rows.slice(1).map((r) => { const o: Record<string, string> = {}; headers.forEach((hh, i) => { o[hh] = (r[i] ?? "").toString().trim(); }); return o; });
+  return rows.slice(1).map((row, j) => {
+    const o: Record<string, string> = {};
+    headers.forEach((hh, i) => { o[hh] = (row[i] ?? "").toString().trim(); });
+    return { r: o, sheetRow: j + 2 };
+  });
 }
 
 // Some escalation sheet rows carry an extra leading "Business Unit" column
@@ -69,13 +78,13 @@ const KEEP: Record<string, (r: Record<string, string>) => boolean> = {
   esc: (r) => !!(r["Name"] || r["Company Name"] || r["Tracking Date"]),
   feedback: (r) => !!(r["Added Date"] || r["Agency"] || r["Client Email"] || r["Comments"]),
 };
-const MAP: Record<string, (r: Record<string, string>, i: number) => Record<string, unknown>> = {
-  quotes: (r, i) => ({
+const MAP: Record<string, (r: Record<string, string>, i: number, sheetRow: number) => Record<string, unknown>> = {
+  quotes: (r, i, sheetRow) => ({
     quote_id: r["Quote ID"] || null, added_date: pdate(r["Added Date"]), service_dept: r["Service Department"] || null, technology: r["Technology"] || null,
     subject_project: r["Email Subject Line / Project Name"] || null, agency: r["Agency"] || null, client_email: r["Client Email"] || null, pc_sme: r["PC/SME"] || null,
     project_type: r["Project Type"] || null, currency_type: r["Currency Type"] || null, estimated_cost: num(r["Estimated Cost"]), usd_value: num(r["USD Conversion"]),
     status: r["Status"] || null, notes: r["Notes"] || null, geo: r["GEO"] || null, business_type: r["Business Type"] || null, sales_person: r["Account/Sales Person"] || null,
-    confirmed_in_days: intval(r["Confirmed in Days"]), src_row_hash: "Q:" + h(JSON.stringify(r)) + ":" + i,
+    confirmed_in_days: intval(r["Confirmed in Days"]), src_row_hash: "Q:" + h(JSON.stringify(r)) + ":" + i, sheet_row: sheetRow,
   }),
   sql: (r, i) => ({
     month: r["Month"] || null, year: intval(r["Year"]), venture: r["Venture"] || null, lead_date: pdate(r["Date"]), email_address: r["Email Address"] || null,
@@ -111,8 +120,8 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const tab = String(body?.tab || "");
     if (!MAP[tab]) return new Response(JSON.stringify({ ok: false, error: "unknown tab: " + tab }), { status: 400, headers: { "Content-Type": "application/json" } });
-    const objs = toObjects(body?.rows || []).filter(KEEP[tab]);
-    let mapped = objs.map(MAP[tab]);
+    const objs = toObjects(body?.rows || []).filter((x) => KEEP[tab](x.r));
+    let mapped = objs.map((x, i) => MAP[tab](x.r, i, x.sheetRow));
     if (tab === "esc") mapped = mapped.map(fixEscDrift);
     // Guard: never let an empty/garbled push delete a populated table.
     if (mapped.length === 0) {
