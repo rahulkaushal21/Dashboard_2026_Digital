@@ -429,3 +429,35 @@ beyond the 95th-percentile close time of 25) and `flag_no_agency`. Stale rows ar
 the single biggest distortion in the forecast — at the time of writing, 99 of 202
 open deals were stale, carrying $479k of the $554k face value against ~$17k
 expected.
+
+## Verify before you write — the rule that keeps this honest
+Every value, status and commitment claim on a quote must be traced to the CLIENT'S
+OWN WORDS in the thread before it is written. Not the subject line, not our
+follow-up, not a keyword. Read the message, then decide.
+
+Four faults found on 10 Sep 2026, all from writing without reading:
+- **Quoted chains.** Ingest's trimmer has a safety valve that keeps the raw body
+  when trimming would leave under 200 characters — exactly the short "no, not yet"
+  reply. Those bodies still carry the whole thread, so matching a full body reads
+  OUR sales language back as the client's. CodLab/RAPsheet was tagged committed off
+  "move forward" in our own quoted follow-up, while the client's actual words were
+  "still no progress with seed funding". Always match `email_new_text(body)`.
+- **End-client naming.** An email opp named for the end client never dedupes against
+  the sheet row named for the agency. Lyons Wealth (ESS Software) and Virbac
+  (C7EVEN) both duplicated confirmed sheet lines this way. Add a `name` alias.
+- **Foreign currency stored as dollars.** CodLab held AUD 30,000 in `est_value`,
+  overstating one deal by $10,200. Convert, and say in the pulse that you converted.
+- **Approval that is not about the deal.** "Please go ahead and send over the
+  calendar invite" approves a meeting. Read the object of the sentence.
+
+## A decision made on the dashboard is final
+`email_won` / `email_lost` are a person's call and the dashboard is now the record
+relied on. A deal confirmed there is DONE: it is not open pipeline, it is not
+scored, it carries no committed tick, and it must never be served back as
+"still needs adding to the Quotes sheet". Do not build chase lists from it.
+`unlikely` is NOT terminal — it is a caution, not a decision.
+
+## Review flags data defects only
+Review means two sources disagree, or a mis-tag miscounts revenue. It does NOT mean
+a deal is closed and needs entering, and it does NOT mean "go chase this". Flags
+that fired because a deal *looked* closed were removed on 10 Sep 2026.
