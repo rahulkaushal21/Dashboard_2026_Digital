@@ -1,4 +1,4 @@
-// The NBD (new business development) team. Only these five people open genuinely
+// The NBD (new business development) team. Only these six people open genuinely
 // NEW business — everyone else on the Quotes tab is an account manager working an
 // existing client, so their work is repeat business however the sheet tags it.
 //
@@ -12,6 +12,9 @@ export const NBD_TEAM = [
   { name: 'Devanshu Kumar', aliases: ['devanshu kumar', 'devanshu'] },
   { name: 'Nevilson Christian', aliases: ['nevilson christian', 'nevilson'] },
   { name: 'Aman Acharya', aliases: ['aman acharya'] },
+  // The Quotes tab spells him 'kamesh Biniwale' with a lower-case k; owners are
+  // lower-cased before matching, so the full-name alias catches it either way.
+  { name: 'Kamesh Biniwale', aliases: ['kamesh biniwale', 'kamesh'] },
 ] as const
 
 const ALIAS: Set<string> = new Set(NBD_TEAM.flatMap(m => m.aliases as readonly string[]))
