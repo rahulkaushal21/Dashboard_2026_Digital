@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
 import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
-import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost } from '@/lib/pm-metrics'
+import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost, quoteConfirmDate, oppConfirmDate } from '@/lib/pm-metrics'
 import { pmBySlug, fqOf, qLabel, totalPct, attainment, TARGETS, WEIGHTS, type FQ } from '@/lib/pm-team'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
@@ -70,15 +70,17 @@ export default function PmDetail({ slug }: { slug: string }) {
   const inThisQ = (d?: string) => { const k = (d || '').slice(0, 7); return k >= qa && k <= qb }
   const q2cRows = [
     ...(s?.quotes || [])
-      .filter(x => isNewDevQuote(x) && inThisQ(x.added_date))
+      .filter(x => isNewDevQuote(x) && (inThisQ(x.added_date) || inThisQ(quoteConfirmDate(x))))
       .map(x => ({
-        key: `q${x.id}`, date: (x.added_date || '').slice(0, 10), client: x.agency,
+        key: `q${x.id}`, date: (x.added_date || '').slice(0, 10), confirmed: quoteConfirmDate(x),
+        carried: !inThisQ(x.added_date), client: x.agency,
         project: x.subject_project, value: x.usd_value, status: x.status, source: 'sheet' as const,
       })),
     ...(s?.emailNewDevOpps || [])
-      .filter(o => inThisQ(oppDate(o)))
+      .filter(o => inThisQ(oppDate(o)) || inThisQ(oppConfirmDate(o)))
       .map(o => ({
-        key: `e${o.id}`, date: oppDate(o).slice(0, 10), client: o.company_name,
+        key: `e${o.id}`, date: oppDate(o).slice(0, 10), confirmed: oppConfirmDate(o),
+        carried: !inThisQ(oppDate(o)), client: o.company_name,
         project: o.source_subject, value: o.est_value,
         status: isWon(o) ? 'Confirmed' : isLost(o) ? 'Cancelled' : (o.status || 'Open'),
         source: 'email' as const,
@@ -127,7 +129,7 @@ export default function PmDetail({ slug }: { slug: string }) {
               note={`${money(q?.avg || 0)}/mo vs ${money(base)} base`}
               raw={growth} target={TARGETS.growth} targetLabel={`${TARGETS.growth}%`} weight={WEIGHTS.growth} />
             <KpiRow measure="Q2C" result={q?.q2c == null ? '—' : `${q.q2c.toFixed(0)}%`}
-              note={`${q?.won ?? 0} confirmed of ${q?.shared ?? 0} raised · ${q?.lost ?? 0} cancelled, ${q?.open ?? 0} still open`}
+              note={`${q?.won ?? 0} confirmed in this quarter of ${q?.shared ?? 0} in play · ${q?.lost ?? 0} cancelled, ${q?.open ?? 0} unconverted`}
               raw={q?.q2c ?? null} target={TARGETS.q2c} targetLabel={`${TARGETS.q2c}%`} weight={WEIGHTS.q2c} />
             <KpiRow measure="Feedback" result={String(q?.feedback ?? 0)}
               note={`${q?.feedbackFromSheet ?? 0} from the feedback sheet · ${q?.feedbackFromEmail ?? 0} found in email`}
@@ -150,7 +152,7 @@ export default function PmDetail({ slug }: { slug: string }) {
           </p>
           {growth != null && growth < 0 && <p>Growth is below the base, so it contributes nothing to the Total rather than pulling it negative.</p>}
           {(q?.shared ?? 0) === 0 && <p className="text-amber-400">No New-development quote was raised this quarter, so Q2C has nothing to measure and contributes nothing.</p>}
-          {(q?.open ?? 0) > 0 && <p>{q?.open} quote{(q?.open ?? 0) === 1 ? '' : 's'} still open — those count in the Q2C denominator, so closing them lifts the figure.</p>}
+          {(q?.open ?? 0) > 0 && <p>{q?.open} quote{(q?.open ?? 0) === 1 ? '' : 's'} raised this quarter and not yet converted — they count against Q2C here, and if one is signed next quarter that win lands there, not back here.</p>}
         </div>
       </section>
 
@@ -193,9 +195,9 @@ export default function PmDetail({ slug }: { slug: string }) {
         <div className="px-5 py-4">
           <h2 className="font-medium">New-development quotes · {qLabel(fq)}</h2>
           <p className="text-xs text-mav-muted mt-1">
-            Everything behind the Q2C figure. Quotes-tab rows with Project Type “New Development”, plus deals worked over
-            email that were never written onto the sheet — those are read from the subject and brief, and only counted on an
-            explicit build signal.
+            Everything behind the Q2C figure: raised this quarter, or raised earlier and confirmed in it. Quotes-tab rows with
+            Project Type “New Development”, plus deals worked over email that were never written onto the sheet — those are read
+            from the subject and brief, and only counted on an explicit build signal.
           </p>
           <p className="text-xs text-mav-muted mt-1">
             {q?.shared ?? 0} raised ({(q?.shared ?? 0) - (q?.sharedFromEmail ?? 0)} sheet · {q?.sharedFromEmail ?? 0} email)
@@ -206,12 +208,16 @@ export default function PmDetail({ slug }: { slug: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[740px]">
               <thead className="text-left text-mav-muted border-y border-mav-line">
-                <tr>{['Added', 'Client', 'Project', 'Value', 'Found in', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
+                <tr>{['Raised', 'Confirmed', 'Client', 'Project', 'Value', 'Found in', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {q2cRows.map(x => (
                   <tr key={x.key} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                    <td className="px-5 py-2.5 text-mav-muted whitespace-nowrap">{x.date}</td>
+                    <td className="px-5 py-2.5 text-mav-muted whitespace-nowrap">
+                      {x.date}
+                      {x.carried && <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-mav-yellow/15 text-mav-yellow">carried in</span>}
+                    </td>
+                    <td className="px-5 py-2.5 text-mav-muted whitespace-nowrap">{x.confirmed || '—'}</td>
                     <td className="px-5 py-2.5">{x.client}</td>
                     <td className="px-5 py-2.5 text-mav-muted max-w-[260px] truncate" title={x.project}>{x.project}</td>
                     <td className="px-5 py-2.5 tabular-nums">{x.value ? money(x.value) : <span className="text-mav-muted">—</span>}</td>

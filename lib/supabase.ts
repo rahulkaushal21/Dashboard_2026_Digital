@@ -36,6 +36,9 @@ email_lost?: boolean; email_lost_reason?: string; email_lost_at?: string; email_
 // Confirmed Won from the dashboard — the mirror image of email_lost, and held apart
 // from `won`/`status` for the same reason: the sheet sync overwrites both.
 email_won?: boolean; email_won_reason?: string; email_won_at?: string; email_won_by?: string
+// When the sheet sync last confirmed this row's status — the fallback date for
+// placing a win in the right quarter when email_won_at is absent.
+status_checked_at?: string
 // Matched to a line in the revenue sheet while the Quotes row still reads Open —
 // i.e. delivered and invoiced, but nobody set the sheet to Confirmed. Derived every
 // load by matchBookedQuotes(); nothing is written to the database.

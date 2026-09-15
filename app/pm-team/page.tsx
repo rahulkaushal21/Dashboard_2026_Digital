@@ -170,7 +170,7 @@ function HowItWorks() {
   return (
     <div className="grid gap-3 md:grid-cols-4 mb-6">
       {item('Growth', 'The quarter’s average monthly booking against the PM’s base. The base is their last-year monthly average and it only moves up: beat it in a quarter and that quarter’s average becomes the new base. Miss it and the old base stands.')}
-      {item('Q2C', 'Confirmed ÷ every New Development quote raised in the quarter — the Quotes tab plus deals worked over email that never reached the sheet. Quotes still open count in the denominator, so an unclosed quote weighs on the number rather than disappearing from it. Ad-hoc, Maintenance, Additional Pages, Ballpark and Dedicated are not New Development and are excluded.')}
+      {item('Q2C', 'Confirmations land in the quarter they were WON in, not the quarter the quote was raised — a Q1 quote signed in Q2 is Q2’s win. The denominator is everything raised in the quarter plus anything older confirmed in it, sheet and email together. Quotes still open count against the quarter, so an unclosed quote weighs on the number rather than vanishing from it, and a closed quarter never moves afterwards.')}
       {item('Feedback', 'Client feedbacks recorded against the PM in the quarter — from the feedback sheet and from email.')}
       {item('Total', 'How far each measure got towards full marks — 16% growth, 85% Q2C, 8 feedbacks — weighted 40/40/20 and capped at 100%. Negative growth counts as zero rather than pulling the total below it.')}
     </div>

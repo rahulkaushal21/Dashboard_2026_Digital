@@ -31,6 +31,39 @@ export const isNewDevQuote = (q: Quote) => norm(q.project_type).includes('new')
 const quoteWon = (q: Quote) => norm(q.status) === 'confirmed'
 const quoteLost = (q: Quote) => norm(q.status).includes('cancel')
 
+const addDays = (iso: string, days: number) => {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * The date a Quotes-tab row was CONFIRMED, which is what decides the quarter its
+ * win counts in. The sheet records "confirmed in days" rather than a date, so it
+ * is added to the raised date — 485 of the 504 confirmed rows carry it; the other
+ * 19 fall back to the raised date.
+ *
+ * The value can be NEGATIVE (as low as -34), meaning the row was written up after
+ * the client had already said yes. That is kept rather than clamped: the client
+ * confirmed when they confirmed, and late paperwork should not move the win into
+ * a later quarter.
+ *
+ * Empty for anything not confirmed. Cancellations have no date at all — only 3 of
+ * 190 carry one — so a cancelled quote can only ever sit in the quarter it was
+ * raised in. Worth fixing in the sheet if cancellation timing ever matters.
+ */
+export function quoteConfirmDate(q: Quote): string {
+  if (!quoteWon(q) || !q.added_date) return ''
+  const base = q.added_date.slice(0, 10)
+  return q.confirmed_in_days == null ? base : addDays(base, q.confirmed_in_days)
+}
+
+/** The same, for an email-origin deal: when it was marked won, else when it arrived. */
+export function oppConfirmDate(o: Opportunity): string {
+  if (!isWon(o)) return ''
+  return (o.email_won_at || o.status_checked_at || oppDate(o) || '').slice(0, 10)
+}
+
 // ---------------------------------------------------------------------------
 // Classifying an EMAIL opportunity as New Development.
 //
@@ -247,21 +280,45 @@ function quarterOf(s: PmStats, f: FQ, today: Date): PmQuarter {
   for (const [k, v] of s.byMonth) if (inQ(k, f)) booked += v
   const me = monthsElapsed(f, today)
 
+  // ---------------------------------------------------------------------
+  // The Q2C cohort for a quarter is:
+  //     everything RAISED in it  ∪  everything CONFIRMED in it
+  //
+  // A confirmation belongs to the quarter it was WON in, not the quarter the
+  // quote was raised — a Q1 quote signed in Q2 is Q2's win. Six Q1 quotes
+  // confirmed in Q2, and ten confirmed in Q1 came from quotes raised earlier,
+  // so this is not a rounding detail.
+  //
+  // A closed quarter cannot move afterwards. A quote raised in Q and still open
+  // when Q ended stays in Q's denominator for good and never later joins Q's
+  // numerator — when it converts, that win lands in the quarter it converted in.
+  // So the only thing a past quarter ever shows is what was true on its last day.
+  // ---------------------------------------------------------------------
   let shared = 0, w = 0, l = 0, open = 0, fromEmail = 0
-  for (const q of s.quotes) {
-    if (!isNewDevQuote(q) || !inQ(monthKey(q.added_date), f)) continue
+  const tally = (raisedInQ: boolean, wonInQ: boolean, lost: boolean, isEmail: boolean) => {
     shared++
-    if (quoteWon(q)) w++
-    else if (quoteLost(q)) l++
-    else open++
+    if (isEmail) fromEmail++
+    if (wonInQ) w++
+    else if (raisedInQ && lost) l++
+    else if (raisedInQ) open++    // open at the quarter's close, or won later
   }
-  // The same count from email, for deals never written onto the Quotes tab.
+
+  for (const q of s.quotes) {
+    if (!isNewDevQuote(q)) continue
+    const raisedInQ = inQ(monthKey(q.added_date), f)
+    const cd = quoteConfirmDate(q)
+    const wonInQ = !!cd && inQ(monthKey(cd), f)
+    if (!raisedInQ && !wonInQ) continue
+    tally(raisedInQ, wonInQ, quoteLost(q), false)
+  }
+
+  // The same rule for deals worked over email that never reached the sheet.
   for (const o of s.emailNewDevOpps) {
-    if (!inQ(monthKey(oppDate(o)), f)) continue
-    shared++; fromEmail++
-    if (isWon(o)) w++
-    else if (isLost(o)) l++
-    else open++
+    const raisedInQ = inQ(monthKey(oppDate(o)), f)
+    const cd = oppConfirmDate(o)
+    const wonInQ = !!cd && inQ(monthKey(cd), f)
+    if (!raisedInQ && !wonInQ) continue
+    tally(raisedInQ, wonInQ, isLost(o), true)
   }
 
   // month_year is preferred over added_date because it is the month the feedback
