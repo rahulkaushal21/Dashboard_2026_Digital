@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, Settings, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, Settings, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
@@ -25,6 +25,7 @@ const nav: Entry[] = [
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
   { href: '/forecast', label: 'Forecast', icon: LineChart },
   { href: '/last-year', label: 'Last Year Review', icon: History },
+  { href: '/pm-team', label: 'PM Team', icon: UserCog },
   {
     label: 'Operations', icon: Cog, children: [
       { href: '/operations/lnd', label: 'L&D Program', icon: GraduationCap },
@@ -104,7 +105,10 @@ export default function Sidebar() {
 // while the nav holds "/clients" — an exact compare never matched and no tab ever lit
 // up. Normalise both sides (keeping "/" for the root) before comparing.
 const trim = (p?: string | null) => { const v = (p || '/').split(/[?#]/)[0]; return v.length > 1 ? v.replace(/\/+$/, '') : '/' }
-const samePath = (path: string | null, href: string) => trim(path) === trim(href)
+// A detail page keeps its section lit: /pm-team/afzal-multani highlights PM Team.
+// '/' is excluded or it would match every route.
+const samePath = (path: string | null, href: string) =>
+  trim(path) === trim(href) || (href !== '/' && trim(path).startsWith(trim(href) + '/'))
 
 const linkCls = (active: boolean, indent = false) =>
   `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-sm transition-colors

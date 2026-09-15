@@ -435,6 +435,19 @@ return (await import('./mockData')).mockRevenue
 }
 export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, technology, engagement_model, geo, sme, sales_person, contact_email', 'id')) || [] }
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
+// Feedback keyed to the PM who owns it, for the PM scorecard. Kept apart from
+// getFeedback() because that one is the Delights feed and selects a different set
+// of columns; this one needs pc_sme and the month the feedback lands in.
+//
+// `month_year` is blank on most rows, so the scorecard falls back to added_date.
+// Between the two, all 67 rows are dated. 39 of them came in from email rather
+// than the sheet, which is why the PM feedback count is genuinely "email and
+// sheet combined" without any extra join.
+export interface PmFeedbackRow { id: number; pc_sme?: string; month_year?: string; added_date?: string; csat?: number; feedback_type?: string; nature?: string; agency?: string; comments?: string; evidence?: string; source_sender?: string }
+export async function getPmFeedback(): Promise<PmFeedbackRow[]> {
+  return (await read<PmFeedbackRow>('feedback', 'id, pc_sme, month_year, added_date, csat, feedback_type, nature, agency, comments, evidence, source_sender')) || []
+}
+
 export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, thread_id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }
 
 // The human verdicts recorded on Critical Escalations, so every board can honour them.
@@ -675,7 +688,11 @@ export async function getDelights(): Promise<Delight[]> {
   return [...groups.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }
 
-export interface Quote { id: number; quote_id?: string; added_date?: string; agency?: string; usd_value?: number; status?: string; business_type?: string; geo?: string; sales_person?: string; confirmed_in_days?: number; technology?: string; client_email?: string }
+// `pc_sme` (col H) and `project_type` (col I) are what the PM scorecard's Q2C
+// reads: the Q2C% for PM tab counts quotes whose Project Type is New Development,
+// which is a far larger and more meaningful set than the Business Type column
+// (432 rows against 74). getQuotes() selects '*', so both already come back.
+export interface Quote { id: number; quote_id?: string; added_date?: string; agency?: string; usd_value?: number; status?: string; business_type?: string; geo?: string; sales_person?: string; confirmed_in_days?: number; technology?: string; client_email?: string; pc_sme?: string; project_type?: string; subject_project?: string }
 export interface QuoteConversion { id: number; company_name?: string; outcome?: string; lost_reason?: string; amount_usd?: number; decided_at?: string }
 export interface SqlLead { id: number; month?: string; year?: number; venture?: string; industry?: string; persona?: string; company_name?: string; prospect_region?: string; assigned_to?: string; lead_date?: string }
 export interface Escalation { id: number; company_name?: string; geo?: string; situation_type?: string; escalation_type?: string; business_impact?: string; month?: string; week?: string; email_subject?: string; tracking_date?: string; project_name?: string; reference_id?: string; deal_type?: string; service_type?: string; link?: string; source?: string; raised_by?: string; evidence?: string; source_sender?: string; source_date?: string }

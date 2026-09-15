@@ -14,6 +14,7 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/business-trend', label: 'Business Trend' },
   { href: '/forecast', label: 'Forecast' },
   { href: '/last-year', label: 'Last Year Review' },
+  { href: '/pm-team', label: 'PM Team' },
 ]
 
 // Operations sub-pages are deliberately NOT in PAGES. They hold named-person data
@@ -57,7 +58,14 @@ export function canSee(profile: Profile | null, path: string): boolean {
   if (path === '/admin') return false
   if (ADMIN_ONLY.includes(path)) return false
   const allowed = profile.allowed_pages || []
-  return allowed.includes(path)
+  if (allowed.includes(path)) return true
+  // A granted section also covers its detail pages — /pm-team grants
+  // /pm-team/afzal-multani. Without this a viewer could open the PM list and then
+  // be locked out of every name on it. '/' is excluded explicitly, or it would
+  // prefix-match the entire dashboard. The trailing slash matters: '/pm' must not
+  // open '/pm-team'. ADMIN_ONLY is already rejected above, so this cannot widen it.
+  const p = path.length > 1 ? path.replace(/\/+$/, '') : path
+  return allowed.some(a => a !== '/' && p.startsWith(a + '/'))
 }
 
 // Look up an email in the allowlist (active only). Returns the profile, or null
