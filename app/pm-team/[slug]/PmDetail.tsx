@@ -62,7 +62,6 @@ export default function PmDetail({ slug }: { slug: string }) {
   const growth = q ? growthPct(q.avg, base) : null
   const total = q ? totalPct(growth, q.q2c, q.feedback) : 0
   const peak = Math.max(1, ...months.map(x => x.v))
-  const decided = (q?.won || 0) + (q?.lost || 0)
 
   // Every deal behind the Q2C figure — Quotes tab AND email — so the number can be
   // checked rather than trusted. Email rows carry no Project Type, so they are the
@@ -128,7 +127,7 @@ export default function PmDetail({ slug }: { slug: string }) {
               note={`${money(q?.avg || 0)}/mo vs ${money(base)} base`}
               raw={growth} target={TARGETS.growth} targetLabel={`${TARGETS.growth}%`} weight={WEIGHTS.growth} />
             <KpiRow measure="Q2C" result={q?.q2c == null ? '—' : `${q.q2c.toFixed(0)}%`}
-              note={`${q?.won ?? 0} confirmed of ${decided} decided`}
+              note={`${q?.won ?? 0} confirmed of ${q?.shared ?? 0} raised · ${q?.lost ?? 0} cancelled, ${q?.open ?? 0} still open`}
               raw={q?.q2c ?? null} target={TARGETS.q2c} targetLabel={`${TARGETS.q2c}%`} weight={WEIGHTS.q2c} />
             <KpiRow measure="Feedback" result={String(q?.feedback ?? 0)}
               note={`${q?.feedbackFromSheet ?? 0} from the feedback sheet · ${q?.feedbackFromEmail ?? 0} found in email`}
@@ -150,7 +149,8 @@ export default function PmDetail({ slug }: { slug: string }) {
               : `This is the last-year monthly average, still the bar because it has not been beaten this year yet.`}
           </p>
           {growth != null && growth < 0 && <p>Growth is below the base, so it contributes nothing to the Total rather than pulling it negative.</p>}
-          {decided === 0 && <p className="text-amber-400">No New-development quote has been decided this quarter, so Q2C has nothing to measure and contributes nothing.</p>}
+          {(q?.shared ?? 0) === 0 && <p className="text-amber-400">No New-development quote was raised this quarter, so Q2C has nothing to measure and contributes nothing.</p>}
+          {(q?.open ?? 0) > 0 && <p>{q?.open} quote{(q?.open ?? 0) === 1 ? '' : 's'} still open — those count in the Q2C denominator, so closing them lifts the figure.</p>}
         </div>
       </section>
 

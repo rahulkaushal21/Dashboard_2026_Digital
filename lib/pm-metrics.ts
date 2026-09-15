@@ -276,7 +276,11 @@ function quarterOf(s: PmStats, f: FQ, today: Date): PmQuarter {
     avg: me > 0 ? booked / me : 0,
     monthsElapsed: me,
     shared, won: w, lost: l, open, sharedFromEmail: fromEmail,
-    q2c: decided > 0 ? (w / decided) * 100 : null,
+    // Confirmed against EVERY New-development quote raised in the quarter, not
+    // just the decided ones. Excluding the still-open quotes let a PM who had
+    // converted five of twelve read as 100%, because the seven they had not yet
+    // closed simply vanished from the denominator.
+    q2c: shared > 0 ? (w / shared) * 100 : null,
     feedbackFromSheet: fbSheet,
     feedbackFromEmail: fbEmail,
     feedback: fbSheet + fbEmail,
