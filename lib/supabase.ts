@@ -443,9 +443,9 @@ export async function getFeedback(): Promise<Feedback[]> { return (await read<Fe
 // Between the two, all 67 rows are dated. 39 of them came in from email rather
 // than the sheet, which is why the PM feedback count is genuinely "email and
 // sheet combined" without any extra join.
-export interface PmFeedbackRow { id: number; pc_sme?: string; month_year?: string; added_date?: string; csat?: number; feedback_type?: string; nature?: string; agency?: string; comments?: string; evidence?: string; source_sender?: string }
+export interface PmFeedbackRow { id: number; pc_sme?: string; month_year?: string; added_date?: string; csat?: number; feedback_type?: string; nature?: string; agency?: string; comments?: string; evidence?: string; source_sender?: string; thread_id?: string }
 export async function getPmFeedback(): Promise<PmFeedbackRow[]> {
-  return (await read<PmFeedbackRow>('feedback', 'id, pc_sme, month_year, added_date, csat, feedback_type, nature, agency, comments, evidence, source_sender')) || []
+  return (await read<PmFeedbackRow>('feedback', 'id, pc_sme, month_year, added_date, csat, feedback_type, nature, agency, comments, evidence, source_sender, thread_id')) || []
 }
 
 export async function getEmailSignals(): Promise<EmailSignal[]> { return (await read<EmailSignal>('email_signals', 'id, thread_id, company_name, client_email, signal_type, sentiment, summary, source_subject, source_date')) || [] }

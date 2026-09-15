@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
-import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow } from '@/lib/supabase'
-import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote } from '@/lib/pm-metrics'
+import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
+import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost } from '@/lib/pm-metrics'
 import { pmBySlug, fqOf, qLabel, totalPct, attainment, TARGETS, WEIGHTS, type FQ } from '@/lib/pm-team'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
@@ -22,14 +22,15 @@ export default function PmDetail({ slug }: { slug: string }) {
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [fb, setFb] = useState<PmFeedbackRow[]>([])
+  const [sigs, setSigs] = useState<EmailSignal[]>([])
   const [qi, setQi] = useState(QUARTERS.length - 1)
 
   useEffect(() => {
-    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback()])
-      .then(([b, o, qs, f]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f) })
+    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals()])
+      .then(([b, o, qs, f, sg]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg) })
   }, [])
 
-  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb), [bookings, opps, quotes, fb])
+  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb, sigs), [bookings, opps, quotes, fb, sigs])
   const s = pm ? stats.get(pm.slug) : undefined
   const fq = QUARTERS[qi]
 
@@ -63,10 +64,27 @@ export default function PmDetail({ slug }: { slug: string }) {
   const peak = Math.max(1, ...months.map(x => x.v))
   const decided = (q?.won || 0) + (q?.lost || 0)
 
-  // Quotes behind the Q2C figure, so the number can be checked rather than trusted.
-  const qQuotes = (s?.quotes || [])
-    .filter(x => isNewDevQuote(x) && (x.added_date || '').slice(0, 7) >= qKey(fq)[0] && (x.added_date || '').slice(0, 7) <= qKey(fq)[1])
-    .sort((a, b) => (b.added_date || '').localeCompare(a.added_date || ''))
+  // Every deal behind the Q2C figure — Quotes tab AND email — so the number can be
+  // checked rather than trusted. Email rows carry no Project Type, so they are the
+  // ones the classifier picked out; showing them here is what makes that auditable.
+  const [qa, qb] = qKey(fq)
+  const inThisQ = (d?: string) => { const k = (d || '').slice(0, 7); return k >= qa && k <= qb }
+  const q2cRows = [
+    ...(s?.quotes || [])
+      .filter(x => isNewDevQuote(x) && inThisQ(x.added_date))
+      .map(x => ({
+        key: `q${x.id}`, date: (x.added_date || '').slice(0, 10), client: x.agency,
+        project: x.subject_project, value: x.usd_value, status: x.status, source: 'sheet' as const,
+      })),
+    ...(s?.emailNewDevOpps || [])
+      .filter(o => inThisQ(oppDate(o)))
+      .map(o => ({
+        key: `e${o.id}`, date: oppDate(o).slice(0, 10), client: o.company_name,
+        project: o.source_subject, value: o.est_value,
+        status: isWon(o) ? 'Confirmed' : isLost(o) ? 'Cancelled' : (o.status || 'Open'),
+        source: 'email' as const,
+      })),
+  ].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
   return (
     <div>
@@ -112,7 +130,8 @@ export default function PmDetail({ slug }: { slug: string }) {
             <KpiRow measure="Q2C" result={q?.q2c == null ? '—' : `${q.q2c.toFixed(0)}%`}
               note={`${q?.won ?? 0} confirmed of ${decided} decided`}
               raw={q?.q2c ?? null} target={TARGETS.q2c} targetLabel={`${TARGETS.q2c}%`} weight={WEIGHTS.q2c} />
-            <KpiRow measure="Feedback" result={String(q?.feedback ?? 0)} note="recorded this quarter"
+            <KpiRow measure="Feedback" result={String(q?.feedback ?? 0)}
+              note={`${q?.feedbackFromSheet ?? 0} from the feedback sheet · ${q?.feedbackFromEmail ?? 0} found in email`}
               raw={q?.feedback ?? 0} target={TARGETS.feedback} targetLabel={String(TARGETS.feedback)} weight={WEIGHTS.feedback} />
           </tbody>
           <tfoot>
@@ -141,15 +160,24 @@ export default function PmDetail({ slug }: { slug: string }) {
         <p className="text-xs text-mav-muted mb-4">USD booked each month. Apr–Jun 2026 is fixed to the revenue sheet&rsquo;s pivot, the agreed final figure for that quarter.</p>
         {months.length === 0 ? <p className="text-sm text-mav-muted">No bookings recorded.</p> : (
           <div className="overflow-x-auto">
-            <div className="flex items-end gap-2 min-w-[640px] h-44">
+            {/* items-stretch, and each column h-full, is load-bearing: with
+                items-end the columns size to their content, so the bars' own
+                percentage heights resolve against an indefinite height and
+                collapse to nothing — which is why no bars were drawing. */}
+            <div className="flex items-stretch gap-2 min-w-[680px] h-52">
               {months.map(({ k, v }, i) => {
                 const prev = i > 0 ? months[i - 1].v : null
                 const up = prev != null && v >= prev
                 return (
-                  <div key={k} className="flex-1 flex flex-col items-center justify-end gap-1 group">
-                    <span className="text-[10px] tabular-nums text-mav-muted opacity-0 group-hover:opacity-100 whitespace-nowrap">{money(v)}</span>
-                    <div className={`w-full rounded-t ${v === 0 ? 'bg-mav-line' : up ? 'bg-mav-yellow' : 'bg-mav-yellow/45'}`}
-                      style={{ height: `${Math.max(2, (v / peak) * 100)}%` }} title={`${mLabel(k)} — ${money(v)}`} />
+                  <div key={k} className="flex-1 h-full flex flex-col items-center gap-1">
+                    <span className="text-[10px] tabular-nums text-mav-muted whitespace-nowrap">{v ? money(v) : ''}</span>
+                    {/* The bar's percentage height resolves against THIS box, which
+                        flex-1 + min-h-0 gives a definite height — the labels above
+                        and below can no longer push it past the chart. */}
+                    <div className="flex-1 min-h-0 w-full flex items-end">
+                      <div className={`w-full rounded-t ${v === 0 ? 'bg-mav-line' : up ? 'bg-mav-yellow' : 'bg-mav-yellow/45'}`}
+                        style={{ height: `${Math.max(2, (v / peak) * 100)}%` }} title={`${mLabel(k)} — ${money(v)}`} />
+                    </div>
                     <span className="text-[10px] text-mav-muted whitespace-nowrap">{mLabel(k)}</span>
                   </div>
                 )
@@ -165,23 +193,29 @@ export default function PmDetail({ slug }: { slug: string }) {
         <div className="px-5 py-4">
           <h2 className="font-medium">New-development quotes · {qLabel(fq)}</h2>
           <p className="text-xs text-mav-muted mt-1">
-            Every Quotes-tab row behind the Q2C figure — Project Type “New Development”, owned by this PC/SME.
-            {' '}{q?.shared ?? 0} raised · {q?.won ?? 0} confirmed · {q?.lost ?? 0} cancelled · {q?.open ?? 0} still open.
+            Everything behind the Q2C figure. Quotes-tab rows with Project Type “New Development”, plus deals worked over
+            email that were never written onto the sheet — those are read from the subject and brief, and only counted on an
+            explicit build signal.
+          </p>
+          <p className="text-xs text-mav-muted mt-1">
+            {q?.shared ?? 0} raised ({(q?.shared ?? 0) - (q?.sharedFromEmail ?? 0)} sheet · {q?.sharedFromEmail ?? 0} email)
+            {' · '}{q?.won ?? 0} confirmed · {q?.lost ?? 0} cancelled · {q?.open ?? 0} still open.
           </p>
         </div>
-        {qQuotes.length === 0 ? <p className="px-5 pb-5 text-sm text-mav-muted">No New-development quotes raised this quarter.</p> : (
+        {q2cRows.length === 0 ? <p className="px-5 pb-5 text-sm text-mav-muted">No New-development work raised this quarter.</p> : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[680px]">
+            <table className="w-full text-sm min-w-[740px]">
               <thead className="text-left text-mav-muted border-y border-mav-line">
-                <tr>{['Added', 'Client', 'Project', 'Value', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
+                <tr>{['Added', 'Client', 'Project', 'Value', 'Found in', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
               </thead>
               <tbody>
-                {qQuotes.map(x => (
-                  <tr key={x.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                    <td className="px-5 py-2.5 text-mav-muted whitespace-nowrap">{(x.added_date || '').slice(0, 10)}</td>
-                    <td className="px-5 py-2.5">{x.agency}</td>
-                    <td className="px-5 py-2.5 text-mav-muted max-w-[260px] truncate" title={x.subject_project}>{x.subject_project}</td>
-                    <td className="px-5 py-2.5 tabular-nums">{x.usd_value ? money(x.usd_value) : <span className="text-mav-muted">—</span>}</td>
+                {q2cRows.map(x => (
+                  <tr key={x.key} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                    <td className="px-5 py-2.5 text-mav-muted whitespace-nowrap">{x.date}</td>
+                    <td className="px-5 py-2.5">{x.client}</td>
+                    <td className="px-5 py-2.5 text-mav-muted max-w-[260px] truncate" title={x.project}>{x.project}</td>
+                    <td className="px-5 py-2.5 tabular-nums">{x.value ? money(x.value) : <span className="text-mav-muted">—</span>}</td>
+                    <td className="px-5 py-2.5"><SourcePill s={x.source} /></td>
                     <td className="px-5 py-2.5"><StatusPill s={x.status} /></td>
                   </tr>
                 ))}
@@ -196,7 +230,8 @@ export default function PmDetail({ slug }: { slug: string }) {
         <div className="px-5 py-4">
           <h2 className="font-medium">Open opportunities</h2>
           <p className="text-xs text-mav-muted mt-1">
-            Raised this month and still open, sheet and email.
+            Raised this month and still open — Quotes tab and email together.
+            {' '}{pending.rows.filter(o => o.origin === 'email').length} of the {pending.rows.length} below came from email.
             {pending.toppedUp > 0 && ` It is early in the month, so the ${pending.toppedUp} most recent open deals from previous months are included.`}
           </p>
         </div>
@@ -213,7 +248,7 @@ export default function PmDetail({ slug }: { slug: string }) {
                     <td className="px-5 py-2.5">{o.company_name}</td>
                     <td className="px-5 py-2.5 text-mav-muted max-w-[260px] truncate" title={o.source_subject}>{o.source_subject}</td>
                     <td className="px-5 py-2.5 tabular-nums">{o.est_value ? money(o.est_value) : <span className="text-mav-muted">—</span>}</td>
-                    <td className="px-5 py-2.5 text-mav-muted text-xs">{o.origin}</td>
+                    <td className="px-5 py-2.5"><SourcePill s={o.origin === 'email' ? 'email' : 'sheet'} /></td>
                     <td className="px-5 py-2.5 text-mav-muted">{o.status}</td>
                   </tr>
                 ))}
@@ -231,6 +266,14 @@ const qKey = (f: FQ): [string, string] => {
   const y = f.q === 4 ? f.fy + 1 : f.fy
   const p = (n: number) => String(n).padStart(2, '0')
   return [`${y}-${p(sm)}`, `${y}-${p(sm + 2)}`]
+}
+
+function SourcePill({ s }: { s: 'sheet' | 'email' }) {
+  return (
+    <span className={`text-[11px] px-2 py-0.5 rounded ${s === 'email' ? 'bg-blue-500/15 text-blue-300' : 'bg-mav-line text-mav-muted'}`}>
+      {s}
+    </span>
+  )
 }
 
 function StatusPill({ s }: { s?: string }) {

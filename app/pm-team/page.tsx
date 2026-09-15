@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/Header'
-import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow } from '@/lib/supabase'
+import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
 import { buildPmStats, growthPct, type PmQuarter } from '@/lib/pm-metrics'
 import { PM_TEAM, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, type FQ, type PmMember } from '@/lib/pm-team'
 
@@ -37,15 +37,16 @@ export default function PmTeam() {
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [fb, setFb] = useState<PmFeedbackRow[]>([])
+  const [sigs, setSigs] = useState<EmailSignal[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback()])
-      .then(([b, o, qs, f]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f) })
+    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals()])
+      .then(([b, o, qs, f, sg]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg) })
       .finally(() => setLoading(false))
   }, [])
 
-  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb), [bookings, opps, quotes, fb])
+  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb, sigs), [bookings, opps, quotes, fb, sigs])
 
   // One cell per PM per quarter, computed once so the table only has to read it.
   const grid = useMemo(() => QUARTERS.map(fq => ({

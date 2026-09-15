@@ -2,7 +2,7 @@
 // individual PM page both read from here so they cannot drift apart — the bug
 // that had Business Trend and Forecast quoting two different FY targets.
 
-import type { BookingRow, Opportunity, PmFeedbackRow, Quote } from './supabase'
+import type { BookingRow, EmailSignal, Opportunity, PmFeedbackRow, Quote } from './supabase'
 import { PM_TEAM, pmOf, qRange, qStartMonth, qCalYear, baselineFor, PM_REASSIGN, Q1_FY2026_ACTUALS, type FQ, type PmMember } from './pm-team'
 
 export const monthKey = (d?: string) => (d || '').slice(0, 7)
@@ -31,8 +31,42 @@ export const isNewDevQuote = (q: Quote) => norm(q.project_type).includes('new')
 const quoteWon = (q: Quote) => norm(q.status) === 'confirmed'
 const quoteLost = (q: Quote) => norm(q.status).includes('cancel')
 
+// ---------------------------------------------------------------------------
+// Classifying an EMAIL opportunity as New Development.
+//
+// The team often works a deal entirely over email and never raises a Quotes-tab
+// line for it, so a Q2C built only on the sheet under-counts them. Email rows
+// carry no Project Type — their `business_type` is free text and unusable for
+// this ("Repeat", "Existing", "Agency", "Website", "Analytics/Web", "Staff
+// augmentation", and null on a third of them) — so the work is read from the
+// subject and summary instead.
+//
+// Deliberately CONSERVATIVE: a deal counts as New Development only on an explicit
+// build signal, and anything unrecognised is left out. Over-counting would inflate
+// a PM's Q2C with maintenance tickets, which is worse than missing a deal. Every
+// row this matches is listed on the PM's own page, tagged `email`, so the
+// classification can be checked rather than trusted.
+//
+// Order matters: a strong build signal wins over a service word, because
+// "Squarespace Support — Figma to Squarespace, 6 pages" is a build despite
+// the word "Support".
+const BUILD_SIGNAL = /\bnew website\b|\bnew site\b|\bnew project\b|\brevamp\b|\bre-?design\b|\bre-?build\b|\bbuilds?\b|\bdevelopment brief\b|\bfigma to\b|\bdesign (?:&|and) development\b|\bfull[- ]stack developer\b|\bwebsite refresh\b/i
+const SERVICE_WORD = /\bmaint[ae]?[in]*ance\b|\bad-?hoc\b|\bretainer\b|\bcare plan\b|\bqa\b|\bsecurity\b|\bmalware\b|\bplugin\b|\bbug ?fix|\bdedicated\b|\bstaff aug|\bbanner\b|\bfeedback\b|\bhosting\b|\badditional\b/i
+
+/**
+ * True when an email-origin opportunity looks like New Development work.
+ * `reason` is exposed separately so the page can show why it counted.
+ */
+export function emailNewDev(o: Opportunity): boolean {
+  const t = `${o.source_subject || ''} ${o.summary || o.gist || ''}`
+  if (BUILD_SIGNAL.test(t)) return true
+  if (SERVICE_WORD.test(t)) return false
+  return false
+}
+
 /** Flags an opportunity as new-development, for the open-deals list only. */
-export const isNewDev = (o: Opportunity) => norm(o.business_type).includes('new')
+export const isNewDev = (o: Opportunity) =>
+  o.origin === 'email' ? emailNewDev(o) : norm(o.business_type).includes('new')
 
 /**
  * The date a quote belongs to. quote_date is the Quotes-tab "Added" date;
@@ -62,11 +96,16 @@ export interface PmQuarter {
   /** Booked ÷ months elapsed — the figure Growth is scored on. */
   avg: number
   monthsElapsed: number
-  /** New-development quotes raised in the quarter, from the Quotes tab. */
+  /** New-development quotes raised in the quarter: Quotes tab + email. */
   shared: number
   won: number
   lost: number
   open: number
+  /** How many of the above came from email rather than the Quotes tab. */
+  sharedFromEmail: number
+  /** Feedbacks split by where they were found. */
+  feedbackFromSheet: number
+  feedbackFromEmail: number
   /** Confirmed ÷ decided among New-development quotes, as a percentage. */
   q2c: number | null
   feedback: number
@@ -80,6 +119,10 @@ export interface PmStats {
   opps: Opportunity[]
   quotes: Quote[]
   feedback: PmFeedbackRow[]
+  /** Praise picked out of email and attributed to this PM via their client list. */
+  praise: EmailSignal[]
+  /** Email-origin deals this PM owns that read as New Development. */
+  emailNewDevOpps: Opportunity[]
   quarter: (f: FQ) => PmQuarter
   /** The ratcheted bar for a quarter: last-year average, or better if already beaten this FY. */
   baseline: (f: FQ) => number
@@ -90,12 +133,14 @@ export function buildPmStats(
   opps: Opportunity[],
   quotes: Quote[],
   feedback: PmFeedbackRow[],
+  signals: EmailSignal[] = [],
   today = NOW_DEFAULT,
 ): Map<string, PmStats> {
   const out = new Map<string, PmStats>()
   for (const pm of PM_TEAM) {
     out.set(pm.slug, {
       pm, byMonth: new Map(), bookings: [], opps: [], quotes: [], feedback: [],
+      praise: [], emailNewDevOpps: [],
       quarter: () => EMPTY_Q, baseline: () => pm.lastYearAvg,
     })
   }
@@ -122,6 +167,26 @@ export function buildPmStats(
   for (const q of quotes) { const pm = pmOf(q.pc_sme); if (pm) out.get(pm.slug)!.quotes.push(q) }
   for (const f of feedback) { const pm = pmOf(f.pc_sme); if (pm) out.get(pm.slug)!.feedback.push(f) }
 
+  // Email-origin deals that read as New Development, so Q2C stops depending on
+  // somebody remembering to raise a Quotes line.
+  for (const o of opps) {
+    if (o.origin !== 'email' || !emailNewDev(o)) continue
+    const pm = pmOf(o.pm_owner); if (!pm) continue
+    out.get(pm.slug)!.emailNewDevOpps.push(o)
+  }
+
+  // Praise found in email, attributed to the PM who owns that client. Threads
+  // already captured as a feedback row are skipped so nothing counts twice.
+  const ownerOf = clientOwnerMap(quotes, bookings)
+  const seenThreads = new Set(feedback.map(f => f.thread_id).filter(Boolean) as string[])
+  for (const sig of signals) {
+    if (!isPraise(sig)) continue
+    if (sig.thread_id && seenThreads.has(sig.thread_id)) continue
+    const pm = pmOf(ownerOf.get(norm(sig.company_name)))
+    if (!pm) continue
+    out.get(pm.slug)!.praise.push(sig)
+  }
+
   for (const s of out.values()) {
     // Newest first, so "the latest open opportunities" needs no further sorting.
     s.opps.sort((a, b) => (oppDate(b) || '').localeCompare(oppDate(a) || ''))
@@ -137,14 +202,52 @@ export function buildPmStats(
   return out
 }
 
-const EMPTY_Q: PmQuarter = { booked: 0, avg: 0, monthsElapsed: 0, shared: 0, won: 0, lost: 0, open: 0, q2c: null, feedback: 0 }
+const EMPTY_Q: PmQuarter = {
+  booked: 0, avg: 0, monthsElapsed: 0, shared: 0, won: 0, lost: 0, open: 0,
+  sharedFromEmail: 0, feedbackFromSheet: 0, feedbackFromEmail: 0, q2c: null, feedback: 0,
+}
+
+/**
+ * Which signal types count as a client feedback. Positive sentiment alone is too
+ * loose — a cheerful "commercial" or "sales" note is not the client praising the
+ * work — so only the explicitly appreciative types count.
+ */
+const PRAISE_TYPES = new Set(['praise', 'feedback', 'positive_feedback', 'delight', 'testimonial'])
+export const isPraise = (s: EmailSignal) =>
+  norm(s.sentiment) === 'positive' && PRAISE_TYPES.has(norm(s.signal_type))
+
+/**
+ * Client name → the PM who owns them, so a praise email that names only the
+ * client can still be credited. Built from the two places ownership is recorded,
+ * the Quotes tab and the revenue sheet, taking whoever appears against that
+ * client most often.
+ */
+function clientOwnerMap(quotes: Quote[], bookings: BookingRow[]): Map<string, string> {
+  const tally = new Map<string, Map<string, number>>()
+  const add = (co?: string, who?: string) => {
+    const c = norm(co), w = (who || '').trim()
+    if (!c || !w) return
+    if (!tally.has(c)) tally.set(c, new Map())
+    const m = tally.get(c)!
+    m.set(w, (m.get(w) || 0) + 1)
+  }
+  for (const q of quotes) add(q.agency, q.pc_sme)
+  for (const b of bookings) add(b.company_name, PM_REASSIGN[norm(b.company_name)] || b.sme)
+  const out = new Map<string, string>()
+  for (const [co, m] of tally) {
+    let best = '', n = 0
+    for (const [who, c] of m) if (c > n) { best = who; n = c }
+    if (best) out.set(co, best)
+  }
+  return out
+}
 
 function quarterOf(s: PmStats, f: FQ, today: Date): PmQuarter {
   let booked = 0
   for (const [k, v] of s.byMonth) if (inQ(k, f)) booked += v
   const me = monthsElapsed(f, today)
 
-  let shared = 0, w = 0, l = 0, open = 0
+  let shared = 0, w = 0, l = 0, open = 0, fromEmail = 0
   for (const q of s.quotes) {
     if (!isNewDevQuote(q) || !inQ(monthKey(q.added_date), f)) continue
     shared++
@@ -152,20 +255,31 @@ function quarterOf(s: PmStats, f: FQ, today: Date): PmQuarter {
     else if (quoteLost(q)) l++
     else open++
   }
+  // The same count from email, for deals never written onto the Quotes tab.
+  for (const o of s.emailNewDevOpps) {
+    if (!inQ(monthKey(oppDate(o)), f)) continue
+    shared++; fromEmail++
+    if (isWon(o)) w++
+    else if (isLost(o)) l++
+    else open++
+  }
 
   // month_year is preferred over added_date because it is the month the feedback
   // is *about*, not the day somebody typed it in; it is blank on most rows and
   // added_date covers the rest, so nothing in the feed goes uncounted.
-  const feedback = s.feedback.filter(x => inQ(monthKey(x.month_year || x.added_date), f)).length
+  const fbSheet = s.feedback.filter(x => inQ(monthKey(x.month_year || x.added_date), f)).length
+  const fbEmail = s.praise.filter(x => inQ(monthKey(x.source_date), f)).length
 
   const decided = w + l
   return {
     booked,
     avg: me > 0 ? booked / me : 0,
     monthsElapsed: me,
-    shared, won: w, lost: l, open,
+    shared, won: w, lost: l, open, sharedFromEmail: fromEmail,
     q2c: decided > 0 ? (w / decided) * 100 : null,
-    feedback,
+    feedbackFromSheet: fbSheet,
+    feedbackFromEmail: fbEmail,
+    feedback: fbSheet + fbEmail,
   }
 }
 
