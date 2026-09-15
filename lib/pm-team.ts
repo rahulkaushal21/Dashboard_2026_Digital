@@ -158,6 +158,36 @@ export const FEEDBACK_BANDS: Band[] = [
 
 export const WEIGHTS = { growth: 0.4, q2c: 0.4, feedback: 0.2 }
 
+// ---------------------------------------------------------------------------
+// The TOTAL, as the KPI sheet computes it.
+//
+// Total is NOT the 1–10 band score weighted together. It is attainment against
+// the top band — how far each measure got towards a full 10 — capped at 100% and
+// weighted 40/40/20:
+//
+//   Total % = 40% x (growth / 16) + 40% x (Q2C / 85) + 20% x (feedbacks / 8)
+//
+// Verified against every PM on the Q1 2026 KPI sheet: Maitri 24, Rahul Jain 69,
+// Gaurav 61, Paryusha 56, Bonny 8, Gagandeep 41 — all exact. Note what the shape
+// of it means: negative growth contributes nothing rather than going negative,
+// and a missing Q2C contributes nothing too, which is why Bonny (no Q2C, 1%
+// growth, 2 feedbacks) lands at 8% rather than being left blank.
+// ---------------------------------------------------------------------------
+export const TARGETS = { growth: 16, q2c: 85, feedback: 8 }
+
+/** How far a measure got towards its top band: 0 at or below zero, 1 at target. */
+export const attainment = (v: number | null | undefined, target: number): number =>
+  v == null || !Number.isFinite(v) ? 0 : Math.min(Math.max(v, 0) / target, 1)
+
+/** The Total, as a percentage. Every component counts, including a zero one. */
+export function totalPct(growth: number | null, q2c: number | null, feedback: number | null): number {
+  return 100 * (
+    WEIGHTS.growth * attainment(growth, TARGETS.growth) +
+    WEIGHTS.q2c * attainment(q2c, TARGETS.q2c) +
+    WEIGHTS.feedback * attainment(feedback, TARGETS.feedback)
+  )
+}
+
 /** The band a value falls in. `null` in → `null` out, so "no data" never scores 3. */
 export const bandOf = (bands: Band[], v: number | null | undefined): Band | null =>
   v == null || !Number.isFinite(v) ? null : bands.find(b => v >= b.min) || bands[bands.length - 1]
