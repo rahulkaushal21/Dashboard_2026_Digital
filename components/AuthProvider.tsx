@@ -2,7 +2,8 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { checkAccess, getStoredProfile, saveSession, clearSession, canSee, Profile,
-  signInWithGoogle, verifiedEmail, signOutGoogle, ALLOWED_DOMAINS } from '@/lib/access'
+  signInWithGoogle, verifiedEmail, signOutGoogle, ALLOWED_DOMAINS,
+  sessionEpochStale, applySessionEpoch } from '@/lib/access'
 import Sidebar from './Sidebar'
 import { MavlersLogo, MavlersMark } from './MavlersLogo'
 
@@ -21,6 +22,18 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     let done = false
 
     const run = async () => {
+      // 0. Forced re-authentication. When the session epoch in the bundle is ahead
+      //    of the one this browser last saw, everything local is thrown away and
+      //    the Google session revoked, so the only way back in is through Google.
+      //    Runs before anything reads a session, or we would briefly honour the
+      //    very session we are discarding.
+      if (sessionEpochStale()) {
+        await applySessionEpoch()
+        if (done) return
+        setProfile(null)
+        return
+      }
+
       // 1. A Google session wins, because it PROVES the address. Coming back from
       //    the OAuth redirect this is the only thing that exists yet.
       let google: string | null = null

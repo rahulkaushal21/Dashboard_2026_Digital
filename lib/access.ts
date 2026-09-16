@@ -81,6 +81,47 @@ export function saveSession(profile: Profile) {
 }
 export function clearSession() { window.localStorage.removeItem(KEY); window.localStorage.removeItem(PKEY) }
 
+// ---- Forcing everybody to sign in again -----------------------------------
+// BUMP THIS STRING to sign every user out. On the next load their cached profile
+// is dropped and their Google session is revoked, so they land on the sign-in
+// screen and have to go through Google again.
+//
+// Why a constant in the bundle rather than a server-side revocation list: this is
+// a static export with no server of its own, so nothing re-checks a session on
+// each request. Clearing `auth.sessions` in Postgres revokes the REFRESH token,
+// but it does not reach the profile cached in localStorage — which is what keeps
+// somebody signed in here — and an already-issued access token stays valid until
+// it expires. Shipping a new epoch in the JS reaches every browser the moment it
+// loads the new build, which is the only moment we actually control.
+export const SESSION_EPOCH = '2026-09-16-google-reauth'
+const EKEY = 'dash_epoch'
+
+/**
+ * True when this browser has not yet been through the current epoch.
+ *
+ * Note a browser that has NEVER signed in is also "stale" — it has no marker at
+ * all. That is deliberate and harmless: it clears nothing, stamps the marker, and
+ * shows the sign-in screen it would have shown anyway.
+ */
+export function sessionEpochStale(): boolean {
+  if (typeof window === 'undefined') return false
+  try { return window.localStorage.getItem(EKEY) !== SESSION_EPOCH }
+  catch { return false }   // storage blocked — never lock somebody into a logout loop
+}
+
+/**
+ * Perform the forced sign-out, then stamp the epoch so it happens exactly once.
+ *
+ * The stamp is written FIRST and unconditionally. If it were written only after a
+ * successful sign-out, a user coming back from the Google redirect would arrive
+ * still stale, get signed out again, and bounce between here and Google forever.
+ */
+export async function applySessionEpoch(): Promise<void> {
+  try { window.localStorage.setItem(EKEY, SESSION_EPOCH) } catch { /* nothing more we can do */ }
+  clearSession()
+  await signOutGoogle()
+}
+
 export const profileFor = (email: string, fullName?: string | null, isAdmin = false): Profile => ({
   is_admin: isAdmin || isOwner(email),
   email: email.trim().toLowerCase(),
