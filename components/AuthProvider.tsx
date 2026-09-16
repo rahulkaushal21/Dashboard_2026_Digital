@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { checkAccess, getStoredProfile, saveSession, clearSession, canSee, Profile,
   signInWithGoogle, verifiedEmail, signOutGoogle, ALLOWED_DOMAINS,
-  sessionEpochStale, applySessionEpoch } from '@/lib/access'
+  sessionEpochStale, applySessionEpoch, hasGoogleSession, onSessionLost } from '@/lib/access'
 import Sidebar from './Sidebar'
 import { MavlersLogo, MavlersMark } from './MavlersLogo'
 
@@ -61,6 +61,17 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       const stored = getStoredProfile()
       if (done) return
       if (stored && stored.is_active) {
+        // ...but only while a Google session still backs it. The cache is here
+        // to survive a transient network failure, not to outlive the session.
+        // Without this check somebody whose session had gone stayed in the UI
+        // looking signed in while the database saw them as anonymous: pages
+        // read fine, and every action button failed on a permission error they
+        // had no way to explain. getSession() is a localStorage read, so this
+        // cannot misfire just because the network is down.
+        const live = await hasGoogleSession()
+        if (done) return
+        if (!live) { clearSession(); setProfile(null); return }
+
         setProfile(stored)
         // Re-check the domain in case the rule changed since the session was
         // cached. This no longer touches the network, so it cannot fail.
@@ -77,7 +88,13 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     }
 
     run()
-    return () => { done = true }
+
+    // A session can also end while the page sits open — signed out in another
+    // tab, or a refresh that fails. Drop straight back to the sign-in screen
+    // rather than leaving a dashboard on screen whose every write is refused.
+    const stop = onSessionLost(() => { clearSession(); setProfile(null) })
+
+    return () => { done = true; stop() }
   }, [])
 
   const signOut = () => { signOutGoogle(); clearSession(); setProfile(null); setRefused(null) }

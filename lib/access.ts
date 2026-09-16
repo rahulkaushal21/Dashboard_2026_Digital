@@ -234,6 +234,41 @@ export async function verifiedEmail(): Promise<string | null> {
   return user.email.trim().toLowerCase()
 }
 
+/**
+ * Does a Google session actually exist in this browser?
+ *
+ * getSession() reads localStorage and never makes a network call, so `false`
+ * here means "there is no session", NOT "we could not reach Supabase". That
+ * distinction is the whole point: the cached profile exists to survive a
+ * transient network failure, not to outlive the session itself.
+ *
+ * Errors fail OPEN — an unreadable store should not eject somebody who is
+ * genuinely signed in.
+ */
+export async function hasGoogleSession(): Promise<boolean> {
+  if (!supabase) return true   // no backend wired up (mock data) — nothing to check
+  try {
+    const { data } = await supabase.auth.getSession()
+    return !!data.session
+  } catch { return true }
+}
+
+/**
+ * Call `onLost` if the Google session ends while the page is open — a sign-out
+ * in another tab, or a refresh that fails. Page load is not the only moment a
+ * session can disappear, and a tab left open for a day would otherwise keep
+ * showing a signed-in dashboard whose every write is refused.
+ *
+ * Returns an unsubscribe function.
+ */
+export function onSessionLost(onLost: () => void): () => void {
+  if (!supabase) return () => {}
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) onLost()
+  })
+  return () => { try { data.subscription.unsubscribe() } catch { /* already gone */ } }
+}
+
 export async function signOutGoogle(): Promise<void> {
   try { await supabase?.auth.signOut() } catch { /* local session is cleared anyway */ }
 }
