@@ -6,7 +6,7 @@ import { Trash2 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { listAdmins, addAdmin, removeAdmin, isOwner, OWNER_EMAIL, ALLOWED_DOMAINS, type AdminRow } from '@/lib/access'
 
-function SettingsForm() {
+function SettingsForm({ canEdit }: { canEdit: boolean }) {
   const [sheet, setSheet] = useState('')
   const [gmail, setGmail] = useState('')
   const [updated, setUpdated] = useState('')
@@ -17,30 +17,41 @@ function SettingsForm() {
     try { await saveSettings({ business_sheet_url: sheet, scan_gmail_address: gmail }); setStatus('Saved — the next routine run will use these.') }
     catch (e: any) { setStatus('Error: ' + e.message) }
   }
+  // Read-only rendering for non-admins. The database refuses the write anyway
+  // (app_settings is admin-only), so this is about not offering a button that
+  // would only fail.
+  const box = `w-full bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none ${canEdit ? 'focus:border-mav-yellow' : 'text-mav-muted cursor-not-allowed'}`
+
   return (
     <div className="max-w-xl space-y-6">
+      {!canEdit && (
+        <p className="text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
+          You can see these settings but not change them. The Business Sheet URL decides where every booking, quote and
+          SQL figure on the dashboard comes from, so editing is limited to admins. Ask {OWNER_EMAIL} if it needs changing.
+        </p>
+      )}
       <div>
         <label className="block text-sm font-medium mb-1">Business Sheet URL</label>
         <p className="text-xs text-mav-muted mb-2">The Google Sheet the routine reads (bookings, quotes, SQLs).</p>
-        <input value={sheet} onChange={e => setSheet(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…"
-          className="w-full bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow" />
+        <input value={sheet} onChange={e => setSheet(e.target.value)} readOnly={!canEdit} disabled={!canEdit}
+          placeholder="https://docs.google.com/spreadsheets/d/…" className={box} />
       </div>
       <div>
         <label className="block text-sm font-medium mb-1">Inbox to scan (Gmail address)</label>
         <p className="text-xs text-mav-muted mb-2">Use your own Gmail to test, then switch to the live central inbox. If the live inbox is a different Google account, also re-point the routine's Gmail connector to it.</p>
-        <input value={gmail} onChange={e => setGmail(e.target.value)} placeholder="central-inbox@company.com"
-          className="w-full bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow" />
+        <input value={gmail} onChange={e => setGmail(e.target.value)} readOnly={!canEdit} disabled={!canEdit}
+          placeholder="central-inbox@company.com" className={box} />
       </div>
-      <div className="flex items-center gap-4">
-        <button onClick={save} className="bg-mav-yellow text-black font-medium rounded-md px-5 py-2 text-sm">Save settings</button>
-        {status && <span className="text-sm text-mav-muted">{status}</span>}
-      </div>
+      {canEdit && (
+        <div className="flex items-center gap-4">
+          <button onClick={save} className="bg-mav-yellow text-black font-medium rounded-md px-5 py-2 text-sm">Save settings</button>
+          {status && <span className="text-sm text-mav-muted">{status}</span>}
+        </div>
+      )}
       {updated && <p className="text-xs text-mav-muted">Last updated {new Date(updated).toLocaleString()}</p>}
     </div>
   )
 }
-
-const SUPER_ADMIN = 'web@uplers.com'
 
 /**
  * Who can see the whole PM Team section. Only the owner can edit this; everyone
@@ -83,9 +94,10 @@ function AdminsPanel() {
     <div>
       <h2 className="text-base font-semibold mb-1">PM Team access</h2>
       <p className="text-sm text-mav-muted mb-4">
-        Admins see every PM&rsquo;s scorecard. A PM without admin sees only their own, and anyone who is neither sees
-        none of it. Everything else in the dashboard is open to all {ALLOWED_DOMAINS.join(' and ')} accounts.
-        Only <span className="text-white">{OWNER_EMAIL}</span> can change this list.
+        Admins see every PM&rsquo;s scorecard and can edit Settings. A PM without admin sees only their own scorecard,
+        and anyone who is neither sees none of it. Everything else in the dashboard is open to all{' '}
+        {ALLOWED_DOMAINS.join(' and ')} accounts. Only the super admin,{' '}
+        <span className="text-white">{OWNER_EMAIL}</span>, can change this list.
       </p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-4">
@@ -96,7 +108,7 @@ function AdminsPanel() {
           <tbody>
             <tr className="border-b border-mav-line/60">
               <td className="px-4 py-3">{OWNER_EMAIL}</td>
-              <td className="px-4 py-3 text-mav-muted">Owner — always an admin, cannot be removed</td>
+              <td className="px-4 py-3 text-mav-muted">Super admin — always an admin, cannot be removed</td>
               <td></td>
             </tr>
             {rows.map(r => (
@@ -133,13 +145,16 @@ function AdminsPanel() {
 }
 
 export default function Admin() {
+  const { profile } = useAuth()
+  // Super admin or admin may edit; everyone else reads.
+  const canEdit = !!profile?.is_admin
   return (
     <div className="space-y-10">
       <div>
         <Header title="Settings" subtitle="Point the routine at a sheet and an inbox — no code change needed" />
         {/* User access used to live here. Access is now decided by Google sign-in
             and the email domain (lib/access.ts), so there is no list to manage. */}
-        <SettingsForm />
+        <SettingsForm canEdit={canEdit} />
       </div>
       <AdminsPanel />
     </div>
