@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/Header'
 import { useAuth } from '@/components/AuthProvider'
+import { OWNER_EMAIL } from '@/lib/access'
 import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
 import { buildPmStats, growthPct, type PmQuarter } from '@/lib/pm-metrics'
 import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, type FQ, type PmMember } from '@/lib/pm-team'
@@ -34,12 +35,13 @@ interface Cell {
 }
 
 export default function PmTeam() {
-  const { email } = useAuth()
-  // A PM sees their own scorecard only. Anyone who is not on the roster —
-  // leadership, an AM — is not being measured here and sees the whole team.
+  const { email, profile } = useAuth()
+  const isAdmin = !!profile?.is_admin
   const me = pmByEmail(email)
-  // Memoised: a fresh array each render would re-run the whole grid computation.
-  const roster = useMemo(() => (me ? [me] : PM_TEAM), [me])
+  // Admins see the whole team; a PM sees only themselves; anyone who is neither
+  // sees nothing here. Memoised — a fresh array each render would re-run the
+  // whole grid computation.
+  const roster = useMemo(() => (isAdmin ? PM_TEAM : me ? [me] : []), [isAdmin, me])
 
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
@@ -71,11 +73,22 @@ export default function PmTeam() {
   return (
     <div>
       <Header
-        title={me ? 'My scorecard' : 'PM Team'}
-        subtitle={me
-          ? 'Your quarterly KPI — growth, quote conversion and client feedback'
-          : 'Quarterly KPI scorecard — growth, quote conversion and client feedback'} />
+        title={isAdmin ? 'PM Team' : 'My scorecard'}
+        subtitle={isAdmin
+          ? 'Quarterly KPI scorecard — growth, quote conversion and client feedback'
+          : 'Your quarterly KPI — growth, quote conversion and client feedback'} />
 
+      {roster.length === 0 ? (
+        <div className="max-w-lg mt-10">
+          <h2 className="text-lg font-semibold mb-2">Nothing to show here</h2>
+          <p className="text-sm text-mav-muted">
+            This section holds individual PM scorecards. You&rsquo;re signed in as{' '}
+            <span className="text-white">{email}</span>, which isn&rsquo;t on the PM roster, so there is no
+            scorecard of your own to show. Ask {OWNER_EMAIL} for admin access if you need to see the team&rsquo;s.
+          </p>
+        </div>
+      ) : (
+      <>
       <HowItWorks />
 
       {loading && <p className="text-sm text-mav-muted mb-4">Loading…</p>}
@@ -149,6 +162,8 @@ export default function PmTeam() {
           </div>
         </section>
       ))}
+      </>
+      )}
     </div>
   )
 }

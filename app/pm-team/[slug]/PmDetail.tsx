@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
 import { useAuth } from '@/components/AuthProvider'
+import { OWNER_EMAIL } from '@/lib/access'
 import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
 import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost, quoteConfirmDate, oppConfirmDate } from '@/lib/pm-metrics'
 import { pmBySlug, pmByEmail, fqOf, qLabel, totalPct, attainment, TARGETS, WEIGHTS, type FQ } from '@/lib/pm-team'
@@ -19,11 +20,12 @@ const QUARTERS: FQ[] = Array.from({ length: CUR_FQ.q }, (_, i) => ({ fy: CUR_FQ.
 
 export default function PmDetail({ slug }: { slug: string }) {
   const pm = pmBySlug(slug)
-  const { email } = useAuth()
-  // A PM may open their own page and nobody else's. Everyone else — leadership,
-  // AMs — can open any of them, because they are not measured by this scorecard.
+  const { email, profile } = useAuth()
+  // Admins may open any scorecard. A PM may open their own and nobody else's.
+  // Anyone who is neither may open none.
+  const isAdmin = !!profile?.is_admin
   const me = pmByEmail(email)
-  const blocked = !!me && !!pm && me.slug !== pm.slug
+  const blocked = !isAdmin && (!me || !pm || me.slug !== pm.slug)
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
@@ -66,11 +68,14 @@ export default function PmDetail({ slug }: { slug: string }) {
     <div className="max-w-md mt-16">
       <h1 className="text-xl font-semibold mb-2">Not your scorecard</h1>
       <p className="text-sm text-mav-muted mb-4">
-        Individual KPI pages are private to the person they belong to. You can open your own.
+        Individual KPI pages are private to the person they belong to.
+        {me ? ' You can open your own.' : ` Ask ${OWNER_EMAIL} for admin access if you need to see the team's.`}
       </p>
-      <Link href={`/pm-team/${me!.slug}`} className="text-mav-yellow text-sm hover:underline">
-        Go to my scorecard &rarr;
-      </Link>
+      {me && (
+        <Link href={`/pm-team/${me.slug}`} className="text-mav-yellow text-sm hover:underline">
+          Go to my scorecard &rarr;
+        </Link>
+      )}
     </div>
   )
 
@@ -108,7 +113,7 @@ export default function PmDetail({ slug }: { slug: string }) {
   return (
     <div>
       <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-muted hover:text-white mb-3">
-        <ArrowLeft size={14} /> {me ? 'My scorecard' : 'PM Team'}
+        <ArrowLeft size={14} /> {isAdmin ? 'PM Team' : 'My scorecard'}
       </Link>
       <Header title={pm.name} subtitle="Project manager — quarterly KPI, bookings and open quotes" />
 

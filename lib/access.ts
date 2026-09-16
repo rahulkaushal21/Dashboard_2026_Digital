@@ -6,10 +6,11 @@ import { supabase } from './supabase'
 // There is no per-person allowlist any more: everyone on it was an admin, so it
 // gated nothing and only added a step.
 //
-// The one exception is the PM Team section. A PM sees their own scorecard and
-// nobody else's; anyone who is not a PM sees the whole team. That rule lives in
-// lib/pm-team.ts (pmByEmail), derived from the roster rather than a permissions
-// table.
+// The one exception is the PM Team section:
+//   • an ADMIN sees every PM
+//   • a PM sees their own scorecard and nobody else's
+//   • anyone who is neither sees none of it
+// Admins live in `dashboard_admins`, managed by the owner from Settings.
 //
 // STATED PLAINLY: the PM rule is CLIENT-SIDE. The pages still load the full
 // dataset with the public anon key and hide what the viewer should not see. It
@@ -19,6 +20,14 @@ import { supabase } from './supabase'
 
 /** Domains allowed to sign in. */
 export const ALLOWED_DOMAINS = ['mavlers.com', 'uplers.com']
+
+/**
+ * The owner, who manages the admin list. Fixed here and in the database policy
+ * rather than stored as a row, so deleting the last admin can never lock
+ * everybody out of admin management.
+ */
+export const OWNER_EMAIL = 'web@uplers.com'
+export const isOwner = (email?: string | null) => (email || '').trim().toLowerCase() === OWNER_EMAIL
 
 export const isAllowedDomain = (email?: string | null): boolean => {
   const at = (email || '').trim().toLowerCase().split('@')[1]
@@ -49,6 +58,8 @@ export interface Profile {
   role: 'admin' | 'viewer' | string
   is_active: boolean
   allowed_pages?: string[] | null
+  /** Sees the whole PM Team section. Resolved at sign-in from dashboard_admins. */
+  is_admin?: boolean
 }
 
 const KEY = 'dash_email'
@@ -70,7 +81,8 @@ export function saveSession(profile: Profile) {
 }
 export function clearSession() { window.localStorage.removeItem(KEY); window.localStorage.removeItem(PKEY) }
 
-export const profileFor = (email: string, fullName?: string | null): Profile => ({
+export const profileFor = (email: string, fullName?: string | null, isAdmin = false): Profile => ({
+  is_admin: isAdmin || isOwner(email),
   email: email.trim().toLowerCase(),
   full_name: fullName || null,
   role: 'admin',
@@ -90,7 +102,52 @@ export function canSee(profile: Profile | null, _path: string): boolean {
  * sign-in path has a single entry point.
  */
 export async function checkAccess(email: string): Promise<Profile | null> {
-  return isAllowedDomain(email) ? profileFor(email) : null
+  if (!isAllowedDomain(email)) return null
+  return profileFor(email, null, await isAdminEmail(email))
+}
+
+// ---- Admin list -----------------------------------------------------------
+//
+// Reads go through the signed-in session, so `dashboard_admins` is invisible to
+// anon. Writes are refused by the database unless the JWT belongs to the owner —
+// the client cannot talk its way past that by claiming to be somebody else.
+
+export interface AdminRow { email: string; added_by: string; added_at?: string; note?: string | null }
+
+/**
+ * Whether this address is an admin. The owner always is, checked locally first,
+ * so a failed or not-yet-created table can never lock the owner out of the
+ * section they administer.
+ */
+export async function isAdminEmail(email: string): Promise<boolean> {
+  if (isOwner(email)) return true
+  if (!supabase) return false
+  try {
+    const { data, error } = await supabase
+      .from('dashboard_admins').select('email').eq('email', email.trim().toLowerCase()).maybeSingle()
+    if (error) return false
+    return !!data
+  } catch { return false }
+}
+
+export async function listAdmins(): Promise<AdminRow[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('dashboard_admins').select('*').order('added_at', { ascending: true })
+  return (data as AdminRow[]) || []
+}
+
+export async function addAdmin(email: string, addedBy: string, note?: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured')
+  const e = email.trim().toLowerCase()
+  if (!isAllowedDomain(e)) throw new Error(`Only ${ALLOWED_DOMAINS.join(' and ')} addresses can be admins.`)
+  const { error } = await supabase.from('dashboard_admins').insert({ email: e, added_by: addedBy, note: note || null })
+  if (error) throw new Error(error.message)
+}
+
+export async function removeAdmin(email: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured')
+  const { error } = await supabase.from('dashboard_admins').delete().eq('email', email.trim().toLowerCase())
+  if (error) throw new Error(error.message)
 }
 
 // ---- Google sign-in -------------------------------------------------------
