@@ -120,12 +120,45 @@ A: 'near-certain', B: 'likely', C: 'coin-flip', D: 'unlikely', E: 'long shot',
 // What each band actually means, in the terms a person would use to decide what to do
 // about the deal. The score is a probability, so the bands are just ranges of it —
 // saying so plainly stops "B" being read as a grade awarded to the deal.
+// Ranges copied from the CASE in the quote_intent view (A >= .80, B >= .60,
+// C >= .35, D >= .15, else E). They are written out here only so a person can read
+// them; if the view's cut-offs ever move, these must move with them.
 const TIER_MEANING: Record<string, { range: string; what: string }> = {
 A: { range: '80% and above', what: 'Plan around it. Deals shaped like this almost always land.' },
 B: { range: '60–79%', what: 'Likely, not certain. Worth forecasting, still worth chasing.' },
-C: { range: '40–59%', what: 'A coin flip. The outcome is decided by what you do next.' },
-D: { range: '20–39%', what: 'Unlikely on the evidence. Needs something to change.' },
-E: { range: 'below 20%', what: 'A long shot. Do not plan revenue around it.' },
+C: { range: '35–59%', what: 'A coin flip. The outcome is decided by what you do next.' },
+D: { range: '15–34%', what: 'Unlikely on the evidence. Needs something to change.' },
+E: { range: 'below 15%', what: 'A long shot. Do not plan revenue around it.' },
+}
+// The score is not the four factors multiplied together — three of them are first
+// divided by the average quote's value for that factor, so what actually moves the
+// number is how far ABOVE or BELOW typical this deal sits. Silence is the exception:
+// it multiplies outright, which is why a quiet deal is punished so hard.
+//
+//   p = 0.8843 × (relationship/0.8597) × (value/0.8891) × (email/0.8840) × silence
+//
+// Those pivots are the cohort averages baked into the view. Without them a reader
+// sees 0.942 and reasonably assumes it is dragging a 97% score DOWN, when it is in
+// fact pushing it up — 0.942 is well above the 0.8597 average.
+const BASE_RATE = 0.8843
+const PIVOT = { relationship: 0.8597, value: 0.8891, email: 0.8840 }
+/** How much a factor multiplies the score: >1 helps, <1 hurts. */
+const effect = (v: number | undefined, pivot: number) =>
+  v == null || !Number.isFinite(v) ? null : v / pivot
+
+/**
+ * The "×1.10" line under a factor. Colour carries the direction so the row can be
+ * read at a glance without doing the comparison in your head; 1.00 stays neutral
+ * grey because "no effect" is neither good nor bad.
+ */
+function Effect({ v }: { v: number | null }) {
+  if (v == null) return <div className="mt-0.5 text-mav-muted/50">—</div>
+  const up = v >= 1.005, down = v <= 0.995
+  return (
+    <div className={`mt-0.5 tabular-nums ${up ? 'text-emerald-300' : down ? 'text-orange-300' : 'text-mav-muted'}`}>
+      ×{v.toFixed(2)}
+    </div>
+  )
 }
 // The cohort the score is fitted on: quotes DECIDED since the start of this financial
 // year. Counted live rather than written into the copy, because it was hardcoded at
@@ -857,21 +890,58 @@ Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since Apr
 <span className="text-amber-300"> This is {sel.win_probability > sel.intent_score ? 'well below' : 'well above'} the {sel.win_probability}% on the deal — worth a second look at which is right.</span>
 )}
 </p>
-{/* The four factors. Each carries a title, because the bare decimal says nothing on
-    its own — hovering explains what the number is and which direction is good. */}
+{/* The four factors. Each shows its raw value AND what that value does to the score,
+    because the raw decimal alone is actively misleading: 0.942 looks like a penalty
+    and is in fact a 10% uplift. The ×N line is the part to read. */}
+<div className="text-[11px] text-mav-muted mb-1.5">
+  Each factor is measured against the average quote. <span className="text-emerald-300">×1.10</span> means it
+  pushes this deal 10% above the base rate; <span className="text-orange-300">×0.85</span> would pull it 15% below.
+</div>
 <div className="grid grid-cols-4 gap-2 text-xs">
 <div title={`Relationship — how often THIS client has confirmed quotes before. ${sel.client_decided_quotes != null ? `They have confirmed ${sel.client_confirmed_quotes} of ${sel.client_decided_quotes} decided quotes.` : 'No decided quotes from them yet, so this sits at the house average.'} Higher is better. A client with 20+ quotes is a reseller shopping around and scores LOWER, not higher — historically those confirm about 25% of the time.`}
   className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Relationship</div><div className="font-semibold tabular-nums">{sel.intent_relationship}</div>
+<Effect v={effect(sel.intent_relationship, PIVOT.relationship)} />
 <div className="text-mav-muted mt-0.5">{sel.client_decided_quotes != null ? `${sel.client_confirmed_quotes}/${sel.client_decided_quotes} confirmed` : 'no history'}</div></div>
 <div title={`Value band — what quotes at this price historically convert at. ${sel.value ? `This one is ${money(sel.value)}.` : 'No value on this quote, so it sits at the average.'} Small quotes convert far more often than large ones: under $250 confirms about 96% of the time, and the rate falls steadily as the number grows. Higher is better.`}
   className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Value band</div><div className="font-semibold tabular-nums">{sel.intent_value_factor}</div>
+<Effect v={effect(sel.intent_value_factor, PIVOT.value)} />
 <div className="text-mav-muted mt-0.5">{sel.value ? money(sel.value) : 'no value'}</div></div>
 <div title={`Email — what the client has actually said, read from their own replies only (our chasing cannot manufacture a positive). ${sel.signal_label ? `Here: ${sel.signal_label}.` : 'No thread matched to this deal.'} Invoice or payment talk confirms 96%, "approved / please proceed" 96%, access handed over 93%, kickoff returned 90% — against 71% for a thread showing none of them. Higher is better.`}
   className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Email</div><div className="font-semibold tabular-nums">{sel.intent_signal}</div>
+<Effect v={effect(sel.intent_signal, PIVOT.email)} />
 <div className="text-mav-muted mt-0.5">{sel.signal_label ? sel.signal_label.split(' ').slice(0,2).join(' ') : 'no thread'}</div></div>
 <div title={`Silence — how long since anyone touched this deal${sel.days_since_touch != null ? `: ${sel.days_since_touch} days` : ''}. ${sel.intent_basis === 'sheet-date' ? 'Measured from the SHEET date because no email was found, and the sheet is logged over a week late on 22% of rows — so this deal may be fresher than it looks.' : 'Measured from the last email on the thread.'} Higher is better; a deal going quiet is the clearest signal it is drifting.`}
   className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Silence</div><div className="font-semibold tabular-nums">{sel.intent_recency}</div>
+{/* Silence multiplies outright rather than against an average, so its raw value
+    IS its effect. Shown the same way so the row reads consistently. */}
+<Effect v={sel.intent_recency} />
 <div className="text-mav-muted mt-0.5">{sel.days_since_touch != null ? `${sel.days_since_touch}d quiet` : 'unknown'}</div></div>
+</div>
+
+{/* The actual sum, with this deal's own numbers in it. A reader who does not trust
+    the score can follow it end to end rather than being asked to take 97 on faith.
+    The cap is stated because it bites often: four good factors routinely multiply
+    past 1.0, and the model refuses to claim any deal is more than 97% certain. */}
+<div className="mt-3 pt-3 border-t border-mav-line text-[11px] text-mav-muted">
+<div className="uppercase tracking-wide mb-1.5">How this score is built</div>
+<div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 tabular-nums">
+  <span>base {Math.round(BASE_RATE * 100)}%</span>
+  <span className="opacity-50">×</span>
+  <span className="text-white">{effect(sel.intent_relationship, PIVOT.relationship)?.toFixed(2) ?? '—'}</span>
+  <span className="opacity-50">relationship ×</span>
+  <span className="text-white">{effect(sel.intent_value_factor, PIVOT.value)?.toFixed(2) ?? '—'}</span>
+  <span className="opacity-50">value ×</span>
+  <span className="text-white">{effect(sel.intent_signal, PIVOT.email)?.toFixed(2) ?? '—'}</span>
+  <span className="opacity-50">email ×</span>
+  <span className="text-white">{sel.intent_recency?.toFixed(2) ?? '—'}</span>
+  <span className="opacity-50">silence</span>
+  <span className="opacity-50">=</span>
+  <span className={`font-semibold ${TIER_STYLE[sel.intent_tier]} px-1.5 py-0.5 rounded`}>{sel.intent_score}%</span>
+</div>
+<p className="mt-1.5">
+  The base is how often a quote confirms at all. Each factor then multiplies it up or down.
+  {sel.intent_score === 97 && ' Capped at 97% — the model never calls any open deal a certainty.'}
+</p>
 </div>
 
 {/* All five bands, with the current one lit. Without this the letter is a grade with
