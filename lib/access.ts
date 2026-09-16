@@ -79,6 +79,53 @@ export async function checkAccess(email: string): Promise<Profile | null> {
   return (row as Profile) || null
 }
 
+// ---- Google sign-in -------------------------------------------------------
+//
+// Google proves WHO you are; `dashboard_users` still decides WHAT you can open.
+// The two are deliberately separate: signing in with a Google account that is not
+// on the allowlist gets you nothing, and being on the allowlist no longer lets
+// somebody else type your address and walk in.
+//
+// The OAuth flow is `implicit` (set on the client in lib/supabase.ts) because this
+// app is a static export with no server to exchange a PKCE code. The token comes
+// back in the URL fragment and supabase-js picks it up via detectSessionInUrl.
+
+/** Where Google sends the browser back to — the page you started from. */
+const returnUrl = () =>
+  typeof window === 'undefined' ? '' : window.location.href.split('#')[0].split('?')[0]
+
+export async function signInWithGoogle(): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured')
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: returnUrl(),
+      // Always show the chooser. Without it a shared machine silently reuses
+      // whichever Google account signed in last.
+      queryParams: { prompt: 'select_account' },
+    },
+  })
+  if (error) throw error
+}
+
+/**
+ * The email Google has verified for the current session, or null.
+ * `email_verified` is checked explicitly — an unverified address proves nothing.
+ */
+export async function verifiedEmail(): Promise<string | null> {
+  if (!supabase) return null
+  const { data } = await supabase.auth.getSession()
+  const user = data.session?.user
+  if (!user?.email) return null
+  const claim = (user.user_metadata as any)?.email_verified
+  if (claim === false) return null
+  return user.email.trim().toLowerCase()
+}
+
+export async function signOutGoogle(): Promise<void> {
+  try { await supabase?.auth.signOut() } catch { /* local session is cleared anyway */ }
+}
+
 // ---- Admin user management (RPCs verify the actor is an active admin) ----
 export async function listUsers(): Promise<Profile[]> {
   if (!supabase) return []
