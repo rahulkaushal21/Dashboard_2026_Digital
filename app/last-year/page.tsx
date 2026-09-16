@@ -3,6 +3,13 @@ import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
+import { PM_REASSIGN } from '@/lib/pm-team'
+
+// Who a booking belongs to, with the same known-wrong SME cells corrected as on
+// the PM pages — otherwise the two screens name a different owner for the same
+// client, and whichever one you looked at last wins the argument.
+const pmOfBooking = (r: BookingRow) =>
+  (PM_REASSIGN[(r.company_name || '').trim().toLowerCase()] || r.sme || '').trim()
 
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -43,14 +50,20 @@ const CUR_I = QS.length - 1                       // current (still in-progress)
 const DEF_CUR = Math.max(0, QS.length - 2)
 const DEF_BASE = Math.max(0, QS.length - 3)
 
-type Row = { client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[]; upcoming: number }
+type Row = {
+  client: string; fyLast: number; fyTd: number; spLy: number; spTy: number; qv: number[]; upcoming: number
+  // PM on the client's most recent booking, plus everyone who has held it. A
+  // client can change hands mid-year (Pointb ran under three), so showing only
+  // one name would quietly misattribute the older revenue.
+  pm: string; pmLatest: string; pmAll: Set<string>
+}
 
 export default function LastYearReview() {
   const [rows, setRows] = useState<BookingRow[]>([])
   const [q, setQ] = useState('')
   const [mv, setMv] = useState('')      // quarter movement filter
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')   // 'YYYY-MM' month range
-  const [fGeo, setFGeo] = useState(''); const [fService, setFService] = useState('')
+  const [fGeo, setFGeo] = useState(''); const [fService, setFService] = useState(''); const [fPm, setFPm] = useState('')
   const [qCur, setQCur] = useState(DEF_CUR)     // index of the quarter being compared
   const [qBase, setQBase] = useState(DEF_BASE)  // index of the quarter compared against
   useEffect(() => { getBookingsFull().then(setRows) }, [])
@@ -58,6 +71,7 @@ export default function LastYearReview() {
   const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
   const geos = useMemo(() => uniq(rows.map(r => r.geo)), [rows])
   const services = useMemo(() => uniq(rows.map(r => r.service_name)), [rows])
+  const pms = useMemo(() => uniq(rows.map(pmOfBooking)), [rows])
 
   const data = useMemo(() => {
     const m = new Map<string, Row>()
@@ -67,11 +81,18 @@ export default function LastYearReview() {
       if (!c) return
       if (fGeo && (r.geo || '').trim() !== fGeo) return            // GEO filter
       if (fService && (r.service_name || '').trim() !== fService) return  // Service filter
+      if (fPm && pmOfBooking(r) !== fPm) return                            // PM filter
       const k = (r.booking_month || '').slice(0, 7)
       if (from && k < from) return        // From/To month range narrows the whole analysis
       if (to && k > to) return
       const amt = r.booking_amount || 0
-      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0), upcoming: 0 }
+      const cur = m.get(c) || { client: c, fyLast: 0, fyTd: 0, spLy: 0, spTy: 0, qv: QS.map(() => 0), upcoming: 0, pm: '', pmLatest: '', pmAll: new Set<string>() }
+      const who = pmOfBooking(r)
+      if (who) {
+        cur.pmAll.add(who)
+        // Latest booking wins, so the PM column says who holds the account now.
+        if (k >= cur.pmLatest) { cur.pmLatest = k; cur.pm = who }
+      }
       if (between(k, `${lyStart}-04`, `${tyStart}-03`)) cur.fyLast += amt
       // "to date" = current fiscal year up to (and including) the current month only
       if (k >= `${tyStart}-04` && k <= curMonthKey) cur.fyTd += amt
@@ -82,7 +103,7 @@ export default function LastYearReview() {
       m.set(c, cur)
     })
     return [...m.values()]
-  }, [rows, from, to, fGeo, fService])
+  }, [rows, from, to, fGeo, fService, fPm])
 
   // compare the two user-selected quarters (qCur vs qBase)
   const qStatus = (r: Row) => {
@@ -124,6 +145,7 @@ export default function LastYearReview() {
       <div className="mb-4 text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
         Pick any two quarters with the <span className="text-white">Compare / vs</span> selectors — use two <em>completed</em> quarters (e.g. {qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete. <span className="text-white">Dropped</span> = had revenue in {qLabel(QS[qBase])} but none in {qLabel(QS[qCur])}; <span className="text-white">New</span> = the reverse. The FY columns&rsquo; <span className="text-white">&ldquo;to date&rdquo;</span> still counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.
         {upcoming > 0 && <span> Excludes <span className="text-mav-yellow">{money(upcoming)}</span> in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</span>}
+        <span> <span className="text-white">PM</span> is whoever is on the client&rsquo;s most recent booking; a <span className="text-white">+n</span> beside it means the account changed hands during the period — hover to see everyone who held it. Filtering by PM narrows every figure on the page to that PM&rsquo;s bookings only.</span>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -153,20 +175,22 @@ export default function LastYearReview() {
         </select>
         <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={sel}><option value="">All GEO</option>{geos.map(g => <option key={g} value={g}>{g}</option>)}</select>
         <select value={fService} onChange={e => setFService(e.target.value)} className={sel}><option value="">All services</option>{services.map(s => <option key={s} value={s}>{s}</option>)}</select>
+        <select value={fPm} onChange={e => setFPm(e.target.value)} className={sel} title="Project manager on the booking"><option value="">All PMs</option>{pms.map(p => <option key={p} value={p}>{p}</option>)}</select>
         <span className="text-xs text-mav-muted ml-1">From</span>
         <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">To</span>
         <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(from || to || fGeo || fService) && <button onClick={() => { setFrom(''); setTo(''); setFGeo(''); setFService('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>}
+        {(from || to || fGeo || fService || fPm) && <button onClick={() => { setFrom(''); setTo(''); setFGeo(''); setFService(''); setFPm('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>}
         <span className="text-xs text-mav-muted ml-auto">{view.length} clients · scroll right for all quarters →</span>
       </div>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
+          <table className="w-full text-sm min-w-[860px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-5 py-3 font-medium sticky left-0 bg-mav-panel">Client</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">PM</th>
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(lyStart).slice(2)}-{String(tyStart).slice(2)}</th>
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(tyStart).slice(2)} TD</th>
                 {QS.map((f, i) => <th key={i} className={`px-4 py-3 font-medium text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow' : i === qBase ? 'text-white' : ''}`}>{qLabel(f)}{i === qCur ? ' (compare)' : i === qBase ? ' (vs)' : ''}</th>)}
@@ -180,6 +204,18 @@ export default function LastYearReview() {
                 return (
                   <tr key={r.client} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
                     <td className="px-5 py-3 font-medium whitespace-nowrap sticky left-0 bg-mav-panel">{r.client}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {r.pm
+                        ? <>
+                            <span>{r.pm}</span>
+                            {r.pmAll.size > 1 && (
+                              <span className="text-xs text-mav-muted ml-1.5" title={`Held by ${[...r.pmAll].join(', ')} over this period`}>
+                                +{r.pmAll.size - 1}
+                              </span>
+                            )}
+                          </>
+                        : <span className="text-mav-muted">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-right text-mav-muted">{r.fyLast ? money(r.fyLast) : '—'}</td>
                     <td className="px-4 py-3 text-right">{r.fyTd ? money(r.fyTd) : '—'}</td>
                     {r.qv.map((v, i) => <td key={i} className={`px-4 py-3 text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow font-medium' : i === qBase ? '' : 'text-mav-muted'}`}>{v ? money(v) : '—'}</td>)}
