@@ -145,13 +145,22 @@ function AdminsPanel() {
 }
 
 export default function Admin() {
-  const { profile } = useAuth()
+  const { profile, email } = useAuth()
   // Super admin or admin may edit; everyone else reads.
   const canEdit = !!profile?.is_admin
+  const role = isOwner(email) ? 'Super admin' : canEdit ? 'Admin' : 'View only'
   return (
     <div className="space-y-10">
       <div>
         <Header title="Settings" subtitle="Point the routine at a sheet and an inbox — no code change needed" />
+        {/* Say plainly which role the viewer is being treated as. Without this
+            there is no way to tell whether the page is read-only by design or
+            because something went wrong. */}
+        <p className="-mt-2 mb-5 text-xs text-mav-muted">
+          Signed in as <span className="text-white">{email}</span>
+          <span className={`ml-2 px-2 py-0.5 rounded-full border ${
+            role === 'View only' ? 'border-mav-line text-mav-muted' : 'border-mav-yellow/40 text-mav-yellow'}`}>{role}</span>
+        </p>
         {/* User access used to live here. Access is now decided by Google sign-in
             and the email domain (lib/access.ts), so there is no list to manage. */}
         <SettingsForm canEdit={canEdit} />
