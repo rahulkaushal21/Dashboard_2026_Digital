@@ -1,8 +1,32 @@
 import { supabase } from './supabase'
 
-// The pages a viewer can be granted. `/admin` (Settings + user management) is
-// admin-only and never appears here. Keys are the route hrefs, matched against
-// dashboard_users.allowed_pages.
+// Access model
+// ------------
+// Anyone signing in with a Mavlers or Uplers Google account gets the dashboard.
+// There is no per-person allowlist any more: everyone on it was an admin, so it
+// gated nothing and only added a step.
+//
+// The one exception is the PM Team section. A PM sees their own scorecard and
+// nobody else's; anyone who is not a PM sees the whole team. That rule lives in
+// lib/pm-team.ts (pmByEmail), derived from the roster rather than a permissions
+// table.
+//
+// STATED PLAINLY: the PM rule is CLIENT-SIDE. The pages still load the full
+// dataset with the public anon key and hide what the viewer should not see. It
+// stops a PM browsing a colleague's numbers; it does not stop someone who opens
+// developer tools. Enforcing it properly means filtering in the database against
+// the signed-in identity — a separate piece of work.
+
+/** Domains allowed to sign in. */
+export const ALLOWED_DOMAINS = ['mavlers.com', 'uplers.com']
+
+export const isAllowedDomain = (email?: string | null): boolean => {
+  const at = (email || '').trim().toLowerCase().split('@')[1]
+  return !!at && ALLOWED_DOMAINS.includes(at)
+}
+
+// Every signed-in person sees all of these. The list stays so the sidebar and the
+// route guard read from one place.
 export const PAGES: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/opportunities', label: 'Opportunities' },
@@ -17,12 +41,8 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/pm-team', label: 'PM Team' },
 ]
 
-// Operations sub-pages are deliberately NOT in PAGES. They hold named-person data
-// (individual learning progress against a reporting manager), so they are admin-only
-// and cannot be granted to a viewer from Settings. Move an entry into PAGES above if
-// that ever needs to change.
-const ADMIN_ONLY = ['/operations/lnd', '/operations/revenue-history']
-
+// Derived from the Google identity now rather than read from a table. `role` is
+// kept so existing callers still compile; everyone who signs in is equivalent.
 export interface Profile {
   email: string
   full_name?: string | null
@@ -50,33 +70,27 @@ export function saveSession(profile: Profile) {
 }
 export function clearSession() { window.localStorage.removeItem(KEY); window.localStorage.removeItem(PKEY) }
 
-// Which routes this profile may open. Admins see everything (incl. Settings);
-// viewers see only their allowed_pages.
-export function canSee(profile: Profile | null, path: string): boolean {
-  if (!profile || !profile.is_active) return false
-  if (profile.role === 'admin') return true
-  if (path === '/admin') return false
-  if (ADMIN_ONLY.includes(path)) return false
-  const allowed = profile.allowed_pages || []
-  if (allowed.includes(path)) return true
-  // A granted section also covers its detail pages — /pm-team grants
-  // /pm-team/afzal-multani. Without this a viewer could open the PM list and then
-  // be locked out of every name on it. '/' is excluded explicitly, or it would
-  // prefix-match the entire dashboard. The trailing slash matters: '/pm' must not
-  // open '/pm-team'. ADMIN_ONLY is already rejected above, so this cannot widen it.
-  const p = path.length > 1 ? path.replace(/\/+$/, '') : path
-  return allowed.some(a => a !== '/' && p.startsWith(a + '/'))
+export const profileFor = (email: string, fullName?: string | null): Profile => ({
+  email: email.trim().toLowerCase(),
+  full_name: fullName || null,
+  role: 'admin',
+  is_active: true,
+  allowed_pages: PAGES.map(p => p.href),
+})
+
+// Every signed-in person can open every page. The only scoping left is inside
+// the PM Team pages, which narrow to the viewer's own record.
+export function canSee(profile: Profile | null, _path: string): boolean {
+  return !!profile && profile.is_active
 }
 
-// Look up an email in the allowlist (active only). Returns the profile, or null
-// if the email is definitively not on the list. THROWS on a transient error
-// (network/RPC) so callers can tell "not allowed" apart from "couldn't check".
+/**
+ * Access is decided by the email domain alone — no database round-trip, so it
+ * cannot fail transiently and lock somebody out. Kept as a function so the
+ * sign-in path has a single entry point.
+ */
 export async function checkAccess(email: string): Promise<Profile | null> {
-  if (!supabase) return null
-  const { data, error } = await supabase.rpc('dashboard_check', { p_email: email.trim().toLowerCase() })
-  if (error) throw error
-  const row = Array.isArray(data) ? data[0] : data
-  return (row as Profile) || null
+  return isAllowedDomain(email) ? profileFor(email) : null
 }
 
 // ---- Google sign-in -------------------------------------------------------
@@ -126,31 +140,6 @@ export async function signOutGoogle(): Promise<void> {
   try { await supabase?.auth.signOut() } catch { /* local session is cleared anyway */ }
 }
 
-// ---- Admin user management (RPCs verify the actor is an active admin) ----
-export async function listUsers(): Promise<Profile[]> {
-  if (!supabase) return []
-  const { data } = await supabase.rpc('dashboard_list', { p_actor: currentEmail() || '' })
-  return (data as Profile[]) || []
-}
-
-export async function upsertUser(u: Partial<Profile> & { email: string }): Promise<void> {
-  if (!supabase) throw new Error('Supabase not configured')
-  const { error } = await supabase.rpc('dashboard_upsert_user', {
-    p_actor: currentEmail() || '',
-    p_email: u.email.trim().toLowerCase(),
-    p_full_name: u.full_name ?? '',
-    p_role: u.role || 'viewer',
-    p_pages: u.role === 'admin' ? [] : (u.allowed_pages || []),
-    p_active: u.is_active ?? true,
-  })
-  if (error) throw error
-}
-
-export async function deleteUser(email: string): Promise<void> {
-  if (!supabase) throw new Error('Supabase not configured')
-  const { error } = await supabase.rpc('dashboard_delete_user', {
-    p_actor: currentEmail() || '',
-    p_email: email.trim().toLowerCase(),
-  })
-  if (error) throw error
-}
+// The dashboard_users allowlist and its admin RPCs are no longer consulted. The
+// table is left in the database rather than dropped, so the old model can be
+// restored by reinstating checkAccess() and canSee() if this one proves too open.

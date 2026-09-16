@@ -12,6 +12,13 @@
 export interface PmMember {
   name: string
   slug: string
+  /**
+   * Work email, used to decide whose scorecard a signed-in PM may open. Taken
+   * from real mail traffic rather than guessed from the name — `rahul.j@` is
+   * Rahul Jain and `rahul.k@` is Rahul Kaushal, a different person, so a
+   * first-name guess would have shown one of them the other's numbers.
+   */
+  email: string
   aliases: string[]
   /**
    * The PM's LAST-YEAR MONTHLY AVERAGE booking in USD — the `Base Data` column of
@@ -29,21 +36,21 @@ export interface PmMember {
 }
 
 export const PM_TEAM: PmMember[] = [
-  { name: 'Afzal Multani', slug: 'afzal-multani', aliases: ['afzal multani', 'afzal'], lastYearAvg: 23081 },
-  { name: 'Bonny Chhatbar', slug: 'bonny-chhatbar', aliases: ['bonny chhatbar', 'bonny chhatbhar', 'bonny'], lastYearAvg: 22962 },
-  { name: 'Gagandeep Singh', slug: 'gagandeep-singh', aliases: ['gagandeep singh', 'gagandeep'], lastYearAvg: 21416 },
-  { name: 'Gaurav Pardeshi', slug: 'gaurav-pardeshi', aliases: ['gaurav pardeshi', 'gaurav'], lastYearAvg: 12201 },
-  { name: 'Madhav Maheshwari', slug: 'madhav-maheshwari', aliases: ['madhav maheshwari', 'madhav'], lastYearAvg: 10000 },
-  { name: 'Maitri Shah', slug: 'maitri-shah', aliases: ['maitri shah', 'maitri'], lastYearAvg: 15638 },
+  { name: 'Afzal Multani', slug: 'afzal-multani', email: 'afzal@mavlers.com', aliases: ['afzal multani', 'afzal'], lastYearAvg: 23081 },
+  { name: 'Bonny Chhatbar', slug: 'bonny-chhatbar', email: 'bonny@mavlers.com', aliases: ['bonny chhatbar', 'bonny chhatbhar', 'bonny'], lastYearAvg: 22962 },
+  { name: 'Gagandeep Singh', slug: 'gagandeep-singh', email: 'gagandeep@mavlers.com', aliases: ['gagandeep singh', 'gagandeep'], lastYearAvg: 21416 },
+  { name: 'Gaurav Pardeshi', slug: 'gaurav-pardeshi', email: 'gaurav@mavlers.com', aliases: ['gaurav pardeshi', 'gaurav'], lastYearAvg: 12201 },
+  { name: 'Madhav Maheshwari', slug: 'madhav-maheshwari', email: 'madhav@mavlers.com', aliases: ['madhav maheshwari', 'madhav'], lastYearAvg: 10000 },
+  { name: 'Maitri Shah', slug: 'maitri-shah', email: 'maitri@mavlers.com', aliases: ['maitri shah', 'maitri'], lastYearAvg: 15638 },
   // The revenue sheet also spells him 'Malay Srivastava' (no 'h').
-  { name: 'Malay Shrivastava', slug: 'malay-shrivastava', aliases: ['malay shrivastava', 'malay srivastava', 'malay'], lastYearAvg: 20464 },
-  { name: 'Nitin Mishra', slug: 'nitin-mishra', aliases: ['nitin mishra', 'nitin'], lastYearAvg: 23333 },
-  { name: 'Paryusha Jain', slug: 'paryusha-jain', aliases: ['paryusha jain', 'paryusha'], lastYearAvg: 16251 },
+  { name: 'Malay Shrivastava', slug: 'malay-shrivastava', email: 'malay@mavlers.com', aliases: ['malay shrivastava', 'malay srivastava', 'malay'], lastYearAvg: 20464 },
+  { name: 'Nitin Mishra', slug: 'nitin-mishra', email: 'nitin@mavlers.com', aliases: ['nitin mishra', 'nitin'], lastYearAvg: 23333 },
+  { name: 'Paryusha Jain', slug: 'paryusha-jain', email: 'paryusha@mavlers.com', aliases: ['paryusha jain', 'paryusha'], lastYearAvg: 16251 },
   // 'Rahul' alone is deliberately NOT an alias. Rahul Kaushal is a different
   // person who also appears as a pc_sme, and a bare first-name match would hand
   // his rows to Rahul Jain. Confirmed by the user: keep them apart.
-  { name: 'Rahul Jain', slug: 'rahul-jain', aliases: ['rahul jain'], lastYearAvg: 5738 },
-  { name: 'Sankalp Waman Bhoyar', slug: 'sankalp-waman-bhoyar', aliases: ['sankalp waman bhoyar', 'sankalp bhoyar', 'sankalp'], lastYearAvg: 16224 },
+  { name: 'Rahul Jain', slug: 'rahul-jain', email: 'rahul.j@mavlers.com', aliases: ['rahul jain'], lastYearAvg: 5738 },
+  { name: 'Sankalp Waman Bhoyar', slug: 'sankalp-waman-bhoyar', email: 'sankalp@mavlers.com', aliases: ['sankalp waman bhoyar', 'sankalp bhoyar', 'sankalp'], lastYearAvg: 16224 },
 ]
 
 /**
@@ -96,6 +103,17 @@ for (const m of PM_TEAM) for (const a of m.aliases) BY_ALIAS.set(a, m)
 /** The PM who owns a free-text name cell, or undefined if they aren't on the team. */
 export const pmOf = (raw?: string): PmMember | undefined =>
   raw ? BY_ALIAS.get(raw.trim().toLowerCase()) : undefined
+
+/**
+ * The PM a signed-in viewer IS, if any.
+ *
+ * Someone who matches is a PM and sees only their own scorecard. Someone who
+ * does not — leadership, an AM, anyone else in the business — is not being
+ * measured by this page and sees the whole team. That is the whole rule; there
+ * is no separate list of who is allowed to see everything.
+ */
+export const pmByEmail = (email?: string | null): PmMember | undefined =>
+  email ? PM_TEAM.find(m => m.email === email.trim().toLowerCase()) : undefined
 
 export const pmBySlug = (slug: string): PmMember | undefined => PM_TEAM.find(m => m.slug === slug)
 

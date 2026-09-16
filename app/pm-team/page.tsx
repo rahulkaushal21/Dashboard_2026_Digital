@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/Header'
+import { useAuth } from '@/components/AuthProvider'
 import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
 import { buildPmStats, growthPct, type PmQuarter } from '@/lib/pm-metrics'
-import { PM_TEAM, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, type FQ, type PmMember } from '@/lib/pm-team'
+import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, type FQ, type PmMember } from '@/lib/pm-team'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 const NOW = new Date()
@@ -33,6 +34,13 @@ interface Cell {
 }
 
 export default function PmTeam() {
+  const { email } = useAuth()
+  // A PM sees their own scorecard only. Anyone who is not on the roster —
+  // leadership, an AM — is not being measured here and sees the whole team.
+  const me = pmByEmail(email)
+  // Memoised: a fresh array each render would re-run the whole grid computation.
+  const roster = useMemo(() => (me ? [me] : PM_TEAM), [me])
+
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
@@ -51,18 +59,22 @@ export default function PmTeam() {
   // One cell per PM per quarter, computed once so the table only has to read it.
   const grid = useMemo(() => QUARTERS.map(fq => ({
     fq,
-    cells: PM_TEAM.map<Cell>(pm => {
+    cells: roster.map<Cell>(pm => {
       const s = stats.get(pm.slug)!
       const q = s.quarter(fq)
       const base = s.baseline(fq)
       const growth = growthPct(q.avg, base)
       return { pm, q, base, raised: base > pm.lastYearAvg, growth, total: totalPct(growth, q.q2c, q.feedback) }
     }),
-  })), [stats])
+  })), [stats, roster])
 
   return (
     <div>
-      <Header title="PM Team" subtitle="Quarterly KPI scorecard — growth, quote conversion and client feedback" />
+      <Header
+        title={me ? 'My scorecard' : 'PM Team'}
+        subtitle={me
+          ? 'Your quarterly KPI — growth, quote conversion and client feedback'
+          : 'Quarterly KPI scorecard — growth, quote conversion and client feedback'} />
 
       <HowItWorks />
 

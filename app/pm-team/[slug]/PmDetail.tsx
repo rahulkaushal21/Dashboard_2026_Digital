@@ -3,9 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
+import { useAuth } from '@/components/AuthProvider'
 import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
 import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost, quoteConfirmDate, oppConfirmDate } from '@/lib/pm-metrics'
-import { pmBySlug, fqOf, qLabel, totalPct, attainment, TARGETS, WEIGHTS, type FQ } from '@/lib/pm-team'
+import { pmBySlug, pmByEmail, fqOf, qLabel, totalPct, attainment, TARGETS, WEIGHTS, type FQ } from '@/lib/pm-team'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -18,6 +19,11 @@ const QUARTERS: FQ[] = Array.from({ length: CUR_FQ.q }, (_, i) => ({ fy: CUR_FQ.
 
 export default function PmDetail({ slug }: { slug: string }) {
   const pm = pmBySlug(slug)
+  const { email } = useAuth()
+  // A PM may open their own page and nobody else's. Everyone else — leadership,
+  // AMs — can open any of them, because they are not measured by this scorecard.
+  const me = pmByEmail(email)
+  const blocked = !!me && !!pm && me.slug !== pm.slug
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [quotes, setQuotes] = useState<Quote[]>([])
@@ -56,6 +62,18 @@ export default function PmDetail({ slug }: { slug: string }) {
 
   if (!pm) return <div><Header title="PM not found" /><Link href="/pm-team" className="text-mav-yellow text-sm">← PM Team</Link></div>
 
+  if (blocked) return (
+    <div className="max-w-md mt-16">
+      <h1 className="text-xl font-semibold mb-2">Not your scorecard</h1>
+      <p className="text-sm text-mav-muted mb-4">
+        Individual KPI pages are private to the person they belong to. You can open your own.
+      </p>
+      <Link href={`/pm-team/${me!.slug}`} className="text-mav-yellow text-sm hover:underline">
+        Go to my scorecard &rarr;
+      </Link>
+    </div>
+  )
+
   const q = s?.quarter(fq)
   const base = s ? s.baseline(fq) : pm.lastYearAvg
   const raised = base > pm.lastYearAvg
@@ -89,7 +107,9 @@ export default function PmDetail({ slug }: { slug: string }) {
 
   return (
     <div>
-      <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-muted hover:text-white mb-3"><ArrowLeft size={14} /> PM Team</Link>
+      <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-muted hover:text-white mb-3">
+        <ArrowLeft size={14} /> {me ? 'My scorecard' : 'PM Team'}
+      </Link>
       <Header title={pm.name} subtitle="Project manager — quarterly KPI, bookings and open quotes" />
 
       <div className="flex flex-wrap items-center gap-2 mb-5">
