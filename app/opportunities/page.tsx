@@ -104,7 +104,7 @@ if (bt === 'new repeat' || bt === 'repeat new') return 'New + Repeat'
 return x.is_new_client ? 'New' : 'Repeat'
 }
 // Intent tiers. Deliberately a different visual language from Win % — that is a
-// person's judgement of the deal, this is what the last 675 decided quotes say
+// person's judgement of the deal, this is what the decided quotes of this year say
 // about deals shaped like this one. They disagree often, and the disagreement is
 // the useful part, so they must not look like the same number twice.
 const TIER_STYLE: Record<string, string> = {
@@ -116,6 +116,33 @@ E: 'bg-red-500/15 text-red-300 ring-1 ring-red-500/30',
 }
 const TIER_LABEL: Record<string, string> = {
 A: 'near-certain', B: 'likely', C: 'coin-flip', D: 'unlikely', E: 'long shot',
+}
+// What each band actually means, in the terms a person would use to decide what to do
+// about the deal. The score is a probability, so the bands are just ranges of it —
+// saying so plainly stops "B" being read as a grade awarded to the deal.
+const TIER_MEANING: Record<string, { range: string; what: string }> = {
+A: { range: '80% and above', what: 'Plan around it. Deals shaped like this almost always land.' },
+B: { range: '60–79%', what: 'Likely, not certain. Worth forecasting, still worth chasing.' },
+C: { range: '40–59%', what: 'A coin flip. The outcome is decided by what you do next.' },
+D: { range: '20–39%', what: 'Unlikely on the evidence. Needs something to change.' },
+E: { range: 'below 20%', what: 'A long shot. Do not plan revenue around it.' },
+}
+// The cohort the score is fitted on: quotes DECIDED since the start of this financial
+// year. Counted live rather than written into the copy, because it was hardcoded at
+// 675 and had two problems — it went stale the moment another quote closed, and 675
+// was the all-time figure, while the model is fitted only on FY-2026 onward. The
+// business ran at 0–47% in the Jan–Mar era and 87% since April; quoting the all-time
+// count next to an April-onward percentage described a population that never existed.
+const MODEL_FROM = '2026-04-01'
+const decidedCohort = (all: Opportunity[]) => {
+  const decided = all.filter(x => {
+    const d = (x.first_date || x.source_date || '').slice(0, 10)
+    if (!d || d < MODEL_FROM) return false
+    const s = oppStatus(x)
+    return s === 'Won' || s === 'Lost'
+  })
+  const won = decided.filter(x => oppStatus(x) === 'Won').length
+  return { n: decided.length, rate: decided.length ? Math.round((won / decided.length) * 100) : null }
 }
 // Why this deal scored what it did, in one hoverable line.
 const intentWhy = (x: Opportunity): string => {
@@ -161,6 +188,9 @@ return Object.entries(m).sort((a, b) => b[1].value - a[1].value || b[1].count - 
 
 export default function Opportunities() {
 const [all, setAll] = useState<Opportunity[]>([])
+// Counted from the data on every load, so the sentence under the intent score can
+// never drift from the population it is describing.
+const cohort = useMemo(() => decidedCohort(all), [all])
 const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
 // Rows the Quotes sheet tags "New" under an owner who isn't on the NBD team.
 const [misTagOnly, setMisTagOnly] = useState(false)
@@ -481,7 +511,7 @@ pending = <span className="text-amber-300 font-semibold">{money(m.openOnlyValue)
 of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)}</span> flagged “might not come” · {m.unlikely} {m.unlikely === 1 ? 'quote' : 'quotes'}
 </div>
 )}
-{/* How much of Pending the 675 decided quotes say is genuinely coming. Shown against
+{/* How much of Pending the decided-quote history says is genuinely coming. Shown against
     Pending, because the gap between the two is the point — most of a month's pending
     value normally sits below a coin flip. */}
 {m.pending > 0 && (
@@ -816,23 +846,48 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 <div className="mb-5 rounded-lg border border-mav-line bg-mav-dark/40 p-3">
 <div className="flex items-baseline justify-between mb-2">
 <span className="text-xs uppercase tracking-wide text-mav-muted">Buying intent — what past quotes predict</span>
-<span className={`text-xs font-semibold px-2 py-1 rounded ${TIER_STYLE[sel.intent_tier]}`}>{sel.intent_tier} · {sel.intent_score}</span>
+<span title={`${sel.intent_tier} — ${TIER_LABEL[sel.intent_tier]} (${TIER_MEANING[sel.intent_tier]?.range}). ${TIER_MEANING[sel.intent_tier]?.what}`}
+  className={`text-xs font-semibold px-2 py-1 rounded cursor-help ${TIER_STYLE[sel.intent_tier]}`}>{sel.intent_tier} · {sel.intent_score}</span>
 </div>
 <p className="text-sm text-mav-muted mb-3">
-{TIER_LABEL[sel.intent_tier]} — of 675 quotes we have actually decided, ones shaped like this converted about {sel.intent_score}% of the time.
+<span className="text-white">{sel.intent_tier} = {TIER_LABEL[sel.intent_tier]}</span> ({TIER_MEANING[sel.intent_tier]?.range}).{' '}
+{TIER_MEANING[sel.intent_tier]?.what}{' '}
+Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since April 2026, ones shaped like this converted about {sel.intent_score}% of the time.
 {sel.win_probability != null && Math.abs(sel.win_probability - sel.intent_score) >= 25 && (
 <span className="text-amber-300"> This is {sel.win_probability > sel.intent_score ? 'well below' : 'well above'} the {sel.win_probability}% on the deal — worth a second look at which is right.</span>
 )}
 </p>
+{/* The four factors. Each carries a title, because the bare decimal says nothing on
+    its own — hovering explains what the number is and which direction is good. */}
 <div className="grid grid-cols-4 gap-2 text-xs">
-<div><div className="text-mav-muted mb-0.5">Relationship</div><div className="font-semibold tabular-nums">{sel.intent_relationship}</div>
+<div title={`Relationship — how often THIS client has confirmed quotes before. ${sel.client_decided_quotes != null ? `They have confirmed ${sel.client_confirmed_quotes} of ${sel.client_decided_quotes} decided quotes.` : 'No decided quotes from them yet, so this sits at the house average.'} Higher is better. A client with 20+ quotes is a reseller shopping around and scores LOWER, not higher — historically those confirm about 25% of the time.`}
+  className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Relationship</div><div className="font-semibold tabular-nums">{sel.intent_relationship}</div>
 <div className="text-mav-muted mt-0.5">{sel.client_decided_quotes != null ? `${sel.client_confirmed_quotes}/${sel.client_decided_quotes} confirmed` : 'no history'}</div></div>
-<div><div className="text-mav-muted mb-0.5">Value band</div><div className="font-semibold tabular-nums">{sel.intent_value_factor}</div>
+<div title={`Value band — what quotes at this price historically convert at. ${sel.value ? `This one is ${money(sel.value)}.` : 'No value on this quote, so it sits at the average.'} Small quotes convert far more often than large ones: under $250 confirms about 96% of the time, and the rate falls steadily as the number grows. Higher is better.`}
+  className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Value band</div><div className="font-semibold tabular-nums">{sel.intent_value_factor}</div>
 <div className="text-mav-muted mt-0.5">{sel.value ? money(sel.value) : 'no value'}</div></div>
-<div><div className="text-mav-muted mb-0.5">Email</div><div className="font-semibold tabular-nums">{sel.intent_signal}</div>
+<div title={`Email — what the client has actually said, read from their own replies only (our chasing cannot manufacture a positive). ${sel.signal_label ? `Here: ${sel.signal_label}.` : 'No thread matched to this deal.'} Invoice or payment talk confirms 96%, "approved / please proceed" 96%, access handed over 93%, kickoff returned 90% — against 71% for a thread showing none of them. Higher is better.`}
+  className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Email</div><div className="font-semibold tabular-nums">{sel.intent_signal}</div>
 <div className="text-mav-muted mt-0.5">{sel.signal_label ? sel.signal_label.split(' ').slice(0,2).join(' ') : 'no thread'}</div></div>
-<div><div className="text-mav-muted mb-0.5">Silence</div><div className="font-semibold tabular-nums">{sel.intent_recency}</div>
+<div title={`Silence — how long since anyone touched this deal${sel.days_since_touch != null ? `: ${sel.days_since_touch} days` : ''}. ${sel.intent_basis === 'sheet-date' ? 'Measured from the SHEET date because no email was found, and the sheet is logged over a week late on 22% of rows — so this deal may be fresher than it looks.' : 'Measured from the last email on the thread.'} Higher is better; a deal going quiet is the clearest signal it is drifting.`}
+  className="cursor-help"><div className="text-mav-muted mb-0.5 underline decoration-dotted decoration-mav-line underline-offset-2">Silence</div><div className="font-semibold tabular-nums">{sel.intent_recency}</div>
 <div className="text-mav-muted mt-0.5">{sel.days_since_touch != null ? `${sel.days_since_touch}d quiet` : 'unknown'}</div></div>
+</div>
+
+{/* All five bands, with the current one lit. Without this the letter is a grade with
+    no scale — you cannot tell whether B is second-best of three or of five. */}
+<div className="mt-3 pt-3 border-t border-mav-line">
+<div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1.5">What the bands mean</div>
+<div className="flex flex-wrap gap-1.5">
+{(['A','B','C','D','E'] as const).map(t => (
+<span key={t} title={`${TIER_LABEL[t]} (${TIER_MEANING[t].range}) — ${TIER_MEANING[t].what}`}
+  className={`text-[11px] px-1.5 py-0.5 rounded cursor-help ${t === sel.intent_tier
+    ? TIER_STYLE[t]
+    : 'text-mav-muted border border-mav-line'}`}>
+  {t} {TIER_LABEL[t]} <span className="opacity-60">{TIER_MEANING[t].range}</span>
+</span>
+))}
+</div>
 </div>
 {sel.intent_basis === 'sheet-date' && (
 <p className="mt-2 text-xs text-mav-muted">Recency is from the sheet&apos;s own date — no email found for this deal. The sheet is logged more than a week late on 22% of rows, so this deal may be fresher than it looks.</p>
