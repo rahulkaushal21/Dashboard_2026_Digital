@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { checkAccess, getStoredProfile, saveSession, clearSession, canSee, Profile,
   signInWithGoogle, verifiedEmail, signOutGoogle, ALLOWED_DOMAINS } from '@/lib/access'
 import Sidebar from './Sidebar'
+import { MavlersLogo, MavlersMark } from './MavlersLogo'
 
 interface AuthState { profile: Profile | null; email: string | null; signOut: () => void }
 const AuthCtx = createContext<AuthState>({ profile: null, email: null, signOut: () => {} })
@@ -101,8 +102,31 @@ function RouteGuard({ children }: { children: React.ReactNode }) {
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
-  return <div className="h-screen flex items-center justify-center text-mav-muted">{children}</div>
+  return (
+    <div className="h-screen flex flex-col items-center justify-center gap-4 text-mav-muted">
+      <MavlersLogo className="h-6 w-auto text-white/70" />
+      <span className="text-xs uppercase tracking-[0.18em]">{children}</span>
+    </div>
+  )
 }
+
+// What the dashboard actually holds. Kept factual — this is an internal tool, so
+// the sign-in screen earns trust by describing the real sources, not by borrowing
+// marketing claims from the public site.
+const CAPABILITIES = [
+  {
+    title: 'Revenue & forecast',
+    body: 'Monthly bookings against target, the quarter in trend, and where the financial year lands.',
+  },
+  {
+    title: 'Opportunities & quotes',
+    body: 'One record per deal, matched across the Quotes tab and the shared inbox so nothing is counted twice.',
+  },
+  {
+    title: 'PM scorecards',
+    body: 'Growth, quote-to-conversion and client feedback — per project manager, per quarter.',
+  },
+]
 
 function LoginScreen({ refused }: { refused: string | null }) {
   const [err, setErr] = useState('')
@@ -117,34 +141,96 @@ function LoginScreen({ refused }: { refused: string | null }) {
   }
 
   return (
-    <div className="h-screen flex items-center justify-center">
-      <div className="w-full max-w-sm px-6">
-        <div className="flex items-center gap-2 mb-6">
-          <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
-          <span className="font-semibold tracking-tight">Digital Dashboard</span>
-        </div>
-        <h1 className="text-xl font-semibold mb-1">Sign in</h1>
-        <p className="text-sm text-mav-muted mb-5">
-          Use your work Google account — {ALLOWED_DOMAINS.join(' or ')}.
-        </p>
+    // Two equal columns on desktop; a single stacked column below lg, where the
+    // brand panel becomes a short header rather than half a phone screen.
+    <div className="min-h-screen grid lg:grid-cols-2">
+      {/* ── Brand half ─────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden bg-[#141414] border-b lg:border-b-0 lg:border-r border-mav-line
+                          flex flex-col justify-between px-6 py-10 sm:px-10 lg:px-14 lg:py-14">
+        {/* The chevron from the logo, blown up and bled off the corner. The one
+            loud move on the page; everything else stays quiet around it. */}
+        <MavlersMark
+          className="pointer-events-none absolute -right-20 -top-16 w-[26rem] text-mav-yellow/[0.07]
+                     lg:-right-28 lg:w-[34rem]"
+        />
+        {/* A soft warm wash so the flat panel has some depth behind the type. */}
+        <div aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_0%_100%,rgba(255,219,45,0.06),transparent_60%)]" />
 
-        {refused && (
-          <div className="mb-4 text-sm bg-red-500/10 border border-red-500/25 rounded-md px-3 py-2">
-            <p className="text-red-400 font-medium">{refused} can&rsquo;t sign in here.</p>
-            <p className="text-mav-muted mt-1">
-              The dashboard is open to {ALLOWED_DOMAINS.join(' and ')} accounts. Sign in with your work account instead.
-            </p>
+        <div className="relative">
+          <div className="flex items-center gap-3">
+            <MavlersLogo className="h-7 w-auto text-white sm:h-8" />
+            <span className="h-5 w-px bg-mav-line" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mav-muted">
+              Digital
+            </span>
           </div>
-        )}
+        </div>
 
-        <button onClick={google} disabled={busy}
-          className="w-full flex items-center justify-center gap-3 bg-white text-[#1f1f1f] font-medium rounded-md py-2.5 text-sm disabled:opacity-60 hover:bg-white/90 transition-colors">
-          <GoogleMark />
-          {busy ? 'Redirecting…' : 'Continue with Google'}
-        </button>
+        <div className="relative mt-10 lg:mt-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mav-yellow mb-4">
+            Internal dashboard
+          </p>
+          <h1 className="text-3xl sm:text-4xl lg:text-[2.75rem] font-bold leading-[1.1] tracking-tight text-balance max-w-md">
+            Every number the web team runs on.
+          </h1>
+          <p className="mt-4 text-sm leading-relaxed text-mav-muted max-w-md">
+            Bookings, quotes, opportunities and scorecards — read straight from the revenue sheet and the shared
+            inbox, and refreshed every half hour.
+          </p>
 
-        {err && <p className="text-sm text-red-400 mt-3">{err}</p>}
-      </div>
+          <ul className="mt-9 space-y-5 max-w-md">
+            {CAPABILITIES.map(c => (
+              <li key={c.title} className="border-l-2 border-mav-yellow/40 pl-4">
+                <p className="text-sm font-semibold text-white">{c.title}</p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-mav-muted">{c.body}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="relative mt-10 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] uppercase tracking-[0.14em] text-mav-muted/70">
+          <span>Financial year April–March</span>
+          <span className="hidden sm:inline text-mav-line">/</span>
+          <span>Synced every 30 minutes</span>
+        </div>
+      </section>
+
+      {/* ── Sign-in half ───────────────────────────────────────────── */}
+      <section className="flex items-center justify-center px-6 py-14 sm:px-10">
+        <div className="w-full max-w-sm">
+          <h2 className="text-2xl font-bold tracking-tight">Sign in</h2>
+          <p className="mt-2 text-sm leading-relaxed text-mav-muted">
+            Use your work Google account — {ALLOWED_DOMAINS.join(' or ')}. It decides what you can see, so there is
+            no separate password to keep.
+          </p>
+
+          {refused && (
+            <div className="mt-6 text-sm bg-red-500/10 border border-red-500/25 rounded-lg px-4 py-3">
+              <p className="text-red-400 font-medium">{refused} can&rsquo;t sign in here.</p>
+              <p className="text-mav-muted mt-1 leading-relaxed">
+                The dashboard is open to {ALLOWED_DOMAINS.join(' and ')} accounts. Sign in with your work account instead.
+              </p>
+            </div>
+          )}
+
+          <button onClick={google} disabled={busy}
+            className="mt-7 w-full flex items-center justify-center gap-3 bg-white text-[#1f1f1f] font-semibold rounded-lg
+                       py-3 text-sm transition-colors hover:bg-white/90 disabled:opacity-60
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mav-yellow focus-visible:ring-offset-2
+                       focus-visible:ring-offset-mav-dark">
+            <GoogleMark />
+            {busy ? 'Redirecting…' : 'Continue with Google'}
+          </button>
+
+          {err && <p className="text-sm text-red-400 mt-3">{err}</p>}
+
+          <p className="mt-8 pt-6 border-t border-mav-line text-xs leading-relaxed text-mav-muted">
+            Everyone on the domain sees the dashboard. Project-manager scorecards are the exception: a PM sees their
+            own, and admins see them all.
+          </p>
+        </div>
+      </section>
     </div>
   )
 }
