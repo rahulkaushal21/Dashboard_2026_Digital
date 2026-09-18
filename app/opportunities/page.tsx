@@ -550,7 +550,7 @@ of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)
 {m.pending > 0 && (
 <div className="mt-2 text-xs text-mav-muted">
 {m.bankable > 0 ? (<>
-bankable <span className="text-emerald-300 font-semibold">{money(m.bankableValue)}</span>
+<span className="cursor-help underline decoration-dotted underline-offset-2" title="Pending deals scoring tier A or B (60%+ likely to confirm, based on how similar past quotes ended), excluding anything flagged “might not come”. Counted at full face value.">bankable</span> <span className="text-emerald-300 font-semibold">{money(m.bankableValue)}</span>
 <span className="opacity-60"> of {money(m.pendingValue)} pending</span>
 {' · '}
 <span title="Tier A — 80%+. Deals shaped like these confirmed at least 4 times in 5." className="text-emerald-300">A {money(m.tierAValue)}</span>
@@ -560,8 +560,12 @@ bankable <span className="text-emerald-300 font-semibold">{money(m.bankableValue
 <span className="opacity-60"> ({m.tierB})</span>
 {' · '}
 <span title="Each deal counted at its own intent score rather than at face value. The A+B total above assumes every one of them lands; this does not.">
-weighted <span className="text-emerald-300 font-semibold">{money(Math.round(m.bankableExpected))}</span>
+<span className="cursor-help underline decoration-dotted underline-offset-2">weighted</span> <span className="text-emerald-300 font-semibold">{money(Math.round(m.bankableExpected))}</span>
 </span>
+<div className="mt-1 text-[11px] opacity-60 leading-snug">
+Bankable = pending deals likely to confirm (tier A 80%+ or B 60–80%), at full value.
+Weighted = the same deals, each multiplied by its win chance (e.g. $10k at 70% counts as $7k). This is the realistic figure to forecast on.
+</div>
 </>) : (
 <span className="text-amber-300">nothing in Pending scores above a coin flip — all {money(m.pendingValue)} is tier C or below</span>
 )}
