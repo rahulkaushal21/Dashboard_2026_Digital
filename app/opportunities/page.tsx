@@ -491,9 +491,6 @@ unlikely: unlikelyR.length, unlikelyValue: sum(unlikelyR),
 tierA: tierA.length, tierAValue: sum(tierA),
 tierB: tierB.length, tierBValue: sum(tierB),
 bankable: bankable.length, bankableValue: sum(bankable),
-// Risk-weighted rather than face value: each deal counted at its own score. This is
-// the number to forecast on — the A+B face value assumes every one of them lands.
-bankableExpected: bankable.reduce((s, x) => s + (x.value || 0) * ((x.intent_score ?? 0) / 100), 0),
 // Win rate over ALL quotes shared that month — won ÷ everything quoted. Recent
 // months read low by design because their quotes are still in play; `decidedRate`
 // is kept alongside so a month can also be judged on what has actually closed.
@@ -558,13 +555,8 @@ of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)
 {' + '}
 <span title="Tier B — 60-80%. Likely, not certain." className="text-teal-300">B {money(m.tierBValue)}</span>
 <span className="opacity-60"> ({m.tierB})</span>
-{' · '}
-<span title="Each deal counted at its own intent score rather than at face value. The A+B total above assumes every one of them lands; this does not.">
-<span className="cursor-help underline decoration-dotted underline-offset-2">weighted</span> <span className="text-emerald-300 font-semibold">{money(Math.round(m.bankableExpected))}</span>
-</span>
 <div className="mt-1 text-[11px] opacity-60 leading-snug">
 Bankable = pending deals likely to confirm (tier A 80%+ or B 60–80%), at full value.
-Weighted = the same deals, each multiplied by its win chance (e.g. $10k at 70% counts as $7k). This is the realistic figure to forecast on.
 </div>
 </>) : (
 <span className="text-amber-300">nothing in Pending scores above a coin flip — all {money(m.pendingValue)} is tier C or below</span>
