@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Inbox, ClipboardList, Table2 } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Inbox, Table2 } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
@@ -22,12 +22,9 @@ const isGroup = (e: Entry): e is Group => 'children' in e
 const nav: Entry[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
-  // The three pages added for the 1 Oct change, kept together and directly under
-  // Opportunities: they are the daily loop — what needs you, what is booked this
-  // month, and the sheet it all reconciles against.
+  // The daily loop: what needs a person, and the ledger it all lands in.
   { href: '/needs-input', label: 'Needs Input', icon: Inbox },
-  { href: '/project-sheet', label: 'Project Sheet', icon: ClipboardList },
-  { href: '/revenue-sheet', label: 'Revenue Sheet', icon: Table2 },
+  { href: '/revenue-sheet', label: 'Web, Hub & LP', icon: Table2 },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },

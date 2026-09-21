@@ -1259,3 +1259,32 @@ export async function duplicateBookingToMonth(bookingId: number, month: string, 
   if (error) return { error: error.message }
   return { id: Number(data) }
 }
+
+// ---- The Web, Hub & LP ledger ---------------------------------------------
+//
+// The sheet's own lines and everything confirmed in the dashboard, in one list with a
+// column saying which is which. They lived on two pages first, which was the wrong shape:
+// reconciling a month means reading one list, not cross-referencing two.
+
+export interface LedgerRow {
+  row_key: string; source: 'sheet' | 'dashboard'; source_id: number
+  company_name?: string; project_name?: string; contact_email?: string
+  service_dept?: string; engagement_model?: string; technology?: string; geo?: string
+  pm_owner?: string; sales_person?: string; booking_month?: string
+  amount_usd?: number; local_value?: number; currency?: string
+  in_sheet: boolean; confirmed_at?: string; confirmed_by?: string
+}
+
+export async function getProjectLedger(): Promise<LedgerRow[]> {
+  return (await read<LedgerRow>('web_project_ledger', '*', 'row_key')) || []
+}
+
+/** Copy one ledger line into a month, whichever side it came from. */
+export async function copyRowToMonth(source: string, id: number, month: string, amount?: number | null): Promise<{ id?: number; error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('copy_row_to_month', {
+    p_source: source, p_id: id, p_month: `${month}-01`, p_amount: amount ?? null,
+  })
+  if (error) return { error: error.message }
+  return { id: Number(data) }
+}
