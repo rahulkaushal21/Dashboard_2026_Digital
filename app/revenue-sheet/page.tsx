@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import { getProjectLedger, copyRowToMonth, type LedgerRow } from '@/lib/supabase'
+import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile } from '@/lib/access'
 
 // Web, Hub & LP — the whole ledger, in the revenue sheet's own columns.
@@ -23,6 +24,68 @@ const ym = (s?: string) => (s || '').slice(0, 7)
 const uniq = (xs: (string | undefined)[]) => Array.from(new Set(xs.map(x => (x || '').trim()).filter(Boolean))).sort()
 const monLabel = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
+// The Web, Hub & LP tab's columns, in its order and under its names.
+//
+// The point is that somebody who knows the spreadsheet can read this page without
+// translating. The dashboard's own names for these fields differ in places — "PC/SME" is
+// pm_owner, "Agency" is company_name — and using the dashboard's names here would have
+// made the two impossible to compare side by side, which is the whole job this page does.
+//
+// `compact` marks the handful worth seeing when the job is the monthly move rather than
+// reconciliation. Thirty-five columns is right for checking a month against the sheet and
+// far too many for ticking retainers.
+type Col = { key: string; label: string; compact?: boolean; right?: boolean; get: (r: LedgerRow) => string }
+
+const dash = (v: unknown) => (v === null || v === undefined || v === '') ? '—' : String(v)
+const d10 = (v?: string) => (v || '').slice(0, 10) || '—'
+const num = (v?: number | null) => v == null ? '—' : Number(v).toLocaleString('en-US')
+
+// Optimization is arithmetic on the two hour columns, so it is derived here rather than
+// stored — there is no way for it to disagree with them.
+const optimisation = (r: LedgerRow) => {
+  const i = r.internal_hrs, a = r.actual_hrs
+  if (i == null || a == null || !(i > 0)) return '—'
+  return `${Math.round(((i - a) / i) * 100)}%`
+}
+
+const COLUMNS: Col[] = [
+  { key: 'project_id', label: 'Project Id', get: r => dash(r.project_id) },
+  { key: 'quote_id', label: 'Quote ID', get: r => dash(r.quote_id) },
+  { key: 'dept', label: 'Service Department', compact: true, get: r => dash(r.service_dept) },
+  { key: 'project', label: 'Project Name', compact: true, get: r => dash(r.project_name) },
+  { key: 'ptype', label: 'Project Type', compact: true, get: r => dash(r.engagement_model) },
+  { key: 'tech', label: 'Technology', compact: true, get: r => dash(r.technology) },
+  { key: 'conf', label: 'Confirmation Date', get: r => d10(r.confirmed_at) },
+  { key: 'start', label: 'Start Date', get: r => d10(r.start_date) },
+  { key: 'delivery', label: 'Delivery Date', get: r => d10(r.delivery_date) },
+  { key: 'intdel', label: 'Internal Delivery', get: r => d10(r.internal_delivery) },
+  { key: 'inthrs', label: 'Internal hrs', right: true, get: r => num(r.internal_hrs) },
+  { key: 'acthrs', label: 'Actual hrs', right: true, get: r => num(r.actual_hrs) },
+  { key: 'opt', label: 'Optimization', right: true, get: optimisation },
+  { key: 'status', label: 'Project Status', get: r => dash(r.delivery_status) },
+  { key: 'stype', label: 'Service Type', get: r => dash(r.service_type) },
+  { key: 'dtype', label: 'Delivery Type', get: r => dash(r.delivery_type) },
+  { key: 'sme', label: 'PC/SME', compact: true, get: r => dash(r.pm_owner) },
+  { key: 'expert', label: 'Expert', get: r => dash(r.expert) },
+  { key: 'integration', label: 'Integration', get: r => dash(r.integration) },
+  { key: 'agency', label: 'Agency', compact: true, get: r => dash(r.company_name) },
+  { key: 'cname', label: 'Client Name', get: r => dash(r.client_name) },
+  { key: 'cemail', label: 'Client Email', get: r => dash(r.contact_email) },
+  { key: 'ctype', label: 'Client Type', get: r => dash(r.client_type) },
+  { key: 'geo', label: 'Geo', compact: true, get: r => dash(r.geo) },
+  { key: 'cur', label: 'Currency Type', get: r => dash(r.currency) },
+  { key: 'qprice', label: 'Quote Price', right: true, get: r => num(r.quote_price) },
+  { key: 'cprice', label: 'Confirmed Price', right: true, get: r => num(r.local_value) },
+  { key: 'usd', label: 'USD Conversion', compact: true, right: true, get: r => num(r.amount_usd) },
+  { key: 'btype', label: 'Business Type', get: r => dash(r.business_type) },
+  { key: 'am', label: 'Account/Sales Person', compact: true, get: r => dash(r.sales_person) },
+  { key: 'outsrc', label: 'Outsource Price', right: true, get: r => num(r.outsource_price) },
+  { key: 'invno', label: 'Invoice No', get: r => dash(r.invoice_no) },
+  { key: 'invcur', label: 'Invoice Currency', get: r => dash(r.invoice_currency) },
+  { key: 'invamt', label: 'Invoice Amount', right: true, get: r => num(r.invoice_amount) },
+  { key: 'month', label: 'Month-Year', compact: true, get: r => ym(r.booking_month) },
+]
+
 const PAGE = 100
 
 export default function ProjectLedger() {
@@ -42,6 +105,10 @@ export default function ProjectLedger() {
   const [page, setPage] = useState(0)
 
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  // Thirty-five columns is right for reconciling a month against the spreadsheet and far
+  // too many for ticking retainers, which is the other thing this page is for.
+  const [sheetView, setSheetView] = useState(true)
+  const [editing, setEditing] = useState<LedgerRow | null>(null)
   const [target, setTarget] = useState(nextMonth)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
@@ -113,10 +180,11 @@ export default function ProjectLedger() {
   }
 
   const exportCsv = () => {
-    const head = ['Month', 'Company', 'Project', 'Contact', 'Dept', 'Engagement', 'Technology', 'GEO', 'PM', 'AM', 'Amount USD', 'In sheet']
+    // Exports what is on screen, under the sheet's own headers, so a paste into the
+    // spreadsheet lands in the right columns.
+    const head = ['In sheet', ...cols.map(c => c.label)]
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const body = shown.map(r => [ym(r.booking_month), r.company_name, r.project_name, r.contact_email, r.service_dept,
-      r.engagement_model, r.technology, r.geo, r.pm_owner, r.sales_person, r.amount_usd, r.in_sheet ? 'yes' : 'no'].map(esc).join(','))
+    const body = shown.map(r => [r.in_sheet ? 'yes' : 'no', ...cols.map(c => { const v = c.get(r); return v === '—' ? '' : v })].map(esc).join(','))
     const blob = new Blob([[head.map(esc).join(','), ...body].join('\n')], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -131,6 +199,8 @@ export default function ProjectLedger() {
     for (let i = -1; i < 3; i++) out.push(monthKey(new Date(d.getFullYear(), d.getMonth() + (i === -1 ? 1 : -i), 1)))
     return Array.from(new Set(out))
   }, [])
+
+  const cols = useMemo(() => sheetView ? COLUMNS : COLUMNS.filter(c => c.compact), [sheetView])
 
   const sel = 'bg-mav-panel border border-mav-line rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
   const th = 'px-3 py-2 font-medium whitespace-nowrap'
@@ -164,7 +234,13 @@ export default function ProjectLedger() {
           {loading ? 'Loading…' : <>{shown.length.toLocaleString()} line{shown.length === 1 ? '' : 's'} · {clients} client{clients === 1 ? '' : 's'} · <span className="text-white">{money(total)}</span>
             {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}</>}
         </div>
-        <button onClick={exportCsv} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors">Export CSV</button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setSheetView(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
+            {sheetView ? 'Compact view' : 'All sheet columns'}
+          </button>
+          <button onClick={exportCsv} className="text-xs px-3 py-1.5 rounded-md border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-colors">Export CSV</button>
+        </div>
       </div>
 
       {/* The action bar only exists once something is ticked, so it never sits there as
@@ -194,42 +270,42 @@ export default function ProjectLedger() {
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-left text-mav-muted border-b border-mav-line">
+          <thead className="text-left text-white/70 border-b border-mav-line">
             <tr>
               <th className="px-3 py-2 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label="Select all filtered" /></th>
-              <th className={th}>Month</th><th className={th}>Company</th><th className={th}>Project</th>
-              <th className={th}>Dept</th><th className={th}>Engagement</th><th className={th}>Technology</th>
-              <th className={th}>GEO</th><th className={th}>PM</th><th className={th}>AM</th>
-              <th className={`${th} text-right`}>Amount</th><th className={th}>In sheet</th>
+              <th className={th}>In sheet</th>
+              {cols.map(c => <th key={c.key} className={`${th} ${c.right ? 'text-right' : ''}`}>{c.label}</th>)}
+              <th className={th}></th>
             </tr>
           </thead>
           <tbody>
             {pageRows.map(r => (
               <tr key={r.row_key} className={`border-b border-mav-line/60 ${picked.has(r.row_key) ? 'bg-mav-yellow/5' : ''}`}>
                 <td className="px-3 py-2"><input type="checkbox" checked={picked.has(r.row_key)} onChange={() => toggle(r.row_key)} aria-label={`Select ${r.company_name}`} /></td>
-                <td className={td}>{ym(r.booking_month)}</td>
-                <td className={td}>{r.company_name || '—'}</td>
-                <td className={`${td} text-mav-muted max-w-[14rem] truncate`} title={r.project_name || ''}>{r.project_name || '—'}</td>
-                <td className={`${td} text-mav-muted`}>{r.service_dept || '—'}</td>
-                <td className={`${td} text-mav-muted`}>{r.engagement_model || '—'}</td>
-                <td className={`${td} text-mav-muted`}>{r.technology || '—'}</td>
-                <td className={`${td} text-mav-muted`}>{r.geo || '—'}</td>
-                <td className={`${td} text-mav-muted`}>{r.pm_owner || '—'}</td>
-                <td className={`${td} text-mav-muted`}>{r.sales_person || '—'}</td>
-                <td className={`${td} text-right`}>
-                  {money(r.amount_usd)}
-                  {r.currency && r.currency !== 'USD' && r.local_value != null && (
-                    <div className="text-[11px] text-mav-muted">{Number(r.local_value).toLocaleString('en-US')} {r.currency}</div>
-                  )}
-                </td>
                 <td className={td}>
                   {r.in_sheet
-                    ? <span className="text-xs text-mav-muted">yes</span>
+                    ? <span className="text-xs text-white/50">yes</span>
                     : <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/50 text-amber-300">pending</span>}
+                </td>
+                {cols.map(c => {
+                  const v = c.get(r)
+                  return (
+                    <td key={c.key}
+                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-white/25' : 'text-white/80'} max-w-[16rem] truncate`}
+                      title={v === '—' ? '' : v}>{v}</td>
+                  )
+                })}
+                <td className={td}>
+                  {/* Only dashboard rows are editable, and only because only they have
+                      somewhere to put the answer — a sheet row's blanks live in the
+                      source spreadsheet, which this page does not own. */}
+                  {r.source === 'dashboard'
+                    ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
+                    : <span className="text-xs text-white/25">in sheet</span>}
                 </td>
               </tr>
             ))}
-            {!loading && shown.length === 0 && <tr><td colSpan={12} className="px-3 py-6 text-center text-mav-muted">Nothing matches those filters.</td></tr>}
+            {!loading && shown.length === 0 && <tr><td colSpan={cols.length + 3} className="px-3 py-6 text-center text-mav-muted">Nothing matches those filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -247,11 +323,18 @@ export default function ProjectLedger() {
       )}
 
       <p className="text-xs text-mav-muted mt-4 max-w-3xl">
-        <span className="text-amber-300">Pending</span> means confirmed here and not yet in the Google Sheet. Moving a line creates a
-        confirmed entry in the chosen month; it does not write to the sheet, because that feed is replaced wholesale on every sync
-        and anything added there would disappear within the half hour. Until the writer is built, Export CSV is the handover.
-        You can move a client whose PM is you{isAdmin ? ', and as an admin, anyone else' : ''}.
+        Shown in the <span className="text-white">Web, Hub &amp; LP</span> tab&rsquo;s own columns and order.
+        <span className="text-amber-300"> Pending</span> means confirmed here and not yet carried into the sheet by the
+        hourly writer. A greyed <span className="text-white/40">&mdash;</span> on a sheet line is a column the dashboard has
+        never stored, not an empty one; those values are in the source spreadsheet. Dashboard lines can be edited to add
+        what is known later &mdash; Project Id, Quote ID, Expert, hours, invoice &mdash; by the PM who owns them
+        {isAdmin ? ', and by you as an admin' : ''}.
       </p>
+
+      {editing && (
+        <EditLedgerRowDialog row={editing} onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); setStatus('Saved.'); load() }} />
+      )}
     </div>
   )
 }

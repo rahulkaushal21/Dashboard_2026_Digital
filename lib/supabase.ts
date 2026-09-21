@@ -38,6 +38,9 @@ contact_email?: string
 // which is what it actually closed at — the gap between them is the discount.
 client_name?: string; client_type?: string; service_type?: string; delivery_type?: string
 quote_price?: number; start_date?: string; delivery_date?: string
+// The sheet's two human-facing labels. `quote_id` is NOT quote_key: that one is this
+// row's identity and what the Quotes janitors match on, so it is never hand-edited.
+project_id?: string; quote_id?: string
 // DELIVERY state (Under Development / Delivered / On Hold / Cancelled). Deliberately
 // not `status`, which is the SALES state and is overwritten by the Quotes sync every
 // 30 minutes — writing "Delivered" there would push a won deal back into open pipeline.
@@ -951,6 +954,8 @@ export interface ConfirmFields {
   technology?: string; contact_email?: string; business_type?: string
   quote_price?: number | null; start_date?: string | null; delivery_date?: string | null
   delivery_status?: string
+  /** The sheet's human-facing labels. Not quote_key, which is this row's identity. */
+  project_id?: string; quote_id?: string
 }
 
 /**
@@ -973,6 +978,7 @@ export async function confirmOpportunityFull(id: number, f: ConfirmFields): Prom
     p_quote_price: f.quote_price ?? null, p_start_date: f.start_date || null,
     p_delivery_date: f.delivery_date || null, p_delivery_status: f.delivery_status ?? null,
     p_business_type: f.business_type ?? null,
+    p_project_id: f.project_id ?? null, p_quote_id: f.quote_id ?? null,
   })
   if (!error) return { ok: true }
   const m = /still missing:\s*(.+)$/.exec(error.message)
@@ -1296,6 +1302,54 @@ export interface LedgerRow {
   pm_owner?: string; sales_person?: string; booking_month?: string
   amount_usd?: number; local_value?: number; currency?: string
   in_sheet: boolean; confirmed_at?: string; confirmed_by?: string
+  // The rest of the revenue sheet's columns. Sheet-side rows carry null for the ones
+  // web_revenue never stored — the values are in the source spreadsheet and the
+  // dashboard has never held them, so a blank here means "not here", not "empty".
+  project_id?: string; quote_id?: string
+  client_name?: string; client_type?: string; service_type?: string; delivery_type?: string
+  delivery_status?: string; start_date?: string; delivery_date?: string
+  expert?: string; internal_delivery?: string; internal_hrs?: number; actual_hrs?: number
+  integration?: string; quote_price?: number; outsource_price?: number
+  invoice_no?: string; invoice_currency?: string; invoice_amount?: number
+  business_type?: string
+}
+
+/**
+ * The columns somebody fills in after the deal is won — delivery's and finance's.
+ *
+ * Every field is optional and undefined means LEAVE ALONE, so a form that sends three
+ * of them cannot blank the other nine. An empty string clears a text field.
+ */
+export interface ProjectFieldEdits {
+  project_id?: string; quote_id?: string; expert?: string
+  internal_delivery?: string | null; internal_hrs?: number | null; actual_hrs?: number | null
+  integration?: string; outsource_price?: number | null
+  invoice_no?: string; invoice_currency?: string; invoice_amount?: number | null
+  feedback_status?: string; delivery_status?: string
+  delivery_date?: string | null; start_date?: string | null
+}
+
+/**
+ * Save those later-known fields. The RPC can reach these columns and no others — not the
+ * value, not the owner, not whether the deal is won — so a row already booked as revenue
+ * cannot be quietly repriced from a grid.
+ */
+export async function updateProjectFields(id: number, f: ProjectFieldEdits): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase || !id) return { ok: false, error: 'Supabase not configured' }
+  const t = (v?: string) => v === undefined ? null : v
+  const n = (v?: number | null) => v ?? null
+  const { error } = await supabase.rpc('update_project_fields', {
+    p_id: id,
+    p_project_id: t(f.project_id), p_quote_id: t(f.quote_id), p_expert: t(f.expert),
+    p_internal_delivery: f.internal_delivery || null,
+    p_internal_hrs: n(f.internal_hrs), p_actual_hrs: n(f.actual_hrs),
+    p_integration: t(f.integration), p_outsource_price: n(f.outsource_price),
+    p_invoice_no: t(f.invoice_no), p_invoice_currency: t(f.invoice_currency),
+    p_invoice_amount: n(f.invoice_amount), p_feedback_status: t(f.feedback_status),
+    p_delivery_status: t(f.delivery_status),
+    p_delivery_date: f.delivery_date || null, p_start_date: f.start_date || null,
+  })
+  return error ? { ok: false, error: error.message } : { ok: true }
 }
 
 export async function getProjectLedger(): Promise<LedgerRow[]> {

@@ -29,6 +29,17 @@ import {
 export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   deal: Opportunity; onClose: () => void; onConfirmed: () => void
 }) {
+  // ---- identifiers. The sheet's two labels. Defaulted to exactly what the writer would
+  // derive, so leaving them alone produces the same row it always would have, and typing
+  // over them is a deliberate act rather than a correction of a blank.
+  const derivedQuote = deal.quote_ref || ''
+  const derivedProject = (() => {
+    const m = /QUT(\d+)/i.exec(derivedQuote)
+    return m ? `PRJ${m[1]}` : `PRJ-D${deal.id}`
+  })()
+  const [projectId, setProjectId] = useState(deal.project_id || derivedProject)
+  const [quoteId, setQuoteId] = useState(deal.quote_id || derivedQuote)
+
   // ---- what was sold
   const [subject, setSubject] = useState(deal.source_subject || '')
   const [serviceDept, setServiceDept] = useState(deal.service_dept || '')
@@ -184,6 +195,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
       quote_price: quotePrice === '' ? null : Number(quotePrice),
       start_date: startDate || null, delivery_date: deliveryDate || null,
       delivery_status: deliveryStatus,
+      project_id: projectId, quote_id: quoteId,
     })
     setSaving(false)
     if (res.ok) { onConfirmed(); return }
@@ -293,7 +305,18 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
 
         {/* Body */}
         <div className="px-5 py-4 overflow-y-auto">
-          <Section n={1} title="The project" blurb="What was sold, and who builds it.">
+          <Section n={1} title="Identifiers" blurb="The sheet's Project Id and Quote ID. Filled in for you — change them if the real ones differ.">
+            <F label="Project Id">
+              <input className={`${ctl} ${border(false)}`} value={projectId} onChange={e => setProjectId(e.target.value)}
+                placeholder="PRJ…" />
+            </F>
+            <F label="Quote ID">
+              <input className={`${ctl} ${border(false)}`} value={quoteId} onChange={e => setQuoteId(e.target.value)}
+                placeholder="QUT…" />
+            </F>
+          </Section>
+
+          <Section n={2} title="The project" blurb="What was sold, and who builds it.">
             <F label="Project title" wide
               hint="An email-sourced deal inherits the mail's subject line — rename it to what the project is actually called.">
               <input className={`${ctl} ${border(false)}`} value={subject} onChange={e => setSubject(e.target.value)}
@@ -317,7 +340,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
             </F>
           </Section>
 
-          <Section n={2} title="The client" blurb="The agency is the company; the client name is the person at it.">
+          <Section n={3} title="The client" blurb="The agency is the company; the client name is the person at it.">
             <F label="Agency">
               <input className={`${ctl} border-white/10 bg-white/[0.04] text-white/70 cursor-not-allowed`} value={deal.company_name || ''} readOnly
                 title="The company this deal belongs to. Changing it would make it a different deal." />
@@ -347,7 +370,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
             </F>
           </Section>
 
-          <Section n={3} title="The money" blurb="What you quoted, and what it actually closed at.">
+          <Section n={4} title="The money" blurb="What you quoted, and what it actually closed at.">
             <F label="Quoted price" hint="Before negotiation. Leave blank if it was never formally quoted.">
               <input type="number" className={`${ctl} ${border(false)}`} value={quotePrice}
                 onChange={e => setQuotePrice(e.target.value)} placeholder="optional" />
@@ -376,7 +399,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
             )}
           </Section>
 
-          <Section n={4} title="Dates" blurb="When it was quoted, when it was won, and when it runs.">
+          <Section n={5} title="Dates" blurb="When it was quoted, when it was won, and when it runs.">
             <F label="Quote date" need={missing.includes('Quote date')}>
               <input type="date" className={`${ctl} ${border(missing.includes('Quote date'))}`} value={quoteDate}
                 onChange={e => setQuoteDate(e.target.value)} />
@@ -396,7 +419,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
             </F>
           </Section>
 
-          <Section n={5} title="Delivery and owners" blurb="How it is scheduled, and who is accountable.">
+          <Section n={6} title="Delivery and owners" blurb="How it is scheduled, and who is accountable.">
             <F label="Delivery type" need={missing.includes('Delivery type')} auto={has('deliveryType')} guess={guessed('deliveryType')}>
               <Pick value={deliveryType} onChange={setDeliveryType} options={vocab.delivery_type}
                 bad={missing.includes('Delivery type')} />
