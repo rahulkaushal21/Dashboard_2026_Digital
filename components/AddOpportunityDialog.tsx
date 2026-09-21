@@ -52,6 +52,9 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   // than the same mistake going through on a retry.
   const [needsForce, setNeedsForce] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
+  // Which fields the last client pick filled in. Held in a ref rather than state because
+  // nothing renders from it — it only needs to be right by the time the next pick runs.
+  const fromClient = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     getFxRates().then(setRates)
@@ -79,16 +82,33 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
     setPicked(c)
     setCompany(c.company_name)
     setShowList(false)
-    // Only fill what is still empty, so a value typed before choosing the client is not
-    // overwritten by history.
-    if (c.currency) setCurrency(c.currency)
-    setGeo(g => g || c.geo || '')
-    setSalesPerson(v => v || c.sales_person || '')
-    setPmOwner(v => v || c.pm_owner || '')
-    setTechnology(v => v || c.technology || '')
-    setServiceDept(v => v || c.service_dept || '')
-    setProjectType(v => v || c.project_type || '')
-    setContactEmail(v => v || c.contact_email || '')
+
+    // Replace a field when it is empty, OR when the only reason it holds anything is that
+    // a PREVIOUS pick put it there. Anything the person typed themselves is left alone.
+    //
+    // The earlier version only filled blanks, which is right the first time and wrong
+    // every time after: changing the client left the last client's PM, contact email and
+    // department sitting in the form, attached to the new client's name. The clearing
+    // case matters just as much — if the new client has no contact email, the field must
+    // go empty rather than keep the old one's.
+    const prev = fromClient.current
+    const now = new Set<string>()
+    const apply = (key: string, incoming: string | undefined, current: string, set: (v: string) => void) => {
+      if (!prev.has(key) && current.trim()) return
+      const v = (incoming || '').trim()
+      set(v)
+      if (v) now.add(key)
+    }
+    // Currency is a select with no empty option, so it falls back to USD rather than ''.
+    apply('currency', c.currency || 'USD', currency === 'USD' ? '' : currency, setCurrency)
+    apply('geo', c.geo, geo, setGeo)
+    apply('salesPerson', c.sales_person, salesPerson, setSalesPerson)
+    apply('pmOwner', c.pm_owner, pmOwner, setPmOwner)
+    apply('technology', c.technology, technology, setTechnology)
+    apply('serviceDept', c.service_dept, serviceDept, setServiceDept)
+    apply('projectType', c.project_type, projectType, setProjectType)
+    apply('contactEmail', c.contact_email, contactEmail, setContactEmail)
+    fromClient.current = now
   }
 
   const valueN = value === '' ? null : Number(value)
