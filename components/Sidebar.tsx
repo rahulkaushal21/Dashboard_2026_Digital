@@ -2,13 +2,18 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Inbox, ClipboardList, Table2 } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
 // A nav entry is either a link or a group of links. Groups exist so Operations can
 // hold several sub-pages without crowding the top level; access is still granted
 // per sub-page, never per group.
+//
+// ADDING A PAGE MEANS EDITING TWO LISTS. This one draws the sidebar; PAGES in
+// lib/access.ts is what canSee() and the route guard read. A page added to PAGES alone
+// works perfectly if you type its URL and is invisible to everyone who does not — which
+// is exactly how Needs Input, Project Sheet and Revenue Sheet shipped unreachable.
 type Leaf = { href: string; label: string; icon: any }
 type Group = { label: string; icon: any; children: Leaf[] }
 type Entry = Leaf | Group
@@ -17,6 +22,12 @@ const isGroup = (e: Entry): e is Group => 'children' in e
 const nav: Entry[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
+  // The three pages added for the 1 Oct change, kept together and directly under
+  // Opportunities: they are the daily loop — what needs you, what is booked this
+  // month, and the sheet it all reconciles against.
+  { href: '/needs-input', label: 'Needs Input', icon: Inbox },
+  { href: '/project-sheet', label: 'Project Sheet', icon: ClipboardList },
+  { href: '/revenue-sheet', label: 'Revenue Sheet', icon: Table2 },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
