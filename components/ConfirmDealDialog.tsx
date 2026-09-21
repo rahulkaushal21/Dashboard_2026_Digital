@@ -1,22 +1,25 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { confirmOpportunityFull, opportunityMissingFields, type Opportunity } from '@/lib/supabase'
+import { confirmOpportunityFull, opportunityMissingFields, getFxRates, toUsd, type FxRate, type Opportunity } from '@/lib/supabase'
+import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS } from '@/lib/deal-fields'
 
 // Confirming a deal — the moment it becomes revenue.
 //
 // Because the spreadsheet stops being the record on 1 Oct, there is no later pass where
 // somebody fills in the gaps. So this asks for everything the revenue record needs and
-// refuses to go through while any of it is absent. The refusal is enforced in the
-// database; this form exists to make it easy to satisfy rather than to be the rule.
-
-const GEOS = ['US', 'UK', 'AU']
-const PROJECT_TYPES = ['New Development', 'Ad-hoc', 'Maintanance', 'Additional Pages', 'Dedicated', 'Partial Dedicated', 'Ballpark']
+// refuses while any of it is absent. The refusal is enforced in the database; this form
+// exists to make it easy to satisfy rather than to be the rule.
 
 export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   deal: Opportunity; onClose: () => void; onConfirmed: () => void
 }) {
-  const [estValue, setEstValue] = useState(deal.est_value != null ? String(deal.est_value) : '')
+  // The figure shown is the one as QUOTED. A deal already converted to USD keeps its
+  // local figure in local_value; older rows only have est_value, which for a USD deal is
+  // the same number anyway.
+  const [localValue, setLocalValue] = useState(
+    deal.local_value != null ? String(deal.local_value) : deal.est_value != null ? String(deal.est_value) : '')
   const [currency, setCurrency] = useState(deal.currency || 'USD')
+  const [subject, setSubject] = useState(deal.source_subject || '')
   const [quoteDate, setQuoteDate] = useState((deal.source_date || '').slice(0, 10))
   const [serviceDept, setServiceDept] = useState(deal.service_dept || '')
   const [projectType, setProjectType] = useState(deal.project_type || '')
@@ -26,21 +29,26 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   const [confirmedOn, setConfirmedOn] = useState(() => new Date().toISOString().slice(0, 10))
   const [note, setNote] = useState('')
 
+  const [rates, setRates] = useState<FxRate[]>([])
   const [missing, setMissing] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Ask the database what is missing rather than recomputing it here. One definition,
-  // so the checklist can never disagree with the rule that actually refuses the write.
+  // Ask the database what is missing rather than recomputing it here. One definition, so
+  // the checklist cannot disagree with the rule that actually refuses the write.
   useEffect(() => { opportunityMissingFields(deal.id).then(setMissing) }, [deal.id])
+  useEffect(() => { getFxRates().then(setRates) }, [])
+
+  const amt = localValue === '' ? null : Number(localValue)
+  const usd = toUsd(amt, currency, rates)
+  const converted = currency.toUpperCase() !== 'USD' && usd != null
 
   const save = async () => {
     setSaving(true); setError('')
     const res = await confirmOpportunityFull(deal.id, {
-      est_value: estValue === '' ? null : Number(estValue),
-      currency, quote_date: quoteDate || null, service_dept: serviceDept,
-      project_type: projectType, sales_person: salesPerson, pm_owner: pmOwner,
-      geo, confirmed_on: confirmedOn, note,
+      est_value: amt, currency, subject, quote_date: quoteDate || null,
+      service_dept: serviceDept, project_type: projectType, sales_person: salesPerson,
+      pm_owner: pmOwner, geo, confirmed_on: confirmedOn, note,
     })
     setSaving(false)
     if (res.ok) { onConfirmed(); return }
@@ -77,15 +85,57 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <F label="Value" need={needs('Value')}><input type="number" className={inputCls} value={estValue} onChange={e => setEstValue(e.target.value)} /></F>
-          <F label="Currency" need={needs('Currency')}><input className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)} /></F>
+          {/* An email-sourced deal inherits the mail's subject line, which is rarely what
+              the project should be called. Editable here, where someone is looking anyway. */}
+          <div className="sm:col-span-2">
+            <F label="Project title"><input className={inputCls} value={subject} onChange={e => setSubject(e.target.value)} placeholder="What this project is called" /></F>
+          </div>
+
+          <F label="Value" need={needs('Value')}>
+            <input type="number" className={inputCls} value={localValue} onChange={e => setLocalValue(e.target.value)} />
+          </F>
+          <F label="Currency" need={needs('Currency')}>
+            <select className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)}>
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </F>
+
+          {/* Say what will actually be booked. Everything downstream adds up USD, so a
+              GBP quote stored raw would overstate the pipeline by a third — showing the
+              converted figure here means nobody discovers that later. */}
+          {converted && (
+            <div className="sm:col-span-2 -mt-1 text-xs text-mav-muted">
+              Books as <span className="text-white">${usd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> USD
+              <span className="ml-1">· rate {(rates.find(r => r.currency.toUpperCase() === (currency.toUpperCase() === 'EURO' ? 'EUR' : currency.toUpperCase()))?.rate_to_usd ?? 1)} per {currency.toUpperCase()}, from Settings</span>
+            </div>
+          )}
+
           <F label="Quote date" need={needs('Quote date')}><input type="date" className={inputCls} value={quoteDate} onChange={e => setQuoteDate(e.target.value)} /></F>
           <F label="Confirmed on"><input type="date" className={inputCls} value={confirmedOn} onChange={e => setConfirmedOn(e.target.value)} /></F>
-          <F label="Service / dept" need={needs('Service / dept')}><input className={inputCls} value={serviceDept} onChange={e => setServiceDept(e.target.value)} placeholder="Web" /></F>
-          <F label="Project type" need={needs('Project type')}><select className={inputCls} value={projectType} onChange={e => setProjectType(e.target.value)}><option value="">—</option>{PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></F>
+
+          <F label="Service / dept" need={needs('Service / dept')}>
+            <select className={inputCls} value={serviceDept} onChange={e => setServiceDept(e.target.value)}>
+              <option value="">—</option>
+              {SERVICE_DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
+              {/* An older row may hold a department no longer on the list. Keep it selectable
+                  so confirming does not silently retag the deal as something else. */}
+              {deal.service_dept && !SERVICE_DEPTS.includes(deal.service_dept as any) && (
+                <option value={deal.service_dept}>{deal.service_dept} (existing)</option>
+              )}
+            </select>
+          </F>
+          <F label="Project type" need={needs('Project type')}>
+            <select className={inputCls} value={projectType} onChange={e => setProjectType(e.target.value)}>
+              <option value="">—</option>{PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </F>
           <F label="Account manager" need={needs('Account manager')}><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>
           <F label="PM owner" need={needs('PM owner')}><input className={inputCls} value={pmOwner} onChange={e => setPmOwner(e.target.value)} /></F>
-          <F label="Geography" need={needs('Geography')}><select className={inputCls} value={geo} onChange={e => setGeo(e.target.value)}><option value="">—</option>{GEOS.map(g => <option key={g} value={g}>{g}</option>)}</select></F>
+          <F label="Geography" need={needs('Geography')}>
+            <select className={inputCls} value={geo} onChange={e => setGeo(e.target.value)}>
+              <option value="">—</option>{GEOS.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </F>
           <div className="sm:col-span-2"><F label="Note (optional)"><input className={inputCls} value={note} onChange={e => setNote(e.target.value)} placeholder="How it was confirmed" /></F></div>
         </div>
 

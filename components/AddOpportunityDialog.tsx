@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { addOpportunity, findPossibleDuplicates, type DuplicateHit } from '@/lib/supabase'
+import { addOpportunity, findPossibleDuplicates, getFxRates, toUsd, type DuplicateHit, type FxRate } from '@/lib/supabase'
+import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, CHANNELS } from '@/lib/deal-fields'
 
 // Adding a deal the email scan did not catch — a referral, an upsell raised on a call,
 // work that came out of an event.
@@ -10,10 +11,6 @@ import { addOpportunity, findPossibleDuplicates, type DuplicateHit } from '@/lib
 // head until it is won, which is the gap this whole change exists to close. The
 // completeness gate on CONFIRMING is what keeps the revenue record honest, so entry can
 // afford to be forgiving.
-
-const CHANNELS = ['referral', 'linkedin', 'upsell', 'event', 'inbound', 'other']
-const GEOS = ['US', 'UK', 'AU']
-const PROJECT_TYPES = ['New Development', 'Ad-hoc', 'Maintanance', 'Additional Pages', 'Dedicated', 'Partial Dedicated', 'Ballpark']
 
 const money = (n?: number) => n == null ? '—' : `$${Math.round(n).toLocaleString('en-US')}`
 
@@ -31,6 +28,9 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   const [geo, setGeo] = useState('')
   const [subject, setSubject] = useState('')
   const [note, setNote] = useState('')
+
+  const [rates, setRates] = useState<FxRate[]>([])
+  useEffect(() => { getFxRates().then(setRates) }, [])
 
   const [dupes, setDupes] = useState<DuplicateHit[]>([])
   const [saving, setSaving] = useState(false)
@@ -101,9 +101,14 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
           <F label="Where it came from"><select className={inputCls} value={channel} onChange={e => setChannel(e.target.value)}>{CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}</select></F>
           <F label="Quote date"><input type="date" className={inputCls} value={quoteDate} onChange={e => setQuoteDate(e.target.value)} /></F>
           <F label="Value"><input type="number" className={inputCls} value={value} onChange={e => { setValue(e.target.value); setNeedsForce(false) }} placeholder="0" /></F>
-          <F label="Currency"><input className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)} /></F>
-          <F label="Service / dept"><input className={inputCls} value={serviceDept} onChange={e => setServiceDept(e.target.value)} placeholder="Web" /></F>
+          <F label="Currency"><select className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)}>{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></F>
+          <F label="Service / dept"><select className={inputCls} value={serviceDept} onChange={e => setServiceDept(e.target.value)}><option value="">—</option>{SERVICE_DEPTS.map(d => <option key={d} value={d}>{d}</option>)}</select></F>
           <F label="Project type"><select className={inputCls} value={projectType} onChange={e => setProjectType(e.target.value)}><option value="">—</option>{PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></F>
+          {currency.toUpperCase() !== 'USD' && valueN != null && !Number.isNaN(valueN) && (
+            <div className="sm:col-span-2 -mt-1 text-xs text-mav-muted">
+              Books as <span className="text-white">${(toUsd(valueN, currency, rates) ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> USD · rate from Settings
+            </div>
+          )}
           <F label="Technology"><input className={inputCls} value={technology} onChange={e => setTechnology(e.target.value)} placeholder="Shopify, WordPress…" /></F>
           <F label="Geography"><select className={inputCls} value={geo} onChange={e => setGeo(e.target.value)}><option value="">—</option>{GEOS.map(g => <option key={g} value={g}>{g}</option>)}</select></F>
           <F label="Account manager"><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>

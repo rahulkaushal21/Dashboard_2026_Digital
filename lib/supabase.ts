@@ -30,6 +30,9 @@ quote_date?: string; origin?: string; est_value?: number; next_step?: string; en
 // from when email did not catch it — referral, LinkedIn, upsell, event, inbound.
 channel?: string; currency?: string; service_dept?: string; project_type?: string
 created_by?: string; created_at?: string; confirmed_by?: string; confirmed_at?: string
+// The figure as QUOTED, in `currency`. est_value is always USD — every total, forecast
+// and scorecard adds est_value up without asking what currency it was.
+local_value?: number
 // "Might not come" — a human call that this open quote probably won't convert.
 // The deal stays Open (it isn't Lost), but it's discounted from the realistic view.
 unlikely?: boolean; unlikely_reason?: string; unlikely_at?: string; unlikely_by?: string
@@ -925,6 +928,9 @@ export interface ConfirmFields {
   est_value?: number | null; currency?: string; quote_date?: string | null
   service_dept?: string; project_type?: string; sales_person?: string
   pm_owner?: string; geo?: string; confirmed_on?: string | null; note?: string
+  /** The project title. Editable at confirm time because an email-sourced deal inherits
+   *  the mail's subject line, which is rarely what the project should be called. */
+  subject?: string
 }
 
 /**
@@ -940,6 +946,7 @@ export async function confirmOpportunityFull(id: number, f: ConfirmFields): Prom
     p_project_type: f.project_type ?? null, p_sales_person: f.sales_person ?? null,
     p_pm_owner: f.pm_owner ?? null, p_geo: f.geo ?? null,
     p_confirmed_on: f.confirmed_on || null, p_note: f.note ?? null,
+    p_subject: f.subject ?? null,
   })
   if (!error) return { ok: true }
   const m = /still missing:\s*(.+)$/.exec(error.message)
@@ -1067,4 +1074,44 @@ export async function getNeedsInput(): Promise<NeedsInputRow[]> {
   if (!supabase) return []
   const { data } = await supabase.from('web_needs_input').select('*').order('priority').order('days_waiting', { ascending: false })
   return (data as NeedsInputRow[]) || []
+}
+
+// ---- Currency ------------------------------------------------------------
+//
+// est_value is USD everywhere in this dashboard. A quote raised in GBP and stored raw
+// would overstate the pipeline by a third, so the local figure lives in local_value and
+// est_value holds the conversion. Rates are held in the database rather than hard-coded
+// because they move, and a rate nobody can change without a deploy is a rate that goes
+// stale silently.
+
+export interface FxRate { currency: string; rate_to_usd: number; updated_at?: string; updated_by?: string }
+
+export async function getFxRates(): Promise<FxRate[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('fx_rates').select('*').order('currency')
+  return (data as FxRate[]) || []
+}
+
+export async function saveFxRate(currency: string, rate: number, updatedBy: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  if (!(rate > 0)) return { error: 'A rate has to be greater than zero.' }
+  const { error } = await supabase.from('fx_rates')
+    .upsert({ currency: currency.trim().toUpperCase(), rate_to_usd: rate, updated_by: updatedBy, updated_at: new Date().toISOString() })
+  return error ? { error: error.message } : {}
+}
+
+export async function deleteFxRate(currency: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { error } = await supabase.from('fx_rates').delete().eq('currency', currency.trim().toUpperCase())
+  return error ? { error: error.message } : {}
+}
+
+/** Convert with a rate table already loaded, for a live preview while typing. */
+export const toUsd = (amount: number | null | undefined, currency: string | undefined, rates: FxRate[]): number | null => {
+  if (amount == null || Number.isNaN(amount)) return null
+  const c = (currency || 'USD').trim().toUpperCase()
+  // 'EURO' appears in older sheet rows; it means EUR.
+  const key = c === 'EURO' ? 'EUR' : c
+  const r = rates.find(x => x.currency.toUpperCase() === key)?.rate_to_usd
+  return Math.round(amount * (r ?? 1) * 100) / 100
 }
