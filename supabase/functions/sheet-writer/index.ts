@@ -319,6 +319,11 @@ async function buildRevenue(sb: any): Promise<string[][]> {
     put(col.am, s(o.sales_person));
     // Filled in after the fact, from the ledger, by delivery and by finance. Blank until
     // then — which is the honest state, not a gap to paper over.
+    //
+    // The Expert column says "Contractor" on outsourced work, matching what the tab's own
+    // 3,106 filled rows already say. WHICH contractor is held in the dashboard only: the
+    // tab has no column for it, and inventing one would break a paste back into the
+    // source spreadsheet.
     put(col.expert, s(o.expert));
     put(col.intDelivery, sheetDate(o.internal_delivery));
     put(col.intHrs, o.internal_hrs == null ? "" : String(o.internal_hrs));
