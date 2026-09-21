@@ -64,6 +64,17 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
 
   const matches = useMemo(() => searchClients(clients, company), [clients, company])
 
+  // Once a client has been chosen there is nothing left to suggest, and the one entry the
+  // search still returns is the client already in the box.
+  //
+  // This matters more than it sounds. onFocus reopens the list, so without this it
+  // reopened on every click back into the field — offering only the name already typed,
+  // and parked on top of Project name, which is the next thing anyone fills in. The list
+  // was closing correctly; it was being reopened with nothing to say.
+  const suggestions = useMemo(
+    () => (picked && company.trim().toLowerCase() === picked.company_name.trim().toLowerCase()) ? [] : matches,
+    [picked, company, matches])
+
   const pick = (c: ClientDefaults) => {
     setPicked(c)
     setCompany(c.company_name)
@@ -116,12 +127,13 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
     if (res.id) onAdded(res.id)
   }
 
-  const inputCls = 'mt-1 w-full bg-mav-dark border border-mav-line rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:border-mav-yellow/60'
+  const inputCls = 'mt-1 w-full bg-mav-dark border border-white/20 rounded-md px-3 py-2 text-sm text-white placeholder:text-white/35 \
+    focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors'
   const F = ({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) => (
     <label className="block">
-      <span className="text-xs text-mav-muted">{label}</span>
+      <span className="text-xs font-medium text-white/85">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-mav-muted mt-0.5">{hint}</span>}
+      {hint && <span className="block text-[11px] text-white/50 mt-0.5">{hint}</span>}
     </label>
   )
 
@@ -134,9 +146,9 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h2 className="text-lg font-semibold">Add an opportunity</h2>
-            <p className="text-xs text-mav-muted mt-0.5">For a deal email did not catch. Start typing the client — if we have worked with them, the rest fills itself.</p>
+            <p className="text-xs text-white/60 mt-0.5">For a deal email did not catch. Start typing the client — if we have worked with them, the rest fills itself.</p>
           </div>
-          <button onClick={onClose} className="text-mav-muted hover:text-white text-xl leading-none">&times;</button>
+          <button onClick={onClose} className="text-white/60 hover:text-white text-xl leading-none">&times;</button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -145,14 +157,16 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
               <div className="relative">
                 <input className={inputCls} value={company} autoFocus placeholder="Start typing — three letters is enough"
                   onChange={e => { setCompany(e.target.value); setPicked(null); setNeedsForce(false); setShowList(true) }}
-                  onFocus={() => setShowList(true)} autoComplete="off" />
-                {showList && matches.length > 0 && (
-                  <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-mav-dark border border-mav-line rounded-md shadow-xl">
-                    {matches.map(c => (
+                  onFocus={() => { if (!picked) setShowList(true) }}
+                  onKeyDown={e => { if (e.key === 'Escape' && showList) { e.stopPropagation(); setShowList(false) } }}
+                  autoComplete="off" />
+                {showList && suggestions.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-mav-panel border border-white/25 rounded-md shadow-2xl">
+                    {suggestions.map(c => (
                       <button key={c.client_key} type="button" onClick={() => pick(c)}
-                        className="w-full text-left px-3 py-2 hover:bg-mav-panel transition-colors border-b border-mav-line/40 last:border-0">
+                        className="w-full text-left px-3 py-2 hover:bg-mav-yellow/15 transition-colors border-b border-white/10 last:border-0">
                         <div className="text-sm">{c.company_name}</div>
-                        <div className="text-[11px] text-mav-muted">
+                        <div className="text-[11px] text-white/55">
                           {c.is_existing_client
                             ? `${c.booking_months} month${c.booking_months === 1 ? '' : 's'} booked · ${money(c.lifetime_usd)} lifetime`
                             : `${c.deals} deal${c.deals === 1 ? '' : 's'}, never booked`}
@@ -172,7 +186,7 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
                   Known client — filled from their history. {picked.is_existing_client ? `${picked.booking_months} months booked, ${money(picked.lifetime_usd)} lifetime.` : 'Quoted before, never booked.'} Change anything that is different this time.
                 </div>
               ) : matches.length === 0 ? (
-                <div className="mt-1.5 text-[11px] text-mav-muted">No match — this will be recorded as a new client.</div>
+                <div className="mt-1.5 text-[11px] text-white/60">No match — this will be recorded as a new client.</div>
               ) : null
             )}
           </div>
@@ -184,7 +198,7 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
           <F label="Value"><input type="number" className={inputCls} value={value} onChange={e => { setValue(e.target.value); setNeedsForce(false) }} placeholder="0" /></F>
           <F label="Currency"><select className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)}>{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></F>
           {converted && (
-            <div className="sm:col-span-2 -mt-1 text-xs text-mav-muted">
+            <div className="sm:col-span-2 -mt-1 text-xs text-white/70">
               Books as <span className="text-white">${usd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> USD · rate from Settings
             </div>
           )}
@@ -249,7 +263,7 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
         )}
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors">Cancel</button>
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-colors">Cancel</button>
           <button onClick={save} disabled={saving || !company.trim()}
             className="text-xs px-4 py-1.5 rounded-md bg-mav-yellow text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
             {saving ? 'Adding…' : needsForce ? 'Add anyway' : 'Add opportunity'}
