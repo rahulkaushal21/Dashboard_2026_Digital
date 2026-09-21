@@ -843,20 +843,26 @@ return (
  ? 'Recorded on the dashboard only — the Quotes sheet is never edited automatically. Change it any time; nothing here is final.'
  : 'Record the outcome here the moment you know it. The Quotes sheet still needs updating by hand afterwards.'}
 </div>
-<div className="flex flex-wrap gap-2">
-{/* The 1 Oct path: fill anything missing and book it, in one step. The quick toggle
-    beside it stays for the older flow, where the Quotes sheet is still the record and
-    this only records a call. */}
+{/* Confirming is ONE action now. There used to be a quick toggle beside this that
+    recorded the call without the details, from the era when the Quotes sheet was the
+    record and could be finished by hand afterwards. After the 1 Oct cutover there is
+    no afterwards, so a confirmation that skips the details would write an unfinishable
+    half-row into the sheet. Full width because it is the thing you came here to do. */}
 {canConfirmLocally(sel, me, iAmAdmin) && !sel.won && (
 <button onClick={() => setConfirming(sel)}
-className="text-xs px-3 py-1.5 rounded-md bg-green-500 text-black font-medium hover:brightness-110 transition">
-Confirm with details…
+className="w-full mb-2 px-3 py-2.5 rounded-md bg-green-500 text-black text-sm font-bold hover:brightness-110 transition">
+Mark Confirmed
 </button>
 )}
+<div className="flex flex-wrap gap-2">
+{/* The undo half of the old toggle has to stay: it is the only way back from a
+    confirmation made by mistake. */}
+{sel.email_won && (
 <button disabled={savingWon} onClick={() => toggleConfirmed(sel)}
-className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_won ? 'border-mav-line text-mav-muted hover:text-white' : 'border-green-500/50 text-green-300 hover:bg-green-500/15'}`}>
-{savingWon ? 'Saving…' : sel.email_won ? 'Undo confirm' : '✓ Mark Confirmed'}
+className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors disabled:opacity-50">
+{savingWon ? 'Saving…' : 'Undo confirm'}
 </button>
+)}
 <button disabled={savingLost} onClick={() => toggleLost(sel)}
 className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-white' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
 {savingLost ? 'Saving…' : sel.email_lost ? 'Undo Lost' : '✗ Mark Lost'}
