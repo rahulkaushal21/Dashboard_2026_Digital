@@ -5,6 +5,7 @@ import { getSettings, saveSettings } from '@/lib/config'
 import { Trash2 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { listAdmins, addAdmin, removeAdmin, isOwner, OWNER_EMAIL, ALLOWED_DOMAINS, type AdminRow } from '@/lib/access'
+import PmDirectoryPanel from '@/components/PmDirectoryPanel'
 
 function SettingsForm({ canEdit }: { canEdit: boolean }) {
   const [sheet, setSheet] = useState('')
@@ -166,6 +167,7 @@ export default function Admin() {
         <SettingsForm canEdit={canEdit} />
       </div>
       <AdminsPanel />
+      <PmDirectoryPanel canEdit={canEdit} />
     </div>
   )
 }

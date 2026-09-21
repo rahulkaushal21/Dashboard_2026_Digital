@@ -970,3 +970,76 @@ export async function findPossibleDuplicates(company: string, estValue?: number 
   if (error || !data) return []
   return data as DuplicateHit[]
 }
+
+// ---- Managing the PM directory (Settings) ---------------------------------
+//
+// Writes go straight at the table rather than through an RPC, because the RLS
+// policy on pm_directory already does the work: reads for any signed-in user,
+// writes only where is_dashboard_admin() passes against the Google JWT. A
+// non-admin's insert affects zero rows and returns an error, which is exactly
+// the behaviour an RPC would have given us.
+//
+// This is an AUTHORISATION table — anyone who can add a row can grant themselves
+// the right to confirm somebody else's revenue — so it is deliberately as tightly
+// held as dashboard_admins.
+
+export async function listDirectory(): Promise<DirectoryMember[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('pm_directory')
+    .select('email, name, slug, team, aliases, active')
+    .order('team', { ascending: true }).order('name', { ascending: true })
+  return (data as DirectoryMember[]) || []
+}
+
+const slugify = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+/**
+ * Add somebody to the directory.
+ *
+ * Aliases are the spellings this person appears under in the free-text owner
+ * columns, and they are what decides whose deals somebody may confirm. They are
+ * matched EXACTLY, never as substrings, which is why a bare first name is worth
+ * thinking twice about: two people here share one, and a careless alias hands one
+ * person's deals to the other.
+ */
+export async function addDirectoryMember(m: { email: string; name: string; team: PmTeam; aliases: string[]; note?: string }, addedBy: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const email = m.email.trim().toLowerCase()
+  const aliases = m.aliases.map(a => a.trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean)
+  if (!email || !m.name.trim()) return { error: 'Name and email are both required.' }
+  if (!aliases.length) return { error: 'At least one alias is needed, or none of their deals will match them.' }
+  const { error } = await supabase.from('pm_directory').insert({
+    email, name: m.name.trim(), slug: slugify(m.name), team: m.team,
+    aliases, active: true, added_by: addedBy, note: m.note || null,
+  })
+  return error ? { error: error.message } : {}
+}
+
+export async function updateDirectoryMember(email: string, patch: Partial<{ name: string; team: PmTeam; aliases: string[]; active: boolean }>): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const body: any = { ...patch }
+  if (patch.aliases) body.aliases = patch.aliases.map(a => a.trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean)
+  if (patch.name) body.slug = slugify(patch.name)
+  const { error } = await supabase.from('pm_directory').update(body).eq('email', email.trim().toLowerCase())
+  return error ? { error: error.message } : {}
+}
+
+/**
+ * Remove somebody. Deactivating is usually the better move for a leaver: their
+ * past deals keep a resolvable owner for the audit trail, and nothing they ever
+ * confirmed becomes unattributable.
+ */
+export async function removeDirectoryMember(email: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { error } = await supabase.from('pm_directory').delete().eq('email', email.trim().toLowerCase())
+  return error ? { error: error.message } : {}
+}
+
+/** How many live deals this person is named on — what they would lose if deactivated. */
+export async function directoryMemberDealCount(m: DirectoryMember): Promise<number> {
+  if (!supabase) return 0
+  const col = m.team === 'nbd' ? 'sales_person' : 'pm_owner'
+  const { data } = await supabase.from('opportunities').select(`id, ${col}`).eq('won', false)
+  if (!data) return 0
+  return (data as any[]).filter(r => ownerMatches(r[col], m.aliases)).length
+}
