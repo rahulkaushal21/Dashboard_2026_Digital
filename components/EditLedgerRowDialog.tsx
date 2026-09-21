@@ -1,6 +1,6 @@
 'use client'
-import { useState } from 'react'
-import { updateProjectFields, type LedgerRow } from '@/lib/supabase'
+import { useEffect, useState } from 'react'
+import { updateProjectFields, getPickList, CONTRACTOR, type LedgerRow } from '@/lib/supabase'
 import { CURRENCIES } from '@/lib/deal-fields'
 
 // The columns somebody fills in AFTER the deal is won.
@@ -27,6 +27,10 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const [deliveryDate, setDeliveryDate] = useState((row.delivery_date || '').slice(0, 10))
   const [internalDelivery, setInternalDelivery] = useState((row.internal_delivery || '').slice(0, 10))
   const [expert, setExpert] = useState(row.expert || '')
+  const [contractorName, setContractorName] = useState(row.contractor_name || '')
+  const [outsourceCur, setOutsourceCur] = useState(row.outsource_currency || 'USD')
+  const [experts, setExperts] = useState<string[]>([])
+  const [contractors, setContractors] = useState<string[]>([])
   const [internalHrs, setInternalHrs] = useState(row.internal_hrs != null ? String(row.internal_hrs) : '')
   const [actualHrs, setActualHrs] = useState(row.actual_hrs != null ? String(row.actual_hrs) : '')
   const [integration, setIntegration] = useState(row.integration || '')
@@ -37,6 +41,8 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => { getPickList('expert').then(setExperts); getPickList('contractor').then(setContractors) }, [])
 
   // The sheet shows this as a percentage and it is pure arithmetic, so it is computed
   // rather than typed — one less field to get wrong, and it updates as the hours are
@@ -51,6 +57,7 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
     setSaving(true); setError('')
     const res = await updateProjectFields(row.source_id, {
       project_id: projectId, quote_id: quoteId, expert, integration,
+      contractor_name: contractorName, outsource_currency: outsourceCur,
       delivery_status: status, invoice_no: invoiceNo, invoice_currency: invoiceCur,
       internal_delivery: internalDelivery || null,
       start_date: startDate || null, delivery_date: deliveryDate || null,
@@ -106,7 +113,16 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
                 {status && !STATUSES.includes(status) && <option value={status}>{status} (not in list)</option>}
               </select>
             </F>
-            <F label="Expert"><input className={ctl} value={expert} onChange={e => setExpert(e.target.value)} placeholder="Who is building it" /></F>
+            <F label="Expert">
+              <select className={ctl} value={expert} onChange={e => setExpert(e.target.value)}>
+                <option value="">— choose —</option>
+                {experts.map(x => <option key={x} value={x}>{x}</option>)}
+                {/* A retired expert is still named on the projects they built, so their
+                    own row must stay selectable or saving anything else here would
+                    quietly reassign the work. */}
+                {expert && !experts.includes(expert) && <option value={expert}>{expert} (not in list)</option>}
+              </select>
+            </F>
             <F label="Start date"><input type="date" className={ctl} value={startDate} onChange={e => setStartDate(e.target.value)} /></F>
             <F label="Delivery date"><input type="date" className={ctl} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} /></F>
             <F label="Internal delivery"><input type="date" className={ctl} value={internalDelivery} onChange={e => setInternalDelivery(e.target.value)} /></F>
@@ -117,8 +133,28 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
             </F>
           </Group>
 
-          <Group title="Money owed and paid" blurb="Filled in by finance, usually weeks later. Blank is normal — about a quarter of projects never get an invoice number.">
-            <F label="Outsource price"><input type="number" className={ctl} value={outsource} onChange={e => setOutsource(e.target.value)} placeholder="0" /></F>
+          <Group title="Invoicing" blurb="Filled in by finance, usually weeks later. Blank is normal — about a quarter of projects never get an invoice number.">
+            {/* Only meaningful on an outsourced build; the database clears all three if
+                the expert changes back to somebody in-house. */}
+            {expert === CONTRACTOR && (
+              <>
+                <F label="Contractor" hint="Managed in Settings.">
+                  <select className={ctl} value={contractorName} onChange={e => setContractorName(e.target.value)}>
+                    <option value="">— choose —</option>
+                    {contractors.map(x => <option key={x} value={x}>{x}</option>)}
+                    {contractorName && !contractors.includes(contractorName) && <option value={contractorName}>{contractorName} (not in list)</option>}
+                  </select>
+                </F>
+                <F label="Contractor cost" hint="The sheet's Outsource Price.">
+                  <input type="number" className={ctl} value={outsource} onChange={e => setOutsource(e.target.value)} placeholder="0" />
+                </F>
+                <F label="Cost currency">
+                  <select className={ctl} value={outsourceCur} onChange={e => setOutsourceCur(e.target.value)}>
+                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </F>
+              </>
+            )}
             <F label="Invoice no"><input className={ctl} value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} /></F>
             <F label="Invoice currency">
               <select className={ctl} value={invoiceCur} onChange={e => setInvoiceCur(e.target.value)}>

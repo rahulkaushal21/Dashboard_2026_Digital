@@ -41,6 +41,14 @@ quote_price?: number; start_date?: string; delivery_date?: string
 // The sheet's two human-facing labels. `quote_id` is NOT quote_key: that one is this
 // row's identity and what the Quotes janitors match on, so it is never hand-edited.
 project_id?: string; quote_id?: string
+// Who built it, and what it cost if it went outside. 'Contractor' in `expert` is the
+// sheet's own marker for outsourced work, and the three contractor fields only mean
+// anything alongside it — the database clears them if the expert changes back.
+expert?: string; contractor_name?: string
+outsource_price?: number; outsource_currency?: string
+internal_delivery?: string; internal_hrs?: number; actual_hrs?: number
+integration?: string; invoice_no?: string; invoice_currency?: string
+invoice_amount?: number; feedback_status?: string
 // DELIVERY state (Under Development / Delivered / On Hold / Cancelled). Deliberately
 // not `status`, which is the SALES state and is overwritten by the Quotes sync every
 // 30 minutes — writing "Delivered" there would push a won deal back into open pipeline.
@@ -956,6 +964,9 @@ export interface ConfirmFields {
   delivery_status?: string
   /** The sheet's human-facing labels. Not quote_key, which is this row's identity. */
   project_id?: string; quote_id?: string
+  /** Who built it. 'Contractor' means outsourced, and then the three below apply. */
+  expert?: string; contractor_name?: string
+  outsource_price?: number | null; outsource_currency?: string
 }
 
 /**
@@ -979,6 +990,8 @@ export async function confirmOpportunityFull(id: number, f: ConfirmFields): Prom
     p_delivery_date: f.delivery_date || null, p_delivery_status: f.delivery_status ?? null,
     p_business_type: f.business_type ?? null,
     p_project_id: f.project_id ?? null, p_quote_id: f.quote_id ?? null,
+    p_expert: f.expert ?? null, p_contractor_name: f.contractor_name ?? null,
+    p_outsource_price: f.outsource_price ?? null, p_outsource_currency: f.outsource_currency ?? null,
   })
   if (!error) return { ok: true }
   const m = /still missing:\s*(.+)$/.exec(error.message)
@@ -1296,7 +1309,9 @@ export async function duplicateBookingToMonth(bookingId: number, month: string, 
 // reconciling a month means reading one list, not cross-referencing two.
 
 export interface LedgerRow {
-  row_key: string; source: 'sheet' | 'dashboard'; source_id: number
+  // 'raw' is a line of the Web, Hub & LP tab itself; 'dashboard' is one confirmed
+  // here. ('sheet' was the old web_revenue aggregate and no longer appears.)
+  row_key: string; source: 'raw' | 'sheet' | 'dashboard'; source_id: number
   company_name?: string; project_name?: string; contact_email?: string
   service_dept?: string; engagement_model?: string; technology?: string; geo?: string
   pm_owner?: string; sales_person?: string; booking_month?: string
@@ -1312,6 +1327,8 @@ export interface LedgerRow {
   integration?: string; quote_price?: number; outsource_price?: number
   invoice_no?: string; invoice_currency?: string; invoice_amount?: number
   business_type?: string
+  // An outsourced build: who did it, and what it cost in outsource_currency.
+  contractor_name?: string; outsource_currency?: string
 }
 
 /**
@@ -1327,6 +1344,7 @@ export interface ProjectFieldEdits {
   invoice_no?: string; invoice_currency?: string; invoice_amount?: number | null
   feedback_status?: string; delivery_status?: string
   delivery_date?: string | null; start_date?: string | null
+  contractor_name?: string; outsource_currency?: string
 }
 
 /**
@@ -1348,6 +1366,7 @@ export async function updateProjectFields(id: number, f: ProjectFieldEdits): Pro
     p_invoice_amount: n(f.invoice_amount), p_feedback_status: t(f.feedback_status),
     p_delivery_status: t(f.delivery_status),
     p_delivery_date: f.delivery_date || null, p_start_date: f.start_date || null,
+    p_contractor_name: t(f.contractor_name), p_outsource_currency: t(f.outsource_currency),
   })
   return error ? { ok: false, error: error.message } : { ok: true }
 }
@@ -1443,4 +1462,64 @@ export function geoCodeFromSheet(v?: string): string | undefined {
   if (s.startsWith('au') || s.startsWith('nz')) return 'AU'
   if (s.startsWith('other')) return 'Other'
   return undefined
+}
+
+// ---- Managed lists: who builds the work ------------------------------------
+//
+// The experts and the contractors, held in one table because they are the same shape and
+// the same person maintains both. Read by everyone, changed only by admins, from
+// Settings — a list that needs a deploy to change is a list that goes stale.
+
+export const CONTRACTOR = 'Contractor'
+
+export interface PickItem { kind: 'expert' | 'contractor'; value: string; sort: number; active: boolean }
+
+/** Active entries of one list, in the order Settings put them. */
+export async function getPickList(kind: 'expert' | 'contractor'): Promise<string[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.from('pick_lists')
+    .select('value, sort').eq('kind', kind).eq('active', true).order('sort').order('value')
+  if (error || !data) return []
+  return (data as any[]).map(r => r.value)
+}
+
+/** Every entry including the retired ones — Settings needs to see what it can turn back on. */
+export async function getPickListAll(kind: 'expert' | 'contractor'): Promise<PickItem[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.from('pick_lists')
+    .select('*').eq('kind', kind).order('sort').order('value')
+  if (error || !data) return []
+  return data as PickItem[]
+}
+
+export async function addPickItem(kind: 'expert' | 'contractor', value: string, sort = 100): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const v = value.trim()
+  if (!v) return { error: 'A name is needed.' }
+  const { error } = await supabase.from('pick_lists').insert({ kind, value: v, sort })
+  // The primary key is (kind, value), so a duplicate is refused by the database rather
+  // than by a check here that could be raced.
+  if (error) return { error: /duplicate key/i.test(error.message) ? `${v} is already on the list.` : error.message }
+  return {}
+}
+
+/**
+ * Retire or restore an entry.
+ *
+ * Deliberately not a delete. A retired expert is still named on every project they built,
+ * and removing the row would leave those rows pointing at a value the list no longer
+ * offers — which is exactly the state that makes a dropdown silently drop somebody's
+ * work. Setting active=false stops it being offered on new deals and changes nothing
+ * that has already happened.
+ */
+export async function setPickItemActive(kind: 'expert' | 'contractor', value: string, active: boolean): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { error } = await supabase.from('pick_lists').update({ active }).eq('kind', kind).eq('value', value)
+  return error ? { error: error.message } : {}
+}
+
+export async function setPickItemSort(kind: 'expert' | 'contractor', value: string, sort: number): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { error } = await supabase.from('pick_lists').update({ sort }).eq('kind', kind).eq('value', value)
+  return error ? { error: error.message } : {}
 }

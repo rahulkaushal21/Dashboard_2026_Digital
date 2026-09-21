@@ -187,7 +187,21 @@ function indexOfHeader(headers: string[], name: string): number {
   return headers.findIndex((h) => (h || "").trim().toLowerCase() === want);
 }
 
+// Conversion to USD, from the same fx_rates table Settings edits, so the sheet and the
+// dashboard can never book the same contractor invoice at two different dollar figures.
+// An unknown currency converts 1:1 rather than to zero: wrong by the spread is
+// recoverable, silently zero is not.
+function toUsd(amount: number, currency: string, rates: Record<string, number>): number {
+  const k = (currency || "USD").toUpperCase();
+  const rate = k === "USD" ? 1 : (rates[k === "EURO" ? "EUR" : k] ?? 1);
+  return Number(amount) * rate;
+}
+
 async function buildRevenue(sb: any): Promise<string[][]> {
+  const { data: fx } = await sb.from("fx_rates").select("currency, rate_to_usd");
+  const rates: Record<string, number> = {};
+  for (const r of fx || []) rates[String(r.currency).toUpperCase()] = Number(r.rate_to_usd);
+
   const { data: hdr } = await sb.from("sheet_raw_header").select("headers").eq("tab", "revenue").maybeSingle();
   const headers: string[] = hdr?.headers || [];
   if (!headers.length) throw new Error("no raw header for the revenue tab — run sheet-raw first");
@@ -257,7 +271,7 @@ async function buildRevenue(sb: any): Promise<string[][]> {
   const trailingMonth = (headers[headers.length - 1] || "").trim() === "" ? headers.length - 1 : -1;
 
   const { data: opps, error: oe } = await sb.from("opportunities")
-    .select("id, quote_key, project_id, quote_id, company_name, source_subject, client_name, contact_email, client_type, service_dept, service_type, delivery_type, delivery_status, project_type, technology, geo, pm_owner, sales_person, business_type, currency, quote_price, local_value, est_value, start_date, delivery_date, confirmed_at, source_date, origin, expert, internal_delivery, internal_hrs, actual_hrs, integration, outsource_price, invoice_no, invoice_currency, invoice_amount, feedback_status")
+    .select("id, quote_key, project_id, quote_id, company_name, source_subject, client_name, contact_email, client_type, service_dept, service_type, delivery_type, delivery_status, project_type, technology, geo, pm_owner, sales_person, business_type, currency, quote_price, local_value, est_value, start_date, delivery_date, confirmed_at, source_date, origin, expert, internal_delivery, internal_hrs, actual_hrs, integration, outsource_price, outsource_currency, contractor_name, invoice_no, invoice_currency, invoice_amount, feedback_status")
     .eq("won", true).not("confirmed_by", "is", null);
   if (oe) throw new Error("opportunities: " + oe.message);
 
@@ -268,14 +282,16 @@ async function buildRevenue(sb: any): Promise<string[][]> {
     // belongs to. Using confirmed_at would file October's retainers under September.
     const monthOf = o.origin === "recurring" ? (o.source_date || o.confirmed_at) : (o.confirmed_at || o.source_date);
 
-    // A typed identifier always wins; these shapes are only the default for a row nobody
-    // has labelled. The sheet's own Project Id is PRJ + the Quote ID's digits, generated
-    // by the Apps Script at quote time, so those digits are reused where the deal carries
-    // a real quote id. Otherwise PRJ-D<id>, which cannot collide with a timestamp-shaped
-    // one and says plainly that the dashboard issued it.
-    const qut = /QUT(\d+)/i.exec(s(o.quote_key));
-    put(col.projectId, s(o.project_id) || (qut ? `PRJ${qut[1]}` : `PRJ-D${o.id}`));
-    put(col.quote, s(o.quote_id) || s(o.quote_key));
+    // Project Id is written ONLY if somebody typed one. It was derived here before, as
+    // PRJ + the quote digits or PRJ-D<id>, but the real ones follow a format this system
+    // cannot reproduce — so a generated value was a plausible wrong id in a column people
+    // match on. A blank cell is visibly waiting for someone; a wrong id is not.
+    put(col.projectId, s(o.project_id));
+    // Quote ID falls back to quote_key only where that key is a real QUT reference. A
+    // hand-entered deal's key is 'pm:<uuid>', which is internal identity, not a quote
+    // number, and does not belong in a column people read.
+    const qk = s(o.quote_key);
+    put(col.quote, s(o.quote_id) || (/^QUT/i.test(qk) ? qk : ""));
     put(col.dept, s(o.service_dept));
     put(col.project, s(o.source_subject));
     put(col.ptype, s(o.project_type));
@@ -318,10 +334,13 @@ async function buildRevenue(sb: any): Promise<string[][]> {
     put(col.invoiceNo, s(o.invoice_no));
     put(col.invoiceCur, s(o.invoice_currency));
     put(col.invoiceAmt, o.invoice_amount == null ? "" : money(o.invoice_amount));
+    // What an outsourced build cost. The sheet keeps the local figure and a USD one but
+    // no currency column, so the conversion has to happen here or the two disagree the
+    // moment a contractor invoices in anything but dollars.
     put(col.outsource, o.outsource_price == null ? "" : money(o.outsource_price));
-    // The USD column is 99.8% zero in the source, so an unset outsource price books as
-    // zero rather than blank — that is what every existing row does.
-    put(col.outsourceUsd, money(o.outsource_price ?? 0));
+    // The USD column is 99.8% zero in the source, so an unset cost books as zero rather
+    // than blank — that is what every existing row does.
+    put(col.outsourceUsd, money(toUsd(o.outsource_price ?? 0, o.outsource_currency || "USD", rates)));
     put(col.month, sheetMonth(monthOf));
     put(col.week, sheetWeek(o.start_date));
     if (trailingMonth >= 0) row[trailingMonth] = sheetMonth(monthOf);

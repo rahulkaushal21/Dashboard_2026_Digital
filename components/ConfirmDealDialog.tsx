@@ -4,6 +4,7 @@ import { Check, Sparkles } from 'lucide-react'
 import {
   confirmOpportunityFull, opportunityMissingFields, getFxRates, toUsd,
   getSheetVocab, getSheetClientDefaults, sheetDefaultsFor, geoCodeFromSheet,
+  getPickList, CONTRACTOR,
   type FxRate, type Opportunity, type SheetVocab, type SheetClientDefaults,
 } from '@/lib/supabase'
 import {
@@ -29,15 +30,15 @@ import {
 export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   deal: Opportunity; onClose: () => void; onConfirmed: () => void
 }) {
-  // ---- identifiers. The sheet's two labels. Defaulted to exactly what the writer would
-  // derive, so leaving them alone produces the same row it always would have, and typing
-  // over them is a deliberate act rather than a correction of a blank.
-  const derivedQuote = deal.quote_ref || ''
-  const derivedProject = (() => {
-    const m = /QUT(\d+)/i.exec(derivedQuote)
-    return m ? `PRJ${m[1]}` : `PRJ-D${deal.id}`
-  })()
-  const [projectId, setProjectId] = useState(deal.project_id || derivedProject)
+  // ---- identifiers.
+  //
+  // Project Id starts BLANK on purpose. It follows a format this system cannot
+  // reproduce, so a generated lookalike would be a plausible wrong value in a column
+  // people match on — worse than an empty one, because an empty one is visibly waiting
+  // for somebody. Quote ID is prefilled only where the deal carries a real QUT
+  // reference; a hand-entered deal's key is 'pm:<uuid>', which is not a quote number.
+  const derivedQuote = /^QUT/i.test(deal.quote_ref || '') ? (deal.quote_ref || '') : ''
+  const [projectId, setProjectId] = useState(deal.project_id || '')
   const [quoteId, setQuoteId] = useState(deal.quote_id || derivedQuote)
 
   // ---- what was sold
@@ -70,6 +71,16 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   const [deliveryType, setDeliveryType] = useState(deal.delivery_type || '')
   const [deliveryStatus, setDeliveryStatus] = useState(deal.delivery_status || 'Under Development')
 
+  // ---- who builds it. 'Contractor' is not a person — it is the sheet's own marker for
+  // work built outside, and it is what the Expert column already says on those rows. So
+  // choosing it asks the three questions the sheet has no column for.
+  const [expert, setExpert] = useState(deal.expert || '')
+  const [contractorName, setContractorName] = useState(deal.contractor_name || '')
+  const [outsourcePrice, setOutsourcePrice] = useState(deal.outsource_price != null ? String(deal.outsource_price) : '')
+  const [outsourceCur, setOutsourceCur] = useState(deal.outsource_currency || 'USD')
+  const [experts, setExperts] = useState<string[]>([])
+  const [contractors, setContractors] = useState<string[]>([])
+
   // ---- people
   const [salesPerson, setSalesPerson] = useState(deal.sales_person || '')
   const [pmOwner, setPmOwner] = useState(deal.pm_owner || '')
@@ -90,6 +101,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   useEffect(() => { opportunityMissingFields(deal.id).then(setServerMissing) }, [deal.id])
   useEffect(() => { getFxRates().then(setRates) }, [])
   useEffect(() => { getSheetVocab().then(setVocab) }, [])
+  useEffect(() => { getPickList('expert').then(setExperts); getPickList('contractor').then(setContractors) }, [])
 
   // Prefill from the client's own history — but only where the deal itself is silent.
   // A value already on the deal is what somebody decided about THIS project; the sheet
@@ -196,6 +208,9 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
       start_date: startDate || null, delivery_date: deliveryDate || null,
       delivery_status: deliveryStatus,
       project_id: projectId, quote_id: quoteId,
+      expert, contractor_name: contractorName,
+      outsource_price: outsourcePrice === '' ? null : Number(outsourcePrice),
+      outsource_currency: outsourceCur,
     })
     setSaving(false)
     if (res.ok) { onConfirmed(); return }
@@ -427,6 +442,28 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
             <F label="Project status" hint="A deal just confirmed is starting, not finished.">
               <Pick value={deliveryStatus} onChange={setDeliveryStatus} options={vocab.delivery_status} bad={false} />
             </F>
+            <F label="Expert" hint="Who actually builds it. Choose Contractor if it is going outside.">
+              <Pick value={expert} onChange={setExpert} options={experts} bad={false} />
+            </F>
+            {/* Only asked once the work is outsourced, and cleared by the database if the
+                expert changes back — a named contractor on an in-house build is a claim
+                about money that is not true. */}
+            {expert === CONTRACTOR && (
+              <>
+                <F label="Contractor" hint="Managed in Settings, alongside the expert list.">
+                  <Pick value={contractorName} onChange={setContractorName} options={contractors} bad={false} />
+                </F>
+                <F label="Contractor cost" hint="Goes to the sheet's Outsource Price.">
+                  <input type="number" className={`${ctl} ${border(false)}`} value={outsourcePrice}
+                    onChange={e => setOutsourcePrice(e.target.value)} placeholder="0" />
+                </F>
+                <F label="Cost currency">
+                  <select className={`${ctl} ${border(false)}`} value={outsourceCur} onChange={e => setOutsourceCur(e.target.value)}>
+                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </F>
+              </>
+            )}
             <F label="PM owner" need={missing.includes('PM owner')} auto={has('pmOwner')}>
               <input className={`${ctl} ${border(missing.includes('PM owner'))}`} value={pmOwner}
                 onChange={e => setPmOwner(e.target.value)} />

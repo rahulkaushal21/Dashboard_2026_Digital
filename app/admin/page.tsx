@@ -7,6 +7,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { listAdmins, addAdmin, removeAdmin, isOwner, OWNER_EMAIL, ALLOWED_DOMAINS, type AdminRow } from '@/lib/access'
 import PmDirectoryPanel from '@/components/PmDirectoryPanel'
 import FxRatesPanel from '@/components/FxRatesPanel'
+import PickListPanel from '@/components/PickListPanel'
 
 function SettingsForm({ canEdit }: { canEdit: boolean }) {
   const [sheet, setSheet] = useState('')
@@ -170,6 +171,10 @@ export default function Admin() {
       <AdminsPanel />
       <PmDirectoryPanel canEdit={canEdit} />
       <FxRatesPanel canEdit={canEdit} actor={email || OWNER_EMAIL} />
+      <PickListPanel kind="expert" canEdit={canEdit} title="Experts"
+        blurb="Who builds the work. These are the options on the Expert dropdown when a deal is confirmed and on the ledger. Contractor is on the list deliberately — it is the sheet's own marker for work built outside, and choosing it asks who the contractor was and what they cost." />
+      <PickListPanel kind="contractor" canEdit={canEdit} title="Contractors"
+        blurb="Offered once Expert is set to Contractor. Their cost goes to the sheet's Outsource Price column." />
     </div>
   )
 }
