@@ -469,8 +469,7 @@ export default function ProjectLedger() {
         <span className="text-white">Double-click a cell to fill it in</span> &mdash; Project Id, Quote ID, Expert, dates,
         hours, invoice &mdash; or use Edit at the end of the row for the lot. Only the row&rsquo;s own PC/SME can change it
         {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
-        the sheet, not in it, so the next sync cannot wipe them &mdash; and they are carried into the new spreadsheet by the
-        writer. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
+        the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
       </p>
 
       {editing && (
