@@ -1243,3 +1243,19 @@ export async function getProjectSheet(month: string): Promise<ProjectSheetRow[]>
     .order('company_name')
   return (data as ProjectSheetRow[]) || []
 }
+
+/**
+ * Copy a revenue-sheet line into a month.
+ *
+ * It does NOT write to web_revenue — that table is full-replaced on every sync, so a row
+ * added there vanishes within half an hour. The copy becomes a confirmed entry in our own
+ * record, which is what the Project sheet shows.
+ */
+export async function duplicateBookingToMonth(bookingId: number, month: string, amount?: number | null, note?: string): Promise<{ id?: number; error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('duplicate_booking_to_month', {
+    p_booking_id: bookingId, p_month: `${month}-01`, p_amount: amount ?? null, p_note: note ?? null,
+  })
+  if (error) return { error: error.message }
+  return { id: Number(data) }
+}
