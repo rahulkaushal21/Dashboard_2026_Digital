@@ -30,6 +30,7 @@ quote_date?: string; origin?: string; est_value?: number; next_step?: string; en
 // from when email did not catch it — referral, LinkedIn, upsell, event, inbound.
 channel?: string; currency?: string; service_dept?: string; project_type?: string
 created_by?: string; created_at?: string; confirmed_by?: string; confirmed_at?: string
+contact_email?: string
 // The figure as QUOTED, in `currency`. est_value is always USD — every total, forecast
 // and scorecard adds est_value up without asking what currency it was.
 local_value?: number
@@ -906,6 +907,7 @@ export interface NewOpportunity {
   quote_date?: string | null; service_dept?: string; project_type?: string
   technology?: string; business_type?: string; sales_person?: string
   pm_owner?: string; geo?: string; subject?: string; note?: string; force?: boolean
+  contact_email?: string
 }
 
 /** Create a deal by hand. Returns its id, or the database's own refusal message. */
@@ -919,6 +921,7 @@ export async function addOpportunity(v: NewOpportunity): Promise<{ id?: number; 
     p_business_type: v.business_type ?? null, p_sales_person: v.sales_person ?? null,
     p_pm_owner: v.pm_owner ?? null, p_geo: v.geo ?? null,
     p_subject: v.subject ?? null, p_note: v.note ?? null, p_force: v.force ?? false,
+    p_contact_email: v.contact_email ?? null,
   })
   if (error) return { error: error.message }
   return { id: Number(data) }
@@ -1113,4 +1116,130 @@ export const toUsd = (amount: number | null | undefined, currency: string | unde
   const key = c === 'EURO' ? 'EUR' : c
   const r = rates.find(x => x.currency.toUpperCase() === key)?.rate_to_usd
   return Math.round(amount * (r ?? 1) * 100) / 100
+}
+
+// ---- Client memory --------------------------------------------------------
+//
+// What we already know about a client, so nobody retypes it. Everything here is read
+// back from the client's own history — their last deal and their revenue rows — rather
+// than guessed, which is why the form can fill six fields from three characters.
+//
+// Loaded once when the form opens and filtered in the browser. A round trip per
+// keystroke would be slower and no more accurate; the list is small enough that holding
+// it is cheaper than fetching it repeatedly.
+
+export interface ClientDefaults {
+  client_key: string; company_name: string; currency?: string; geo?: string
+  sales_person?: string; pm_owner?: string; technology?: string; service_dept?: string
+  project_type?: string; contact_email?: string
+  deals: number; booking_months: number; lifetime_usd?: number
+  last_seen?: string; is_existing_client: boolean
+}
+
+export async function getClientDefaults(): Promise<ClientDefaults[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_client_defaults').select('*')
+  return (data as ClientDefaults[]) || []
+}
+
+/**
+ * Clients matching what has been typed. Three characters minimum — below that almost
+ * everything matches and the list is noise rather than help.
+ *
+ * A match at the START of the name outranks one in the middle, then longer-standing
+ * clients come first, so typing "hex" puts HexaGroup at the top rather than some company
+ * with "hex" buried in it.
+ */
+export function searchClients(all: ClientDefaults[], q: string, limit = 8): ClientDefaults[] {
+  const needle = q.trim().toLowerCase()
+  if (needle.length < 3) return []
+  return all
+    .filter(c => c.client_key.includes(needle))
+    .sort((a, b) => {
+      const as = a.client_key.startsWith(needle) ? 0 : 1
+      const bs = b.client_key.startsWith(needle) ? 0 : 1
+      if (as !== bs) return as - bs
+      return (b.booking_months + b.deals) - (a.booking_months + a.deals)
+    })
+    .slice(0, limit)
+}
+
+// ---- Recurring work (the Project sheet) -----------------------------------
+//
+// Dedicated and retainer clients bill every month for the same thing. Nobody should
+// retype them, and nothing should book them automatically either: one dedicated client
+// in this data billed steadily for nine months and then stopped, and auto-confirming
+// would have invented nine months of revenue that looked exactly like the real thing.
+//
+// So each month is one deliberate click, carrying last month's figure forward.
+
+export interface RecurringMonthRow {
+  recurring_id: number; company_name: string; monthly_value?: number; currency?: string
+  engagement_model?: string; service_dept?: string; technology?: string; geo?: string
+  pm_owner?: string; sales_person?: string; active: boolean
+  paused_at?: string; pause_reason?: string; start_month?: string; end_month?: string
+  owner_email?: string | null
+  draft_id?: number | null; draft_month?: string | null
+  state?: 'pending' | 'confirmed' | 'dismissed' | null
+  draft_amount?: number | null; opportunity_id?: number | null
+  decided_by?: string | null; decided_at?: string | null
+  suggested_amount?: number
+}
+
+export async function getRecurringMonth(): Promise<RecurringMonthRow[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_recurring_month').select('*').order('company_name')
+  return (data as RecurringMonthRow[]) || []
+}
+
+/** Book one month of a retainer. Creates the month if it does not exist, then confirms it. */
+export async function addRecurringMonth(recurringId: number, month: string, amount?: number | null, note?: string): Promise<{ id?: number; error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('add_recurring_month', {
+    p_recurring_id: recurringId, p_month: month, p_amount: amount ?? null, p_note: note ?? null,
+  })
+  if (error) return { error: error.message }
+  return { id: Number(data) }
+}
+
+export interface RecurringDeal {
+  id?: number; company_name: string; monthly_value?: number | null; currency?: string
+  engagement_model?: string; service_dept?: string; technology?: string; geo?: string
+  pm_owner?: string; sales_person?: string; start_month: string; end_month?: string | null
+  active?: boolean; note?: string
+}
+
+export async function saveRecurringDeal(d: RecurringDeal, actor: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const body = { ...d, created_by: actor }
+  const { error } = d.id
+    ? await supabase.from('recurring_deals').update(body).eq('id', d.id)
+    : await supabase.from('recurring_deals').insert(body)
+  return error ? { error: error.message } : {}
+}
+
+// ---- The month's entries, in revenue-sheet shape ---------------------------
+//
+// Deliberately the same columns, in the same order, as the revenue sheet: company,
+// contact, department, engagement model, technology, GEO, PM, AM, date, amount. The
+// sheet becomes a dump of this rather than the other way round, so matching its shape is
+// what makes the two comparable while both exist.
+
+export interface ProjectSheetRow {
+  id: number; company_name?: string; contact_email?: string; service_dept?: string
+  project_type?: string; technology?: string; geo?: string; pm_owner?: string
+  sales_person?: string; confirmed_at?: string; est_value?: number
+  local_value?: number; currency?: string; source_subject?: string; origin?: string
+}
+
+/** Everything confirmed in the given month (YYYY-MM). */
+export async function getProjectSheet(month: string): Promise<ProjectSheetRow[]> {
+  if (!supabase) return []
+  const start = `${month}-01`
+  const end = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1).toISOString().slice(0, 10)
+  const { data } = await supabase.from('opportunities')
+    .select('id, company_name, contact_email, service_dept, project_type, technology, geo, pm_owner, sales_person, confirmed_at, est_value, local_value, currency, source_subject, origin')
+    .eq('won', true).gte('confirmed_at', start).lt('confirmed_at', end)
+    .order('company_name')
+  return (data as ProjectSheetRow[]) || []
 }

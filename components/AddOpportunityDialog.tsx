@@ -1,22 +1,31 @@
 'use client'
-import { useEffect, useState } from 'react'
-import { addOpportunity, findPossibleDuplicates, getFxRates, toUsd, type DuplicateHit, type FxRate } from '@/lib/supabase'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  addOpportunity, findPossibleDuplicates, getFxRates, toUsd,
+  getClientDefaults, searchClients, getDirectoryMember,
+  type DuplicateHit, type FxRate, type ClientDefaults,
+} from '@/lib/supabase'
 import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, CHANNELS } from '@/lib/deal-fields'
+import { currentEmail } from '@/lib/access'
 
 // Adding a deal the email scan did not catch — a referral, an upsell raised on a call,
 // work that came out of an event.
 //
-// Only the client name is required. Everything else can be filled in later, because a
-// deal you half-know is still worth recording: the alternative is it living in somebody's
-// head until it is won, which is the gap this whole change exists to close. The
-// completeness gate on CONFIRMING is what keeps the revenue record honest, so entry can
-// afford to be forgiving.
+// THE FORM FILLS ITSELF WHERE IT CAN. Type three characters of a client we have worked
+// with and their currency, geography, account manager, PM, technology, department and
+// engagement model come back from their own history. None of it is guessed: it is what
+// that client's last deal and their revenue rows actually say. Everything stays editable,
+// because the last time is not always this time.
+//
+// Only the client is required. A deal you half-know is still worth recording — the
+// alternative is it living in somebody's head until it is won, which is the gap this
+// whole change exists to close. The rigour belongs on CONFIRMING, where the completeness
+// gate refuses anything incomplete.
 
 const money = (n?: number) => n == null ? '—' : `$${Math.round(n).toLocaleString('en-US')}`
 
 export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (id: number) => void }) {
   const [company, setCompany] = useState('')
-  const [channel, setChannel] = useState('referral')
   const [value, setValue] = useState('')
   const [currency, setCurrency] = useState('USD')
   const [quoteDate, setQuoteDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -27,11 +36,14 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   const [pmOwner, setPmOwner] = useState('')
   const [geo, setGeo] = useState('')
   const [subject, setSubject] = useState('')
+  const [contactEmail, setContactEmail] = useState('')
   const [note, setNote] = useState('')
+  const [channel, setChannel] = useState('')
 
+  const [clients, setClients] = useState<ClientDefaults[]>([])
+  const [picked, setPicked] = useState<ClientDefaults | null>(null)
+  const [showList, setShowList] = useState(false)
   const [rates, setRates] = useState<FxRate[]>([])
-  useEffect(() => { getFxRates().then(setRates) }, [])
-
   const [dupes, setDupes] = useState<DuplicateHit[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -39,12 +51,40 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   // force, so the second click is a deliberate "yes, these really are two deals" rather
   // than the same mistake going through on a retry.
   const [needsForce, setNeedsForce] = useState(false)
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    getFxRates().then(setRates)
+    getClientDefaults().then(setClients)
+    // Default the PM to whoever is filling the form, when they are a PM. They are the
+    // likeliest owner, and an owner is what decides who can confirm it later — a deal
+    // saved with nobody on it can only be confirmed by an admin.
+    getDirectoryMember(currentEmail()).then(m => { if (m) setPmOwner(prev => prev || m.name) })
+  }, [])
+
+  const matches = useMemo(() => searchClients(clients, company), [clients, company])
+
+  const pick = (c: ClientDefaults) => {
+    setPicked(c)
+    setCompany(c.company_name)
+    setShowList(false)
+    // Only fill what is still empty, so a value typed before choosing the client is not
+    // overwritten by history.
+    if (c.currency) setCurrency(c.currency)
+    setGeo(g => g || c.geo || '')
+    setSalesPerson(v => v || c.sales_person || '')
+    setPmOwner(v => v || c.pm_owner || '')
+    setTechnology(v => v || c.technology || '')
+    setServiceDept(v => v || c.service_dept || '')
+    setProjectType(v => v || c.project_type || '')
+    setContactEmail(v => v || c.contact_email || '')
+  }
 
   const valueN = value === '' ? null : Number(value)
 
-  // Warn about possible duplicates while typing, debounced. This never blocks: the
-  // useful match is on VALUE, and a value collision between two genuinely different
-  // deals is common in a business that quotes round numbers.
+  // Warn about possible duplicates while typing. This never blocks: the useful match is
+  // on VALUE, and a value collision between two genuinely different deals is common in a
+  // business that quotes round numbers.
   useEffect(() => {
     if (!company.trim()) { setDupes([]); return }
     const t = setTimeout(() => {
@@ -53,25 +93,30 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
     return () => clearTimeout(t)
   }, [company, value])
 
+  useEffect(() => {
+    const away = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setShowList(false) }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [])
+
   const save = async () => {
     setSaving(true); setError('')
     const res = await addOpportunity({
-      company, channel, est_value: valueN, currency, quote_date: quoteDate,
+      company, channel: channel || undefined, est_value: valueN, currency, quote_date: quoteDate,
       service_dept: serviceDept, project_type: projectType, technology,
       sales_person: salesPerson, pm_owner: pmOwner, geo, subject, note,
-      force: needsForce,
+      contact_email: contactEmail || undefined, force: needsForce,
     })
     setSaving(false)
     if (res.error) {
       setError(res.error)
-      // The database refuses a same-client-same-value repeat once; saying so turns the
-      // next click into an explicit override instead of a silently different action.
       if (/already has a live deal/i.test(res.error)) setNeedsForce(true)
       return
     }
     if (res.id) onAdded(res.id)
   }
 
+  const inputCls = 'mt-1 w-full bg-mav-dark border border-mav-line rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:border-mav-yellow/60'
   const F = ({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) => (
     <label className="block">
       <span className="text-xs text-mav-muted">{label}</span>
@@ -79,7 +124,9 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
       {hint && <span className="block text-[11px] text-mav-muted mt-0.5">{hint}</span>}
     </label>
   )
-  const inputCls = 'mt-1 w-full bg-mav-dark border border-mav-line rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:border-mav-yellow/60'
+
+  const usd = toUsd(valueN, currency, rates)
+  const converted = currency.toUpperCase() !== 'USD' && usd != null && !Number.isNaN(valueN as number)
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:p-8" onClick={onClose}>
@@ -87,34 +134,96 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h2 className="text-lg font-semibold">Add an opportunity</h2>
-            <p className="text-xs text-mav-muted mt-0.5">For a deal email did not catch. Only the client is required — the rest can wait until you confirm it.</p>
+            <p className="text-xs text-mav-muted mt-0.5">For a deal email did not catch. Start typing the client — if we have worked with them, the rest fills itself.</p>
           </div>
           <button onClick={onClose} className="text-mav-muted hover:text-white text-xl leading-none">&times;</button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2" ref={boxRef}>
             <F label="Client *">
-              <input className={inputCls} value={company} onChange={e => { setCompany(e.target.value); setNeedsForce(false) }} placeholder="Company name" autoFocus />
+              <div className="relative">
+                <input className={inputCls} value={company} autoFocus placeholder="Start typing — three letters is enough"
+                  onChange={e => { setCompany(e.target.value); setPicked(null); setNeedsForce(false); setShowList(true) }}
+                  onFocus={() => setShowList(true)} autoComplete="off" />
+                {showList && matches.length > 0 && (
+                  <div className="absolute z-10 mt-1 w-full max-h-64 overflow-y-auto bg-mav-dark border border-mav-line rounded-md shadow-xl">
+                    {matches.map(c => (
+                      <button key={c.client_key} type="button" onClick={() => pick(c)}
+                        className="w-full text-left px-3 py-2 hover:bg-mav-panel transition-colors border-b border-mav-line/40 last:border-0">
+                        <div className="text-sm">{c.company_name}</div>
+                        <div className="text-[11px] text-mav-muted">
+                          {c.is_existing_client
+                            ? `${c.booking_months} month${c.booking_months === 1 ? '' : 's'} booked · ${money(c.lifetime_usd)} lifetime`
+                            : `${c.deals} deal${c.deals === 1 ? '' : 's'}, never booked`}
+                          {c.pm_owner ? ` · ${c.pm_owner}` : ''}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </F>
+            {/* Say which it is. "New client" is a real business fact, not a form state —
+                it changes who should own the deal and how it is reported. */}
+            {company.trim().length >= 3 && (
+              picked ? (
+                <div className="mt-1.5 text-[11px] text-green-300">
+                  Known client — filled from their history. {picked.is_existing_client ? `${picked.booking_months} months booked, ${money(picked.lifetime_usd)} lifetime.` : 'Quoted before, never booked.'} Change anything that is different this time.
+                </div>
+              ) : matches.length === 0 ? (
+                <div className="mt-1.5 text-[11px] text-mav-muted">No match — this will be recorded as a new client.</div>
+              ) : null
+            )}
           </div>
-          <F label="Where it came from"><select className={inputCls} value={channel} onChange={e => setChannel(e.target.value)}>{CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}</select></F>
-          <F label="Quote date"><input type="date" className={inputCls} value={quoteDate} onChange={e => setQuoteDate(e.target.value)} /></F>
+
+          <div className="sm:col-span-2">
+            <F label="Project name"><input className={inputCls} value={subject} onChange={e => setSubject(e.target.value)} placeholder="What this project is called" /></F>
+          </div>
+
           <F label="Value"><input type="number" className={inputCls} value={value} onChange={e => { setValue(e.target.value); setNeedsForce(false) }} placeholder="0" /></F>
           <F label="Currency"><select className={inputCls} value={currency} onChange={e => setCurrency(e.target.value)}>{CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}</select></F>
-          <F label="Service / dept"><select className={inputCls} value={serviceDept} onChange={e => setServiceDept(e.target.value)}><option value="">—</option>{SERVICE_DEPTS.map(d => <option key={d} value={d}>{d}</option>)}</select></F>
-          <F label="Project type"><select className={inputCls} value={projectType} onChange={e => setProjectType(e.target.value)}><option value="">—</option>{PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></F>
-          {currency.toUpperCase() !== 'USD' && valueN != null && !Number.isNaN(valueN) && (
+          {converted && (
             <div className="sm:col-span-2 -mt-1 text-xs text-mav-muted">
-              Books as <span className="text-white">${(toUsd(valueN, currency, rates) ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> USD · rate from Settings
+              Books as <span className="text-white">${usd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> USD · rate from Settings
             </div>
           )}
-          <F label="Technology"><input className={inputCls} value={technology} onChange={e => setTechnology(e.target.value)} placeholder="Shopify, WordPress…" /></F>
+
+          <F label="Quote date"><input type="date" className={inputCls} value={quoteDate} onChange={e => setQuoteDate(e.target.value)} /></F>
           <F label="Geography"><select className={inputCls} value={geo} onChange={e => setGeo(e.target.value)}><option value="">—</option>{GEOS.map(g => <option key={g} value={g}>{g}</option>)}</select></F>
+
+          <F label="Service / dept">
+            <select className={inputCls} value={serviceDept} onChange={e => setServiceDept(e.target.value)}>
+              <option value="">—</option>
+              {SERVICE_DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
+              {serviceDept && !SERVICE_DEPTS.includes(serviceDept as any) && <option value={serviceDept}>{serviceDept} (existing)</option>}
+            </select>
+          </F>
+          <F label="Project type">
+            <select className={inputCls} value={projectType} onChange={e => setProjectType(e.target.value)}>
+              <option value="">—</option>
+              {PROJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              {projectType && !PROJECT_TYPES.includes(projectType as any) && <option value={projectType}>{projectType} (existing)</option>}
+            </select>
+          </F>
+
+          <F label="Technology"><input className={inputCls} value={technology} onChange={e => setTechnology(e.target.value)} placeholder="Shopify, WordPress…" /></F>
+          <F label="Client contact"><input className={inputCls} value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="name@client.com" /></F>
+
           <F label="Account manager"><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>
           <F label="PM owner" hint="Whoever is named here can confirm the deal later."><input className={inputCls} value={pmOwner} onChange={e => setPmOwner(e.target.value)} /></F>
-          <div className="sm:col-span-2"><F label="Subject / project"><input className={inputCls} value={subject} onChange={e => setSubject(e.target.value)} /></F></div>
+
           <div className="sm:col-span-2"><F label="Note"><textarea className={inputCls} rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="Anything worth knowing about this deal" /></F></div>
+
+          {/* Last, and optional. It is useful for reporting on where work comes from, and
+              it is the least urgent thing on this form. */}
+          <div className="sm:col-span-2">
+            <F label="Where it came from (optional)">
+              <select className={inputCls} value={channel} onChange={e => setChannel(e.target.value)}>
+                <option value="">—</option>{CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </F>
+          </div>
         </div>
 
         {dupes.length > 0 && (

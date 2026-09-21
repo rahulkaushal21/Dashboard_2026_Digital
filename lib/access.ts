@@ -40,6 +40,7 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/', label: 'Dashboard' },
   { href: '/opportunities', label: 'Opportunities' },
   { href: '/needs-input', label: 'Needs Input' },
+  { href: '/project-sheet', label: 'Project Sheet' },
   { href: '/clients', label: 'Clients' },
   { href: '/escalations', label: 'Escalations' },
   { href: '/critical-escalations', label: 'Critical Escalations' },
