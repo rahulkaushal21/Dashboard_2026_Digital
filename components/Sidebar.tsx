@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Inbox, Table2 } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2 } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 
@@ -22,8 +22,9 @@ const isGroup = (e: Entry): e is Group => 'children' in e
 const nav: Entry[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
-  // The daily loop: what needs a person, and the ledger it all lands in.
-  { href: '/needs-input', label: 'Needs Input', icon: Inbox },
+  // Needs Input is deliberately NOT here. The page still exists and still works at
+  // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
+  // it just is not offered in the nav. Put the entry back here to restore it.
   { href: '/revenue-sheet', label: 'Web, Hub & LP', icon: Table2 },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
