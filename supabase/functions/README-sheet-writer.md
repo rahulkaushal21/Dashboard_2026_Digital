@@ -34,6 +34,21 @@ output becomes its next input. Point `TARGET_SHEET_ID` at a new file, always.
    select cron.schedule('sheet-writer', '47 * * * *',
      $$select net.http_get(url:='https://<project>.supabase.co/functions/v1/sheet-writer?token=<TOKEN>')$$);
    ```
+   Live since 21 Sep 2026, hourly at :47 — six minutes after `sheet-raw-revenue` at :41,
+   so the raw copy is always refreshed before it is written out.
+
+## Never echo a secret's value, whatever the variable is called
+
+A throwaway diagnostic here printed `TARGET_SHEET_ID` back verbatim on the reasoning that
+a spreadsheet id is not sensitive. The two secrets had been crossed: that variable held
+the service-account private key, and printing it leaked the key, which then had to be
+rotated.
+
+The rule is not "guard the variable named like a secret". A setup check exists precisely
+because a variable may not hold what its name says, so it must report only SHAPE — set or
+missing, length, whether it parses — and never the value. `sheet-writer` now also refuses
+a `TARGET_SHEET_ID` longer than 120 characters or containing whitespace, because that is
+not a sheet id and is a sign the wrong value is in it.
 
 ## What each tab holds
 
