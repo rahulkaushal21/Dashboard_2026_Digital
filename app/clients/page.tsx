@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
+import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
+import Link from 'next/link'
 import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
@@ -307,7 +309,21 @@ export default function Clients() {
   const PAGE_SIZE = 50
   const [page, setPage] = useState(1)
   useEffect(() => {
-    getClients().then(setClients); getClient360().then(setC360); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getEscalationVerdicts().then(setVerdicts); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
+    // Arriving from a deal on Opportunities: ?client=Acme opens straight onto that
+    // record. Matched on the name because that is what the two tables share — there is
+    // no id on a client — and case/spacing-insensitively, because the name comes from
+    // whichever sheet the deal came from.
+    getClients().then(rows => {
+      setClients(rows)
+      const want = readDeepLink('client')
+      if (!want) return
+      const k = want.trim().toLowerCase()
+      const hit = rows.find(c => (c.company_name || '').trim().toLowerCase() === k)
+        || rows.find(c => (c.company_name || '').trim().toLowerCase().includes(k))
+      if (hit) setSelC(hit)
+      clearDeepLink('client')
+    })
+    getClient360().then(setC360); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getEscalationVerdicts().then(setVerdicts); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
     getClientDirectory().then(setDir)
     // only email-sourced opportunities count as "active discussion" (sheet quotes live on the Opportunities page)
     // — but keep the full list too, because the automation-demand scan below needs to
@@ -1332,8 +1348,12 @@ export default function Clients() {
                 <div className="mt-6 border-t border-mav-line pt-4">
                   <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Open opportunities &amp; quotes</span><span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">{cOpps.length}</span><span className="text-[11px] text-mav-muted">needs input</span></div>
                   <div className="space-y-3">
+                    {/* Each quote opens on Opportunities, where it can actually be acted
+                        on — confirmed, marked lost, or edited. Showing it here and making
+                        somebody go and find it there again was the gap. */}
                     {cOpps.slice(0, 8).map(o => (
-                      <div key={o.id} className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
+                      <Link key={o.id} href={`/opportunities?deal=${o.id}`}
+                        className="block rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 hover:border-blue-400/50 hover:bg-blue-500/10 transition-colors">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 break-words text-sm font-medium leading-snug">{o.summary || o.rfq_status || o.source_subject || '(opportunity)'}</div>
                           {o.win_probability != null && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400">{o.win_probability}%</span>}
@@ -1344,7 +1364,8 @@ export default function Clients() {
                           {o.pm_owner && <span>· {o.pm_owner}</span>}
                         </div>
                         {o.gist && <p className="mt-2 text-xs leading-relaxed text-mav-muted">{o.gist}</p>}
-                      </div>
+                        <div className="mt-2 text-[11px] text-blue-400">Open on Opportunities &rarr;</div>
+                      </Link>
                     ))}
                   </div>
                 </div>

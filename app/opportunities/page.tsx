@@ -1,7 +1,9 @@
 'use client'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
+import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
+import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
 import { getOpportunities, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
@@ -263,7 +265,18 @@ useCloseOnNav(useCallback(() => setSel(null), []))
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
-useEffect(() => { getOpportunities().then(setAll) }, [])
+useEffect(() => {
+  getOpportunities().then(rows => {
+    setAll(rows)
+    // Arriving from a client's open quotes on Client 360: ?deal=<id> opens that deal.
+    // Matched on the row id, which is stable, rather than on a subject line that is not.
+    const want = readDeepLink('deal')
+    if (!want) return
+    const hit = rows.find(o => String(o.id) === want)
+    if (hit) setSel(hit)
+    clearDeepLink('deal')
+  })
+}, [])
 // Who is looking, and what they are allowed to change. A viewer sees the same page
 // without the Add button and without a confirm action — the database refuses them
 // either way, so this only avoids offering something that would bounce.
@@ -813,7 +826,16 @@ return (
 <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6 lg:p-8">
 <div className="flex items-start justify-between gap-3 mb-4">
 <div>
-<h2 className="text-xl font-semibold">{sel.company_name}</h2>
+{/* The client name opens their Client 360 record. Somebody looking at a deal
+    almost always wants to know who they are dealing with — what else is
+    running, what has been escalated, when they last booked — and until now
+    that meant leaving the page, finding the client list and searching. */}
+<Link href={`/clients?client=${encodeURIComponent(sel.company_name || '')}`}
+  className="group inline-flex items-center gap-1.5 text-xl font-semibold hover:text-mav-yellow transition-colors"
+  title={`Open ${sel.company_name} in Client 360`}>
+  {sel.company_name}
+  <span className="text-sm text-mav-muted group-hover:text-mav-yellow">↗</span>
+</Link>
 <div className="mt-1 flex flex-wrap gap-1">
 <span className={`text-xs px-2 py-1 rounded-full ${statusTone(oppStatus(sel))}`}>{oppStatus(sel)}</span>
 <span className={`text-xs px-2 py-1 rounded-full ${typeLabel(sel) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : sel.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(sel) === 'New + Repeat' ? 'New + repeat work' : sel.is_new_client ? 'New business' : 'Repeat client'}</span>

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
+import Link from 'next/link'
 import { getProjectLedger, copyRowToMonth, type LedgerRow } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile } from '@/lib/access'
@@ -292,7 +293,16 @@ export default function ProjectLedger() {
                   return (
                     <td key={c.key}
                       className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-white/25' : 'text-white/80'} max-w-[16rem] truncate`}
-                      title={v === '—' ? '' : v}>{v}</td>
+                      title={v === '—' ? '' : v}>
+                      {/* The Agency cell opens that client's Client 360 record. Same
+                          reason as on a deal: the row tells you what was billed, and the
+                          next question is always who they are. CSV export is untouched —
+                          it reads c.get(r), not this. */}
+                      {c.key === 'agency' && v !== '—'
+                        ? <Link href={`/clients?client=${encodeURIComponent(r.company_name || '')}`}
+                            className="hover:text-mav-yellow transition-colors">{v}</Link>
+                        : v}
+                    </td>
                   )
                 })}
                 <td className={td}>
