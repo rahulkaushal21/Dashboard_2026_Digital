@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { updateProjectFields, getPickList, CONTRACTOR, type LedgerRow } from '@/lib/supabase'
+import { updateProjectFields, getPickList, getContractors, CONTRACTOR, type LedgerRow, type Contractor } from '@/lib/supabase'
 import { CURRENCIES } from '@/lib/deal-fields'
 
 // The columns somebody fills in AFTER the deal is won.
@@ -30,7 +30,7 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const [contractorName, setContractorName] = useState(row.contractor_name || '')
   const [outsourceCur, setOutsourceCur] = useState(row.outsource_currency || 'USD')
   const [experts, setExperts] = useState<string[]>([])
-  const [contractors, setContractors] = useState<string[]>([])
+  const [contractors, setContractors] = useState<Contractor[]>([])
   const [internalHrs, setInternalHrs] = useState(row.internal_hrs != null ? String(row.internal_hrs) : '')
   const [actualHrs, setActualHrs] = useState(row.actual_hrs != null ? String(row.actual_hrs) : '')
   const [integration, setIntegration] = useState(row.integration || '')
@@ -42,7 +42,7 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  useEffect(() => { getPickList('expert').then(setExperts); getPickList('contractor').then(setContractors) }, [])
+  useEffect(() => { getPickList('expert').then(setExperts); getContractors().then(setContractors) }, [])
 
   // The sheet shows this as a percentage and it is pure arithmetic, so it is computed
   // rather than typed — one less field to get wrong, and it updates as the hours are
@@ -139,10 +139,17 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
             {expert === CONTRACTOR && (
               <>
                 <F label="Contractor" hint="Managed in Settings.">
-                  <select className={ctl} value={contractorName} onChange={e => setContractorName(e.target.value)}>
+                  {/* Picking a contractor sets the cost currency to the one they invoice
+                      in — right by default rather than right if someone remembers. */}
+                  <select className={ctl} value={contractorName} onChange={e => {
+                    setContractorName(e.target.value)
+                    const c = contractors.find(x => x.name === e.target.value)
+                    if (c?.default_currency) setOutsourceCur(c.default_currency)
+                  }}>
                     <option value="">— choose —</option>
-                    {contractors.map(x => <option key={x} value={x}>{x}</option>)}
-                    {contractorName && !contractors.includes(contractorName) && <option value={contractorName}>{contractorName} (not in list)</option>}
+                    {contractors.map(x => <option key={x.name} value={x.name}>{x.name}</option>)}
+                    {contractorName && !contractors.some(x => x.name === contractorName) &&
+                      <option value={contractorName}>{contractorName} (not in list)</option>}
                   </select>
                 </F>
                 <F label="Contractor cost" hint="The sheet's Outsource Price.">

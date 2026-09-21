@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getPickListAll, addPickItem, setPickItemActive, setPickItemSort, type PickItem } from '@/lib/supabase'
+import { getPickListAll, addPickItem, setPickItemActive, type PickItem } from '@/lib/supabase'
 
 // The experts and the contractors, maintained here rather than in code.
 //
-// One component for both because they are the same thing: an ordered list of names a
-// dropdown offers. Two panels would have been the same code twice and two places to fix
-// the next bug in it.
+// The list is alphabetical everywhere it is read, so there is no order to curate here:
+// this is a list you scan for one name, and the only ordering that helps is the one where
+// you already know where to look. Contractors are NOT here — they have an agency, a
+// currency and an address, so they are records with their own panel.
 //
 // NOTHING IS DELETED. A person who has left is still named on every project they built,
 // and removing their row would leave those rows pointing at a value the list no longer
@@ -29,9 +30,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
   const add = async () => {
     if (!name.trim()) { setStatus('A name is needed.'); return }
     setBusy(true); setStatus('')
-    // New entries sort after everything on the list, so adding somebody never silently
-    // reorders the names people are used to seeing in a fixed order.
-    const res = await addPickItem(kind, name, Math.max(100, ...rows.map(r => r.sort)) + 10)
+    const res = await addPickItem(kind, name)
     setBusy(false)
     if (res.error) { setStatus(res.error); return }
     setName(''); setStatus(`${name.trim()} added.`); refresh()
@@ -43,19 +42,6 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
     setBusy(false)
     setStatus(res.error || `${r.value} ${r.active ? 'retired' : 'restored'}.`)
     if (!res.error) refresh()
-  }
-
-  const move = async (r: PickItem, dir: -1 | 1) => {
-    const list = rows.filter(x => x.active)
-    const i = list.findIndex(x => x.value === r.value)
-    const j = i + dir
-    if (i < 0 || j < 0 || j >= list.length) return
-    setBusy(true)
-    // Swap the two sort values rather than renumbering the list: one pair of writes, and
-    // nothing else on the list moves.
-    await setPickItemSort(kind, r.value, list[j].sort)
-    await setPickItemSort(kind, list[j].value, r.sort)
-    setBusy(false); refresh()
   }
 
   const active = rows.filter(r => r.active)
@@ -76,14 +62,8 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
                 <td className="px-2 py-2.5">{r.value}</td>
                 <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   {canEdit && (
-                    <>
-                      <button onClick={() => move(r, -1)} disabled={busy || i === 0}
-                        className="text-white/50 hover:text-white disabled:opacity-20 px-1" aria-label={`Move ${r.value} up`}>↑</button>
-                      <button onClick={() => move(r, 1)} disabled={busy || i === active.length - 1}
-                        className="text-white/50 hover:text-white disabled:opacity-20 px-1 mr-2" aria-label={`Move ${r.value} down`}>↓</button>
-                      <button onClick={() => toggle(r)} disabled={busy}
-                        className="text-xs text-mav-muted hover:text-amber-300 disabled:opacity-50">Retire</button>
-                    </>
+                    <button onClick={() => toggle(r)} disabled={busy}
+                      className="text-xs text-mav-muted hover:text-amber-300 disabled:opacity-50">Retire</button>
                   )}
                 </td>
               </tr>

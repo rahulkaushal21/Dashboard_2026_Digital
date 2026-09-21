@@ -8,6 +8,8 @@ import { listAdmins, addAdmin, removeAdmin, isOwner, OWNER_EMAIL, ALLOWED_DOMAIN
 import PmDirectoryPanel from '@/components/PmDirectoryPanel'
 import FxRatesPanel from '@/components/FxRatesPanel'
 import PickListPanel from '@/components/PickListPanel'
+import ContractorsPanel from '@/components/ContractorsPanel'
+import { getDirectoryMember } from '@/lib/supabase'
 
 function SettingsForm({ canEdit }: { canEdit: boolean }) {
   const [sheet, setSheet] = useState('')
@@ -151,6 +153,11 @@ export default function Admin() {
   const { profile, email } = useAuth()
   // Super admin or admin may edit; everyone else reads.
   const canEdit = !!profile?.is_admin
+  // Contractors are the one list a PM maintains too, so the panel needs to know whether
+  // this viewer is in the PM directory. Checked against the directory rather than the
+  // email domain: being a colleague is not the same as owning deals.
+  const [isPm, setIsPm] = useState(false)
+  useEffect(() => { getDirectoryMember(email).then(m => setIsPm(!!m)) }, [email])
   const role = isOwner(email) ? 'Super admin' : canEdit ? 'Admin' : 'View only'
   return (
     <div className="space-y-10">
@@ -172,9 +179,11 @@ export default function Admin() {
       <PmDirectoryPanel canEdit={canEdit} />
       <FxRatesPanel canEdit={canEdit} actor={email || OWNER_EMAIL} />
       <PickListPanel kind="expert" canEdit={canEdit} title="Experts"
-        blurb="Who builds the work. These are the options on the Expert dropdown when a deal is confirmed and on the ledger. Contractor is on the list deliberately — it is the sheet's own marker for work built outside, and choosing it asks who the contractor was and what they cost." />
-      <PickListPanel kind="contractor" canEdit={canEdit} title="Contractors"
-        blurb="Offered once Expert is set to Contractor. Their cost goes to the sheet's Outsource Price column." />
+        blurb="Who builds the work — the options on the Expert dropdown when a deal is confirmed, and on the ledger. Listed A–Z. Contractor is on the list deliberately: it is the sheet's own marker for work built outside, and choosing it asks who the contractor was and what they cost." />
+      {/* PMs can maintain this one, so it is not gated on canEdit. The database allows a
+          registered PM or an admin, and the panel matches that rather than being stricter
+          and quietly sending people to ask somebody. */}
+      <ContractorsPanel canEdit={canEdit || isPm} actor={email || OWNER_EMAIL} />
     </div>
   )
 }

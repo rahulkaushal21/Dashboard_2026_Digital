@@ -4,7 +4,7 @@ import { Check, Sparkles } from 'lucide-react'
 import {
   confirmOpportunityFull, opportunityMissingFields, getFxRates, toUsd,
   getSheetVocab, getSheetClientDefaults, sheetDefaultsFor, geoCodeFromSheet,
-  getPickList, CONTRACTOR,
+  getPickList, getContractors, CONTRACTOR, type Contractor,
   type FxRate, type Opportunity, type SheetVocab, type SheetClientDefaults,
 } from '@/lib/supabase'
 import {
@@ -26,6 +26,80 @@ import {
 // make it easy to satisfy rather than to be the rule. Two exceptions, both deliberate:
 // Quote Price (15% of historical rows never had one) and, on retainer-shaped project
 // types, Delivery Date (a Dedicated engagement is not delivered on a day).
+
+
+// ---- presentation ---------------------------------------------------------
+//
+// These live at MODULE scope on purpose. Defined inside the component they were a new
+// function identity on every render, so React treated each render as a different
+// component type and remounted the entire form instead of updating it — which threw away
+// the scroll position and the focused field every time anything changed. Choosing
+// Contractor was just the first change big enough for anyone to notice.
+
+const ctl = `mt-1 w-full bg-mav-dark border rounded-md px-3 py-2 text-sm text-white placeholder:text-white/35
+  focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors`
+const border = (bad: boolean) => bad ? 'border-amber-400/70' : 'border-white/20'
+
+/** One labelled control. `need` turns it amber; `auto`/`guess` mark a filled-in value. */
+function F({ label, need, auto, guess, hint, wide, from, children }: {
+  label: string; need?: boolean; auto?: boolean; guess?: boolean; hint?: string
+  wide?: boolean; from?: string; children: React.ReactNode
+}) {
+  return (
+    <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
+      <span className="flex items-center gap-1.5 text-xs">
+        <span className={`font-medium ${need ? 'text-amber-300' : 'text-white/85'}`}>{label}</span>
+        {need && <span className="text-amber-300">· needed</span>}
+        {auto && !need && (
+          <span title={`Filled in from ${from || 'this client'}'s last project — check it`}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-sky-400/15 text-sky-300">
+            <Sparkles size={10} /> prefilled
+          </span>
+        )}
+        {guess && !auto && !need && (
+          <span title="The usual answer across all projects — this client has no history here, so check it properly"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-white/10 text-white/65">
+            <Sparkles size={10} /> usual
+          </span>
+        )}
+      </span>
+      {children}
+      {hint && <span className="mt-1 block text-[11px] text-white/50">{hint}</span>}
+    </label>
+  )
+}
+
+function Section({ n, title, blurb, children }: {
+  n: number; title: string; blurb: string; children: React.ReactNode
+}) {
+  return (
+    <section className="border-t border-mav-line pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <span className="grid place-items-center w-5 h-5 rounded-full bg-mav-yellow/15 border border-mav-yellow/40 text-[10px] font-semibold text-mav-yellow">{n}</span>
+          {title}
+        </h3>
+        <p className="text-[11px] text-white/55 mt-1 ml-7">{blurb}</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 ml-0 sm:ml-7">{children}</div>
+    </section>
+  )
+}
+
+/** A dropdown from the sheet's own vocabulary, keeping whatever the deal already holds
+ *  selectable — an older row may carry a spelling no longer in use, and confirming must
+ *  not silently retag it as something else. */
+function Pick({ value, onChange, options, bad }: {
+  value: string; onChange: (v: string) => void; options: readonly string[]; bad: boolean
+}) {
+  return (
+    <select className={`${ctl} ${border(bad)}`} value={value} onChange={e => onChange(e.target.value)}>
+      <option value="">— choose —</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+      {value && !options.includes(value) && <option value={value}>{value} (not in list)</option>}
+    </select>
+  )
+}
 
 export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   deal: Opportunity; onClose: () => void; onConfirmed: () => void
@@ -79,7 +153,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   const [outsourcePrice, setOutsourcePrice] = useState(deal.outsource_price != null ? String(deal.outsource_price) : '')
   const [outsourceCur, setOutsourceCur] = useState(deal.outsource_currency || 'USD')
   const [experts, setExperts] = useState<string[]>([])
-  const [contractors, setContractors] = useState<string[]>([])
+  const [contractors, setContractors] = useState<Contractor[]>([])
 
   // ---- people
   const [salesPerson, setSalesPerson] = useState(deal.sales_person || '')
@@ -101,7 +175,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   useEffect(() => { opportunityMissingFields(deal.id).then(setServerMissing) }, [deal.id])
   useEffect(() => { getFxRates().then(setRates) }, [])
   useEffect(() => { getSheetVocab().then(setVocab) }, [])
-  useEffect(() => { getPickList('expert').then(setExperts); getPickList('contractor').then(setContractors) }, [])
+  useEffect(() => { getPickList('expert').then(setExperts); getContractors().then(setContractors) }, [])
 
   // Prefill from the client's own history — but only where the deal itself is silent.
   // A value already on the deal is what somebody decided about THIS project; the sheet
@@ -219,67 +293,8 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   }
 
   // ---- presentation --------------------------------------------------------
-  const ctl = 'mt-1 w-full bg-mav-dark border rounded-md px-3 py-2 text-sm text-white placeholder:text-white/35 \
-    focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors'
-
-  /** One labelled control. `need` turns it amber; `auto` marks a value that was filled in. */
-  const F = ({ label, need, auto, guess, hint, wide, children }: {
-    label: string; need?: boolean; auto?: boolean; guess?: boolean; hint?: string; wide?: boolean
-    children: React.ReactNode
-  }) => (
-    <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
-      <span className="flex items-center gap-1.5 text-xs">
-        <span className={`font-medium ${need ? 'text-amber-300' : 'text-white/85'}`}>{label}</span>
-        {need && <span className="text-amber-300">·</span>}
-        {need && <span className="text-amber-300">needed</span>}
-        {auto && !need && (
-          <span title={`Filled in from ${deal.company_name}'s last project — check it`}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-sky-400/15 text-sky-300">
-            <Sparkles size={10} /> prefilled
-          </span>
-        )}
-        {guess && !auto && !need && (
-          <span title="The usual answer across all projects — this client has no history here, so check it properly"
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-white/10 text-white/65">
-            <Sparkles size={10} /> usual
-          </span>
-        )}
-      </span>
-      {children}
-      {hint && <span className="mt-1 block text-[11px] text-white/50">{hint}</span>}
-    </label>
-  )
-
-  const border = (bad: boolean) => bad ? 'border-amber-400/70' : 'border-white/20'
-  const Section = ({ n, title, blurb, children }: {
-    n: number; title: string; blurb: string; children: React.ReactNode
-  }) => (
-    <section className="border-t border-mav-line pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold flex items-center gap-2">
-          <span className="grid place-items-center w-5 h-5 rounded-full bg-mav-yellow/15 border border-mav-yellow/40 text-[10px] font-semibold text-mav-yellow">{n}</span>
-          {title}
-        </h3>
-        <p className="text-[11px] text-white/55 mt-1 ml-7">{blurb}</p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 ml-0 sm:ml-7">{children}</div>
-    </section>
-  )
-
-  /** A dropdown whose options come from the sheet, with whatever the deal already holds
-   *  kept selectable — an older row may carry a spelling no longer in use, and confirming
-   *  must not silently retag it as something else. */
-  const Pick = ({ value, onChange, options, bad }: {
-    value: string; onChange: (v: string) => void; options: readonly string[]; bad: boolean
-  }) => (
-    <select className={`${ctl} ${border(bad)}`} value={value} onChange={e => onChange(e.target.value)}>
-      <option value="">— choose —</option>
-      {options.map(o => <option key={o} value={o}>{o}</option>)}
-      {value && !options.includes(value) && <option value={value}>{value} (not in list)</option>}
-    </select>
-  )
-
   const has = (k: string) => filled.has(k)
+
   const guessed = (k: string) => assumed.has(k)
 
   return (
@@ -337,19 +352,19 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
               <input className={`${ctl} ${border(false)}`} value={subject} onChange={e => setSubject(e.target.value)}
                 placeholder="What this project is called" />
             </F>
-            <F label="Service / dept" need={missing.includes('Service / dept')} auto={has('serviceDept')}>
+            <F label="Service / dept" need={missing.includes('Service / dept')} auto={has('serviceDept')} from={deal.company_name}>
               <Pick value={serviceDept} onChange={setServiceDept} options={SERVICE_DEPTS}
                 bad={missing.includes('Service / dept')} />
             </F>
-            <F label="Project type" need={missing.includes('Project type')} auto={has('projectType')}>
+            <F label="Project type" need={missing.includes('Project type')} auto={has('projectType')} from={deal.company_name}>
               <Pick value={projectType} onChange={setProjectType} options={PROJECT_TYPES}
                 bad={missing.includes('Project type')} />
             </F>
-            <F label="Service type" need={missing.includes('Service type')} auto={has('serviceType')} guess={guessed('serviceType')}>
+            <F label="Service type" need={missing.includes('Service type')} auto={has('serviceType')} from={deal.company_name} guess={guessed('serviceType')}>
               <Pick value={serviceType} onChange={setServiceType} options={vocab.service_type}
                 bad={missing.includes('Service type')} />
             </F>
-            <F label="Technology" need={missing.includes('Technology')} auto={has('technology')}>
+            <F label="Technology" need={missing.includes('Technology')} auto={has('technology')} from={deal.company_name}>
               <Pick value={technology} onChange={setTechnology} options={vocab.technology}
                 bad={missing.includes('Technology')} />
             </F>
@@ -360,19 +375,19 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
               <input className={`${ctl} border-white/10 bg-white/[0.04] text-white/70 cursor-not-allowed`} value={deal.company_name || ''} readOnly
                 title="The company this deal belongs to. Changing it would make it a different deal." />
             </F>
-            <F label="Client name" need={missing.includes('Client name')} auto={has('clientName')}>
+            <F label="Client name" need={missing.includes('Client name')} auto={has('clientName')} from={deal.company_name}>
               <input className={`${ctl} ${border(missing.includes('Client name'))}`} value={clientName}
                 onChange={e => setClientName(e.target.value)} placeholder="The person you deal with" />
             </F>
-            <F label="Client email" auto={has('clientEmail')}>
+            <F label="Client email" auto={has('clientEmail')} from={deal.company_name}>
               <input type="email" className={`${ctl} ${border(false)}`} value={clientEmail}
                 onChange={e => setClientEmail(e.target.value)} />
             </F>
-            <F label="Client type" need={missing.includes('Client type')} auto={has('clientType')}>
+            <F label="Client type" need={missing.includes('Client type')} auto={has('clientType')} from={deal.company_name}>
               <Pick value={clientType} onChange={setClientType} options={vocab.client_type}
                 bad={missing.includes('Client type')} />
             </F>
-            <F label="Geography" need={missing.includes('Geography')} auto={has('geo')}>
+            <F label="Geography" need={missing.includes('Geography')} auto={has('geo')} from={deal.company_name}>
               <select className={`${ctl} ${border(missing.includes('Geography'))}`} value={geo}
                 onChange={e => setGeo(e.target.value)}>
                 <option value="">— choose —</option>
@@ -380,7 +395,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
                 {geo && !GEOS.includes(geo as any) && <option value={geo}>{geo} (not in list)</option>}
               </select>
             </F>
-            <F label="Business type" auto={has('businessType')}>
+            <F label="Business type" auto={has('businessType')} from={deal.company_name}>
               <Pick value={businessType} onChange={setBusinessType} options={vocab.business_type} bad={false} />
             </F>
           </Section>
@@ -394,7 +409,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
               <input type="number" className={`${ctl} ${border(missing.includes('Value'))}`} value={localValue}
                 onChange={e => setLocalValue(e.target.value)} />
             </F>
-            <F label="Currency" need={missing.includes('Currency')} auto={has('currency')}>
+            <F label="Currency" need={missing.includes('Currency')} auto={has('currency')} from={deal.company_name}>
               <select className={`${ctl} ${border(missing.includes('Currency'))}`} value={currency}
                 onChange={e => setCurrency(e.target.value)}>
                 {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -435,7 +450,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
           </Section>
 
           <Section n={6} title="Delivery and owners" blurb="How it is scheduled, and who is accountable.">
-            <F label="Delivery type" need={missing.includes('Delivery type')} auto={has('deliveryType')} guess={guessed('deliveryType')}>
+            <F label="Delivery type" need={missing.includes('Delivery type')} auto={has('deliveryType')} from={deal.company_name} guess={guessed('deliveryType')}>
               <Pick value={deliveryType} onChange={setDeliveryType} options={vocab.delivery_type}
                 bad={missing.includes('Delivery type')} />
             </F>
@@ -450,8 +465,16 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
                 about money that is not true. */}
             {expert === CONTRACTOR && (
               <>
-                <F label="Contractor" hint="Managed in Settings, alongside the expert list.">
-                  <Pick value={contractorName} onChange={setContractorName} options={contractors} bad={false} />
+                <F label="Contractor" hint="Add one in Settings — any PM or admin can.">
+                  {/* Choosing a contractor sets the cost currency to the one they invoice
+                      in, so it is right by default rather than right if someone remembers.
+                      It stays editable: a contractor can bill in something else once. */}
+                  <Pick value={contractorName} options={contractors.map(c => c.name)} bad={false}
+                    onChange={v => {
+                      setContractorName(v)
+                      const c = contractors.find(x => x.name === v)
+                      if (c?.default_currency) setOutsourceCur(c.default_currency)
+                    }} />
                 </F>
                 <F label="Contractor cost" hint="Goes to the sheet's Outsource Price.">
                   <input type="number" className={`${ctl} ${border(false)}`} value={outsourcePrice}
@@ -464,11 +487,11 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
                 </F>
               </>
             )}
-            <F label="PM owner" need={missing.includes('PM owner')} auto={has('pmOwner')}>
+            <F label="PM owner" need={missing.includes('PM owner')} auto={has('pmOwner')} from={deal.company_name}>
               <input className={`${ctl} ${border(missing.includes('PM owner'))}`} value={pmOwner}
                 onChange={e => setPmOwner(e.target.value)} />
             </F>
-            <F label="Account manager" need={missing.includes('Account manager')} auto={has('salesPerson')}>
+            <F label="Account manager" need={missing.includes('Account manager')} auto={has('salesPerson')} from={deal.company_name}>
               <input className={`${ctl} ${border(missing.includes('Account manager'))}`} value={salesPerson}
                 onChange={e => setSalesPerson(e.target.value)} />
             </F>

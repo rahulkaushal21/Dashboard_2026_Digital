@@ -1474,22 +1474,28 @@ export const CONTRACTOR = 'Contractor'
 
 export interface PickItem { kind: 'expert' | 'contractor'; value: string; sort: number; active: boolean }
 
-/** Active entries of one list, in the order Settings put them. */
+/**
+ * Active entries of one list, A-Z.
+ *
+ * Alphabetical rather than a curated order: this is a list of people you scan for one
+ * name, and the only ordering that helps is the one where you already know where to look.
+ * Sorting happens here, in the browser's own collator, so accents and case behave the way
+ * a reader expects rather than the way byte order does.
+ */
 export async function getPickList(kind: 'expert' | 'contractor'): Promise<string[]> {
   if (!supabase) return []
   const { data, error } = await supabase.from('pick_lists')
-    .select('value, sort').eq('kind', kind).eq('active', true).order('sort').order('value')
+    .select('value').eq('kind', kind).eq('active', true)
   if (error || !data) return []
-  return (data as any[]).map(r => r.value)
+  return (data as any[]).map(r => r.value).sort((a, b) => a.localeCompare(b))
 }
 
 /** Every entry including the retired ones — Settings needs to see what it can turn back on. */
 export async function getPickListAll(kind: 'expert' | 'contractor'): Promise<PickItem[]> {
   if (!supabase) return []
-  const { data, error } = await supabase.from('pick_lists')
-    .select('*').eq('kind', kind).order('sort').order('value')
+  const { data, error } = await supabase.from('pick_lists').select('*').eq('kind', kind)
   if (error || !data) return []
-  return data as PickItem[]
+  return (data as PickItem[]).sort((a, b) => a.value.localeCompare(b.value))
 }
 
 export async function addPickItem(kind: 'expert' | 'contractor', value: string, sort = 100): Promise<{ error?: string }> {
@@ -1521,5 +1527,55 @@ export async function setPickItemActive(kind: 'expert' | 'contractor', value: st
 export async function setPickItemSort(kind: 'expert' | 'contractor', value: string, sort: number): Promise<{ error?: string }> {
   if (!supabase) return { error: 'Supabase not configured' }
   const { error } = await supabase.from('pick_lists').update({ sort }).eq('kind', kind).eq('value', value)
+  return error ? { error: error.message } : {}
+}
+
+// ---- Contractors -----------------------------------------------------------
+//
+// Held as records rather than as names on a list, because a contractor has an agency, a
+// currency they invoice in and an address. A list of strings would have meant retyping
+// the currency on every project and getting it wrong on some of them.
+//
+// PMs can add them as well as admins: the PM placing the work is the one who knows who it
+// went to, and making them ask first is how a list goes stale and names end up in a notes
+// field instead.
+
+export interface Contractor {
+  name: string; agency?: string; default_currency: string; email?: string
+  active: boolean; added_by?: string; added_at?: string
+}
+
+/** Contractors still taking work, A–Z. */
+export async function getContractors(includeRetired = false): Promise<Contractor[]> {
+  if (!supabase) return []
+  let q = supabase.from('contractors').select('*')
+  if (!includeRetired) q = q.eq('active', true)
+  const { data, error } = await q
+  if (error || !data) return []
+  return (data as Contractor[]).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+export async function saveContractor(c: Partial<Contractor> & { name: string }, actor?: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const name = c.name.trim()
+  if (!name) return { error: 'A name is needed.' }
+  const { error } = await supabase.from('contractors').upsert({
+    name,
+    agency: c.agency?.trim() || null,
+    default_currency: (c.default_currency || 'USD').trim().toUpperCase(),
+    email: c.email?.trim() || null,
+    active: c.active ?? true,
+    added_by: actor || null,
+  })
+  return error ? { error: error.message } : {}
+}
+
+/**
+ * Retire or restore. Never a delete — a contractor is named on every project they built,
+ * and removing the row would leave those pointing at a name the list no longer offers.
+ */
+export async function setContractorActive(name: string, active: boolean): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { error } = await supabase.from('contractors').update({ active }).eq('name', name)
   return error ? { error: error.message } : {}
 }
