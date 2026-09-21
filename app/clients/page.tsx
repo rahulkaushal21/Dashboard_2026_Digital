@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClient360, type Client360, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
+import { getClient360, type Client360, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -76,6 +76,14 @@ const tone = (b: string) => b === 'Positive' ? 'bg-green-500/15 text-green-400' 
   : b === 'At risk' ? 'bg-red-500/20 text-red-300' : b === 'Watch' ? 'bg-orange-500/20 text-orange-300' : 'bg-mav-line text-mav-muted'
 const sigTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/risk|escalat|churn/.test(v)) return 'bg-red-500/15 text-red-400'; if (/oppo|lead|upsell|cross/.test(v)) return 'bg-blue-500/15 text-blue-400'; if (/positive|win|prais/.test(v)) return 'bg-green-500/15 text-green-400'; return 'bg-mav-line text-mav-muted' }
 const impactTone = (i?: string) => /critical|sev1|sev 1/i.test(i || '') ? 'bg-red-500/20 text-red-300' : /major/i.test(i || '') ? 'bg-red-500/15 text-red-400' : /minor/i.test(i || '') ? 'bg-amber-500/15 text-amber-400' : 'bg-mav-line text-mav-muted'
+// Every badge on a card carries whatever the source sheet put in that column, and those
+// sheets are hand-filled: Business Impact has turned up holding a whole paragraph. A
+// shrink-0 badge with a paragraph in it cannot wrap and cannot shrink, so it pushed out
+// of its card and straight across the column beside it — which is what made one client's
+// escalation text run over the panel next to it. Capped, truncated, full text on hover.
+const Tag = ({ cls, text }: { cls: string; text: string }) => (
+  <span title={text} className={`shrink-0 max-w-[45%] truncate text-[10px] px-1.5 py-0.5 rounded-full ${cls}`}>{text}</span>
+)
 // Colour per engagement model, shared by the proportion bar and its legend.
 // Dedicated work carries the brand yellow so the thing this panel is asked about
 // reads first; the rest sit muted around it.
@@ -119,6 +127,43 @@ function Stat({ label, value, sub, tone }: {
 }
 
 const SPLIT_COLOURS = ['#FFDB2D', '#7CC4FF', '#9B8CFF', '#5FD3A0']
+
+// One "what they buy" list — every technology, service type or department this client has
+// paid for, biggest first. The Overview tiles answer with a single winner ("mostly built
+// in Wordpress"); that is the headline and not the whole answer. A client on Wordpress
+// who also had two Shopify builds and an AI job reads as a pure Wordpress account here,
+// and whoever is about to pitch them never finds out otherwise.
+//
+// Ordered and sized by revenue, not by project count, to match the tiles: eleven tiny
+// AWS tickets are not a bigger part of the relationship than one large build.
+const MixList = ({ title, note, rows }: { title: string; note: string; rows?: Mix[] }) => {
+  if (!rows || rows.length === 0) return null
+  return (
+    <div>
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className="text-xs uppercase tracking-wide text-mav-muted">{title}</span>
+        <span className="text-[11px] text-mav-muted">{rows.length} &middot; {note}</span>
+      </div>
+      <div className="space-y-1.5">
+        {rows.map((x, i) => (
+          <div key={x.name} className="text-sm">
+            <div className="flex items-center gap-2">
+              <span className="flex-1 min-w-0 truncate" title={x.name}>{x.name}</span>
+              <span className="text-[11px] text-mav-muted tabular-nums shrink-0">{x.projects}&times;</span>
+              <span className="tabular-nums shrink-0">{fmtUsd(x.amount)}</span>
+              <span className="tabular-nums text-mav-muted w-12 text-right shrink-0">{x.pct}%</span>
+            </div>
+            {/* A bar per row rather than one stacked bar: these lists run to seven or
+                eight entries, and a stacked bar at that length is unreadable slivers. */}
+            <div className="mt-1 h-1 rounded-full bg-mav-dark overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${Math.max(x.pct, 1)}%`, background: SPLIT_COLOURS[i % SPLIT_COLOURS.length] }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 /** "Sep 2026" from a YYYY-MM or a date string, without a timezone shifting the month. */
@@ -916,7 +961,7 @@ export default function Clients() {
                       {plays.map(p => (
                         <div key={p.name} className="rounded-lg border border-mav-line bg-mav-dark/40 p-4">
                           <div className="flex items-start justify-between gap-2 mb-2">
-                            <div className="text-sm font-medium leading-snug">{p.name}</div>
+                            <div className="min-w-0 break-words text-sm font-medium leading-snug">{p.name}</div>
                             <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${PLAY_TYPE_TONE[p.type]}`}>{p.type}</span>
                           </div>
                           <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Replaces</div>
@@ -958,7 +1003,7 @@ export default function Clients() {
             {(playType ? UNIVERSAL_PLAYS.filter(p => p.type === playType) : UNIVERSAL_PLAYS).map(p => (
               <div key={p.name} className="rounded-lg border border-mav-line bg-mav-dark/40 p-4">
                 <div className="flex items-start justify-between gap-2 mb-2">
-                  <div className="text-sm font-medium leading-snug">{p.name}</div>
+                  <div className="min-w-0 break-words text-sm font-medium leading-snug">{p.name}</div>
                   <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${PLAY_TYPE_TONE[p.type]}`}>{p.type}</span>
                 </div>
                 <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Replaces</div>
@@ -1115,6 +1160,25 @@ export default function Clients() {
                   match its neighbour. */}
               {cTab === 'work' && (
               <div className="xl:grid xl:grid-cols-2 xl:gap-x-8 xl:items-start">
+              {(() => {
+                const m = c360[(selC.company_name || '').trim().toLowerCase()]
+                if (!m || !(m.tech_split?.length || m.service_split?.length || m.dept_split?.length)) return null
+                return (
+                  <div className="xl:col-span-2 mt-6 border-t border-mav-line pt-4">
+                    <div className="text-xs uppercase tracking-wide text-mav-muted mb-1">What they buy</div>
+                    <p className="text-[11px] text-mav-muted mb-4">
+                      Everything on this client&rsquo;s record, by share of their {fmtUsd(m.lifetime_usd)} lifetime value &mdash;
+                      not only the one they buy most. Each list adds to 100%.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-6">
+                      <MixList title="Technology" note="what it was built in" rows={m.tech_split} />
+                      <MixList title="Service type" note="what we did" rows={m.service_split} />
+                      <MixList title="Service dept" note="where it sat" rows={m.dept_split} />
+                    </div>
+                  </div>
+                )
+              })()}
+
               {bill && (
                 <div className="mt-6 border-t border-mav-line pt-4">
                   <div className="flex items-baseline justify-between gap-3">
@@ -1183,7 +1247,7 @@ export default function Clients() {
                     {cOpps.slice(0, 8).map(o => (
                       <div key={o.id} className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="text-sm font-medium leading-snug">{o.summary || o.rfq_status || o.source_subject || '(opportunity)'}</div>
+                          <div className="min-w-0 break-words text-sm font-medium leading-snug">{o.summary || o.rfq_status || o.source_subject || '(opportunity)'}</div>
                           {o.win_probability != null && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400">{o.win_probability}%</span>}
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">
@@ -1210,8 +1274,8 @@ export default function Clients() {
                     {r.escs.slice(0, 12).map(e => (
                       <div key={e.id} className="rounded-lg border border-mav-line bg-mav-dark/40 p-3">
                         <div className="flex items-start justify-between gap-2">
-                          <div className="text-sm font-medium leading-snug">{e.link || e.email_subject || e.project_name || '(escalation)'}</div>
-                          {e.business_impact && <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${impactTone(e.business_impact)}`}>{e.business_impact}</span>}
+                          <div className="min-w-0 break-words text-sm font-medium leading-snug">{e.link || e.email_subject || e.project_name || '(escalation)'}</div>
+                          {e.business_impact && <Tag cls={impactTone(e.business_impact)} text={e.business_impact} />}
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">
                           {e.tracking_date && <span>{(e.tracking_date || '').slice(0, 10)}</span>}
@@ -1231,7 +1295,7 @@ export default function Clients() {
                   <div className="space-y-3">
                     {r.posFb.slice(0, 8).map(e => (
                       <div key={e.id} className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
-                        <div className="text-sm font-medium leading-snug">{e.link || e.email_subject || e.project_name || '(positive note)'}</div>
+                        <div className="min-w-0 break-words text-sm font-medium leading-snug">{e.link || e.email_subject || e.project_name || '(positive note)'}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">{e.tracking_date && <span>{(e.tracking_date || '').slice(0, 10)}</span>}<span className="px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">Positive · not an escalation</span>{e.raised_by && <span>· {e.raised_by}</span>}</div>
                       </div>
                     ))}
@@ -1262,7 +1326,7 @@ export default function Clients() {
                     <div className="space-y-3">
                       {emails.map(s => (
                         <div key={s.id} className="rounded-lg border border-mav-line bg-mav-dark/40 p-3">
-                          <div className="flex items-start justify-between gap-2"><div className="text-sm font-medium leading-snug">{s.source_subject || '(no subject)'}</div>{s.sentiment && <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${tone(sentBucket(s.sentiment))}`}>{s.sentiment}</span>}</div>
+                          <div className="flex items-start justify-between gap-2"><div className="min-w-0 break-words text-sm font-medium leading-snug">{s.source_subject || '(no subject)'}</div>{s.sentiment && <Tag cls={tone(sentBucket(s.sentiment))} text={s.sentiment} />}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-mav-muted">{s.signal_type && <span className={`px-1.5 py-0.5 rounded-full ${sigTone(s.signal_type)}`}>{s.signal_type.replace(/_/g, ' ')}</span>}{s.source_date && <span>{(s.source_date || '').slice(0, 10)}</span>}{s.client_email && <span>· {s.client_email}</span>}</div>
                           {s.summary && <p className="mt-2 text-xs leading-relaxed text-mav-muted">{s.summary}</p>}
                         </div>

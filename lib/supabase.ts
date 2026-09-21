@@ -1598,8 +1598,12 @@ export interface Client360 {
   handled_by?: string; handled_by_pct?: number
   built_in?: string; built_in_pct?: number
   revenue_split?: { name: string; amount: number; pct: number }[]
+  // The full mix behind the single-winner "mostly built in" figure above: every
+  // technology, service type and service dept this client has bought, by revenue.
+  tech_split?: Mix[]; service_split?: Mix[]; dept_split?: Mix[]
   sales_cycle_days?: number; sales_cycle_n?: number
 }
+export interface Mix { name: string; amount: number; projects: number; pct: number }
 
 /** Keyed on the lower-cased company name, the same way the view is. */
 export async function getClient360(): Promise<Record<string, Client360>> {
