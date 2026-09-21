@@ -863,8 +863,8 @@ export async function getRevenueSources(): Promise<RevenueSource[]> {
 // is in the refusal: "still missing: Geography, Project type" is what the person has
 // to act on, and a bare false would throw it away.
 
-export type PmTeam = 'web' | 'nbd'
-export interface DirectoryMember { email: string; name: string; slug: string; team: PmTeam; aliases: string[]; active: boolean }
+export type PmTeam = 'LP/HUB' | 'WEB-AU' | 'WEB-UK' | 'WEB-US'
+export interface DirectoryMember { email: string; name: string; slug: string; team: PmTeam | null; aliases: string[]; active: boolean }
 
 /** The signed-in person's directory row, or null if they are not on it. */
 export async function getDirectoryMember(email?: string | null): Promise<DirectoryMember | null> {
@@ -888,8 +888,8 @@ export const ownerMatches = (cell: string | undefined, aliases: string[]) =>
 /**
  * May this person confirm this deal, as far as the browser can tell?
  *
- * A web PM is named in pm_owner; NBD is named in sales_person, because they open the
- * business rather than project-manage it. Admins may confirm anything.
+ * A PM is named in pm_owner. Admins may confirm anything. `team` is a pod label for
+ * grouping the team and has no part in this.
  *
  * THIS IS FOR SHOWING THE BUTTON ONLY. The same rule is enforced in the database and
  * that is the one that counts — this copy just avoids offering an action that would
@@ -898,7 +898,7 @@ export const ownerMatches = (cell: string | undefined, aliases: string[]) =>
 export function canConfirmLocally(o: Opportunity, me: DirectoryMember | null, isAdmin: boolean): boolean {
   if (isAdmin) return true
   if (!me) return false
-  return me.team === 'nbd' ? ownerMatches(o.sales_person, me.aliases) : ownerMatches(o.pm_owner, me.aliases)
+  return ownerMatches(o.pm_owner, me.aliases)
 }
 
 export interface NewOpportunity {
@@ -1009,20 +1009,20 @@ const slugify = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'
  * thinking twice about: two people here share one, and a careless alias hands one
  * person's deals to the other.
  */
-export async function addDirectoryMember(m: { email: string; name: string; team: PmTeam; aliases: string[]; note?: string }, addedBy: string): Promise<{ error?: string }> {
+export async function addDirectoryMember(m: { email: string; name: string; team: PmTeam | null; aliases: string[]; note?: string }, addedBy: string): Promise<{ error?: string }> {
   if (!supabase) return { error: 'Supabase not configured' }
   const email = m.email.trim().toLowerCase()
   const aliases = m.aliases.map(a => a.trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean)
   if (!email || !m.name.trim()) return { error: 'Name and email are both required.' }
   if (!aliases.length) return { error: 'At least one alias is needed, or none of their deals will match them.' }
   const { error } = await supabase.from('pm_directory').insert({
-    email, name: m.name.trim(), slug: slugify(m.name), team: m.team,
+    email, name: m.name.trim(), slug: slugify(m.name), team: m.team || null,
     aliases, active: true, added_by: addedBy, note: m.note || null,
   })
   return error ? { error: error.message } : {}
 }
 
-export async function updateDirectoryMember(email: string, patch: Partial<{ name: string; team: PmTeam; aliases: string[]; active: boolean }>): Promise<{ error?: string }> {
+export async function updateDirectoryMember(email: string, patch: Partial<{ name: string; team: PmTeam | null; aliases: string[]; active: boolean }>): Promise<{ error?: string }> {
   if (!supabase) return { error: 'Supabase not configured' }
   const body: any = { ...patch }
   if (patch.aliases) body.aliases = patch.aliases.map(a => a.trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean)
@@ -1045,10 +1045,9 @@ export async function removeDirectoryMember(email: string): Promise<{ error?: st
 /** How many live deals this person is named on — what they would lose if deactivated. */
 export async function directoryMemberDealCount(m: DirectoryMember): Promise<number> {
   if (!supabase) return 0
-  const col = m.team === 'nbd' ? 'sales_person' : 'pm_owner'
-  const { data } = await supabase.from('opportunities').select(`id, ${col}`).eq('won', false)
+  const { data } = await supabase.from('opportunities').select('id, pm_owner').eq('won', false)
   if (!data) return 0
-  return (data as any[]).filter(r => ownerMatches(r[col], m.aliases)).length
+  return (data as any[]).filter(r => ownerMatches(r.pm_owner, m.aliases)).length
 }
 
 // ---- The work list --------------------------------------------------------

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { listDirectory, addDirectoryMember, updateDirectoryMember, removeDirectoryMember, type DirectoryMember, type PmTeam } from '@/lib/supabase'
 import { ALLOWED_DOMAINS, isAllowedDomain } from '@/lib/access'
+import { PM_TEAMS } from '@/lib/deal-fields'
 
 // The PM directory, managed here instead of in code.
 //
@@ -15,20 +16,20 @@ import { ALLOWED_DOMAINS, isAllowedDomain } from '@/lib/access'
 //      resolve to them and they cannot confirm their own work. A careless one — a bare
 //      first name two people share — hands one person's deals to the other.
 //
-//   2. THE TEAM DECIDES WHICH COLUMN IS READ. A web PM is named in the PM column; NBD
-//      is named as the account owner, because they open the business rather than run
-//      the project. Get this wrong and the person matches nothing at all.
+//   2. THE POD IS A LABEL, NOT A PERMISSION. Tagging somebody WEB-UK groups them for
+//      reporting; it does not widen or narrow what they can confirm. Only the aliases
+//      do that. Leaving it blank costs nothing.
 
 export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
   const [rows, setRows] = useState<DirectoryMember[]>([])
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
-  const [draft, setDraft] = useState<{ name: string; team: PmTeam; aliases: string; active: boolean } | null>(null)
+  const [draft, setDraft] = useState<{ name: string; team: PmTeam | ''; aliases: string; active: boolean } | null>(null)
 
   const [nName, setNName] = useState('')
   const [nEmail, setNEmail] = useState('')
-  const [nTeam, setNTeam] = useState<PmTeam>('web')
+  const [nTeam, setNTeam] = useState<PmTeam | ''>('')
   const [nAliases, setNAliases] = useState('')
 
   const refresh = () => listDirectory().then(setRows).catch(() => setRows([]))
@@ -53,21 +54,21 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
 
   const add = async () => {
     setBusy(true); setStatus('')
-    const res = await addDirectoryMember({ email: nEmail, name: nName, team: nTeam, aliases: aliasList(nAliases) }, 'settings')
+    const res = await addDirectoryMember({ email: nEmail, name: nName, team: nTeam || null, aliases: aliasList(nAliases) }, 'settings')
     setBusy(false)
     if (res.error) { setStatus(res.error); return }
-    setNName(''); setNEmail(''); setNTeam('web'); setStatus('Added.'); refresh()
+    setNName(''); setNEmail(''); setNTeam(''); setStatus('Added.'); refresh()
   }
 
   const startEdit = (r: DirectoryMember) => {
     setEditing(r.email)
-    setDraft({ name: r.name, team: r.team, aliases: r.aliases.join(', '), active: r.active })
+    setDraft({ name: r.name, team: r.team || '', aliases: r.aliases.join(', '), active: r.active })
   }
 
   const saveEdit = async () => {
     if (!editing || !draft) return
     setBusy(true); setStatus('')
-    const res = await updateDirectoryMember(editing, { name: draft.name, team: draft.team, aliases: aliasList(draft.aliases), active: draft.active })
+    const res = await updateDirectoryMember(editing, { name: draft.name, team: draft.team || null, aliases: aliasList(draft.aliases), active: draft.active })
     setBusy(false)
     if (res.error) { setStatus(res.error); return }
     setEditing(null); setDraft(null); setStatus('Saved.'); refresh()
@@ -83,17 +84,15 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
   }
 
   const inp = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow'
-  const web = rows.filter(r => r.team === 'web')
-  const nbd = rows.filter(r => r.team === 'nbd')
+
 
   return (
     <div>
       <h2 className="text-base font-semibold mb-1">PM directory</h2>
       <p className="text-sm text-mav-muted mb-4">
-        Who may confirm a deal. A person here can confirm the deals they are named on; an admin can confirm anything;
-        everyone else on {ALLOWED_DOMAINS.join(' or ')} can look but not change. <span className="text-white">Web</span> members
-        are matched on the PM column, <span className="text-white">NBD</span> on the account-owner column — they open the
-        business rather than run the project, so they are named differently on a deal.
+        The PM team, and who may confirm a deal. A person here can confirm the deals they are named on as PM; an admin can
+        confirm anything; everyone else on {ALLOWED_DOMAINS.join(' or ')} can look but not change. The pod is a label for
+        grouping the team — it does not affect what anyone can confirm.
       </p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-4">
@@ -102,19 +101,20 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
             <tr>
               <th className="px-4 py-2 font-medium">Name</th>
               <th className="px-4 py-2 font-medium">Email</th>
-              <th className="px-4 py-2 font-medium">Team</th>
+              <th className="px-4 py-2 font-medium">Pod</th>
               <th className="px-4 py-2 font-medium">Matches on</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
-            {[...web, ...nbd].map(r => editing === r.email && draft ? (
+            {rows.map(r => editing === r.email && draft ? (
               <tr key={r.email} className="border-b border-mav-line/60 bg-mav-dark/40">
                 <td className="px-4 py-2"><input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} className={`${inp} w-40`} /></td>
                 <td className="px-4 py-2 text-mav-muted">{r.email}</td>
                 <td className="px-4 py-2">
-                  <select value={draft.team} onChange={e => setDraft({ ...draft, team: e.target.value as PmTeam })} className={`${inp} w-24`}>
-                    <option value="web">web</option><option value="nbd">nbd</option>
+                  <select value={draft.team} onChange={e => setDraft({ ...draft, team: e.target.value as PmTeam | '' })} className={`${inp} w-32`}>
+                    <option value="">— untagged</option>
+                    {PM_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </td>
                 <td className="px-4 py-2"><input value={draft.aliases} onChange={e => setDraft({ ...draft, aliases: e.target.value })} className={`${inp} w-full`} /></td>
@@ -137,7 +137,9 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
                     <span className="ml-2 text-xs text-amber-300" title={`Sign-in is limited to ${ALLOWED_DOMAINS.join(' and ')}`}>⚠ cannot sign in</span>
                   )}
                 </td>
-                <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full border ${r.team === 'nbd' ? 'border-blue-400/40 text-blue-300' : 'border-mav-line text-mav-muted'}`}>{r.team}</span></td>
+                <td className="px-4 py-3">{r.team
+                  ? <span className="text-xs px-2 py-0.5 rounded-full border border-blue-400/40 text-blue-300">{r.team}</span>
+                  : <span className="text-xs text-mav-muted">untagged</span>}</td>
                 <td className="px-4 py-3 text-mav-muted text-xs">{r.aliases.join(', ')}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   {canEdit && (<>
@@ -157,8 +159,9 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
           <div className="flex flex-wrap items-center gap-2">
             <input value={nName} onChange={e => setNName(e.target.value)} placeholder="Full name" className={`${inp} w-48`} />
             <input value={nEmail} onChange={e => setNEmail(e.target.value)} placeholder="name@mavlers.com" className={`${inp} w-56`} />
-            <select value={nTeam} onChange={e => setNTeam(e.target.value as PmTeam)} className={`${inp} w-28`}>
-              <option value="web">web</option><option value="nbd">nbd</option>
+            <select value={nTeam} onChange={e => setNTeam(e.target.value as PmTeam | '')} className={`${inp} w-36`}>
+              <option value="">— untagged</option>
+              {PM_TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <input value={nAliases} onChange={e => setNAliases(e.target.value)} placeholder="spellings, comma separated" className={`${inp} w-72`} />
             <button onClick={add} disabled={busy || !nName.trim() || !nEmail.trim()}

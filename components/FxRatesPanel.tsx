@@ -75,7 +75,7 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
             <tr>
               <th className="px-4 py-2 font-medium">Currency</th>
               <th className="px-4 py-2 font-medium">Rate to USD</th>
-              <th className="px-4 py-2 font-medium">1,000 becomes</th>
+              <th className="px-4 py-2 font-medium">What it means</th>
               <th className="px-4 py-2 font-medium">Updated</th>
               <th className="px-4 py-2"></th>
             </tr>
@@ -93,8 +93,11 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
                         onKeyDown={e => e.key === 'Enter' && save(r.currency)} className={`${inp} w-32`} />
                     ) : <span className="text-mav-muted">{r.rate_to_usd}</span>}
                   </td>
-                  <td className="px-4 py-3 text-mav-muted">
-                    ${(1000 * (Number.isFinite(v) ? v : 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {/* Spelled as a single unit. An earlier version showed "1,000 becomes
+                      $1,000.00" for USD, which reads as "1 USD = 1000" at a glance — the
+                      arithmetic was right and the sentence was wrong. */}
+                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">
+                    1 {r.currency} = ${(Number.isFinite(v) ? v : 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} USD
                   </td>
                   <td className="px-4 py-3 text-xs text-mav-muted">{r.updated_at ? new Date(r.updated_at).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">

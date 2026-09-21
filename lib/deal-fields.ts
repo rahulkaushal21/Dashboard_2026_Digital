@@ -25,3 +25,6 @@ export const GEOS = ['US', 'UK', 'AU'] as const
 
 /** Where a hand-entered deal came from, when email did not catch it. */
 export const CHANNELS = ['referral', 'linkedin', 'upsell', 'event', 'inbound', 'other'] as const
+
+/** Which pod a PM sits in. Used for tagging and grouping the team, not for permissions. */
+export const PM_TEAMS = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US'] as const
