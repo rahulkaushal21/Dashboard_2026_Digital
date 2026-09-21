@@ -208,17 +208,72 @@ async function buildRevenue(sb: any): Promise<string[][]> {
 
   const grid: string[][] = [headers];
 
-  // 1. The source tab, verbatim, in its own row order.
+  // 1. The source tab, verbatim, in its own row order — with whatever the team has
+  //    filled in on this page laid over the top.
+  //
+  //    A sheet line's blanks (Project Id, Quote ID, Expert…) are edited in the dashboard
+  //    into sheet_row_overrides, because sheet_raw is re-synced from the spreadsheet and
+  //    an edit written there would vanish at the next sync. If they were not applied
+  //    here, the new spreadsheet would keep showing the blanks the team had already
+  //    filled in — and they would go and fill them in again.
+  //
+  //    Read from web_sheet_rows rather than the overrides table directly, so the
+  //    fingerprint guard (an override stops applying if its sheet row moved) is honoured
+  //    in exactly one place instead of being reimplemented here and drifting.
+  const overrides = new Map<number, Record<string, string>>();
+  {
+    let o = 0;
+    for (;;) {
+      const { data, error } = await sb.from("web_sheet_rows")
+        .select("id, has_override, project_id, quote_id, expert, project_status, start_date, delivery_date, internal_delivery, internal_hrs, actual_hrs, integration, invoice_no, invoice_currency, invoice_amount, outsource_price")
+        .eq("has_override", true).order("id").range(o, o + 999);
+      if (error) throw new Error("web_sheet_rows: " + error.message);
+      if (!data?.length) break;
+      for (const r of data) {
+        overrides.set(Number(r.id), {
+          "Project Id": s(r.project_id),
+          "Quote ID": s(r.quote_id),
+          "Expert": s(r.expert),
+          "Project Status": s(r.project_status),
+          "Start Date": sheetDate(r.start_date),
+          "Delivery Date": sheetDate(r.delivery_date),
+          "Internal Delivery": sheetDate(r.internal_delivery),
+          "Internal hrs": s(r.internal_hrs),
+          "Actual hrs": s(r.actual_hrs),
+          "Integration (only for LP)": s(r.integration),
+          "Invoice No": s(r.invoice_no),
+          "Invoice Currency": s(r.invoice_currency),
+          "Invoice Amount": s(r.invoice_amount),
+          "Outsource Price": s(r.outsource_price),
+        });
+      }
+      if (data.length < 1000) break;
+      o += 1000;
+    }
+  }
+
   let from = 0;
   for (;;) {
-    const { data, error } = await sb.from("sheet_raw").select("values")
+    const { data, error } = await sb.from("sheet_raw").select("id, values")
       .eq("tab", "revenue").order("row_index").range(from, from + 999);
     if (error) throw new Error("sheet_raw: " + error.message);
     if (!data?.length) break;
     for (const r of data) {
       const vals: string[] = (r.values || []).map(s);
       while (vals.length < headers.length) vals.push("");
-      grid.push(vals.slice(0, headers.length));
+      const row = vals.slice(0, headers.length);
+      const ov = overrides.get(Number(r.id));
+      if (ov) {
+        for (const [name, value] of Object.entries(ov)) {
+          // Only write what the override actually holds. An empty one means "nobody
+          // filled this in", not "blank it" — otherwise saving a Project Id would wipe
+          // every other column on that line.
+          if (!value) continue;
+          const i = indexOfHeader(headers, name);
+          if (i >= 0) row[i] = value;
+        }
+      }
+      grid.push(row);
     }
     if (data.length < 1000) break;
     from += 1000;

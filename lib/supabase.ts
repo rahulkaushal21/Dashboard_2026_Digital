@@ -1750,3 +1750,57 @@ export async function saveClientQbr(company: string, qbrDate: string, f: {
   })
   return error ? { ok: false, error: error.message } : { ok: true }
 }
+
+// ── Web, Hub & LP: editing a sheet row ───────────────────────────────────────────────
+//
+// A sheet row's blanks cannot be written back to sheet_raw — that table is re-synced from
+// the spreadsheet, so the edit would vanish at the next sync without an error. They go
+// into an overlay instead (sheet_row_overrides) and the view lays them over the top.
+//
+// The RPC refuses anybody who is not the row's own PC/SME or an admin. canEditLedgerRow
+// below is the same rule in the browser, used to decide what to OFFER — the database is
+// what enforces it.
+
+export interface SheetRowEdits {
+  project_id?: string; quote_id?: string; expert?: string
+  contractor_name?: string; outsource_currency?: string; outsource_price?: number | null
+  delivery_status?: string; start_date?: string | null; delivery_date?: string | null
+  internal_delivery?: string | null; internal_hrs?: number | null; actual_hrs?: number | null
+  integration?: string; invoice_no?: string; invoice_currency?: string; invoice_amount?: number | null
+}
+
+export async function updateSheetRowFields(sheetRowId: number, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase || !sheetRowId) return { ok: false, error: 'Supabase not configured' }
+  const t = (v?: string) => v === undefined ? null : v
+  const n = (v?: number | null) => v ?? null
+  const { error } = await supabase.rpc('update_sheet_row_fields', {
+    p_sheet_row_id: sheetRowId,
+    p_project_id: t(f.project_id), p_quote_id: t(f.quote_id), p_expert: t(f.expert),
+    p_contractor_name: t(f.contractor_name), p_outsource_currency: t(f.outsource_currency),
+    p_outsource_price: n(f.outsource_price), p_project_status: t(f.delivery_status),
+    p_start_date: f.start_date || null, p_delivery_date: f.delivery_date || null,
+    p_internal_delivery: f.internal_delivery || null,
+    p_internal_hrs: n(f.internal_hrs), p_actual_hrs: n(f.actual_hrs),
+    p_integration: t(f.integration), p_invoice_no: t(f.invoice_no),
+    p_invoice_currency: t(f.invoice_currency), p_invoice_amount: n(f.invoice_amount),
+  })
+  return error ? { ok: false, error: error.message } : { ok: true }
+}
+
+/** Save to whichever side of the ledger this row came from. */
+export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
+  return row.source === 'raw'
+    ? updateSheetRowFields(row.source_id, f)
+    : updateProjectFields(row.source_id, f)
+}
+
+/**
+ * Whether to OFFER an edit on this row. Mirrors the rule both RPCs enforce: the row's own
+ * PC/SME, or an admin. A row with no PC/SME named is admin-only — nobody can claim it by
+ * being the only person looking at it.
+ */
+export function canEditLedgerRow(row: LedgerRow, me: DirectoryMember | null, isAdmin: boolean): boolean {
+  if (isAdmin) return true
+  if (!me || !(row.pm_owner || '').trim()) return false
+  return ownerMatches(row.pm_owner, me.aliases)
+}

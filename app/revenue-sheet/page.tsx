@@ -2,9 +2,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import Link from 'next/link'
-import { getProjectLedger, copyRowToMonth, type LedgerRow } from '@/lib/supabase'
+import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
-import { getStoredProfile } from '@/lib/access'
+import { getStoredProfile, currentEmail } from '@/lib/access'
 
 // Web, Hub & LP — the whole ledger, in the revenue sheet's own columns.
 //
@@ -35,7 +35,18 @@ const monLabel = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString(
 // `compact` marks the handful worth seeing when the job is the monthly move rather than
 // reconciliation. Thirty-five columns is right for checking a month against the sheet and
 // far too many for ticking retainers.
-type Col = { key: string; label: string; compact?: boolean; right?: boolean; get: (r: LedgerRow) => string }
+type EditKind = 'text' | 'number' | 'date'
+type Col = {
+  key: string; label: string; compact?: boolean; right?: boolean
+  get: (r: LedgerRow) => string
+  // What this column sorts ON. Without it a date column would sort as the string it is
+  // printed as, and Optimization would sort "9%" above "12%".
+  sort?: (r: LedgerRow) => string | number
+  // Set on the columns somebody fills in after the fact. Double-click writes straight
+  // to this field; everything else is read-only here because it belongs to whoever
+  // priced or booked the work, not to whoever is reconciling the month.
+  edit?: keyof SheetRowEdits; kind?: EditKind
+}
 
 const dash = (v: unknown) => (v === null || v === undefined || v === '') ? '—' : String(v)
 const d10 = (v?: string) => (v || '').slice(0, 10) || '—'
@@ -50,44 +61,48 @@ const optimisation = (r: LedgerRow) => {
 }
 
 const COLUMNS: Col[] = [
-  { key: 'project_id', label: 'Project Id', get: r => dash(r.project_id) },
-  { key: 'quote_id', label: 'Quote ID', get: r => dash(r.quote_id) },
+  { key: 'project_id', label: 'Project Id', get: r => dash(r.project_id), edit: 'project_id', kind: 'text' },
+  { key: 'quote_id', label: 'Quote ID', get: r => dash(r.quote_id), edit: 'quote_id', kind: 'text' },
   { key: 'dept', label: 'Service Department', compact: true, get: r => dash(r.service_dept) },
   { key: 'project', label: 'Project Name', compact: true, get: r => dash(r.project_name) },
   { key: 'ptype', label: 'Project Type', compact: true, get: r => dash(r.engagement_model) },
   { key: 'tech', label: 'Technology', compact: true, get: r => dash(r.technology) },
-  { key: 'conf', label: 'Confirmation Date', get: r => d10(r.confirmed_at) },
-  { key: 'start', label: 'Start Date', get: r => d10(r.start_date) },
-  { key: 'delivery', label: 'Delivery Date', get: r => d10(r.delivery_date) },
-  { key: 'intdel', label: 'Internal Delivery', get: r => d10(r.internal_delivery) },
-  { key: 'inthrs', label: 'Internal hrs', right: true, get: r => num(r.internal_hrs) },
-  { key: 'acthrs', label: 'Actual hrs', right: true, get: r => num(r.actual_hrs) },
-  { key: 'opt', label: 'Optimization', right: true, get: optimisation },
-  { key: 'status', label: 'Project Status', get: r => dash(r.delivery_status) },
+  { key: 'conf', label: 'Confirmation Date', get: r => d10(r.confirmed_at), sort: r => r.confirmed_at || '' },
+  { key: 'start', label: 'Start Date', get: r => d10(r.start_date), sort: r => r.start_date || '', edit: 'start_date', kind: 'date' },
+  { key: 'delivery', label: 'Delivery Date', get: r => d10(r.delivery_date), sort: r => r.delivery_date || '', edit: 'delivery_date', kind: 'date' },
+  { key: 'intdel', label: 'Internal Delivery', get: r => d10(r.internal_delivery), sort: r => r.internal_delivery || '', edit: 'internal_delivery', kind: 'date' },
+  { key: 'inthrs', label: 'Internal hrs', right: true, get: r => num(r.internal_hrs), sort: r => r.internal_hrs ?? -1, edit: 'internal_hrs', kind: 'number' },
+  { key: 'acthrs', label: 'Actual hrs', right: true, get: r => num(r.actual_hrs), sort: r => r.actual_hrs ?? -1, edit: 'actual_hrs', kind: 'number' },
+  { key: 'opt', label: 'Optimization', right: true, get: optimisation, sort: r => (r.internal_hrs && r.internal_hrs > 0 && r.actual_hrs != null) ? (r.internal_hrs - r.actual_hrs) / r.internal_hrs : -999 },
+  { key: 'status', label: 'Project Status', get: r => dash(r.delivery_status), edit: 'delivery_status', kind: 'text' },
   { key: 'stype', label: 'Service Type', get: r => dash(r.service_type) },
   { key: 'dtype', label: 'Delivery Type', get: r => dash(r.delivery_type) },
   { key: 'sme', label: 'PC/SME', compact: true, get: r => dash(r.pm_owner) },
-  { key: 'expert', label: 'Expert', get: r => dash(r.expert) },
-  { key: 'integration', label: 'Integration', get: r => dash(r.integration) },
+  { key: 'expert', label: 'Expert', get: r => dash(r.expert), edit: 'expert', kind: 'text' },
+  { key: 'integration', label: 'Integration', get: r => dash(r.integration), edit: 'integration', kind: 'text' },
   { key: 'agency', label: 'Agency', compact: true, get: r => dash(r.company_name) },
   { key: 'cname', label: 'Client Name', get: r => dash(r.client_name) },
   { key: 'cemail', label: 'Client Email', get: r => dash(r.contact_email) },
   { key: 'ctype', label: 'Client Type', get: r => dash(r.client_type) },
   { key: 'geo', label: 'Geo', compact: true, get: r => dash(r.geo) },
   { key: 'cur', label: 'Currency Type', get: r => dash(r.currency) },
-  { key: 'qprice', label: 'Quote Price', right: true, get: r => num(r.quote_price) },
-  { key: 'cprice', label: 'Confirmed Price', right: true, get: r => num(r.local_value) },
-  { key: 'usd', label: 'USD Conversion', compact: true, right: true, get: r => num(r.amount_usd) },
+  { key: 'qprice', label: 'Quote Price', right: true, get: r => num(r.quote_price), sort: r => r.quote_price ?? -1 },
+  { key: 'cprice', label: 'Confirmed Price', right: true, get: r => num(r.local_value), sort: r => r.local_value ?? -1 },
+  { key: 'usd', label: 'USD Conversion', compact: true, right: true, get: r => num(r.amount_usd), sort: r => r.amount_usd ?? -1 },
   { key: 'btype', label: 'Business Type', get: r => dash(r.business_type) },
   { key: 'am', label: 'Account/Sales Person', compact: true, get: r => dash(r.sales_person) },
-  { key: 'outsrc', label: 'Outsource Price', right: true, get: r => num(r.outsource_price) },
-  { key: 'invno', label: 'Invoice No', get: r => dash(r.invoice_no) },
-  { key: 'invcur', label: 'Invoice Currency', get: r => dash(r.invoice_currency) },
-  { key: 'invamt', label: 'Invoice Amount', right: true, get: r => num(r.invoice_amount) },
+  { key: 'outsrc', label: 'Outsource Price', right: true, get: r => num(r.outsource_price), sort: r => r.outsource_price ?? -1, edit: 'outsource_price', kind: 'number' },
+  { key: 'invno', label: 'Invoice No', get: r => dash(r.invoice_no), edit: 'invoice_no', kind: 'text' },
+  { key: 'invcur', label: 'Invoice Currency', get: r => dash(r.invoice_currency), edit: 'invoice_currency', kind: 'text' },
+  { key: 'invamt', label: 'Invoice Amount', right: true, get: r => num(r.invoice_amount), sort: r => r.invoice_amount ?? -1, edit: 'invoice_amount', kind: 'number' },
   { key: 'month', label: 'Month-Year', compact: true, get: r => ym(r.booking_month) },
 ]
 
-const PAGE = 100
+// When this line was entered. The sheet's Confirmation Date is the one somebody types on
+// the day they book it, so that is what "newest first" means here; a line with none falls
+// back to its start date and then to its month, rather than sinking to the bottom.
+const entryDate = (r: LedgerRow) =>
+  (r.confirmed_at || '').slice(0, 10) || (r.start_date || '').slice(0, 10) || (r.booking_month || '')
 
 export default function ProjectLedger() {
   const [rows, setRows] = useState<LedgerRow[]>([])
@@ -104,6 +119,16 @@ export default function ProjectLedger() {
   const [fFrom, setFFrom] = useState('')
   const [fTo, setFTo] = useState('')
   const [page, setPage] = useState(0)
+  // Sorting. Default is the newest entry in the month first, which is what somebody
+  // reconciling today's bookings opens this page for.
+  const [sortKey, setSortKey] = useState<string>('')
+  const [sortAsc, setSortAsc] = useState(false)
+  // Who is looking, so the page only OFFERS an edit on rows this person owns. The two
+  // RPCs behind it enforce the same rule, so a hidden button is a courtesy, not the lock.
+  const [me, setMe] = useState<DirectoryMember | null>(null)
+  // One cell being edited in place: the row, the column, and what has been typed.
+  const [cell, setCell] = useState<{ rowKey: string; col: string; value: string } | null>(null)
+  const [cellBusy, setCellBusy] = useState(false)
 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   // Thirty-five columns is right for reconciling a month against the spreadsheet and far
@@ -116,7 +141,7 @@ export default function ProjectLedger() {
   const [errors, setErrors] = useState<string[]>([])
 
   const load = () => getProjectLedger().then(setRows).finally(() => setLoading(false))
-  useEffect(() => { setIsAdmin(!!getStoredProfile()?.is_admin); load() }, [])
+  useEffect(() => { setIsAdmin(!!getStoredProfile()?.is_admin); getDirectoryMember(currentEmail()).then(setMe); load() }, [])
 
   const opts = useMemo(() => ({
     dept: uniq(rows.map(r => r.service_dept)),
@@ -138,16 +163,51 @@ export default function ProjectLedger() {
       .filter(r => !fSource || (fSource === 'sheet' ? r.in_sheet : !r.in_sheet))
       .filter(r => !fFrom || ym(r.booking_month) >= fFrom)
       .filter(r => !fTo || ym(r.booking_month) <= fTo)
-      .sort((a, b) => (b.booking_month || '').localeCompare(a.booking_month || '') || (a.company_name || '').localeCompare(b.company_name || ''))
-  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fSource, fFrom, fTo])
+      // Newest month first, and within a month the newest entry first — so today's
+      // bookings are at the top on the 21st, then the 20th, then the 19th. A column sort
+      // replaces the second half of that, never the month grouping, because the page is
+      // paginated a month at a time.
+      .sort((a, b) => {
+        const byMonth = (b.booking_month || '').localeCompare(a.booking_month || '')
+        if (byMonth) return byMonth
+        if (sortKey) {
+          const c = COLUMNS.find(x => x.key === sortKey)
+          if (c) {
+            const va = (c.sort || c.get)(a), vb = (c.sort || c.get)(b)
+            const d = typeof va === 'number' && typeof vb === 'number'
+              ? va - vb
+              : String(va).localeCompare(String(vb), undefined, { numeric: true })
+            if (d) return sortAsc ? d : -d
+          }
+        }
+        return entryDate(b).localeCompare(entryDate(a)) || (a.company_name || '').localeCompare(b.company_name || '')
+      })
+  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fSource, fFrom, fTo, sortKey, sortAsc])
 
   useEffect(() => { setPage(0) }, [search, fDept, fModel, fGeo, fPm, fAm, fSource, fFrom, fTo])
+
+  // One page per booking month. A fixed hundred rows split September across two pages and
+  // put the tail of August on the first — the unit of work here is a month, so that is
+  // the unit the pager moves in.
+  const monthPages = useMemo(() => {
+    const out: string[] = []
+    for (const r of shown) { const m = ym(r.booking_month) || '—'; if (out[out.length - 1] !== m) if (!out.includes(m)) out.push(m) }
+    return out
+  }, [shown])
+
+  const handleSort = (key: string) => {
+    if (sortKey !== key) { setSortKey(key); setSortAsc(false); return }
+    if (!sortAsc) { setSortAsc(true); return }
+    setSortKey(''); setSortAsc(false)   // third click returns to newest-entry-first
+  }
 
   const total = shown.reduce((s, r) => s + (r.amount_usd || 0), 0)
   const clients = new Set(shown.map(r => (r.company_name || '').toLowerCase())).size
   const notInSheet = shown.filter(r => !r.in_sheet)
-  const pageRows = shown.slice(page * PAGE, page * PAGE + PAGE)
-  const pages = Math.ceil(shown.length / PAGE)
+  const pages = Math.max(1, monthPages.length)
+  const pageMonth = monthPages[Math.min(page, monthPages.length - 1)] || ''
+  const pageRows = useMemo(() => shown.filter(r => (ym(r.booking_month) || '—') === pageMonth), [shown, pageMonth])
+  const pageTotal = pageRows.reduce((s, r) => s + (r.amount_usd || 0), 0)
 
   const clearAll = () => { setSearch(''); setFDept(''); setFModel(''); setFGeo(''); setFPm(''); setFAm(''); setFSource(''); setFFrom(''); setFTo('') }
   const anyFilter = search || fDept || fModel || fGeo || fPm || fAm || fSource || fFrom || fTo
@@ -180,12 +240,42 @@ export default function ProjectLedger() {
     load()
   }
 
+  // ── Editing a cell in place ─────────────────────────────────────────────────────
+  // Double-click, type, Enter. The alternative was opening a dialog to fill in one
+  // Project Id, which nobody does for three hundred rows.
+  //
+  // One field per save, and a null means "not sent" to both RPCs — so this can FILL a
+  // blank or change a value, and cannot clear one. Clearing is rare, destructive and
+  // belongs in the full Edit dialog where you can see what else you are about to change.
+  const rawOf = (r: LedgerRow, c: Col) => {
+    const v = (r as any)[c.edit as string]
+    if (v == null) return ''
+    return c.kind === 'date' ? String(v).slice(0, 10) : String(v)
+  }
+
+  const saveCell = async () => {
+    if (!cell) { return }
+    const c = COLUMNS.find(x => x.key === cell.col)
+    const r = rows.find(x => x.row_key === cell.rowKey)
+    if (!c?.edit || !r) { setCell(null); return }
+    const v = cell.value.trim()
+    if (v === rawOf(r, c)) { setCell(null); return }
+    const patch: SheetRowEdits = {}
+    ;(patch as any)[c.edit] = c.kind === 'number' ? (v === '' ? null : Number(v)) : v
+    setCellBusy(true); setErrors([])
+    const res = await saveLedgerRow(r, patch)
+    setCellBusy(false); setCell(null)
+    if (!res.ok) { setErrors([`${r.company_name || 'row'}: ${res.error}`]); return }
+    setStatus(`${c.label} saved on ${r.company_name || 'the row'}.`)
+    load()
+  }
+
   const exportCsv = () => {
     // Exports what is on screen, under the sheet's own headers, so a paste into the
     // spreadsheet lands in the right columns.
-    const head = ['In sheet', ...cols.map(c => c.label)]
+    const head = [...cols.map(c => c.label), 'In sheet']
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const body = shown.map(r => [r.in_sheet ? 'yes' : 'no', ...cols.map(c => { const v = c.get(r); return v === '—' ? '' : v })].map(esc).join(','))
+    const body = shown.map(r => [...cols.map(c => { const v = c.get(r); return v === '—' ? '' : v }), r.in_sheet ? 'yes' : 'no'].map(esc).join(','))
     const blob = new Blob([[head.map(esc).join(','), ...body].join('\n')], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -274,8 +364,21 @@ export default function ProjectLedger() {
           <thead className="text-left text-white/70 border-b border-mav-line">
             <tr>
               <th className="px-3 py-2 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label="Select all filtered" /></th>
+              {/* Click to sort, click again to reverse, a third time to go back to
+                  newest-entry-first. Month grouping is never overridden — the pager
+                  moves a month at a time, so a sort that crossed months would page
+                  through rows that have nothing to do with each other. */}
+              {cols.map(c => (
+                <th key={c.key} className={`${th} ${c.right ? 'text-right' : ''}`}>
+                  <button onClick={() => handleSort(c.key)}
+                    className={`inline-flex items-center gap-1 hover:text-white transition-colors ${sortKey === c.key ? 'text-mav-yellow' : ''}`}
+                    title={`Sort by ${c.label}`}>
+                    {c.label}
+                    <span className="text-[10px] opacity-70">{sortKey === c.key ? (sortAsc ? '▲' : '▼') : ''}</span>
+                  </button>
+                </th>
+              ))}
               <th className={th}>In sheet</th>
-              {cols.map(c => <th key={c.key} className={`${th} ${c.right ? 'text-right' : ''}`}>{c.label}</th>)}
               <th className={th}></th>
             </tr>
           </thead>
@@ -283,35 +386,51 @@ export default function ProjectLedger() {
             {pageRows.map(r => (
               <tr key={r.row_key} className={`border-b border-mav-line/60 ${picked.has(r.row_key) ? 'bg-mav-yellow/5' : ''}`}>
                 <td className="px-3 py-2"><input type="checkbox" checked={picked.has(r.row_key)} onChange={() => toggle(r.row_key)} aria-label={`Select ${r.company_name}`} /></td>
+                {cols.map(c => {
+                  const v = c.get(r)
+                  const mine = canEditLedgerRow(r, me, isAdmin)
+                  const editable = !!c.edit && mine
+                  const open = cell?.rowKey === r.row_key && cell?.col === c.key
+                  return (
+                    <td key={c.key}
+                      onDoubleClick={editable ? () => setCell({ rowKey: r.row_key, col: c.key, value: rawOf(r, c) }) : undefined}
+                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-white/25' : 'text-white/80'} ${open ? '' : 'max-w-[16rem] truncate'} ${editable && !open ? 'cursor-text hover:bg-white/5' : ''}`}
+                      title={open ? '' : editable ? `${v === '—' ? 'Empty' : v} — double-click to edit` : (v === '—' ? '' : v)}>
+                      {open ? (
+                        <input autoFocus disabled={cellBusy}
+                          type={c.kind === 'number' ? 'number' : c.kind === 'date' ? 'date' : 'text'}
+                          value={cell!.value}
+                          onChange={e => setCell({ ...cell!, value: e.target.value })}
+                          onBlur={saveCell}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') { e.preventDefault(); saveCell() }
+                            // Escape abandons the edit. Without it the only way out of a
+                            // cell opened by accident is to save something.
+                            if (e.key === 'Escape') { e.preventDefault(); setCell(null) }
+                          }}
+                          className="w-36 bg-mav-dark border border-mav-yellow rounded px-1.5 py-0.5 text-xs text-white outline-none" />
+                      ) : c.key === 'agency' && v !== '—' ? (
+                        // The Agency cell opens that client's Client 360 record: the row
+                        // says what was billed, and the next question is always who they
+                        // are. CSV export is untouched — it reads c.get(r), not this.
+                        <Link href={`/clients?client=${encodeURIComponent(r.company_name || '')}`}
+                          className="hover:text-mav-yellow transition-colors">{v}</Link>
+                      ) : v}
+                    </td>
+                  )
+                })}
                 <td className={td}>
                   {r.in_sheet
                     ? <span className="text-xs text-white/50">yes</span>
                     : <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/50 text-amber-300">pending</span>}
                 </td>
-                {cols.map(c => {
-                  const v = c.get(r)
-                  return (
-                    <td key={c.key}
-                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-white/25' : 'text-white/80'} max-w-[16rem] truncate`}
-                      title={v === '—' ? '' : v}>
-                      {/* The Agency cell opens that client's Client 360 record. Same
-                          reason as on a deal: the row tells you what was billed, and the
-                          next question is always who they are. CSV export is untouched —
-                          it reads c.get(r), not this. */}
-                      {c.key === 'agency' && v !== '—'
-                        ? <Link href={`/clients?client=${encodeURIComponent(r.company_name || '')}`}
-                            className="hover:text-mav-yellow transition-colors">{v}</Link>
-                        : v}
-                    </td>
-                  )
-                })}
                 <td className={td}>
-                  {/* Only dashboard rows are editable, and only because only they have
-                      somewhere to put the answer — a sheet row's blanks live in the
-                      source spreadsheet, which this page does not own. */}
-                  {r.source === 'dashboard'
+                  {/* Every row is editable now, sheet lines included — their answers go
+                      into an overlay beside the sheet rather than into it. Offered only
+                      to the row's own PC/SME, which is the rule both RPCs enforce. */}
+                  {canEditLedgerRow(r, me, isAdmin)
                     ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
-                    : <span className="text-xs text-white/25">in sheet</span>}
+                    : <span className="text-xs text-white/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
                 </td>
               </tr>
             ))}
@@ -320,14 +439,23 @@ export default function ProjectLedger() {
         </table>
       </div>
 
-      {pages > 1 && (
-        <div className="flex items-center justify-between mt-3 text-sm">
-          <span className="text-mav-muted text-xs">Page {page + 1} of {pages} · ticking the header selects all {shown.length.toLocaleString()} filtered lines, not just this page</span>
-          <div className="flex gap-2">
+      {monthPages.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
+          <span className="text-mav-muted text-xs">
+            Showing <span className="text-white">{pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)}</span>
+            {' '}&middot; {pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} &middot; {money(pageTotal)}
+            {' '}&middot; month {Math.min(page, pages - 1) + 1} of {pages} &middot; ticking the header selects all {shown.length.toLocaleString()} filtered lines, not just this month
+          </span>
+          <div className="flex items-center gap-2">
+            {/* A month picker as well as the arrows: stepping back to March one month at
+                a time is eleven clicks. */}
+            <select value={pageMonth} onChange={e => setPage(monthPages.indexOf(e.target.value))} className={sel}>
+              {monthPages.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
+            </select>
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 transition-colors">Previous</button>
+              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 transition-colors">Newer month</button>
             <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 transition-colors">Next</button>
+              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 transition-colors">Older month</button>
           </div>
         </div>
       )}
@@ -336,9 +464,13 @@ export default function ProjectLedger() {
         Shown in the <span className="text-white">Web, Hub &amp; LP</span> tab&rsquo;s own columns and order.
         <span className="text-amber-300"> Pending</span> means confirmed here and not yet carried into the sheet by the
         hourly writer. A greyed <span className="text-white/40">&mdash;</span> on a sheet line is a column the dashboard has
-        never stored, not an empty one; those values are in the source spreadsheet. Dashboard lines can be edited to add
-        what is known later &mdash; Project Id, Quote ID, Expert, hours, invoice &mdash; by the PM who owns them
-        {isAdmin ? ', and by you as an admin' : ''}.
+        never stored, not an empty one; those values are in the source spreadsheet.
+        <br />
+        <span className="text-white">Double-click a cell to fill it in</span> &mdash; Project Id, Quote ID, Expert, dates,
+        hours, invoice &mdash; or use Edit at the end of the row for the lot. Only the row&rsquo;s own PC/SME can change it
+        {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
+        the sheet, not in it, so the next sync cannot wipe them &mdash; and they are carried into the new spreadsheet by the
+        writer. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
       </p>
 
       {editing && (

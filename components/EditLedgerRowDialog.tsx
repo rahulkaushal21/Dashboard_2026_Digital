@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { updateProjectFields, getPickList, getContractors, CONTRACTOR, type LedgerRow, type Contractor } from '@/lib/supabase'
+import { saveLedgerRow, getPickList, getContractors, CONTRACTOR, type LedgerRow, type Contractor } from '@/lib/supabase'
 import { CURRENCIES } from '@/lib/deal-fields'
 
 // The columns somebody fills in AFTER the deal is won.
@@ -14,6 +14,10 @@ import { CURRENCIES } from '@/lib/deal-fields'
 // form can change what the deal is worth, who owns it, or whether it is won: the RPC
 // behind it reaches these columns and no others, which is a stronger guarantee than a
 // form that merely declines to show the rest.
+//
+// Works on both sides of the ledger. A dashboard row updates the opportunity; a SHEET row
+// writes an overlay beside the spreadsheet, because sheet_raw is re-synced and anything
+// written there would vanish at the next sync without an error.
 
 const STATUSES = ['Under Development', 'Delivered', 'On Hold', 'Cancelled', 'Under Review', 'Awaiting Information']
 
@@ -55,7 +59,10 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
 
   const save = async () => {
     setSaving(true); setError('')
-    const res = await updateProjectFields(row.source_id, {
+    // Routed by which side of the ledger the row came from: a dashboard row updates the
+    // opportunity, a sheet row writes the overlay beside the spreadsheet. Both RPCs
+    // refuse anybody who is not the row's PC/SME.
+    const res = await saveLedgerRow(row, {
       project_id: projectId, quote_id: quoteId, expert, integration,
       contractor_name: contractorName, outsource_currency: outsourceCur,
       delivery_status: status, invoice_no: invoiceNo, invoice_currency: invoiceCur,
