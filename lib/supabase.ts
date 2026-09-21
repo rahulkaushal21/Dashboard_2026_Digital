@@ -1579,3 +1579,34 @@ export async function setContractorActive(name: string, active: boolean): Promis
   const { error } = await supabase.from('contractors').update({ active }).eq('name', name)
   return error ? { error: error.message } : {}
 }
+
+// ---- Client 360 -------------------------------------------------------------
+//
+// Eleven figures per client, worked out in the database rather than here. The page loads
+// bookings for EVERY client in order to answer questions about ONE, and a modal average
+// like "mostly built in" is easy to get subtly wrong twice in two places.
+//
+// Built on the revenue tab itself, so it can see delivery dates, experts and project
+// types that the web_revenue aggregate never carried.
+
+export interface Client360 {
+  client_key: string; company_name?: string
+  projects: number; lifetime_usd?: number; avg_value?: number
+  first_month?: string; last_month?: string; months_active: number; tenure_months?: number
+  last_delivered?: string; last_amount?: number; last_project?: string
+  strongest_month?: string; strongest_amount?: number
+  handled_by?: string; handled_by_pct?: number
+  built_in?: string; built_in_pct?: number
+  revenue_split?: { name: string; amount: number; pct: number }[]
+  sales_cycle_days?: number; sales_cycle_n?: number
+}
+
+/** Keyed on the lower-cased company name, the same way the view is. */
+export async function getClient360(): Promise<Record<string, Client360>> {
+  if (!supabase) return {}
+  const { data, error } = await supabase.from('web_client_360').select('*')
+  if (error || !data) return {}
+  const map: Record<string, Client360> = {}
+  for (const r of data as Client360[]) map[r.client_key] = r
+  return map
+}

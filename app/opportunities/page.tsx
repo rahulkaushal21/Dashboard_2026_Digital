@@ -804,9 +804,9 @@ return (
 </div>
 
 {sel && (
-<div className="fixed inset-0 z-40" onClick={() => setSel(null)}>
+<div className="fixed inset-0 lg:left-60 z-40" onClick={() => setSel(null)}>
 <div className="absolute inset-0 bg-black/50" />
-<aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
+<aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6 lg:p-8">
 <div className="flex items-start justify-between gap-3 mb-4">
 <div>
 <h2 className="text-xl font-semibold">{sel.company_name}</h2>

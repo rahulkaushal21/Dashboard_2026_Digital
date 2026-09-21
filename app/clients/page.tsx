@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
+import { getClient360, type Client360, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -99,8 +99,52 @@ const isPosFeedback = (f: Feedback) => sentBucket(f.nature) === 'Positive' || /p
 const isPosFb = (e: Escalation) => /not an escalation/i.test(e.escalation_type || '') || /not an escalation/i.test(e.business_impact || '')
 const isJunk = (e: Escalation) => /^(source|escalation type|type of situation)$/i.test((e.escalation_type || '').trim()) || /^escalation type$/i.test((e.business_impact || '').trim())
 
+
+// One figure, its label, and a line saying what it is made of.
+//
+// The third line is the point. "Average value $2,140" invites the question "of what?",
+// and a number nobody can source is a number nobody acts on — so every tile says how many
+// projects it is over, or which months, or how many quotes.
+function Stat({ label, value, sub, tone }: {
+  label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: 'good' | 'warn' | 'bad'
+}) {
+  const colour = tone === 'good' ? 'text-green-300' : tone === 'warn' ? 'text-amber-300' : tone === 'bad' ? 'text-red-300' : 'text-white'
+  return (
+    <div className="rounded-lg border border-mav-line bg-mav-dark/40 px-3.5 py-3">
+      <div className="text-[11px] uppercase tracking-wide text-mav-muted">{label}</div>
+      <div className={`text-lg font-semibold mt-0.5 tabular-nums ${colour}`}>{value}</div>
+      {sub && <div className="text-[11px] text-white/50 mt-0.5 leading-snug">{sub}</div>}
+    </div>
+  )
+}
+
+const SPLIT_COLOURS = ['#FFDB2D', '#7CC4FF', '#9B8CFF', '#5FD3A0']
+
+const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** "Sep 2026" from a YYYY-MM or a date string, without a timezone shifting the month. */
+const monthName = (v?: string | null) => {
+  const m = /^(\d{4})-(\d{2})/.exec(v || '')
+  return m ? `${MON3[+m[2] - 1]} ${m[1]}` : '—'
+}
+/** "21 Sep 2026" — unambiguous, unlike a locale-shuffled numeric date. */
+const dayName = (v?: string | null) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || '')
+  return m ? `${+m[3]} ${MON3[+m[2] - 1]} ${m[1]}` : '—'
+}
+const monthsSince = (v?: string | null) => {
+  const m = /^(\d{4})-(\d{2})/.exec(v || '')
+  if (!m) return null
+  const now = new Date()
+  return (now.getFullYear() - +m[1]) * 12 + (now.getMonth() + 1 - +m[2])
+}
+
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([])
+  const [c360, setC360] = useState<Record<string, Client360>>({})
+  // Which panel of the client drawer is open. Kept on the page, not the drawer, so it
+  // survives closing one client and opening the next — somebody comparing two accounts
+  // on the same measure should not have to find the tab again each time.
+  const [cTab, setCTab] = useState<'overview' | 'work' | 'experience'>('overview')
   const [signals, setSignals] = useState<EmailSignal[]>([])
   const [escs, setEscs] = useState<Escalation[]>([])
   // Verdicts a human recorded on Critical Escalations. Honoured here so a client can't be
@@ -131,7 +175,7 @@ export default function Clients() {
   const PAGE_SIZE = 50
   const [page, setPage] = useState(1)
   useEffect(() => {
-    getClients().then(setClients); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getEscalationVerdicts().then(setVerdicts); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
+    getClients().then(setClients); getClient360().then(setC360); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getEscalationVerdicts().then(setVerdicts); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
     getClientDirectory().then(setDir)
     // only email-sourced opportunities count as "active discussion" (sheet quotes live on the Opportunities page)
     // — but keep the full list too, because the automation-demand scan below needs to
@@ -969,10 +1013,107 @@ export default function Clients() {
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
               </div>
 
+              {/* Tabs rather than one long scroll. There are four different questions
+                  people bring to a client — how big are they, what is running, how do
+                  they feel about us, what did we say we would do — and stacking all four
+                  meant scrolling past three to reach the fourth. */}
+              <div className="mt-5 flex gap-1 border-b border-mav-line">
+                {([['overview', 'Overview'], ['work', 'Revenue & work'], ['experience', 'Experience & talk']] as const).map(([k, label]) => (
+                  <button key={k} onClick={() => setCTab(k)}
+                    className={`px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${cTab === k
+                      ? 'border-mav-yellow text-white font-medium'
+                      : 'border-transparent text-mav-muted hover:text-white'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {cTab === 'overview' && (() => {
+                const k = (selC.company_name || '').trim().toLowerCase()
+                const m = c360[k]
+                if (!m) return (
+                  <p className="text-sm text-mav-muted mt-5">
+                    No delivered projects on record for this client yet, so there is nothing to measure.
+                  </p>
+                )
+                const quiet = monthsSince(m.last_month)
+                // Split is capped at four lines plus a remainder. A client with nine
+                // project types produces a bar chart of slivers nobody can read.
+                const split = m.revenue_split || []
+                const top = split.slice(0, 4)
+                const rest = split.slice(4)
+                const restAmt = rest.reduce((sum, x) => sum + Number(x.amount || 0), 0)
+                const restPct = rest.reduce((sum, x) => sum + Number(x.pct || 0), 0)
+                return (
+                  <div className="mt-5">
+                    <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                      <Stat label="Lifetime value" value={fmtUsd(m.lifetime_usd)}
+                        sub={`${m.projects} project${m.projects === 1 ? '' : 's'} delivered`} />
+                      <Stat label="Relationship"
+                        value={m.tenure_months ? `${m.tenure_months} mo` : '—'}
+                        sub={m.first_month ? `since ${monthName(m.first_month)} · billed in ${m.months_active}` : undefined} />
+                      <Stat label="Average value" value={fmtUsd(m.avg_value)}
+                        sub={`per project, across ${m.projects}`} />
+                      <Stat label="Sales cycle"
+                        value={m.sales_cycle_days != null ? `${m.sales_cycle_days} days` : '—'}
+                        sub={m.sales_cycle_n ? `quote to confirmed, over ${m.sales_cycle_n} quote${m.sales_cycle_n === 1 ? '' : 's'}` : 'no confirmed quotes on record'} />
+
+                      <Stat label="Last booked" value={monthName(m.last_month)}
+                        sub={m.last_amount ? `${fmtUsd(m.last_amount)}${m.last_project ? ` · ${m.last_project}` : ''}` : undefined}
+                        tone={quiet != null && quiet >= 4 ? 'warn' : undefined} />
+                      <Stat label="Last delivered" value={dayName(m.last_delivered)} />
+                      <Stat label="Strongest month" value={monthName(m.strongest_month)}
+                        sub={m.strongest_amount ? fmtUsd(m.strongest_amount) : undefined} />
+                      <Stat label="Client experience"
+                        value={r.level || (r.recovered ? 'Recovered' : sentBucket(selC.sentiment) || '—')}
+                        tone={r.level === 'At risk' ? 'bad' : r.level ? 'warn' : r.recovered ? 'good' : undefined}
+                        sub={`${r.escs.length} escalation${r.escs.length === 1 ? '' : 's'} · ${r.posFb.length} delight${r.posFb.length === 1 ? '' : 's'}`} />
+
+                      <Stat label="Mostly handled by" value={m.handled_by || '—'}
+                        sub={m.handled_by_pct != null ? `${m.handled_by_pct}% of their revenue` : undefined} />
+                      <Stat label="Mostly built in" value={m.built_in || '—'}
+                        sub={m.built_in_pct != null ? `${m.built_in_pct}% of their revenue` : undefined} />
+                    </div>
+
+                    {top.length > 0 && (
+                      <div className="mt-5 border-t border-mav-line pt-4">
+                        <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">Revenue split</div>
+                        <div className="flex h-2.5 rounded-full overflow-hidden bg-mav-dark mb-3">
+                          {top.map((x, i) => (
+                            <div key={x.name} title={`${x.name} · ${fmtUsd(x.amount)} · ${x.pct}%`}
+                              style={{ width: `${x.pct}%`, background: SPLIT_COLOURS[i % SPLIT_COLOURS.length] }} />
+                          ))}
+                          {restPct > 0 && <div title={`Everything else · ${fmtUsd(restAmt)}`} style={{ width: `${restPct}%`, background: '#4a4a4a' }} />}
+                        </div>
+                        <div className="space-y-1.5">
+                          {top.map((x, i) => (
+                            <div key={x.name} className="flex items-center gap-2 text-sm">
+                              <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: SPLIT_COLOURS[i % SPLIT_COLOURS.length] }} />
+                              <span className="flex-1 truncate">{x.name}</span>
+                              <span className="tabular-nums">{fmtUsd(x.amount)}</span>
+                              <span className="tabular-nums text-mav-muted w-12 text-right">{x.pct}%</span>
+                            </div>
+                          ))}
+                          {rest.length > 0 && (
+                            <div className="flex items-center gap-2 text-sm text-mav-muted">
+                              <span className="w-2.5 h-2.5 rounded-sm shrink-0 bg-[#4a4a4a]" />
+                              <span className="flex-1">{rest.length} other type{rest.length === 1 ? '' : 's'}</span>
+                              <span className="tabular-nums">{fmtUsd(restAmt)}</span>
+                              <span className="tabular-nums w-12 text-right">{Math.round(restPct)}%</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
               {/* Two columns once there is room. Each section is a grid item, so billing
                   can sit beside the open quotes instead of a screen above them.
                   items-start keeps a short section short rather than stretching it to
                   match its neighbour. */}
+              {cTab === 'work' && (
               <div className="xl:grid xl:grid-cols-2 xl:gap-x-8 xl:items-start">
               {bill && (
                 <div className="mt-6 border-t border-mav-line pt-4">
@@ -1057,6 +1198,11 @@ export default function Clients() {
                 </div>
               )}
 
+              </div>
+              )}
+
+              {cTab === 'experience' && (
+              <div className="xl:grid xl:grid-cols-2 xl:gap-x-8 xl:items-start">
               {r.escs.length > 0 && (
                 <div className="mt-6 border-t border-mav-line pt-4">
                   <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Escalations &amp; triggers</span><span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">{r.escs.length}</span></div>
@@ -1147,8 +1293,9 @@ export default function Clients() {
 
               {selC.journey && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.journey}</p></div>}
               {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
-              {!r.escs.length && !r.posFb.length && !convos.length && !cOpps.length && !selC.journey && !selC.action_steps && !ten && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
+              {!r.escs.length && !r.posFb.length && !convos.length && !selC.journey && !selC.action_steps && !ten && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
               </div>
+              )}
             </aside>
           </div>
         )
