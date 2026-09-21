@@ -1043,3 +1043,28 @@ export async function directoryMemberDealCount(m: DirectoryMember): Promise<numb
   if (!data) return 0
   return (data as any[]).filter(r => ownerMatches(r[col], m.aliases)).length
 }
+
+// ---- The work list --------------------------------------------------------
+//
+// Everything the system can derive, it derives. What it cannot is a number nobody has
+// written down and a decision nobody has made — so exactly those two things come back
+// to a person, plus deals somebody started confirming and never finished.
+//
+// The reasons are ranked in the database and each deal appears ONCE, under its most
+// urgent reason. A deal that is both missing a value and awaiting confirmation is one
+// piece of work, not two, and listing it twice would make the queue look worse than it
+// is while teaching people to skim it.
+
+export type NeedsReason = 'confirm_started' | 'awaiting_confirmation' | 'missing_value'
+export interface NeedsInputRow {
+  id: number; company_name?: string; est_value?: number; currency?: string
+  status?: string; origin?: string; pm_owner?: string; sales_person?: string
+  deal_date?: string; owner_email?: string | null; days_waiting: number
+  reason: NeedsReason; detail: string; priority: number
+}
+
+export async function getNeedsInput(): Promise<NeedsInputRow[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_needs_input').select('*').order('priority').order('days_waiting', { ascending: false })
+  return (data as NeedsInputRow[]) || []
+}
