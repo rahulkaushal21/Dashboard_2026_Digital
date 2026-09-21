@@ -1614,3 +1614,75 @@ export async function getClient360(): Promise<Record<string, Client360>> {
   for (const r of data as Client360[]) map[r.client_key] = r
   return map
 }
+
+// ── Client 360: the three per-client blocks loaded only when a drawer opens ───────────
+// Fetched per client rather than for all 405 at once. Delivery history alone is 3,218
+// rows across every client; pulling the lot to show one account's twelve projects is a
+// page that gets slower every month the sheet grows.
+
+/** One delivered project, straight off the revenue sheet. */
+export interface ClientProject {
+  id: number; project_id?: string; quote_id?: string; project_name?: string
+  project_type?: string; technology?: string; service_type?: string; service_dept?: string
+  booking_month?: string; start_date?: string; delivery_date?: string
+  project_status?: string; pc_sme?: string; expert?: string
+  internal_hrs?: number; actual_hrs?: number
+  currency?: string; confirmed_price?: number; usd_value?: number
+}
+export async function getClientProjects(company: string): Promise<ClientProject[]> {
+  if (!supabase || !company.trim()) return []
+  const { data, error } = await supabase.from('web_sheet_rows')
+    .select('id, project_id, quote_id, project_name, project_type, technology, service_type, service_dept, booking_month, start_date, delivery_date, project_status, pc_sme, expert, internal_hrs, actual_hrs, currency, confirmed_price, usd_value')
+    .ilike('agency', company.trim())
+    .order('booking_month', { ascending: false })
+  if (error || !data) return []
+  return data as ClientProject[]
+}
+
+/** Every quote this client was ever sent — won, lost or still open. */
+export interface ClientQuote {
+  id: number; quote_id?: string; added_date?: string; subject_project?: string
+  technology?: string; project_type?: string; status?: string
+  currency_type?: string; estimated_cost?: number; usd_value?: number
+  pc_sme?: string; sales_person?: string; business_type?: string; confirmed_in_days?: number
+}
+export async function getClientQuotes(company: string): Promise<ClientQuote[]> {
+  if (!supabase || !company.trim()) return []
+  const { data, error } = await supabase.from('quotes')
+    .select('id, quote_id, added_date, subject_project, technology, project_type, status, currency_type, estimated_cost, usd_value, pc_sme, sales_person, business_type, confirmed_in_days')
+    .ilike('agency', company.trim())
+    .order('added_date', { ascending: false })
+  if (error || !data) return []
+  return data as ClientQuote[]
+}
+
+/** A written-up quarterly review. The one Client 360 block nobody can derive. */
+export interface ClientQbr {
+  id: number; client_key: string; company_name: string; qbr_date: string
+  summary?: string; action_mavlers?: string; action_client?: string
+  opportunities?: string; next_roadmap?: string; source?: string
+  added_by?: string; added_at?: string; updated_by?: string; updated_at?: string
+}
+export async function getClientQbrs(company: string): Promise<ClientQbr[]> {
+  if (!supabase || !company.trim()) return []
+  const { data, error } = await supabase.from('client_qbr').select('*')
+    .eq('client_key', company.trim().toLowerCase())
+    .order('qbr_date', { ascending: false })
+  if (error || !data) return []
+  return data as ClientQbr[]
+}
+
+/** Writes through the RPC, which takes the author from the signed-in session. */
+export async function saveClientQbr(company: string, qbrDate: string, f: {
+  summary?: string; action_mavlers?: string; action_client?: string
+  opportunities?: string; next_roadmap?: string; source?: string
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { error } = await supabase.rpc('save_client_qbr', {
+    p_company: company.trim(), p_qbr_date: qbrDate,
+    p_summary: f.summary || null, p_action_mavlers: f.action_mavlers || null,
+    p_action_client: f.action_client || null, p_opportunities: f.opportunities || null,
+    p_next_roadmap: f.next_roadmap || null, p_source: f.source || null,
+  })
+  return error ? { ok: false, error: error.message } : { ok: true }
+}

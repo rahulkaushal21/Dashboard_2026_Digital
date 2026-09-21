@@ -1,10 +1,12 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getClient360, type Client360, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
+import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { useAuth } from '@/components/AuthProvider'
+import ClientQbrPanel from '@/components/ClientQbrPanel'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -128,6 +130,62 @@ function Stat({ label, value, sub, tone }: {
 
 const SPLIT_COLOURS = ['#FFDB2D', '#7CC4FF', '#9B8CFF', '#5FD3A0']
 
+// A quote's own status text, straight from the Quotes sheet. Confirmed/won reads green,
+// lost or dropped red, anything else is still in play.
+const quoteTone = (v?: string) => {
+  const t = (v || '').toLowerCase()
+  if (/confirm|won|approved/.test(t)) return 'bg-green-500/15 text-green-400'
+  if (/lost|reject|drop|cancel|declin/.test(t)) return 'bg-red-500/15 text-red-400'
+  return 'bg-blue-500/15 text-blue-400'
+}
+// Delivery state, not sales state: Delivered is the finished one.
+const deliveryTone = (v?: string) => {
+  const t = (v || '').toLowerCase()
+  if (/deliver|complete|live/.test(t)) return 'bg-green-500/15 text-green-400'
+  if (/cancel/.test(t)) return 'bg-red-500/15 text-red-400'
+  if (/hold|await|review/.test(t)) return 'bg-amber-500/15 text-amber-400'
+  return 'bg-mav-line text-mav-muted'
+}
+
+// The client score.
+//
+// One number out of 100, and every point of it is shown alongside so it can be argued
+// with. A score nobody can take apart is a score nobody trusts — and this one is built
+// from data that is often thin (CSAT is filled in on 1 feedback row out of 68), so being
+// able to see WHY it says 55 matters more than the 55 does.
+//
+// It starts at a neutral 70 and moves on things we actually hold: how recently they
+// booked, what has been escalated, what has been praised, whether their spend collapsed,
+// and whether there is anything live in the pipeline. It is a prompt to go and look, not
+// a verdict.
+const scoreOf = (i: {
+  monthsQuiet: number | null; escs6: number; unresolved: boolean; delights: number
+  negSignals: number; dip?: { stopped: boolean }; openQuotes: number
+}) => {
+  const parts: { label: string; points: number }[] = []
+  const add = (label: string, points: number) => { if (points !== 0) parts.push({ label, points }) }
+
+  if (i.monthsQuiet == null) add('never booked', -20)
+  else if (i.monthsQuiet <= 1) add('booked this month or last', 10)
+  else if (i.monthsQuiet >= 7) add(`no booking for ${i.monthsQuiet} months`, -20)
+  else if (i.monthsQuiet >= 4) add(`no booking for ${i.monthsQuiet} months`, -10)
+
+  if (i.escs6 === 0) add('no escalation in 6 months', 10)
+  else if (i.escs6 === 1) add('1 escalation in 6 months', -5)
+  else add(`${i.escs6} escalations in 6 months`, i.escs6 >= 3 ? -20 : -10)
+  if (i.unresolved) add('an escalation is still open', -15)
+
+  if (i.delights > 0) add(`${i.delights} piece${i.delights === 1 ? '' : 's'} of positive feedback`, Math.min(i.delights * 5, 15))
+  if (i.negSignals > 0) add(`${i.negSignals} unhappy email thread${i.negSignals === 1 ? '' : 's'}`, Math.max(i.negSignals * -5, -15))
+  if (i.dip) add(i.dip.stopped ? 'billing has stopped' : 'revenue halved or worse', i.dip.stopped ? -20 : -10)
+  if (i.openQuotes > 0) add(`${i.openQuotes} live quote${i.openQuotes === 1 ? '' : 's'}`, 5)
+
+  const score = Math.max(0, Math.min(100, 70 + parts.reduce((sum, x) => sum + x.points, 0)))
+  const band = score >= 80 ? 'Strong' : score >= 60 ? 'Steady' : score >= 40 ? 'Worth a call' : 'At risk'
+  const tone = score >= 80 ? 'text-green-400' : score >= 60 ? 'text-white' : score >= 40 ? 'text-amber-400' : 'text-red-400'
+  return { score, band, tone, parts: parts.sort((a, b) => a.points - b.points) }
+}
+
 // One "what they buy" list — every technology, service type or department this client has
 // paid for, biggest first. The Overview tiles answer with a single winner ("mostly built
 // in Wordpress"); that is the headline and not the whole answer. A client on Wordpress
@@ -186,10 +244,23 @@ const monthsSince = (v?: string | null) => {
 export default function Clients() {
   const [clients, setClients] = useState<Client[]>([])
   const [c360, setC360] = useState<Record<string, Client360>>({})
+  // Per-client detail, loaded only when a drawer opens. Delivery history alone is 3,218
+  // rows across every client; pulling all of it to show one account's twelve projects is
+  // a page that gets slower every month the sheet grows.
+  const [cProjects, setCProjects] = useState<ClientProject[]>([])
+  const [cQuotes, setCQuotes] = useState<ClientQuote[]>([])
+  const [qbrs, setQbrs] = useState<ClientQbr[]>([])
+  const { profile, email } = useAuth()
+  // A QBR may be written up by the PM who ran the call or by an admin — the same rule the
+  // database enforces. Checked against the PM directory rather than the email domain:
+  // being a colleague is not the same as owning the account.
+  const [isPm, setIsPm] = useState(false)
+  useEffect(() => { getDirectoryMember(email).then(m => setIsPm(!!m)) }, [email])
+  const canQbr = !!profile?.is_admin || isPm
   // Which panel of the client drawer is open. Kept on the page, not the drawer, so it
   // survives closing one client and opening the next — somebody comparing two accounts
   // on the same measure should not have to find the tab again each time.
-  const [cTab, setCTab] = useState<'overview' | 'work' | 'experience'>('overview')
+  const [cTab, setCTab] = useState<'overview' | 'work' | 'projects' | 'health' | 'qbr'>('overview')
   const [signals, setSignals] = useState<EmailSignal[]>([])
   const [escs, setEscs] = useState<Escalation[]>([])
   // Verdicts a human recorded on Critical Escalations. Honoured here so a client can't be
@@ -204,6 +275,18 @@ export default function Clients() {
   const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [recentOnly, setRecentOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo' | 'activity'>('activity'); const [sortAsc, setSortAsc] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
+  // Clearing first matters: without it the previous client's projects stay on screen for
+  // as long as the fetch takes, and what you are reading is another account's delivery
+  // history under this account's name.
+  const refreshQbrs = () => { if (selC) getClientQbrs(selC.company_name).then(setQbrs) }
+  useEffect(() => {
+    if (!selC) return
+    const name = selC.company_name
+    setCProjects([]); setCQuotes([]); setQbrs([])
+    getClientProjects(name).then(setCProjects)
+    getClientQuotes(name).then(setCQuotes)
+    getClientQbrs(name).then(setQbrs)
+  }, [selC])
   // The Client-Backup directory: every client on the sheet, booked or not.
   const [dir, setDir] = useState<ClientDirectory[]>([])
   const [mode, setMode] = useState<'clients' | 'directory'>('clients')
@@ -1058,14 +1141,15 @@ export default function Clients() {
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
               </div>
 
-              {/* Tabs rather than one long scroll. There are four different questions
-                  people bring to a client — how big are they, what is running, how do
-                  they feel about us, what did we say we would do — and stacking all four
-                  meant scrolling past three to reach the fourth. */}
-              <div className="mt-5 flex gap-1 border-b border-mav-line">
-                {([['overview', 'Overview'], ['work', 'Revenue & work'], ['experience', 'Experience & talk']] as const).map(([k, label]) => (
+              {/* Tabs rather than one long scroll. There are five different questions
+                  people bring to a client — how big are they, what do they buy, what has
+                  been delivered, how do they feel about us, and what did we agree on the
+                  last call — and stacking all five meant scrolling past four to reach the
+                  fifth. */}
+              <div className="mt-5 flex gap-1 border-b border-mav-line overflow-x-auto">
+                {([['overview', 'Overview'], ['work', 'Revenue & work'], ['projects', 'Projects & quotes'], ['health', 'Health & talk'], ['qbr', 'QBR']] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setCTab(k)}
-                    className={`px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${cTab === k
+                    className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${cTab === k
                       ? 'border-mav-yellow text-white font-medium'
                       : 'border-transparent text-mav-muted hover:text-white'}`}>
                     {label}
@@ -1265,8 +1349,170 @@ export default function Clients() {
               </div>
               )}
 
-              {cTab === 'experience' && (
+              {cTab === 'projects' && (() => {
+                const conf = cQuotes.filter(x => /confirm|won|approved/i.test(x.status || ''))
+                const lost = cQuotes.filter(x => /lost|reject|drop|cancel|declin/i.test(x.status || ''))
+                const openQ = cQuotes.length - conf.length - lost.length
+                const cycles = conf.map(x => x.confirmed_in_days).filter((d): d is number => d != null)
+                const avgCycle = cycles.length ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length * 10) / 10 : null
+                const hrs = cProjects.filter(x => (x.internal_hrs || 0) > 0 && x.actual_hrs != null)
+                return (
+                  <div className="mt-5 space-y-8">
+                    <div>
+                      <div className="flex items-baseline gap-2 flex-wrap mb-1">
+                        <span className="text-xs uppercase tracking-wide text-mav-muted">Quotes journey</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">{cQuotes.length}</span>
+                        {cQuotes.length > 0 && (
+                          <span className="text-[11px] text-mav-muted">
+                            {conf.length} confirmed · {lost.length} lost · {openQ} open
+                            {cQuotes.length ? ` · ${Math.round(conf.length / cQuotes.length * 100)}% conversion` : ''}
+                            {avgCycle != null ? ` · ${avgCycle} days to confirm` : ''}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-mav-muted mb-3">
+                        Every quote this client was ever sent, newest first &mdash; won, lost and still open.
+                        Conversion counts quotes, not money.
+                      </p>
+                      {cQuotes.length === 0
+                        ? <p className="text-sm text-mav-muted">No quotes on record for this client. Only 274 of 405 clients have any &mdash; the older revenue predates the Quotes sheet.</p>
+                        : (
+                          <div className="overflow-x-auto rounded-lg border border-mav-line">
+                            <table className="w-full text-sm">
+                              <thead className="text-left text-white/70 border-b border-mav-line bg-mav-dark/40">
+                                <tr>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Date</th>
+                                  <th className="px-3 py-2 font-medium">Quote</th>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Type</th>
+                                  <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Value</th>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Status</th>
+                                  <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Days</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cQuotes.map(x => (
+                                  <tr key={x.id} className="border-b border-mav-line/60 last:border-0 align-top">
+                                    <td className="px-3 py-2 whitespace-nowrap text-mav-muted">{dayName(x.added_date)}</td>
+                                    <td className="px-3 py-2"><div className="max-w-md break-words">{x.subject_project || x.quote_id || '—'}</div>
+                                      {x.quote_id && x.subject_project && <div className="text-[11px] text-mav-muted">{x.quote_id}</div>}</td>
+                                    <td className="px-3 py-2 text-mav-muted whitespace-nowrap">{[x.project_type, x.technology].filter(Boolean).join(' · ') || '—'}</td>
+                                    <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{x.usd_value ? fmtUsd(x.usd_value) : '—'}</td>
+                                    <td className="px-3 py-2"><span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${quoteTone(x.status)}`}>{x.status || 'open'}</span></td>
+                                    <td className="px-3 py-2 text-right tabular-nums text-mav-muted whitespace-nowrap">{x.confirmed_in_days ?? '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-baseline gap-2 flex-wrap mb-1">
+                        <span className="text-xs uppercase tracking-wide text-mav-muted">Delivery history</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-medium">{cProjects.length}</span>
+                        {hrs.length > 0 && <span className="text-[11px] text-mav-muted">{hrs.length} with hours logged</span>}
+                      </div>
+                      <p className="text-[11px] text-mav-muted mb-3">
+                        Every project on the revenue sheet for this client, newest first &mdash; who built it, when it
+                        landed, and how the hours came out. Optimization is internal hours against actual.
+                      </p>
+                      {cProjects.length === 0
+                        ? <p className="text-sm text-mav-muted">Nothing delivered on record yet.</p>
+                        : (
+                          <div className="overflow-x-auto rounded-lg border border-mav-line">
+                            <table className="w-full text-sm">
+                              <thead className="text-left text-white/70 border-b border-mav-line bg-mav-dark/40">
+                                <tr>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Month</th>
+                                  <th className="px-3 py-2 font-medium">Project</th>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Built in</th>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Expert</th>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Start &rarr; delivered</th>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Hrs</th>
+                                  <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Value</th>
+                                  <th className="px-3 py-2 font-medium whitespace-nowrap">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cProjects.map(x => {
+                                  const ih = Number(x.internal_hrs), ah = Number(x.actual_hrs)
+                                  const opt = (ih > 0 && Number.isFinite(ah) && x.actual_hrs != null) ? Math.round(((ih - ah) / ih) * 100) : null
+                                  return (
+                                    <tr key={x.id} className="border-b border-mav-line/60 last:border-0 align-top">
+                                      <td className="px-3 py-2 whitespace-nowrap text-mav-muted">{monthName(x.booking_month)}</td>
+                                      <td className="px-3 py-2"><div className="max-w-md break-words">{x.project_name || '—'}</div>
+                                        <div className="text-[11px] text-mav-muted">{[x.project_id, x.service_type, x.service_dept].filter(Boolean).join(' · ')}</div></td>
+                                      <td className="px-3 py-2 text-mav-muted whitespace-nowrap">{[x.technology, x.project_type].filter(Boolean).join(' · ') || '—'}</td>
+                                      <td className="px-3 py-2 whitespace-nowrap">{x.expert || '—'}<div className="text-[11px] text-mav-muted">{x.pc_sme || ''}</div></td>
+                                      <td className="px-3 py-2 whitespace-nowrap text-mav-muted">{dayName(x.start_date)} &rarr; {dayName(x.delivery_date)}</td>
+                                      <td className="px-3 py-2 whitespace-nowrap tabular-nums">
+                                        {x.internal_hrs != null || x.actual_hrs != null ? `${x.internal_hrs ?? '—'} / ${x.actual_hrs ?? '—'}` : '—'}
+                                        {opt != null && <div className={`text-[11px] ${opt >= 0 ? 'text-green-400' : 'text-amber-400'}`} title="Internal hours against actual. Positive means it took less than planned.">{opt}%</div>}
+                                      </td>
+                                      <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">{x.usd_value ? fmtUsd(x.usd_value) : '—'}</td>
+                                      <td className="px-3 py-2"><span className={`text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap ${deliveryTone(x.project_status)}`}>{x.project_status || '—'}</span></td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {cTab === 'health' && (
               <div className="xl:grid xl:grid-cols-2 xl:gap-x-8 xl:items-start">
+              {(() => {
+                const cutoff6 = monthsAgoYM(6)
+                const sc = scoreOf({
+                  monthsQuiet: ten?.sinceLast ?? monthsSince(selC.last_booking_month),
+                  escs6: r.escs.filter(e => ym(e.tracking_date) >= cutoff6).length,
+                  unresolved: r.unresolved,
+                  delights: r.posFb.length + (posFbByClient.get(selC.company_name) || []).length,
+                  negSignals: r.negSigs.length,
+                  dip: r.dip,
+                  openQuotes: cOpps.length,
+                })
+                return (
+                  <div className="xl:col-span-2 mt-6 border-t border-mav-line pt-4">
+                    <div className="text-xs uppercase tracking-wide text-mav-muted mb-3">Client score</div>
+                    <div className="flex flex-wrap items-start gap-6">
+                      <div className="shrink-0">
+                        <div className={`text-4xl font-semibold tabular-nums ${sc.tone}`}>{sc.score}</div>
+                        <div className={`text-sm ${sc.tone}`}>{sc.band}</div>
+                        <div className="text-[11px] text-mav-muted mt-1">out of 100</div>
+                      </div>
+                      <div className="flex-1 min-w-[16rem]">
+                        {/* Every point shown, because a score nobody can take apart is a
+                            score nobody trusts — and this one is built on thin data. */}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 text-sm text-mav-muted">
+                            <span className="flex-1">starting point</span><span className="tabular-nums w-10 text-right">70</span>
+                          </div>
+                          {sc.parts.map(x => (
+                            <div key={x.label} className="flex items-center gap-2 text-sm">
+                              <span className="flex-1 min-w-0 truncate" title={x.label}>{x.label}</span>
+                              <span className={`tabular-nums w-10 text-right ${x.points > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {x.points > 0 ? '+' : ''}{x.points}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-mav-muted mt-3 max-w-2xl">
+                          Built from escalations, feedback, email tone, booking recency and live quotes &mdash; everything
+                          this dashboard already holds. CSAT is not in it: the feedback sheet has a score on 1 row out of 68,
+                          so a CSAT-weighted number would be mostly invented. Treat this as a prompt to go and look, not a verdict.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+
               {r.escs.length > 0 && (
                 <div className="mt-6 border-t border-mav-line pt-4">
                   <div className="flex items-center gap-2 mb-3"><span className="text-xs uppercase tracking-wide text-mav-muted">Escalations &amp; triggers</span><span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 font-medium">{r.escs.length}</span></div>
@@ -1359,6 +1605,10 @@ export default function Clients() {
               {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
               {!r.escs.length && !r.posFb.length && !convos.length && !selC.journey && !selC.action_steps && !ten && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
               </div>
+              )}
+
+              {cTab === 'qbr' && (
+                <ClientQbrPanel company={selC.company_name} rows={qbrs} canEdit={canQbr} onSaved={refreshQbrs} />
               )}
             </aside>
           </div>
