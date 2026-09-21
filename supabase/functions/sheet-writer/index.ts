@@ -355,12 +355,12 @@ async function buildQuotes(sb: any): Promise<string[][]> {
   // Deals that exist only here — entered by hand or found in email. Sheet-origin rows are
   // excluded because they are already above, from the quotes table itself.
   const { data: opps, error: oe } = await sb.from("opportunities")
-    .select("quote_key, source_date, service_dept, technology, source_subject, company_name, contact_email, pm_owner, project_type, currency, local_value, est_value, status, gist, geo, business_type, sales_person, origin")
+    .select("quote_key, quote_id, source_date, service_dept, technology, source_subject, company_name, contact_email, pm_owner, project_type, currency, local_value, est_value, status, gist, geo, business_type, sales_person, origin")
     .in("origin", ["pm", "email", "recurring"]);
   if (oe) throw new Error("opportunities: " + oe.message);
   for (const o of opps || []) {
     grid.push([
-      s(o.quote_key), sheetDate(o.source_date), s(o.service_dept), s(o.technology), s(o.source_subject),
+      s(o.quote_id) || s(o.quote_key), sheetDate(o.source_date), s(o.service_dept), s(o.technology), s(o.source_subject),
       s(o.company_name), s(o.contact_email), s(o.pm_owner), s(o.project_type), s(o.currency || "USD"),
       money(o.local_value ?? o.est_value), money(o.est_value), s(o.status), s(o.gist), geoRegion(o.geo),
       s(o.business_type), s(o.sales_person), "",
