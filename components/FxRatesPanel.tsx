@@ -13,6 +13,14 @@ import { getFxRates, saveFxRate, deleteFxRate, type FxRate } from '@/lib/supabas
 // move, and a rate nobody can change without a deploy is a rate that quietly goes stale.
 // Deals already confirmed keep the figure they were booked at; nothing is restated.
 
+// 21 Sep 2026 rather than a locale-shuffled 09/21/2026 — this sits beside an email
+// address in small text, and a date whose day and month can be read either way round is
+// worse than no date.
+const fmtDate = (iso: string) => {
+  const d = new Date(iso)
+  return isNaN(+d) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; actor: string }) {
   const [rows, setRows] = useState<FxRate[]>([])
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -68,6 +76,17 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
         Changing a rate affects deals confirmed <span className="text-white">from now on</span>; anything
         already booked keeps the figure it was booked at.
       </p>
+      {/* Unlike the contractor list, this stays admin-only: a rate is not local knowledge
+          somebody fills in as they go, it silently reprices every non-USD deal confirmed
+          after it changes. The database enforces the same rule. */}
+      <p className="text-xs mb-4">
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">
+          Admins only
+        </span>
+        <span className="text-mav-muted ml-2">
+          {canEdit ? 'You can change these.' : 'You can see these but not change them.'}
+        </span>
+      </p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-4">
         <table className="w-full text-sm">
@@ -76,7 +95,6 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
               <th className="px-4 py-2 font-medium">Currency</th>
               <th className="px-4 py-2 font-medium">Rate to USD</th>
               <th className="px-4 py-2 font-medium">What it means</th>
-              <th className="px-4 py-2 font-medium">Updated</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
@@ -86,7 +104,18 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
               const changed = String(v) !== String(r.rate_to_usd)
               return (
                 <tr key={r.currency} className="border-b border-mav-line/60">
-                  <td className="px-4 py-3 font-medium">{r.currency}</td>
+                  {/* Who last touched this, under the name rather than in a column of
+                      its own. A rate is a claim about money somebody made on a date, and
+                      reading it three columns away from the figure it explains meant
+                      nobody read it at all. */}
+                  <td className="px-4 py-3 align-top">
+                    <div className="font-medium">{r.currency}</div>
+                    <div className="text-[11px] text-mav-muted mt-0.5">
+                      {r.updated_by
+                        ? <>{r.updated_by}{r.updated_at ? ` · ${fmtDate(r.updated_at)}` : ''}</>
+                        : <span className="text-white/35">never changed here</span>}
+                    </div>
+                  </td>
                   <td className="px-4 py-3">
                     {canEdit && r.currency.toUpperCase() !== 'USD' ? (
                       <input value={draft[r.currency] ?? ''} onChange={e => setDraft({ ...draft, [r.currency]: e.target.value })}
@@ -99,7 +128,6 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
                   <td className="px-4 py-3 text-mav-muted whitespace-nowrap">
                     1 {r.currency} = ${(Number.isFinite(v) ? v : 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} USD
                   </td>
-                  <td className="px-4 py-3 text-xs text-mav-muted">{r.updated_at ? new Date(r.updated_at).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {canEdit && changed && <button onClick={() => save(r.currency)} disabled={busy} className="text-xs text-mav-yellow hover:underline mr-3">Save</button>}
                     {canEdit && r.currency.toUpperCase() !== 'USD' && (
@@ -111,7 +139,7 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
                 </tr>
               )
             })}
-            {rows.length === 0 && <tr><td colSpan={5} className="px-4 py-3 text-mav-muted">No rates set.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={4} className="px-4 py-3 text-mav-muted">No rates set.</td></tr>}
           </tbody>
         </table>
       </div>
