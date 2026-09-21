@@ -62,7 +62,6 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   // ---- people
   const [salesPerson, setSalesPerson] = useState(deal.sales_person || '')
   const [pmOwner, setPmOwner] = useState(deal.pm_owner || '')
-  const [note, setNote] = useState('')
 
   const [rates, setRates] = useState<FxRate[]>([])
   const [vocab, setVocab] = useState<SheetVocab>(VOCAB_FALLBACK as SheetVocab)
@@ -178,7 +177,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
     const res = await confirmOpportunityFull(deal.id, {
       est_value: amt, currency, subject, quote_date: quoteDate || null,
       service_dept: serviceDept, project_type: projectType, sales_person: salesPerson,
-      pm_owner: pmOwner, geo, confirmed_on: confirmedOn, note,
+      pm_owner: pmOwner, geo, confirmed_on: confirmedOn,
       client_name: clientName, client_type: clientType, service_type: serviceType,
       delivery_type: deliveryType, technology, contact_email: clientEmail,
       business_type: businessType,
@@ -193,7 +192,8 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   }
 
   // ---- presentation --------------------------------------------------------
-  const ctl = 'mt-1 w-full bg-mav-dark border rounded-md px-2.5 py-1.5 text-sm focus:outline-none focus:border-mav-yellow/60'
+  const ctl = 'mt-1 w-full bg-mav-dark border rounded-md px-3 py-2 text-sm text-white placeholder:text-white/35 \
+    focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors'
 
   /** One labelled control. `need` turns it amber; `auto` marks a value that was filled in. */
   const F = ({ label, need, auto, guess, hint, wide, children }: {
@@ -202,38 +202,38 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   }) => (
     <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
       <span className="flex items-center gap-1.5 text-xs">
-        <span className={need ? 'text-amber-300' : 'text-mav-muted'}>{label}</span>
+        <span className={`font-medium ${need ? 'text-amber-300' : 'text-white/85'}`}>{label}</span>
         {need && <span className="text-amber-300">·</span>}
         {need && <span className="text-amber-300">needed</span>}
         {auto && !need && (
           <span title={`Filled in from ${deal.company_name}'s last project — check it`}
-            className="inline-flex items-center gap-1 text-[10px] text-sky-300/90">
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-sky-400/15 text-sky-300">
             <Sparkles size={10} /> prefilled
           </span>
         )}
         {guess && !auto && !need && (
           <span title="The usual answer across all projects — this client has no history here, so check it properly"
-            className="inline-flex items-center gap-1 text-[10px] text-mav-muted">
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-white/10 text-white/65">
             <Sparkles size={10} /> usual
           </span>
         )}
       </span>
       {children}
-      {hint && <span className="mt-1 block text-[11px] text-mav-muted/80">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-white/50">{hint}</span>}
     </label>
   )
 
-  const border = (bad: boolean) => bad ? 'border-amber-500/50' : 'border-mav-line'
+  const border = (bad: boolean) => bad ? 'border-amber-400/70' : 'border-white/20'
   const Section = ({ n, title, blurb, children }: {
     n: number; title: string; blurb: string; children: React.ReactNode
   }) => (
     <section className="border-t border-mav-line pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
       <div className="mb-3">
         <h3 className="text-sm font-semibold flex items-center gap-2">
-          <span className="grid place-items-center w-5 h-5 rounded-full bg-mav-dark border border-mav-line text-[10px] text-mav-muted">{n}</span>
+          <span className="grid place-items-center w-5 h-5 rounded-full bg-mav-yellow/15 border border-mav-yellow/40 text-[10px] font-semibold text-mav-yellow">{n}</span>
           {title}
         </h3>
-        <p className="text-[11px] text-mav-muted mt-1 ml-7">{blurb}</p>
+        <p className="text-[11px] text-white/55 mt-1 ml-7">{blurb}</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 ml-0 sm:ml-7">{children}</div>
     </section>
@@ -248,7 +248,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
     <select className={`${ctl} ${border(bad)}`} value={value} onChange={e => onChange(e.target.value)}>
       <option value="">— choose —</option>
       {options.map(o => <option key={o} value={o}>{o}</option>)}
-      {value && !options.includes(value) && <option value={value}>{value} (existing)</option>}
+      {value && !options.includes(value) && <option value={value}>{value} (not in list)</option>}
     </select>
   )
 
@@ -264,11 +264,11 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold">Confirm {deal.company_name || 'this deal'}</h2>
-              <p className="text-xs text-mav-muted mt-0.5">
+              <p className="text-xs text-white/60 mt-0.5">
                 This books the deal as revenue and writes its row into the sheet.
               </p>
             </div>
-            <button onClick={onClose} className="text-mav-muted hover:text-white text-xl leading-none">&times;</button>
+            <button onClick={onClose} className="text-white/60 hover:text-white text-xl leading-none">&times;</button>
           </div>
 
           {sheetClient && filled.size > 0 && (
@@ -319,7 +319,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
 
           <Section n={2} title="The client" blurb="The agency is the company; the client name is the person at it.">
             <F label="Agency">
-              <input className={`${ctl} border-mav-line opacity-60`} value={deal.company_name || ''} readOnly
+              <input className={`${ctl} border-white/10 bg-white/[0.04] text-white/70 cursor-not-allowed`} value={deal.company_name || ''} readOnly
                 title="The company this deal belongs to. Changing it would make it a different deal." />
             </F>
             <F label="Client name" need={missing.includes('Client name')} auto={has('clientName')}>
@@ -339,7 +339,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
                 onChange={e => setGeo(e.target.value)}>
                 <option value="">— choose —</option>
                 {GEOS.map(g => <option key={g} value={g}>{GEO_SHEET_LABEL[g] || g}</option>)}
-                {geo && !GEOS.includes(geo as any) && <option value={geo}>{geo} (existing)</option>}
+                {geo && !GEOS.includes(geo as any) && <option value={geo}>{geo} (not in list)</option>}
               </select>
             </F>
             <F label="Business type" auto={has('businessType')}>
@@ -360,14 +360,14 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
               <select className={`${ctl} ${border(missing.includes('Currency'))}`} value={currency}
                 onChange={e => setCurrency(e.target.value)}>
                 {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                {currency && !CURRENCIES.includes(currency as any) && <option value={currency}>{currency} (existing)</option>}
+                {currency && !CURRENCIES.includes(currency as any) && <option value={currency}>{currency} (not in list)</option>}
               </select>
             </F>
             {/* Say what will actually be booked. Everything downstream adds up USD, so a
                 GBP quote stored raw would overstate the pipeline by a third — showing the
                 converted figure here means nobody discovers that later. */}
             {converted && (
-              <div className="sm:col-span-2 rounded-lg bg-mav-dark border border-mav-line px-3 py-2 text-xs text-mav-muted">
+              <div className="sm:col-span-2 rounded-lg bg-mav-yellow/10 border border-mav-yellow/30 px-3 py-2 text-xs text-white/75">
                 Books as <span className="text-white font-medium">
                   ${usd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
                 </span>
@@ -412,10 +412,6 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
               <input className={`${ctl} ${border(missing.includes('Account manager'))}`} value={salesPerson}
                 onChange={e => setSalesPerson(e.target.value)} />
             </F>
-            <F label="Note (optional)" wide>
-              <input className={`${ctl} ${border(false)}`} value={note} onChange={e => setNote(e.target.value)}
-                placeholder="How it was confirmed" />
-            </F>
           </Section>
 
           {error && (
@@ -428,12 +424,12 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
 
         {/* Footer — also fixed, so Confirm is reachable without scrolling to the bottom. */}
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
-          <span className="text-[11px] text-mav-muted">
+          <span className="text-[11px] text-white/60">
             {ready ? 'Ready.' : `${missing.length} field${missing.length === 1 ? '' : 's'} left`}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors">
+              className="text-xs px-3 py-1.5 rounded-md border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-colors">
               Cancel
             </button>
             {/* Not disabled when incomplete: the checklist above says what is missing, and
