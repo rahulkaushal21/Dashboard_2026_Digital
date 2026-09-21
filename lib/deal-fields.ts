@@ -59,7 +59,29 @@ export const VOCAB_FALLBACK: Record<SheetVocabField, string[]> = {
   client_type: ['Agency', 'Direct/End'],
   technology: ['Wordpress', 'Hubspot', 'Shopify', 'HTML', 'React'],
   delivery_status: ['Under Development', 'Delivered', 'On Hold', 'Cancelled', 'Under Review'],
-  business_type: ['Repeat', 'New', 'New Repeat'],
+  // Two values, not four. The revenue sheet has been filled by hand with Repeat, New and
+  // New Repeat, and the dashboard's own Quotes sync writes a fourth, "Existing". Three of
+  // those mean the same thing — a client who has bought before — and the split was never
+  // deliberate, it was two people typing. Folded to Repeat / New; see normBusinessType.
+  business_type: ['Repeat', 'New'],
+}
+
+/**
+ * Existing → Repeat, New Repeat → Repeat, New stays New.
+ *
+ * Applied wherever a business type is READ (prefilling the confirm dialog, building the
+ * dropdown from the sheet's own vocabulary) as well as written, so a deal carrying the
+ * old spelling shows the new one rather than an odd "(not in list)" option. The historical
+ * sheet rows are left exactly as they are: rewriting 3,218 rows of somebody else's tab to
+ * tidy a word is not a change this dashboard should make on its own.
+ */
+export const normBusinessType = (v?: string | null) => {
+  const t = (v || '').trim().toLowerCase()
+  if (!t) return ''
+  // Repeat is tested FIRST: "New Repeat" starts with "new" and is still a repeat client.
+  if (/repeat|existing/.test(t)) return 'Repeat'
+  if (/^new\b/.test(t)) return 'New'
+  return (v || '').trim()
 }
 
 /** Project types with no delivery date — a retainer is not delivered on a day. */

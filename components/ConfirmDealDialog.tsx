@@ -9,7 +9,7 @@ import {
 } from '@/lib/supabase'
 import {
   SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL,
-  VOCAB_FALLBACK, OPEN_ENDED_TYPES,
+  VOCAB_FALLBACK, OPEN_ENDED_TYPES, normBusinessType,
 } from '@/lib/deal-fields'
 
 // Confirming a deal — the moment it becomes revenue.
@@ -127,7 +127,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
   const [clientEmail, setClientEmail] = useState(deal.contact_email || '')
   const [clientType, setClientType] = useState(deal.client_type || '')
   const [geo, setGeo] = useState(deal.geo || '')
-  const [businessType, setBusinessType] = useState(deal.business_type || '')
+  const [businessType, setBusinessType] = useState(normBusinessType(deal.business_type))
 
   // ---- money. The figure shown is the one as QUOTED: a deal already converted keeps its
   // local figure in local_value, and older rows only have est_value, which for a USD deal

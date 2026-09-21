@@ -1,6 +1,7 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
+import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import KPICard from '@/components/KPICard'
 import { getOpportunities, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
@@ -256,6 +257,9 @@ const [committedOnly, setCommittedOnly] = useState(false)
 const [fAge, setFAge] = useState('')
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
+// Using the sidebar closes this drawer — including a click on the section you are
+// already on, which is not a route change and so re-renders nothing by itself.
+useCloseOnNav(useCallback(() => setSel(null), []))
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).

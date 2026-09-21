@@ -1,6 +1,7 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
+import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getQuotes, getConversions, getBookingsFull, getOpportunities, type RevenueRow, type Quote, type QuoteConversion, type BookingRow, type Opportunity } from '@/lib/supabase'
@@ -85,6 +86,9 @@ export default function BusinessTrendPage() {
   // department, SME and owner, which is exactly what you need before ringing a client.
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [pushSel, setPushSel] = useState<string | null>(null)
+  // Using the sidebar closes this drawer — including a click on the section you are
+  // already on, which is not a route change and so re-renders nothing by itself.
+  useCloseOnNav(useCallback(() => setPushSel(null), []))
   const [loading, setLoading] = useState(true)
   // Set after mount so the server-rendered HTML doesn't bake in a build-time date.
   const [thisMonth, setThisMonth] = useState(''); const [todayMs, setTodayMs] = useState(0)

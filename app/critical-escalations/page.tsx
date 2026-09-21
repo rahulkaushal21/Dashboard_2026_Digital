@@ -1,6 +1,7 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
+import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 
@@ -27,6 +28,9 @@ export default function CriticalEscalations() {
   const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [status, setStatus] = useState<'all' | 'open' | 'unresolved' | 'resolved'>('all')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<CriticalEscalation | null>(null)
+  // Using the sidebar closes this drawer — including a click on the section you are
+  // already on, which is not a route change and so re-renders nothing by itself.
+  useCloseOnNav(useCallback(() => setSel(null), []))
   const [busy, setBusy] = useState<string | null>(null)
 
   useEffect(() => { getCriticalEscalations().then(r => { setRows(r); setLoading(false) }) }, [])

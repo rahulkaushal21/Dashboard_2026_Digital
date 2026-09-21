@@ -1,6 +1,7 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
+import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getDelights, type Delight } from '@/lib/supabase'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -13,6 +14,9 @@ export default function Delights() {
   const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [src, setSrc] = useState<'' | 'sheet' | 'email'>('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<Delight | null>(null)
+  // Using the sidebar closes this drawer — including a click on the section you are
+  // already on, which is not a route change and so re-renders nothing by itself.
+  useCloseOnNav(useCallback(() => setSel(null), []))
 
   useEffect(() => { getDelights().then(r => { setRows(r); setLoading(false) }) }, [])
   useEffect(() => { const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSel(null) }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [])

@@ -1,7 +1,8 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { RefreshCw } from 'lucide-react'
 import Header from '@/components/Header'
+import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getLnd, getLndModules, creditedPct, strictPct, type LndRow, type LndModule } from '@/lib/supabase'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -95,6 +96,9 @@ export default function LndPage() {
   const [only, setOnly] = useState<'' | 'zero' | 'stalled' | 'done'>('')
   const [sort, setSort] = useState<'progress' | 'name' | 'activity'>('progress')
   const [picked, setPicked] = useState<LndRow | null>(null)
+  // Using the sidebar closes this drawer — including a click on the section you are
+  // already on, which is not a route change and so re-renders nothing by itself.
+  useCloseOnNav(useCallback(() => setPicked(null), []))
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
 

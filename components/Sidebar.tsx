@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2 } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
+import { NAV_EVENT } from '@/lib/use-close-on-nav'
 
 // A nav entry is either a link or a group of links. Groups exist so Operations can
 // hold several sub-pages without crowding the top level; access is still granted
@@ -126,7 +127,11 @@ const linkCls = (active: boolean, indent = false) =>
 function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
   const { href, label, icon: Icon } = leaf
   return (
-    <Link href={href} className={linkCls(samePath(path, href), indent)}>
+    // Announce the click so any open drawer closes itself. Needed because clicking the
+    // section you are ALREADY on is a navigation to the same route: nothing re-renders,
+    // so a drawer left open would stay open and the link would look broken.
+    <Link href={href} onClick={() => window.dispatchEvent(new Event(NAV_EVENT))}
+      className={linkCls(samePath(path, href), indent)}>
       <Icon size={16} /> {label}
     </Link>
   )

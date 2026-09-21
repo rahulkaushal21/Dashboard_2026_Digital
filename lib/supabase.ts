@@ -1,12 +1,22 @@
 import { createClient } from '@supabase/supabase-js'
 import { isNbdOwner } from './nbd'
-import { VOCAB_FALLBACK, type SheetVocabField } from './deal-fields'
+import { VOCAB_FALLBACK, normBusinessType, type SheetVocabField } from './deal-fields'
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 export const supabase = url && anon ? createClient(url, anon, {
 auth: { flowType: 'implicit', detectSessionInUrl: true, persistSession: true },
 }) : null
 export const isLive = !!supabase
+
+// Every write in this app goes through an RPC. Wrapping .rpc once here means the read
+// cache is dropped on all of them — confirming a deal, retiring an expert, filing a QBR —
+// rather than each helper having to remember. A helper that forgets is the bug this
+// avoids: the write succeeds, the page refetches, and the old rows come back from cache.
+if (supabase) {
+  const rpc = supabase.rpc.bind(supabase)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(supabase as any).rpc = (...args: any[]) => { clearReadCache(); return (rpc as any)(...args) }
+}
 
 export interface Client {
 company_name: string; client_type?: string; industry?: string; geo?: string
@@ -129,25 +139,74 @@ export interface BookingRow { id: number; company_name?: string; booking_month?:
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
 export interface EmailSignal { id: number; thread_id?: string; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
 
+// Table reads, cached and paged in parallel.
+//
+// Two things made the dashboard feel slow, and neither was the database.
+//
+// 1. PAGES WERE FETCHED ONE AFTER ANOTHER. Supabase caps a request at 1,000 rows, so
+//    3,042 bookings meant four round trips in a queue — the fourth could not start until
+//    the third came back. The first request now asks for the exact count, and the
+//    remaining pages go out together.
+// 2. EVERY PAGE REFETCHED EVERYTHING. Moving from Clients to Opportunities and back
+//    pulled the same 3,000 bookings again. Reads are now held for a minute and shared:
+//    two components asking for the same table at the same time make one request, not two.
+//
+// The cache is cleared on every write (see the supabase.rpc wrapper below), so a
+// confirmed deal shows up immediately — the staleness that remains is another person's
+// change taking up to a minute to appear, which is what a 30-minute sheet sync already
+// implies.
+const READ_TTL_MS = 60_000
+type CacheEntry = { at: number; rows: any[] | null; inflight?: Promise<any[] | null> }
+const readCache = new Map<string, CacheEntry>()
+/** Drop everything held. Called after any write so nobody reads their own stale data. */
+export function clearReadCache() { readCache.clear() }
+
 async function read<T>(table: string, cols = '*', orderBy?: string): Promise<T[] | null> {
 if (!supabase) return null
-// Paginate: Supabase caps each request at 1000 rows, so fetch in pages.
-// IMPORTANT: pass a stable `orderBy` (a unique column) for any table over
-// 1000 rows. Without an ORDER BY, Postgres may return rows in a different
-// order on each page request — and while the revenue sync is writing, that
-// drops or duplicates boundary rows, making totals slightly off and flaky.
+const key = `${table}|${cols}|${orderBy || ''}`
+// A shallow copy per caller: the cached array is shared, and several pages sort what
+// they are handed in place. Without this, one page's sort would silently reorder
+// another's — including the paginated reads that require a stable order.
+const copy = (rows: any[] | null) => (rows ? (rows.slice() as T[]) : null)
+const hit = readCache.get(key)
+if (hit?.inflight) return hit.inflight.then(copy)
+if (hit && Date.now() - hit.at < READ_TTL_MS) return copy(hit.rows)
+
+// IMPORTANT: pass a stable `orderBy` (a unique column) for any table over 1000 rows.
+// Without an ORDER BY, Postgres may return rows in a different order on each page
+// request — and while the revenue sync is writing, that drops or duplicates boundary
+// rows, making totals slightly off and flaky.
 const PAGE = 1000
-const all: T[] = []
-for (let from = 0; ; from += PAGE) {
-let q = supabase.from(table).select(cols).range(from, from + PAGE - 1)
-if (orderBy) q = q.order(orderBy, { ascending: true })
-const { data, error } = await q
-if (error) return all.length ? all : null
-if (!data || data.length === 0) break
-all.push(...(data as T[]))
-if (data.length < PAGE) break
+const page = (from: number, exact = false) => {
+  let q = supabase!.from(table).select(cols, exact ? { count: 'exact' } : undefined).range(from, from + PAGE - 1)
+  if (orderBy) q = q.order(orderBy, { ascending: true })
+  return q
 }
-return all.length ? all : null
+
+const run = (async (): Promise<T[] | null> => {
+  const first = await page(0, true)
+  if (first.error) return null
+  const head = (first.data || []) as T[]
+  const total = first.count ?? head.length
+  if (head.length === 0) return null
+  if (head.length >= PAGE && total > head.length) {
+    const starts: number[] = []
+    for (let from = PAGE; from < total; from += PAGE) starts.push(from)
+    const rest = await Promise.all(starts.map(from => page(from)))
+    for (const r of rest) {
+      // A failed page would silently shorten the table, and a half-loaded revenue tab
+      // is worse than a slow one: the totals would simply be wrong with no sign of it.
+      if (r.error) return null
+      head.push(...((r.data || []) as T[]))
+    }
+  }
+  return head.length ? head : null
+})()
+
+readCache.set(key, { at: Date.now(), rows: null, inflight: run })
+const rows = await run
+readCache.set(key, { at: Date.now(), rows })
+return copy(rows)
 }
 
 // Every client on the Client-Backup tab of the business sheet (2,000+ rows across
@@ -1412,6 +1471,11 @@ export async function getSheetVocab(): Promise<SheetVocab> {
   for (const k of Object.keys(byField)) {
     out[k as SheetVocabField] = byField[k].sort((a, b) => b.uses - a.uses).map(x => x.value)
   }
+  // Business type is the one field whose sheet spellings are folded rather than taken as
+  // given: Repeat, New Repeat and Existing all mean a client who has bought before, and
+  // the split was two people typing rather than a distinction anybody uses. Deduped after
+  // folding so the dropdown does not offer Repeat twice.
+  out.business_type = Array.from(new Set((out.business_type || []).map(normBusinessType).filter(Boolean)))
   return out
 }
 
