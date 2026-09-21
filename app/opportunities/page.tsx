@@ -2,8 +2,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, type Opportunity } from '@/lib/supabase'
-import { currentEmail } from '@/lib/access'
+import { getOpportunities, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type Opportunity } from '@/lib/supabase'
+import AddOpportunityDialog from '@/components/AddOpportunityDialog'
+import ConfirmDealDialog from '@/components/ConfirmDealDialog'
+import { currentEmail, getStoredProfile } from '@/lib/access'
 import { NBD_TEAM } from '@/lib/nbd'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -258,6 +260,19 @@ const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
 useEffect(() => { getOpportunities().then(setAll) }, [])
+// Who is looking, and what they are allowed to change. A viewer sees the same page
+// without the Add button and without a confirm action — the database refuses them
+// either way, so this only avoids offering something that would bounce.
+const [me, setMe] = useState<DirectoryMember | null>(null)
+const [iAmAdmin, setIAmAdmin] = useState(false)
+const [showAdd, setShowAdd] = useState(false)
+const [confirming, setConfirming] = useState<Opportunity | null>(null)
+useEffect(() => {
+setIAmAdmin(!!getStoredProfile()?.is_admin)
+getDirectoryMember(currentEmail()).then(setMe)
+}, [])
+const canEnter = iAmAdmin || !!me
+const reload = () => getOpportunities().then(setAll)
 // Default the "To" date to today (set on the client to avoid a hydration mismatch).
 useEffect(() => { const d = new Date().toISOString().slice(0, 10); setTo(d); setToday(d) }, [])
 
@@ -590,6 +605,20 @@ return (
 <div>
 <Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence." />
 
+{/* Entering a deal the email scan did not catch. Hidden for anyone who is neither a
+    registered PM nor an admin: the RPC refuses them, so offering the button would only
+    produce a refusal they cannot act on. */}
+{canEnter && (
+<div className="-mt-2 mb-6 flex justify-end">
+<button onClick={() => setShowAdd(true)}
+className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
++ Add opportunity
+</button>
+</div>
+)}
+{showAdd && <AddOpportunityDialog onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); reload() }} />}
+{confirming && <ConfirmDealDialog deal={confirming} onClose={() => setConfirming(null)} onConfirmed={() => { setConfirming(null); reload() }} />}
+
 {/* Sheet-mismatch alert: a Won/Lost call made here that the Quotes sheet hasn't caught
     up with. Sits above everything — it's the one thing on this page needing action
     elsewhere. Won and Lost are listed separately because the fix differs for each. */}
@@ -815,6 +844,15 @@ return (
  : 'Record the outcome here the moment you know it. The Quotes sheet still needs updating by hand afterwards.'}
 </div>
 <div className="flex flex-wrap gap-2">
+{/* The 1 Oct path: fill anything missing and book it, in one step. The quick toggle
+    beside it stays for the older flow, where the Quotes sheet is still the record and
+    this only records a call. */}
+{canConfirmLocally(sel, me, iAmAdmin) && !sel.won && (
+<button onClick={() => setConfirming(sel)}
+className="text-xs px-3 py-1.5 rounded-md bg-green-500 text-black font-medium hover:brightness-110 transition">
+Confirm with details…
+</button>
+)}
 <button disabled={savingWon} onClick={() => toggleConfirmed(sel)}
 className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_won ? 'border-mav-line text-mav-muted hover:text-white' : 'border-green-500/50 text-green-300 hover:bg-green-500/15'}`}>
 {savingWon ? 'Saving…' : sel.email_won ? 'Undo confirm' : '✓ Mark Confirmed'}

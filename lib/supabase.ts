@@ -26,6 +26,10 @@ won?: boolean; won_amount?: number; flag?: string; status?: string; source_tags?
 nbd_owner?: boolean; mis_tagged_new?: boolean
 value?: number; technology?: string; service?: string; journey?: string; quote_ref?: string
 quote_date?: string; origin?: string; est_value?: number; next_step?: string; enriched?: boolean
+// Entered by hand from the dashboard (origin='pm'). `channel` is where the deal came
+// from when email did not catch it — referral, LinkedIn, upsell, event, inbound.
+channel?: string; currency?: string; service_dept?: string; project_type?: string
+created_by?: string; created_at?: string; confirmed_by?: string; confirmed_at?: string
 // "Might not come" — a human call that this open quote probably won't convert.
 // The deal stays Open (it isn't Lost), but it's discounted from the realistic view.
 unlikely?: boolean; unlikely_reason?: string; unlikely_at?: string; unlikely_by?: string
@@ -842,4 +846,127 @@ export async function getRevenueHistory(): Promise<RevenueHistoryRow[]> {
 export async function getRevenueSources(): Promise<RevenueSource[]> {
   return (await read<RevenueSource>('revenue_sources',
     'key, label, csv_url, enabled, immutable, last_synced_at, last_rows, last_total, last_message', 'key')) || []
+}
+
+// ---- Entering and confirming a deal from the dashboard ---------------------
+//
+// From 1 Oct 2026 the dashboard is where a deal exists, so these two calls are the
+// entry point rather than the Quotes tab. Both go through SECURITY DEFINER RPCs that
+// take the actor from the Google JWT, NOT from an argument — the client cannot claim
+// to be somebody else, and it cannot talk its way past the rules by calling the REST
+// API directly. Everything below is a convenience wrapper; the database is the guard.
+//
+// They return an `error` STRING rather than a boolean, because the useful information
+// is in the refusal: "still missing: Geography, Project type" is what the person has
+// to act on, and a bare false would throw it away.
+
+export type PmTeam = 'web' | 'nbd'
+export interface DirectoryMember { email: string; name: string; slug: string; team: PmTeam; aliases: string[]; active: boolean }
+
+/** The signed-in person's directory row, or null if they are not on it. */
+export async function getDirectoryMember(email?: string | null): Promise<DirectoryMember | null> {
+  if (!supabase || !email) return null
+  const { data, error } = await supabase.from('pm_directory')
+    .select('email, name, slug, team, aliases, active')
+    .eq('email', email.trim().toLowerCase()).eq('active', true).maybeSingle()
+  if (error || !data) return null
+  return data as DirectoryMember
+}
+
+// Mirror of directory_owner_match() in the database, for deciding whether to SHOW the
+// confirm button. One cell can name several people ("Malav Modi / Kalgi Shah"), so it
+// is split on the same separators lib/nbd.ts uses and each part matched exactly.
+// Substring matching is what the aliases exist to avoid: 'Rahul Kaushal' must never
+// match Rahul Jain.
+const ownerParts = (s?: string) => (s || '').split(/[,/&]|\band\b/i).map(x => x.trim().toLowerCase().replace(/\s+/g, ' ')).filter(Boolean)
+export const ownerMatches = (cell: string | undefined, aliases: string[]) =>
+  ownerParts(cell).some(p => aliases.includes(p))
+
+/**
+ * May this person confirm this deal, as far as the browser can tell?
+ *
+ * A web PM is named in pm_owner; NBD is named in sales_person, because they open the
+ * business rather than project-manage it. Admins may confirm anything.
+ *
+ * THIS IS FOR SHOWING THE BUTTON ONLY. The same rule is enforced in the database and
+ * that is the one that counts — this copy just avoids offering an action that would
+ * be refused.
+ */
+export function canConfirmLocally(o: Opportunity, me: DirectoryMember | null, isAdmin: boolean): boolean {
+  if (isAdmin) return true
+  if (!me) return false
+  return me.team === 'nbd' ? ownerMatches(o.sales_person, me.aliases) : ownerMatches(o.pm_owner, me.aliases)
+}
+
+export interface NewOpportunity {
+  company: string; channel?: string; est_value?: number | null; currency?: string
+  quote_date?: string | null; service_dept?: string; project_type?: string
+  technology?: string; business_type?: string; sales_person?: string
+  pm_owner?: string; geo?: string; subject?: string; note?: string; force?: boolean
+}
+
+/** Create a deal by hand. Returns its id, or the database's own refusal message. */
+export async function addOpportunity(v: NewOpportunity): Promise<{ id?: number; error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('add_opportunity', {
+    p_company: v.company, p_channel: v.channel ?? null,
+    p_est_value: v.est_value ?? null, p_currency: v.currency ?? 'USD',
+    p_quote_date: v.quote_date || null, p_service_dept: v.service_dept ?? null,
+    p_project_type: v.project_type ?? null, p_technology: v.technology ?? null,
+    p_business_type: v.business_type ?? null, p_sales_person: v.sales_person ?? null,
+    p_pm_owner: v.pm_owner ?? null, p_geo: v.geo ?? null,
+    p_subject: v.subject ?? null, p_note: v.note ?? null, p_force: v.force ?? false,
+  })
+  if (error) return { error: error.message }
+  return { id: Number(data) }
+}
+
+export interface ConfirmFields {
+  est_value?: number | null; currency?: string; quote_date?: string | null
+  service_dept?: string; project_type?: string; sales_person?: string
+  pm_owner?: string; geo?: string; confirmed_on?: string | null; note?: string
+}
+
+/**
+ * Fill the gaps and confirm, in ONE call, so a form that fails halfway cannot leave a
+ * deal half-completed. `missing` comes back parsed when the completeness gate refuses,
+ * so the form can tick off exactly what is still needed.
+ */
+export async function confirmOpportunityFull(id: number, f: ConfirmFields): Promise<{ ok: boolean; error?: string; missing?: string[] }> {
+  if (!supabase || !id) return { ok: false, error: 'Supabase not configured' }
+  const { error } = await supabase.rpc('confirm_opportunity', {
+    p_id: id, p_est_value: f.est_value ?? null, p_currency: f.currency ?? null,
+    p_quote_date: f.quote_date || null, p_service_dept: f.service_dept ?? null,
+    p_project_type: f.project_type ?? null, p_sales_person: f.sales_person ?? null,
+    p_pm_owner: f.pm_owner ?? null, p_geo: f.geo ?? null,
+    p_confirmed_on: f.confirmed_on || null, p_note: f.note ?? null,
+  })
+  if (!error) return { ok: true }
+  const m = /still missing:\s*(.+)$/.exec(error.message)
+  return { ok: false, error: error.message, missing: m ? m[1].split(',').map(x => x.trim()) : undefined }
+}
+
+/** What this deal still needs before it can be confirmed. Empty = ready. */
+export async function opportunityMissingFields(id: number): Promise<string[]> {
+  if (!supabase || !id) return []
+  const { data, error } = await supabase.rpc('opportunity_missing_fields', { p_id: id })
+  if (error || !data) return []
+  return data as string[]
+}
+
+export interface DuplicateHit { id: number; company_name?: string; est_value?: number; status?: string; origin?: string; source_date?: string; why: string }
+
+/**
+ * Deals that might already be this one. ADVISORY — it warns, it never blocks.
+ *
+ * The broad "similar value" arm is here because an email-sourced deal is usually named
+ * for the end client while a hand-entered one is named for the agency, so the names
+ * differ on exactly the duplicates worth catching. That is a judgement for a human,
+ * which is why it warns rather than refusing; only same-client-and-value is a hard stop.
+ */
+export async function findPossibleDuplicates(company: string, estValue?: number | null): Promise<DuplicateHit[]> {
+  if (!supabase || !company.trim()) return []
+  const { data, error } = await supabase.rpc('find_possible_duplicates', { p_company: company, p_est_value: estValue ?? null })
+  if (error || !data) return []
+  return data as DuplicateHit[]
 }
