@@ -26,7 +26,7 @@ const nav: Entry[] = [
   // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
   // it just is not offered in the nav. Put the entry back here to restore it.
   { href: '/revenue-sheet', label: 'Web, Hub & LP', icon: Table2 },
-  { href: '/clients', label: 'Clients', icon: Users },
+  { href: '/clients', label: 'Client 360', icon: Users },
   { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
   { href: '/delights', label: 'Delights', icon: Sparkles },

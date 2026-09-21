@@ -622,7 +622,7 @@ export default function Clients() {
 
   return (
     <div>
-      <Header title="Clients" subtitle="Booked clients, sorted by latest action. Click a client for its live discussions — escalations, open quotes & email conversations." />
+      <Header title="Client 360" subtitle="Booked clients, sorted by latest action. Click a client for its live discussions — escalations, open quotes & email conversations." />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
@@ -931,10 +931,15 @@ export default function Clients() {
         const r = riskOf(selC); const convos = sigByClient.get(selC.company_name) || []; const ten = tenureOf(selC)
         const bill = billingOf(selC)
         const cOpps = oppByClient.get(selC.company_name) || []
+        // The panel stops at the main nav (w-60) rather than covering it, so you can
+        // still move to another page without closing the client first. Below lg the nav
+        // is itself a slide-in drawer and there is nothing to spare, so this takes the
+        // lot. It was max-w-md before; at that width the billing chart, the open quotes
+        // and the conversations were three narrow stacks you scrolled past each other.
         return (
-          <div className="fixed inset-0 z-40" onClick={() => setSelC(null)}>
+          <div className="fixed inset-0 lg:left-60 z-40" onClick={() => setSelC(null)}>
             <div className="absolute inset-0 bg-black/50" />
-            <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full max-w-md bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6">
+            <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6 lg:p-8">
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap"><span className={`inline-block w-2.5 h-2.5 rounded-full ${dotCls(r.level || (r.recovered ? 'Positive' : sentBucket(selC.sentiment)))}`} /><h2 className="text-xl font-semibold">{displayName(selC.company_name)}</h2></div>
@@ -954,7 +959,7 @@ export default function Clients() {
                 {selC.client_status && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{selC.client_status}</span>}
               </div>
 
-              <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
+              <div className="border-t border-mav-line pt-4 grid grid-cols-2 xl:grid-cols-4 gap-y-3 gap-x-6 text-sm">
                 <div><div className="text-xs text-mav-muted">Industry</div>{selC.industry || '—'}</div>
                 <div><div className="text-xs text-mav-muted">Type</div>{selC.client_type || '—'}</div>
                 <div><div className="text-xs text-mav-muted">GEO</div>{selC.geo || '—'}</div>
@@ -964,6 +969,11 @@ export default function Clients() {
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
               </div>
 
+              {/* Two columns once there is room. Each section is a grid item, so billing
+                  can sit beside the open quotes instead of a screen above them.
+                  items-start keeps a short section short rather than stretching it to
+                  match its neighbour. */}
+              <div className="xl:grid xl:grid-cols-2 xl:gap-x-8 xl:items-start">
               {bill && (
                 <div className="mt-6 border-t border-mav-line pt-4">
                   <div className="flex items-baseline justify-between gap-3">
@@ -1138,6 +1148,7 @@ export default function Clients() {
               {selC.journey && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.journey}</p></div>}
               {selC.action_steps && <div className="mt-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Next steps</div><p className="text-sm leading-relaxed whitespace-pre-wrap">{selC.action_steps}</p></div>}
               {!r.escs.length && !r.posFb.length && !convos.length && !cOpps.length && !selC.journey && !selC.action_steps && !ten && <p className="text-sm text-mav-muted mt-5">No escalations, conversations or notes recorded for this client yet.</p>}
+              </div>
             </aside>
           </div>
         )

@@ -41,7 +41,7 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/opportunities', label: 'Opportunities' },
   { href: '/needs-input', label: 'Needs Input' },
   { href: '/revenue-sheet', label: 'Web, Hub & LP' },
-  { href: '/clients', label: 'Clients' },
+  { href: '/clients', label: 'Client 360' },
   { href: '/escalations', label: 'Escalations' },
   { href: '/critical-escalations', label: 'Critical Escalations' },
   { href: '/delights', label: 'Delights' },
