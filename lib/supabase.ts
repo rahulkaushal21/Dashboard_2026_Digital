@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { isNbdOwner } from './nbd'
+import { VOCAB_FALLBACK, type SheetVocabField } from './deal-fields'
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 export const supabase = url && anon ? createClient(url, anon, {
@@ -31,6 +32,16 @@ quote_date?: string; origin?: string; est_value?: number; next_step?: string; en
 channel?: string; currency?: string; service_dept?: string; project_type?: string
 created_by?: string; created_at?: string; confirmed_by?: string; confirmed_at?: string
 contact_email?: string
+// The revenue sheet's own columns, asked for at confirmation. `client_name` is the
+// PERSON at the client; company_name is the agency, which is what the sheet calls
+// "Agency". `quote_price` is the figure quoted before negotiation, against local_value
+// which is what it actually closed at — the gap between them is the discount.
+client_name?: string; client_type?: string; service_type?: string; delivery_type?: string
+quote_price?: number; start_date?: string; delivery_date?: string
+// DELIVERY state (Under Development / Delivered / On Hold / Cancelled). Deliberately
+// not `status`, which is the SALES state and is overwritten by the Quotes sync every
+// 30 minutes — writing "Delivered" there would push a won deal back into open pipeline.
+delivery_status?: string
 // The figure as QUOTED, in `currency`. est_value is always USD — every total, forecast
 // and scorecard adds est_value up without asking what currency it was.
 local_value?: number
@@ -934,6 +945,12 @@ export interface ConfirmFields {
   /** The project title. Editable at confirm time because an email-sourced deal inherits
    *  the mail's subject line, which is rarely what the project should be called. */
   subject?: string
+  // The revenue sheet's columns. Every one of these is prefilled from the client's own
+  // history before the PM sees it, so confirming is a check rather than a form fill.
+  client_name?: string; client_type?: string; service_type?: string; delivery_type?: string
+  technology?: string; contact_email?: string; business_type?: string
+  quote_price?: number | null; start_date?: string | null; delivery_date?: string | null
+  delivery_status?: string
 }
 
 /**
@@ -950,6 +967,12 @@ export async function confirmOpportunityFull(id: number, f: ConfirmFields): Prom
     p_pm_owner: f.pm_owner ?? null, p_geo: f.geo ?? null,
     p_confirmed_on: f.confirmed_on || null, p_note: f.note ?? null,
     p_subject: f.subject ?? null,
+    p_client_name: f.client_name ?? null, p_client_type: f.client_type ?? null,
+    p_service_type: f.service_type ?? null, p_delivery_type: f.delivery_type ?? null,
+    p_technology: f.technology ?? null, p_contact_email: f.contact_email ?? null,
+    p_quote_price: f.quote_price ?? null, p_start_date: f.start_date || null,
+    p_delivery_date: f.delivery_date || null, p_delivery_status: f.delivery_status ?? null,
+    p_business_type: f.business_type ?? null,
   })
   if (!error) return { ok: true }
   const m = /still missing:\s*(.+)$/.exec(error.message)
@@ -1287,4 +1310,83 @@ export async function copyRowToMonth(source: string, id: number, month: string, 
   })
   if (error) return { error: error.message }
   return { id: Number(data) }
+}
+
+// ---- The revenue sheet as a source of answers -----------------------------
+//
+// Two lookups that exist so a PM confirming a deal is CHECKING fields rather than
+// filling them in: what the sheet's columns are allowed to contain, and what this
+// particular client's last project said. 403 of the 405 clients in the sheet can supply
+// all five of the fields the dialog newly asks for.
+
+
+export type SheetVocab = Record<SheetVocabField, string[]>
+
+/**
+ * Dropdown options, in order of how often the sheet actually uses them — so the option
+ * on 97% of rows sits at the top of the list rather than alphabetically in the middle.
+ *
+ * Falls back to a short hard-coded list rather than an empty dropdown: a select with no
+ * options would make the deal unconfirmable, which is a worse failure than a short list.
+ */
+export async function getSheetVocab(): Promise<SheetVocab> {
+  const out = { ...VOCAB_FALLBACK } as SheetVocab
+  if (!supabase) return out
+  const { data, error } = await supabase.from('web_sheet_vocab').select('field, value, uses')
+  if (error || !data?.length) return out
+  const byField: Record<string, { value: string; uses: number }[]> = {}
+  for (const r of data as any[]) (byField[r.field] ||= []).push({ value: r.value, uses: Number(r.uses) })
+  for (const k of Object.keys(byField)) {
+    out[k as SheetVocabField] = byField[k].sort((a, b) => b.uses - a.uses).map(x => x.value)
+  }
+  return out
+}
+
+export interface SheetClientDefaults {
+  client_key: string; company_name?: string; client_name?: string; client_email?: string
+  client_type?: string; service_type?: string; delivery_type?: string; technology?: string
+  geo?: string; currency?: string; service_dept?: string; project_type?: string
+  pc_sme?: string; sales_person?: string; sheet_projects: number
+}
+
+/**
+ * What the sheet already knows about every client, keyed on the lower-cased Agency name.
+ *
+ * Fetched as a map rather than a per-deal query because the confirm dialog is opened from
+ * list pages where several deals may be confirmed in a row — one fetch, then every dialog
+ * opens instantly.
+ */
+export async function getSheetClientDefaults(): Promise<Record<string, SheetClientDefaults>> {
+  if (!supabase) return {}
+  const { data, error } = await supabase.from('web_sheet_client_defaults').select('*')
+  if (error || !data) return {}
+  const map: Record<string, SheetClientDefaults> = {}
+  for (const r of data as SheetClientDefaults[]) map[r.client_key] = r
+  return map
+}
+
+/** The sheet's entry for one company, matched the way the view is keyed. */
+export function sheetDefaultsFor(
+  map: Record<string, SheetClientDefaults>, company?: string,
+): SheetClientDefaults | undefined {
+  const k = (company || '').trim().toLowerCase()
+  return k ? map[k] : undefined
+}
+
+/**
+ * The dashboard's short geo code for whatever the sheet wrote.
+ *
+ * The sheet says 'US/Canada', the dashboard stores 'US'. Matching on a prefix would be
+ * wrong in both directions here, so the regions are matched explicitly and anything
+ * unrecognised comes back undefined rather than guessed — a wrong geo is worse than none,
+ * because it is silently wrong on every regional total.
+ */
+export function geoCodeFromSheet(v?: string): string | undefined {
+  const s = (v || '').trim().toLowerCase()
+  if (!s) return undefined
+  if (s.startsWith('us')) return 'US'
+  if (s.startsWith('uk') || s.startsWith('eu')) return 'UK'
+  if (s.startsWith('au') || s.startsWith('nz')) return 'AU'
+  if (s.startsWith('other')) return 'Other'
+  return undefined
 }
