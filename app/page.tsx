@@ -338,7 +338,22 @@ export default function Dashboard() {
 
   const activeClients = useMemo(() =>
     new Set(rangeRev.filter(r => (r.amount_usd || 0) !== 0).map(r => r.client_name)).size, [rangeRev])
-  const openOpps = myOpps.filter(o => inDayRange(o.source_date) && (o.rfq_status === 'pending' || o.rfq_status === 'received')).length
+  // Open pipeline raised in this period, as MONEY.
+  //
+  // It read 0 because it counted rfq_status 'pending' or 'received', and rfq_status is
+  // free text — four rows in the whole table say 'pending' and none say 'received'. The
+  // sales state lives in `status`, which is clean: Won / Open / Lost / On Hold. A count
+  // was the wrong unit anyway; twelve small quotes and one large one are not comparable.
+  const openPipeline = useMemo(() => {
+    const rows = myOpps.filter(o => /^open$/i.test((o.status || '').trim()) && inDayRange(o.source_date))
+    return {
+      usd: rows.reduce((s, o) => s + (o.est_value || 0), 0),
+      n: rows.length,
+      // A deal with no figure is not a small deal, it is an unpriced one. Saying how many
+      // stops the total reading as the whole picture when it is not.
+      unpriced: rows.filter(o => !o.est_value).length,
+    }
+  }, [myOpps, from, to])
   const bookings = rangeRev.length
 
   // AI Insights read the WHOLE history, not the date filter — a six-month trend
@@ -404,7 +419,10 @@ export default function Dashboard() {
           changeLabel={isMtd ? 'vs same days last month' : 'vs last month'}
           note={isMtd && daysGone < daysInMonth ? `${daysGone} of ${daysInMonth} days gone — the month is still filling` : undefined} />
         <KPICard label="Active clients" value={String(activeClients)} />
-        <KPICard label="Open opportunities" value={String(openOpps)} />
+        <KPICard label="Open opportunities" value={fmtUsd(openPipeline.usd)}
+          note={openPipeline.n
+            ? `${openPipeline.n} open${openPipeline.unpriced ? ` · ${openPipeline.unpriced} with no value yet` : ''}`
+            : undefined} />
         <KPICard label="Bookings (period)" value={String(bookings)} />
       </div>
 
@@ -484,10 +502,15 @@ export default function Dashboard() {
                 <Fragment key={seg}>
                   {/* The heavier rule goes ABOVE each segment, so the three rows that
                       belong together read as one block rather than three stripes. */}
-                  <tr className="border-t-2 border-mav-fg/20 hover:bg-mav-dark/40">
-                    <td className="px-5 pt-3 pb-1.5 font-medium whitespace-nowrap border-r border-mav-fg/15">{seg}</td>
-                    {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
-                    <td className="px-5 pt-3 pb-1.5 text-right font-medium whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
+                  {/* The segment's own line is the one being compared across the table;
+                      its two parts are the detail under it. Yellow says which is which at
+                      a glance, so the eye can run down the totals without reading labels.
+                      A tint, not filled: twenty solid yellow cells would shout louder
+                      than the numbers on them. */}
+                  <tr className="border-t-2 border-mav-fg/20 bg-mav-yellow/10 text-mav-fg">
+                    <td className="px-5 pt-3 pb-1.5 font-semibold whitespace-nowrap border-r border-mav-fg/15">{seg}</td>
+                    {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-medium tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
+                    <td className="px-5 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
                   </tr>
                   {ENG.map(g => (
                     <tr key={g} className="text-xs text-mav-muted hover:bg-mav-dark/40 border-t border-mav-fg/10">
@@ -498,13 +521,14 @@ export default function Dashboard() {
                   ))}
                 </Fragment>
               ))}
-              <tr className="border-t-2 border-mav-fg/30 bg-mav-dark/30">
+              {/* Stronger than a segment row, because it is a different kind of line. */}
+              <tr className="border-t-2 border-mav-yellow/60 bg-mav-yellow/20 text-mav-fg">
                 <td className="px-5 pt-3 pb-1.5 font-semibold border-r border-mav-fg/15">Total</td>
-                {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-semibold whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(colTotal(k))}</td>)}
-                <td className="px-5 pt-3 pb-1.5 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
+                {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(colTotal(k))}</td>)}
+                <td className="px-5 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
               </tr>
               {ENG.map(g => (
-                <tr key={g} className="text-xs text-mav-muted bg-mav-dark/30 border-t border-mav-fg/10">
+                <tr key={g} className="text-xs text-mav-muted bg-mav-yellow/[0.06] border-t border-mav-fg/10">
                   <td className="pl-9 pr-5 py-1 whitespace-nowrap border-r border-mav-fg/15">{g}</td>
                   {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(engColTotal(g, k))}</td>)}
                   <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + engColTotal(g, k), 0))}</td>
