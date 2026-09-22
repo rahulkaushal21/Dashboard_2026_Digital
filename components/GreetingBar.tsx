@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getDirectoryMember, getUpcomingHolidays, TEAM_REGION, type DirectoryMember, type Holiday } from '@/lib/supabase'
+import { getDirectoryMember, getUpcomingHolidays, TEAM_REGIONS, type DirectoryMember, type Holiday } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 
 // Who is looking, and when their client's country is shut.
@@ -9,8 +9,8 @@ import { currentEmail } from '@/lib/access'
 // that the UK is closed on the 25th — not that India is. A chased approval that lands on
 // a bank holiday costs a week, and nobody thinks to check another country's calendar.
 //
-// LP/HUB sells into all three regions, so there is no single answer for them and the
-// panel says so rather than picking one at random.
+// LP/HUB works across all three regions, so they get all three, each row tagged with the
+// country — an LP PM needs to know whichever of them is shut that week.
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const DAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -49,13 +49,13 @@ export default function GreetingBar() {
     setGreeting(hello())
     getDirectoryMember(currentEmail()).then(m => {
       setMe(m)
-      const region = m?.team ? TEAM_REGION[m.team] : null
-      if (!region) return
-      getUpcomingHolidays(region).then(r => { setSoon(r.soon); setNext(r.next) })
+      const regions = m?.team ? (TEAM_REGIONS[m.team] || []) : []
+      if (!regions.length) return
+      getUpcomingHolidays(regions).then(r => { setSoon(r.soon); setNext(r.next) })
     })
   }, [])
 
-  const region = me?.team ? TEAM_REGION[me.team] : null
+  const regions = me?.team ? (TEAM_REGIONS[me.team] || []) : []
   const first = (me?.name || '').split(' ')[0]
 
   return (
@@ -71,18 +71,24 @@ export default function GreetingBar() {
         </p>
       </div>
 
-      {region && (
+      {regions.length > 0 && (
         <div className="rounded-xl border border-mav-line bg-mav-panel px-4 py-3 min-w-[15rem]">
           <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1.5">
-            {region} holidays &middot; next 3 weeks
+            {regions.join(' · ')} holidays &middot; next 3 weeks
           </div>
           {soon.length > 0 ? (
             <ul className="space-y-1">
               {soon.map(h => {
                 const n = daysAway(h.on_date)
                 return (
-                  <li key={h.on_date} className="flex items-baseline justify-between gap-3 text-sm">
-                    <span className={n <= 7 ? 'text-amber-300' : ''}>{h.name}</span>
+                  <li key={`${h.region}-${h.on_date}`} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className={n <= 7 ? 'text-amber-300' : ''}>
+                      {/* The country is on every row, not only in the heading: an LP PM
+                          sees three countries here and "Christmas Day" alone does not
+                          say whose office is shut. */}
+                      {regions.length > 1 && <span className="text-mav-muted mr-1.5">{h.region}</span>}
+                      {h.name}
+                    </span>
                     <span className="text-xs text-mav-muted whitespace-nowrap">{label(h.on_date)} &middot; {away(n)}</span>
                   </li>
                 )
@@ -93,7 +99,7 @@ export default function GreetingBar() {
             // one" is the answer somebody actually wanted.
             <p className="text-sm text-mav-muted">
               Clear for three weeks.
-              {next && <> Next is <span className="text-mav-fg">{next.name}</span>, {label(next.on_date)}.</>}
+              {next && <> Next is <span className="text-mav-fg">{next.name}</span>{regions.length > 1 ? ` in the ${next.region}` : ''}, {label(next.on_date)}.</>}
             </p>
           )}
         </div>

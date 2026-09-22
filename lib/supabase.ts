@@ -1888,9 +1888,14 @@ export async function getBigOpenDeals(limit = 25): Promise<{ rows: Opportunity[]
 
 export interface Holiday { region: string; on_date: string; name: string }
 
-/** Which country a PM's team sells into. LP/HUB spans all three, so it has no one answer. */
-export const TEAM_REGION: Record<string, string | null> = {
-  'WEB-UK': 'UK', 'WEB-US': 'US', 'WEB-AU': 'AU', 'LP/HUB': null,
+/**
+ * Which countries a PM's team sells into.
+ *
+ * LP/HUB works across all three, so it gets all three: an LP PM chasing an approval needs
+ * to know whichever of those countries is shut that week, not one picked for them.
+ */
+export const TEAM_REGIONS: Record<string, string[]> = {
+  'WEB-UK': ['UK'], 'WEB-US': ['US'], 'WEB-AU': ['AU'], 'LP/HUB': ['UK', 'US', 'AU'],
 }
 
 /**
@@ -1900,14 +1905,14 @@ export const TEAM_REGION: Record<string, string | null> = {
  * window is empty most of the year, and "nothing for three weeks, next is Christmas Day"
  * is a useful answer where an empty box is not.
  */
-export async function getUpcomingHolidays(region: string | null, days = 21): Promise<{ soon: Holiday[]; next?: Holiday }> {
-  if (!supabase || !region) return { soon: [] }
+export async function getUpcomingHolidays(regions: string[], days = 21): Promise<{ soon: Holiday[]; next?: Holiday }> {
+  if (!supabase || !regions.length) return { soon: [] }
   const today = new Date().toISOString().slice(0, 10)
   const { data, error } = await supabase.from('holidays')
-    .select('region, on_date, name').eq('region', region).gte('on_date', today)
-    .order('on_date').limit(12)
+    .select('region, on_date, name').in('region', regions).gte('on_date', today)
+    .order('on_date').limit(40)
   if (error || !data) return { soon: [] }
-  const rows = data as Holiday[]
+  const rows = (data as Holiday[]).sort((a, b) => a.on_date.localeCompare(b.on_date))
   const cutoff = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10)
   const soon = rows.filter(h => h.on_date <= cutoff)
   return { soon, next: soon.length ? undefined : rows[0] }
