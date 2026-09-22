@@ -170,6 +170,52 @@
   --nav-violet: #6D28D9;
 }
 
+/* The sidebar stays dark, even on the light themes.
+   ------------------------------------------------
+   A light theme with a light sidebar gives the nav nothing to push against: the
+   whole window becomes one pale surface and the eye has no anchor for where the
+   page starts. Every tool people compare this to keeps the rail dark for exactly
+   that reason, and it is what was asked for.
+
+   This works by REDEFINING THE THEME TOKENS on the rail itself rather than by
+   adding a second set of sidebar-specific classes. Tailwind compiles bg-mav-dark
+   to rgb(var(--mav-bg) / 1) and resolves the variable where it is USED, so
+   shadowing the six tokens here re-colours everything inside the rail — the nav
+   items, the hover fills, the borders, the email, the theme cycler — with no
+   component needing to know a theme exists.
+
+   The nav hues switch to the dark-family set for the same reason they differ by
+   theme at all: the shade that reads as a filled chip on sand is washed out on
+   near-black. The rail is near-black now, so it wants the near-black set.
+
+   Warm near-black, not neutral: #181614 against a sand page. A cold grey rail
+   beside a warm page reads as two unrelated screens joined down the middle. */
+[data-family='light'] .theme-rail {
+  --mav-bg:    24 22 20;      /* #181614 warm near-black */
+  --mav-panel: 38 35 31;      /* #26231F hover fill */
+  --mav-line:  58 53 47;      /* #3A352F */
+  --mav-muted: 168 160 148;   /* #A8A094 */
+  --mav-fg:    245 242 236;   /* #F5F2EC */
+  /* Bright again: the reason it was darkened to #B8860B was sand behind it. */
+  --mav-yellow: 255 219 45;
+
+  --nav-amber: #FBBF24;
+  --nav-blue: #60A5FA;
+  --nav-cyan: #22D3EE;
+  --nav-emerald: #6EE7B7;
+  --nav-fuchsia: #E879F9;
+  --nav-green: #34D399;
+  --nav-indigo: #818CF8;
+  --nav-lime: #A3E635;
+  --nav-orange: #FB923C;
+  --nav-red: #F87171;
+  --nav-sky: #38BDF8;
+  --nav-slate: #94A3B8;
+  --nav-stone: #D6D3D1;
+  --nav-teal: #2DD4BF;
+  --nav-violet: #A78BFA;
+}
+
 html, body {
   background: rgb(var(--mav-bg));
   color: rgb(var(--mav-fg));

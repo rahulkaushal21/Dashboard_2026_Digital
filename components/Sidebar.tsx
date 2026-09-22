@@ -79,7 +79,7 @@ export default function Sidebar() {
   return (
     <>
       {/* Mobile top bar. Fixed so it survives the page's own scroll container. */}
-      <div className="lg:hidden fixed top-0 inset-x-0 z-40 flex items-center gap-3 h-14 px-4 bg-mav-dark border-b border-mav-line">
+      <div className="theme-rail lg:hidden fixed top-0 inset-x-0 z-40 flex items-center gap-3 h-14 px-4 bg-mav-dark border-b border-mav-line">
         <button onClick={() => setOpen(true)} aria-label="Open menu" aria-expanded={open}
           className="p-2 -ml-2 rounded-md text-mav-muted hover:text-mav-fg hover:bg-mav-panel">
           <Menu size={20} />
@@ -91,7 +91,7 @@ export default function Sidebar() {
       {/* Scrim. Only rendered when open so it can never swallow taps on desktop. */}
       {open && <div onClick={() => setOpen(false)} className="lg:hidden fixed inset-0 z-40 bg-black/60" aria-hidden="true" />}
 
-      <aside className={`w-60 shrink-0 bg-mav-dark border-r border-mav-line h-screen overflow-y-auto p-4 flex flex-col
+      <aside className={`theme-rail w-60 shrink-0 bg-mav-dark border-r border-mav-line h-screen overflow-y-auto p-4 flex flex-col
         fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0
         ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <button onClick={() => setOpen(false)} aria-label="Close menu"
