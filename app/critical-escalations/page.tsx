@@ -133,6 +133,10 @@ export default function CriticalEscalations() {
                   {r.count > 1 && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-mav-line text-mav-muted">{r.count} escalations</span>}
                   <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${kindTone(r.signal_type)}`}>{kindLabel(r.signal_type)}</span>
                   {r.geo && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-mav-line text-mav-muted">{r.geo}</span>}
+                  {/* The PM earns a place on the card itself — it is the one thing that
+                      decides whether a row is yours. Service and technology stay in the
+                      drawer; three more chips per card would bury the escalation text. */}
+                  {r.pm_owner && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-mav-line text-mav-fg/80">{r.pm_owner}</span>}
                   {r.last_flagged_date && <span className="text-[11px] text-mav-muted">{day(r.last_flagged_date)}</span>}
                   {turnedPositive && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">client now positive →</span>}
                 </div>
@@ -170,6 +174,11 @@ export default function CriticalEscalations() {
                   <span className={`text-xs px-2 py-1 rounded-full ${statusTone(sel_.status)}`}>{statusLabel(sel_.status)}</span>
                   {sel_.count > 1 && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.count} escalations</span>}
                   {sel_.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.geo}</span>}
+                  {/* Whose client, what service, what it is built in — the three things
+                      you would otherwise open Client 360 to find out before acting. */}
+                  {sel_.pm_owner && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-fg/80">{sel_.pm_owner}</span>}
+                  {sel_.service_dept && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.service_dept}</span>}
+                  {sel_.technology && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.technology}</span>}
                 </div>
               </div>
               <button onClick={() => setSel(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>

@@ -598,6 +598,17 @@ export interface CriticalEscalation {
   headline?: string                    // most-recent escalation text (the card summary)
   latest_summary?: string; latest_sentiment?: string
   first_flagged_date?: string; last_flagged_date?: string; resolved_at?: string; resolved_by?: string
+  // Who owns this client and what they are, resolved from their revenue history — so a
+  // name on this page can be placed without leaving it for Client 360.
+  pm_owner?: string; service_dept?: string; technology?: string
+}
+
+/** Per client: the PM, service and technology most of their revenue sits under. */
+export interface ClientContext { client_key: string; company_name?: string; pm_owner?: string; service_dept?: string; technology?: string }
+export async function getClientContext(): Promise<ClientContext[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_client_context').select('*')
+  return (data as ClientContext[]) || []
 }
 const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 // The table stores 'open' | 'unresolved' | 'fixed' | 'positive'; the board shows the last
@@ -606,10 +617,11 @@ const rollUp = (s?: string): 'open' | 'unresolved' | 'resolved' => s === 'open' 
 const RANK: Record<'open' | 'unresolved' | 'resolved', number> = { open: 0, unresolved: 1, resolved: 2 }
 export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
   if (!supabase) return []
-  const [escRes, sigRes, clients] = await Promise.all([
+  const [escRes, sigRes, clients, ctx] = await Promise.all([
     supabase.from('critical_escalations').select('thread_id, company_name, client_email, signal_type, escalation_summary, source_subject, first_flagged_date, status, resolution_note, resolved_at, resolved_by').eq('dismissed', false).order('first_flagged_date', { ascending: false }),
     supabase.from('email_signals').select('thread_id, summary, sentiment, source_date'),
     getClients(),
+    getClientContext(),
   ])
   const rows = (escRes.data as (EscalationItem & { company_name?: string })[]) || []
   const latest = new Map<string, { summary?: string; sentiment?: string; source_date?: string }>()
@@ -622,6 +634,17 @@ export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
     for (const [gk, g] of geoBy) { if (gk.length >= 4 && (gk.startsWith(k) || k.startsWith(gk))) return g }
     return ''
   }
+  // Same prefix match as geo, and for the same reason: the escalation says "Layer 8
+  // Training" where the ledger says "Layer 8 Training, Inc." — one is a prefix of the
+  // other, and an exact key would find nothing.
+  const ctxBy = new Map<string, ClientContext>()
+  for (const c of ctx) if (c.client_key) ctxBy.set(c.client_key, c)
+  const ctxFor = (name?: string): ClientContext | undefined => {
+    const k = ckey(name); if (!k) return undefined
+    if (ctxBy.has(k)) return ctxBy.get(k)
+    for (const [ck, c] of ctxBy) { if (ck.length >= 4 && (ck.startsWith(k) || k.startsWith(ck))) return c }
+    return undefined
+  }
   // group by canonical client key (merges "Growth Funnels"/"GrowthFunnels", ZULU 8's many threads, etc.)
   const groups = new Map<string, CriticalEscalation>()
   for (const r of rows) {
@@ -630,7 +653,9 @@ export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
     const item: EscalationItem = { thread_id: r.thread_id, signal_type: r.signal_type, escalation_summary: r.escalation_summary, source_subject: r.source_subject, client_email: r.client_email, first_flagged_date: r.first_flagged_date, status: r.status, resolution_note: r.resolution_note, resolved_at: r.resolved_at, resolved_by: r.resolved_by, latest_summary: l?.summary, latest_sentiment: l?.sentiment }
     const g = groups.get(key)
     if (!g) {
-      groups.set(key, { company_name: r.company_name || '(unknown client)', geo: geoFor(r.company_name), client_email: r.client_email, signal_type: r.signal_type, items: [item], threadIds: [r.thread_id], count: 1, status: rollUp(r.status), headline: r.escalation_summary, latest_summary: l?.summary, latest_sentiment: l?.sentiment, first_flagged_date: r.first_flagged_date, last_flagged_date: r.first_flagged_date, resolved_at: r.resolved_at, resolved_by: r.resolved_by })
+      const cx = ctxFor(r.company_name)
+      groups.set(key, { company_name: r.company_name || '(unknown client)', geo: geoFor(r.company_name), client_email: r.client_email,
+        pm_owner: cx?.pm_owner, service_dept: cx?.service_dept, technology: cx?.technology, signal_type: r.signal_type, items: [item], threadIds: [r.thread_id], count: 1, status: rollUp(r.status), headline: r.escalation_summary, latest_summary: l?.summary, latest_sentiment: l?.sentiment, first_flagged_date: r.first_flagged_date, last_flagged_date: r.first_flagged_date, resolved_at: r.resolved_at, resolved_by: r.resolved_by })
     } else {
       g.items.push(item); g.threadIds.push(r.thread_id); g.count++
       // worst status across the client's threads wins

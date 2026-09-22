@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { getDirectoryMember, getUpcomingHolidays, TEAM_REGIONS, type DirectoryMember, type Holiday } from '@/lib/supabase'
-import { currentEmail } from '@/lib/access'
+import { currentEmail, getStoredProfile } from '@/lib/access'
 
 // Who is looking, and when their client's country is shut.
 //
@@ -37,8 +37,24 @@ const hello = () => {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
+// A name from the Google sign-in, for anybody who is not in the PM directory. Admins and
+// leadership are not PMs, so they were greeted with a bare "Good evening" and nothing
+// else — the one line on the page addressed to them, addressed to nobody.
+const signInName = (): string => {
+  const p = getStoredProfile()
+  // First name only, to match how a PM from the directory is greeted.
+  const full = (p?.full_name || '').trim()
+  if (full) return full.split(/\s+/)[0]
+  const local = (p?.email || currentEmail() || '').split('@')[0]
+  if (!local) return ''
+  // first.last / first_last / first-last -> First
+  const first = local.split(/[._-]+/)[0]
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : ''
+}
+
 export default function GreetingBar() {
   const [me, setMe] = useState<DirectoryMember | null>(null)
+  const [fallbackName, setFallbackName] = useState('')
   const [soon, setSoon] = useState<Holiday[]>([])
   const [next, setNext] = useState<Holiday | undefined>()
   // Set after mount: working out the hour during render makes the static export's
@@ -47,6 +63,7 @@ export default function GreetingBar() {
 
   useEffect(() => {
     setGreeting(hello())
+    setFallbackName(signInName())
     getDirectoryMember(currentEmail()).then(m => {
       setMe(m)
       const regions = m?.team ? (TEAM_REGIONS[m.team] || []) : []
@@ -56,7 +73,7 @@ export default function GreetingBar() {
   }, [])
 
   const regions = me?.team ? (TEAM_REGIONS[me.team] || []) : []
-  const first = (me?.name || '').split(' ')[0]
+  const first = (me?.name || '').split(' ')[0] || fallbackName
 
   return (
     <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
