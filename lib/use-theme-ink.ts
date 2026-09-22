@@ -11,9 +11,9 @@ import { useEffect, useState } from 'react'
 // Re-read when the theme attribute changes, so switching does not leave black gridlines
 // on a white page until the next reload.
 
-export interface ThemeInk { grid: string; axis: string; tip: string }
+export interface ThemeInk { grid: string; axis: string; tip: string; fg: string; hover: string }
 
-const DARK: ThemeInk = { grid: '#333333', axis: '#9a9a9a', tip: '#1B1B1B' }
+const DARK: ThemeInk = { grid: '#333333', axis: '#9a9a9a', tip: '#1B1B1B', fg: '#f2f2f2', hover: 'rgba(255,255,255,0.05)' }
 
 const read = (): ThemeInk => {
   if (typeof window === 'undefined') return DARK
@@ -23,6 +23,10 @@ const read = (): ThemeInk => {
     grid: v('--chart-grid', DARK.grid),
     axis: v('--chart-axis', DARK.axis),
     tip: v('--chart-tip', DARK.tip),
+    fg: v('--chart-fg', DARK.fg),
+    // The hover wash behind a chart cursor. A white 5% over cream is invisible, so it
+    // is declared per family rather than assumed to be light-on-dark.
+    hover: v('--chart-hover', DARK.hover),
   }
 }
 

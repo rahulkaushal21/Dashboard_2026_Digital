@@ -27,6 +27,8 @@
   --chart-grid: #333333;
   --chart-axis: #9a9a9a;
   --chart-tip:  #1B1B1B;
+  --chart-fg:   #f2f2f2;
+  --chart-hover: rgba(255,255,255,0.05);
 }
 
 /* Light — warm paper
@@ -54,6 +56,8 @@
   --chart-grid: #DDD6CA;
   --chart-axis: #6E675C;
   --chart-tip:  #FAF7F1;
+  --chart-fg:   #23201B;
+  --chart-hover: rgba(0,0,0,0.05);
 }
 
 /* Midnight — deep navy instead of grey.
@@ -70,6 +74,8 @@
   --chart-grid: #28334A;
   --chart-axis: #8F9DB5;
   --chart-tip:  #18202F;
+  --chart-fg:   #E8EDF7;
+  --chart-hover: rgba(255,255,255,0.06);
 }
 
 /* Dim Slate — neither dark nor light.
@@ -86,6 +92,8 @@
   --chart-grid: #3B4451;
   --chart-axis: #97A1AE;
   --chart-tip:  #2B323C;
+  --chart-fg:   #DCE2EA;
+  --chart-hover: rgba(255,255,255,0.06);
 }
 
 /* Cool Light — crisp blue-grey.
@@ -102,6 +110,8 @@
   --chart-grid: #D5DCE5;
   --chart-axis: #5A6778;
   --chart-tip:  #F8FAFC;
+  --chart-fg:   #161F2B;
+  --chart-hover: rgba(0,0,0,0.05);
 }
 
 
@@ -177,45 +187,183 @@ html, body {
 ::selection       { background: #FFDB2D; color: #1B1B1B; text-shadow: none; }
 ::-moz-selection  { background: #FFDB2D; color: #1B1B1B; text-shadow: none; }
 
-/* Status colours on light
-   ----------------------
-   The greens, reds and ambers across the app are the 300/400 shades, chosen to glow on a
-   near-black page. On white they are washed out — text-green-400 against #FFFFFF is about
-   2:1, well under the 4.5:1 body text needs, and red and amber are worse. Every figure
-   that carries meaning by colour becomes hard to read exactly where reading matters.
+/* Status tones for the light family. Warm by default, because Warm Paper is the
+   warm one; Cool Light overrides them below. A tint is a flat colour here rather
+   than the class's own opacity, because Tailwind bakes the alpha into the class
+   name and a 15% saturated -500 over cream comes out grey. */
+:root[data-family='light'] {
+  --t-green-fg: #1E6B3B; --t-green-bg: #E3EEE2; --t-green-bd: #B9D6B8;
+  --t-emerald-fg: #0F6B5C; --t-emerald-bg: #DEEEE9; --t-emerald-bd: #B3D8CF;
+  --t-teal-fg: #0F6B5C; --t-teal-bg: #DEEEE9; --t-teal-bd: #B3D8CF;
+  --t-cyan-fg: #0B5E72; --t-cyan-bg: #DFEDF1; --t-cyan-bd: #B4D6DF;
+  --t-sky-fg: #0B5E86; --t-sky-bg: #E0EDF6; --t-sky-bd: #B8D4E8;
+  --t-blue-fg: #1F4B99; --t-blue-bg: #E3EAF4; --t-blue-bd: #BCCDE6;
+  --t-indigo-fg: #3A35A3; --t-indigo-bg: #E5E5F4; --t-indigo-bd: #C2C3E4;
+  --t-violet-fg: #5B3AA6; --t-violet-bg: #EBE4F3; --t-violet-bd: #CBBCE3;
+  --t-purple-fg: #5B3AA6; --t-purple-bg: #EBE4F3; --t-purple-bd: #CBBCE3;
+  --t-fuchsia-fg: #8B2A7D; --t-fuchsia-bg: #F3E2F0; --t-fuchsia-bd: #DFBCD9;
+  --t-rose-fg: #A81E45; --t-rose-bg: #F7E1E6; --t-rose-bd: #E8BDC7;
+  --t-red-fg: #B3261E; --t-red-bg: #F7E2DD; --t-red-bd: #E6BCB3;
+  --t-orange-fg: #A3501B; --t-orange-bg: #F8E6D6; --t-orange-bd: #E7C4A2;
+  --t-amber-fg: #8A5A00; --t-amber-bg: #F6EAD2; --t-amber-bd: #E0C893;
+  --t-lime-fg: #4C6B12; --t-lime-bg: #E9EFD6; --t-lime-bd: #CDDCA8;
+}
 
-   Rather than rewrite 250 class names for one theme, the same classes are remapped to
-   their darker siblings when light is on. The class keeps its meaning — this figure is
-   good, bad, or worth a look — and each theme renders it at a ratio that passes.
+/* Cool Light: the same tones with the warmth taken out. */
+:root[data-theme='cool'] {
+  --t-green-fg: #17693C; --t-green-bg: #DFF0E4; --t-green-bd: #B4DCC0;
+  --t-emerald-fg: #0B6B5A; --t-emerald-bg: #DAF0EA; --t-emerald-bd: #ACDCD0;
+  --t-teal-fg: #0B6B5A; --t-teal-bg: #DAF0EA; --t-teal-bd: #ACDCD0;
+  --t-cyan-fg: #08607A; --t-cyan-bg: #DAEFF5; --t-cyan-bd: #ABD9E4;
+  --t-sky-fg: #07618C; --t-sky-bg: #DCEEF9; --t-sky-bd: #AFD6EC;
+  --t-blue-fg: #1A4FA8; --t-blue-bg: #E0E9F8; --t-blue-bd: #B5C9EA;
+  --t-indigo-fg: #3730A3; --t-indigo-bg: #E3E4F8; --t-indigo-bd: #BCBEE9;
+  --t-violet-fg: #5A32B0; --t-violet-bg: #E9E3F7; --t-violet-bd: #C6B7E6;
+  --t-purple-fg: #5A32B0; --t-purple-bg: #E9E3F7; --t-purple-bd: #C6B7E6;
+  --t-fuchsia-fg: #8C1F80; --t-fuchsia-bg: #F4E0F1; --t-fuchsia-bd: #E0B7DA;
+  --t-rose-fg: #AC1946; --t-rose-bg: #F9DFE6; --t-rose-bd: #EDB9C6;
+  --t-red-fg: #BB1C15; --t-red-bg: #F9DFDB; --t-red-bd: #EDB6AE;
+  --t-orange-fg: #A84A12; --t-orange-bg: #FAE4D2; --t-orange-bd: #EFBF98;
+  --t-amber-fg: #8A5600; --t-amber-bg: #F8E9CB; --t-amber-bd: #E7C68A;
+  --t-lime-fg: #47690C; --t-lime-bg: #EBF1D4; --t-lime-bd: #CFDEA1;
+}
 
-   Written flat rather than nested: native CSS nesting is fine in current browsers, but
-   this file is plain CSS and there is no reason for it to depend on that. */
+/* Map every status utility onto the theme's own tone. One rule per hue rather
+   than one flat grey for all of them: Sheet, Email, Repeat and Open are
+   different pills, and collapsing them to the same background threw away the
+   only thing that told them apart. */
+
 :root[data-family='light'] .text-green-200,
 :root[data-family='light'] .text-green-300,
 :root[data-family='light'] .text-green-400,
-:root[data-family='light'] .text-emerald-300 { color: #0B7A43; }
+:root[data-family='light'] .text-green-500 { color: var(--t-green-fg); }
+:root[data-family='light'] [class*='bg-green-500/'],
+:root[data-family='light'] [class*='bg-green-400/'] { background-color: var(--t-green-bg); }
+:root[data-family='light'] [class*='border-green-500/'],
+:root[data-family='light'] [class*='border-green-400/'] { border-color: var(--t-green-bd); }
+
+:root[data-family='light'] .text-emerald-200,
+:root[data-family='light'] .text-emerald-300,
+:root[data-family='light'] .text-emerald-400,
+:root[data-family='light'] .text-emerald-500 { color: var(--t-emerald-fg); }
+:root[data-family='light'] [class*='bg-emerald-500/'],
+:root[data-family='light'] [class*='bg-emerald-400/'] { background-color: var(--t-emerald-bg); }
+:root[data-family='light'] [class*='border-emerald-500/'],
+:root[data-family='light'] [class*='border-emerald-400/'] { border-color: var(--t-emerald-bd); }
+
+:root[data-family='light'] .text-teal-200,
+:root[data-family='light'] .text-teal-300,
+:root[data-family='light'] .text-teal-400,
+:root[data-family='light'] .text-teal-500 { color: var(--t-teal-fg); }
+:root[data-family='light'] [class*='bg-teal-500/'],
+:root[data-family='light'] [class*='bg-teal-400/'] { background-color: var(--t-teal-bg); }
+:root[data-family='light'] [class*='border-teal-500/'],
+:root[data-family='light'] [class*='border-teal-400/'] { border-color: var(--t-teal-bd); }
+
+:root[data-family='light'] .text-cyan-200,
+:root[data-family='light'] .text-cyan-300,
+:root[data-family='light'] .text-cyan-400,
+:root[data-family='light'] .text-cyan-500 { color: var(--t-cyan-fg); }
+:root[data-family='light'] [class*='bg-cyan-500/'],
+:root[data-family='light'] [class*='bg-cyan-400/'] { background-color: var(--t-cyan-bg); }
+:root[data-family='light'] [class*='border-cyan-500/'],
+:root[data-family='light'] [class*='border-cyan-400/'] { border-color: var(--t-cyan-bd); }
+
+:root[data-family='light'] .text-sky-200,
+:root[data-family='light'] .text-sky-300,
+:root[data-family='light'] .text-sky-400,
+:root[data-family='light'] .text-sky-500 { color: var(--t-sky-fg); }
+:root[data-family='light'] [class*='bg-sky-500/'],
+:root[data-family='light'] [class*='bg-sky-400/'] { background-color: var(--t-sky-bg); }
+:root[data-family='light'] [class*='border-sky-500/'],
+:root[data-family='light'] [class*='border-sky-400/'] { border-color: var(--t-sky-bd); }
+
+:root[data-family='light'] .text-blue-200,
+:root[data-family='light'] .text-blue-300,
+:root[data-family='light'] .text-blue-400,
+:root[data-family='light'] .text-blue-500 { color: var(--t-blue-fg); }
+:root[data-family='light'] [class*='bg-blue-500/'],
+:root[data-family='light'] [class*='bg-blue-400/'] { background-color: var(--t-blue-bg); }
+:root[data-family='light'] [class*='border-blue-500/'],
+:root[data-family='light'] [class*='border-blue-400/'] { border-color: var(--t-blue-bd); }
+
+:root[data-family='light'] .text-indigo-200,
+:root[data-family='light'] .text-indigo-300,
+:root[data-family='light'] .text-indigo-400,
+:root[data-family='light'] .text-indigo-500 { color: var(--t-indigo-fg); }
+:root[data-family='light'] [class*='bg-indigo-500/'],
+:root[data-family='light'] [class*='bg-indigo-400/'] { background-color: var(--t-indigo-bg); }
+:root[data-family='light'] [class*='border-indigo-500/'],
+:root[data-family='light'] [class*='border-indigo-400/'] { border-color: var(--t-indigo-bd); }
+
+:root[data-family='light'] .text-violet-200,
+:root[data-family='light'] .text-violet-300,
+:root[data-family='light'] .text-violet-400,
+:root[data-family='light'] .text-violet-500 { color: var(--t-violet-fg); }
+:root[data-family='light'] [class*='bg-violet-500/'],
+:root[data-family='light'] [class*='bg-violet-400/'] { background-color: var(--t-violet-bg); }
+:root[data-family='light'] [class*='border-violet-500/'],
+:root[data-family='light'] [class*='border-violet-400/'] { border-color: var(--t-violet-bd); }
+
+:root[data-family='light'] .text-purple-200,
+:root[data-family='light'] .text-purple-300,
+:root[data-family='light'] .text-purple-400,
+:root[data-family='light'] .text-purple-500 { color: var(--t-purple-fg); }
+:root[data-family='light'] [class*='bg-purple-500/'],
+:root[data-family='light'] [class*='bg-purple-400/'] { background-color: var(--t-purple-bg); }
+:root[data-family='light'] [class*='border-purple-500/'],
+:root[data-family='light'] [class*='border-purple-400/'] { border-color: var(--t-purple-bd); }
+
+:root[data-family='light'] .text-fuchsia-200,
+:root[data-family='light'] .text-fuchsia-300,
+:root[data-family='light'] .text-fuchsia-400,
+:root[data-family='light'] .text-fuchsia-500 { color: var(--t-fuchsia-fg); }
+:root[data-family='light'] [class*='bg-fuchsia-500/'],
+:root[data-family='light'] [class*='bg-fuchsia-400/'] { background-color: var(--t-fuchsia-bg); }
+:root[data-family='light'] [class*='border-fuchsia-500/'],
+:root[data-family='light'] [class*='border-fuchsia-400/'] { border-color: var(--t-fuchsia-bd); }
+
+:root[data-family='light'] .text-rose-200,
+:root[data-family='light'] .text-rose-300,
+:root[data-family='light'] .text-rose-400,
+:root[data-family='light'] .text-rose-500 { color: var(--t-rose-fg); }
+:root[data-family='light'] [class*='bg-rose-500/'],
+:root[data-family='light'] [class*='bg-rose-400/'] { background-color: var(--t-rose-bg); }
+:root[data-family='light'] [class*='border-rose-500/'],
+:root[data-family='light'] [class*='border-rose-400/'] { border-color: var(--t-rose-bd); }
 
 :root[data-family='light'] .text-red-200,
 :root[data-family='light'] .text-red-300,
-:root[data-family='light'] .text-red-400 { color: #C5221F; }
-
-:root[data-family='light'] .text-amber-300,
-:root[data-family='light'] .text-amber-400 { color: #9A6400; }
+:root[data-family='light'] .text-red-400,
+:root[data-family='light'] .text-red-500 { color: var(--t-red-fg); }
+:root[data-family='light'] [class*='bg-red-500/'],
+:root[data-family='light'] [class*='bg-red-400/'] { background-color: var(--t-red-bg); }
+:root[data-family='light'] [class*='border-red-500/'],
+:root[data-family='light'] [class*='border-red-400/'] { border-color: var(--t-red-bd); }
 
 :root[data-family='light'] .text-orange-200,
-:root[data-family='light'] .text-orange-300 { color: #B45309; }
-
-:root[data-family='light'] .text-blue-300,
-:root[data-family='light'] .text-blue-400 { color: #1A56C4; }
-
-:root[data-family='light'] .text-purple-300 { color: #6D28D9; }
-
-/* The tinted pill backgrounds (bg-green-500/15 and friends) sit at 10–20% opacity, which
-   is a wash on white. A flat light grey keeps the pill readable as a shape, and the text
-   colour above still says which kind it is. */
-:root[data-family='light'] [class*='bg-green-500/'],
-:root[data-family='light'] [class*='bg-red-500/'],
-:root[data-family='light'] [class*='bg-amber-500/'],
-:root[data-family='light'] [class*='bg-blue-500/'],
+:root[data-family='light'] .text-orange-300,
+:root[data-family='light'] .text-orange-400,
+:root[data-family='light'] .text-orange-500 { color: var(--t-orange-fg); }
 :root[data-family='light'] [class*='bg-orange-500/'],
-:root[data-family='light'] [class*='bg-purple-500/'] { background-color: rgb(0 0 0 / 0.05); }
+:root[data-family='light'] [class*='bg-orange-400/'] { background-color: var(--t-orange-bg); }
+:root[data-family='light'] [class*='border-orange-500/'],
+:root[data-family='light'] [class*='border-orange-400/'] { border-color: var(--t-orange-bd); }
+
+:root[data-family='light'] .text-amber-200,
+:root[data-family='light'] .text-amber-300,
+:root[data-family='light'] .text-amber-400,
+:root[data-family='light'] .text-amber-500 { color: var(--t-amber-fg); }
+:root[data-family='light'] [class*='bg-amber-500/'],
+:root[data-family='light'] [class*='bg-amber-400/'] { background-color: var(--t-amber-bg); }
+:root[data-family='light'] [class*='border-amber-500/'],
+:root[data-family='light'] [class*='border-amber-400/'] { border-color: var(--t-amber-bd); }
+
+:root[data-family='light'] .text-lime-200,
+:root[data-family='light'] .text-lime-300,
+:root[data-family='light'] .text-lime-400,
+:root[data-family='light'] .text-lime-500 { color: var(--t-lime-fg); }
+:root[data-family='light'] [class*='bg-lime-500/'],
+:root[data-family='light'] [class*='bg-lime-400/'] { background-color: var(--t-lime-bg); }
+:root[data-family='light'] [class*='border-lime-500/'],
+:root[data-family='light'] [class*='border-lime-400/'] { border-color: var(--t-lime-bd); }

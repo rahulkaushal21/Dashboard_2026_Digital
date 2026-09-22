@@ -27,7 +27,7 @@ export default function RevenueChart({ data, title = 'Revenue trend (last 3 mont
           <CartesianGrid strokeDasharray="3 3" {...{stroke: ink.grid}} vertical={false} />
           <XAxis dataKey="label" stroke={ink.axis} fontSize={12} tickLine={false} axisLine={false} />
           <YAxis stroke={ink.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v / 1000}k`} />
-          <Tooltip contentStyle={{ background: ink.tip, border: '1px solid #333', borderRadius: 8 }} />
+          <Tooltip contentStyle={{ background: ink.tip, border: `1px solid ${ink.grid}`, borderRadius: 8 }} />
           <Area type="monotone" dataKey="revenue" stroke="#FFDB2D" strokeWidth={2} fill="url(#g)" />
         </AreaChart>
       </ResponsiveContainer>

@@ -1246,7 +1246,7 @@ export default function Clients() {
                             <div key={x.name} title={`${x.name} · ${fmtUsd(x.amount)} · ${x.pct}%`}
                               style={{ width: `${x.pct}%`, background: SPLIT_COLOURS[i % SPLIT_COLOURS.length] }} />
                           ))}
-                          {restPct > 0 && <div title={`Everything else · ${fmtUsd(restAmt)}`} style={{ width: `${restPct}%`, background: '#4a4a4a' }} />}
+                          {restPct > 0 && <div title={`Everything else · ${fmtUsd(restAmt)}`} style={{ width: `${restPct}%`, background: ink.grid }} />}
                         </div>
                         <div className="space-y-1.5">
                           {top.map((x, i) => (
@@ -1259,7 +1259,7 @@ export default function Clients() {
                           ))}
                           {rest.length > 0 && (
                             <div className="flex items-center gap-2 text-sm text-mav-muted">
-                              <span className="w-2.5 h-2.5 rounded-sm shrink-0 bg-[#4a4a4a]" />
+                              <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: ink.grid }} />
                               <span className="flex-1">{rest.length} other type{rest.length === 1 ? '' : 's'}</span>
                               <span className="tabular-nums">{fmtUsd(restAmt)}</span>
                               <span className="tabular-nums w-12 text-right">{Math.round(restPct)}%</span>
@@ -1315,7 +1315,7 @@ export default function Clients() {
                         <YAxis stroke={ink.axis} fontSize={10} tickLine={false} axisLine={false} width={44}
                           tickFormatter={(v: number) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`} />
                         <Tooltip
-                          cursor={{ fill: '#ffffff08' }}
+                          cursor={{ fill: ink.hover }}
                           contentStyle={{ background: ink.tip, border: `1px solid ${ink.grid}`, borderRadius: 8, fontSize: 12 }}
                           labelFormatter={(_l: any, pl: any) => pl?.[0]?.payload?.full || ''}
                           formatter={(v: number) => [fmtUsd(v), 'Billed']} />

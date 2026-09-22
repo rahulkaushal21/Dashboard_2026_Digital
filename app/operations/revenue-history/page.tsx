@@ -325,9 +325,9 @@ export default function RevenueHistory() {
                     item text, which is unreadable on the dark panel. Set the text
                     colours explicitly rather than relying on the series colour. */}
                 <Tooltip cursor={{ fill: '#ffffff14' }}
-                  contentStyle={{ background: '#2e2e2e', border: '1px solid #4a4a4a', borderRadius: 8, fontSize: 12 }}
+                  contentStyle={{ background: ink.tip, border: `1px solid ${ink.grid}`, borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: ink.axis, marginBottom: 2 }}
-                  itemStyle={{ color: '#f2f2f2' }}
+                  itemStyle={{ color: ink.fg }}
                   formatter={(v: number) => [fmtUsd(v), 'Billed']} />
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
                   {/* The current month is only part-billed; dim it so the last bar

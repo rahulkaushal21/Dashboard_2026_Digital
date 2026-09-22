@@ -11,7 +11,7 @@ export default function BarCard({ title, data, dataKey = 'value' }: { title: str
           <CartesianGrid strokeDasharray="3 3" {...{stroke: ink.grid}} horizontal={false} />
           <XAxis type="number" stroke={ink.axis} fontSize={12} tickLine={false} axisLine={false} />
           <YAxis type="category" dataKey="name" stroke={ink.axis} fontSize={12} width={120} tickLine={false} axisLine={false} />
-          <Tooltip contentStyle={{ background: ink.tip, border: '1px solid #333', borderRadius: 8 }} cursor={{ fill: '#ffffff08' }} />
+          <Tooltip contentStyle={{ background: ink.tip, border: `1px solid ${ink.grid}`, borderRadius: 8 }} cursor={{ fill: ink.hover }} />
           <Bar dataKey={dataKey} fill="#FFDB2D" radius={[0, 4, 4, 0]} />
         </BarChart>
       </ResponsiveContainer>
