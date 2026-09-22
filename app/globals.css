@@ -56,20 +56,76 @@
   --chart-tip:  #FAF7F1;
 }
 
+/* Midnight — deep navy instead of grey.
+   Same contrast as Charcoal, but a blue-black rather than a neutral one. Long sessions
+   on a flat near-black feel harsher than the numbers suggest; a little hue in the dark
+   takes the edge off without lifting the contrast. */
+:root[data-theme='midnight'] {
+  --mav-bg:    15 21 33;      /* #0F1521 */
+  --mav-panel: 24 32 47;      /* #18202F */
+  --mav-line:  40 51 74;      /* #28334A */
+  --mav-muted: 143 157 181;   /* #8F9DB5 */
+  --mav-fg:    232 237 247;   /* #E8EDF7 */
+  --mav-yellow: 255 219 45;   /* #FFDB2D */
+  --chart-grid: #28334A;
+  --chart-axis: #8F9DB5;
+  --chart-tip:  #18202F;
+}
 
-/* The current section's colour.
+/* Dim Slate — neither dark nor light.
+   A mid grey-blue page, the way a photo-editing tool or GitHub's dim theme is pitched.
+   Nothing here is near-black or near-white, so it is the lowest-glare option in either
+   direction and the easiest one to move between a bright office and a dim room with. */
+:root[data-theme='dim'] {
+  --mav-bg:    34 40 48;      /* #222830 */
+  --mav-panel: 43 50 60;      /* #2B323C */
+  --mav-line:  59 68 81;      /* #3B4451 */
+  --mav-muted: 151 161 174;   /* #97A1AE */
+  --mav-fg:    220 226 234;   /* #DCE2EA */
+  --mav-yellow: 255 219 45;   /* #FFDB2D */
+  --chart-grid: #3B4451;
+  --chart-axis: #97A1AE;
+  --chart-tip:  #2B323C;
+}
+
+/* Cool Light — crisp blue-grey.
+   The other light option, for anyone who finds Warm Paper too yellow. Brighter and
+   cooler; the brand yellow is darkened further here than on paper, because a cold base
+   makes a warm accent read as a warning rather than as the brand. */
+:root[data-theme='cool'] {
+  --mav-bg:    233 237 242;   /* #E9EDF2 */
+  --mav-panel: 248 250 252;   /* #F8FAFC */
+  --mav-line:  213 220 229;   /* #D5DCE5 */
+  --mav-muted: 90 103 120;    /* #5A6778 */
+  --mav-fg:    22 31 43;      /* #161F2B */
+  --mav-yellow: 176 124 0;    /* #B07C00 */
+  --chart-grid: #D5DCE5;
+  --chart-axis: #5A6778;
+  --chart-tip:  #F8FAFC;
+}
+
+
+/* WHY data-family AS WELL AS data-theme
+   -------------------------------------
+   data-theme names the palette; data-family says whether that palette is dark or light.
+   Everything that depends only on the DIRECTION — which shade of a section hue to use,
+   whether the status greens and reds need darkening — keys on family, so adding a fourth
+   or fifth theme is one palette block and nothing else. Keying those on the theme name
+   would mean duplicating forty rules per theme and forgetting one.
+
+   The current section's colour.
    SectionTheme publishes both shades on <html>; the theme decides which applies.
    One colour cannot serve both backgrounds — the shade that reads on sand is
    invisible on near-black — so there are two, and CSS picks. */
-:root, :root[data-theme='dark'] { --section: var(--section-dark, #FBBF24); }
-:root[data-theme='light']       { --section: var(--section-light, #B45309); }
+:root, :root[data-family='dark'] { --section: var(--section-dark, #FBBF24); }
+:root[data-family='light']      { --section: var(--section-light, #B45309); }
 
 
 /* The nav's filled active item, one colour per section.
    Two sets because the sidebar's background differs by theme: the shade that reads
    as a filled chip on near-black is washed out on sand, and vice versa. Declared
    here rather than branched in the component, which would need to know the theme. */
-:root, :root[data-theme='dark'] {
+:root, :root[data-family='dark'] {
   --nav-amber: #FBBF24;
   --nav-blue: #60A5FA;
   --nav-cyan: #22D3EE;
@@ -86,7 +142,7 @@
   --nav-teal: #2DD4BF;
   --nav-violet: #A78BFA;
 }
-:root[data-theme='light'] {
+:root[data-family='light'] {
   --nav-amber: #B45309;
   --nav-blue: #1D4ED8;
   --nav-cyan: #0E7490;
@@ -134,32 +190,32 @@ html, body {
 
    Written flat rather than nested: native CSS nesting is fine in current browsers, but
    this file is plain CSS and there is no reason for it to depend on that. */
-:root[data-theme='light'] .text-green-200,
-:root[data-theme='light'] .text-green-300,
-:root[data-theme='light'] .text-green-400,
-:root[data-theme='light'] .text-emerald-300 { color: #0B7A43; }
+:root[data-family='light'] .text-green-200,
+:root[data-family='light'] .text-green-300,
+:root[data-family='light'] .text-green-400,
+:root[data-family='light'] .text-emerald-300 { color: #0B7A43; }
 
-:root[data-theme='light'] .text-red-200,
-:root[data-theme='light'] .text-red-300,
-:root[data-theme='light'] .text-red-400 { color: #C5221F; }
+:root[data-family='light'] .text-red-200,
+:root[data-family='light'] .text-red-300,
+:root[data-family='light'] .text-red-400 { color: #C5221F; }
 
-:root[data-theme='light'] .text-amber-300,
-:root[data-theme='light'] .text-amber-400 { color: #9A6400; }
+:root[data-family='light'] .text-amber-300,
+:root[data-family='light'] .text-amber-400 { color: #9A6400; }
 
-:root[data-theme='light'] .text-orange-200,
-:root[data-theme='light'] .text-orange-300 { color: #B45309; }
+:root[data-family='light'] .text-orange-200,
+:root[data-family='light'] .text-orange-300 { color: #B45309; }
 
-:root[data-theme='light'] .text-blue-300,
-:root[data-theme='light'] .text-blue-400 { color: #1A56C4; }
+:root[data-family='light'] .text-blue-300,
+:root[data-family='light'] .text-blue-400 { color: #1A56C4; }
 
-:root[data-theme='light'] .text-purple-300 { color: #6D28D9; }
+:root[data-family='light'] .text-purple-300 { color: #6D28D9; }
 
 /* The tinted pill backgrounds (bg-green-500/15 and friends) sit at 10–20% opacity, which
    is a wash on white. A flat light grey keeps the pill readable as a shape, and the text
    colour above still says which kind it is. */
-:root[data-theme='light'] [class*='bg-green-500/'],
-:root[data-theme='light'] [class*='bg-red-500/'],
-:root[data-theme='light'] [class*='bg-amber-500/'],
-:root[data-theme='light'] [class*='bg-blue-500/'],
-:root[data-theme='light'] [class*='bg-orange-500/'],
-:root[data-theme='light'] [class*='bg-purple-500/'] { background-color: rgb(0 0 0 / 0.05); }
+:root[data-family='light'] [class*='bg-green-500/'],
+:root[data-family='light'] [class*='bg-red-500/'],
+:root[data-family='light'] [class*='bg-amber-500/'],
+:root[data-family='light'] [class*='bg-blue-500/'],
+:root[data-family='light'] [class*='bg-orange-500/'],
+:root[data-family='light'] [class*='bg-purple-500/'] { background-color: rgb(0 0 0 / 0.05); }

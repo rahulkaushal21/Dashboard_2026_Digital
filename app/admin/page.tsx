@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Header from '@/components/Header'
 import { getSettings, saveSettings } from '@/lib/config'
+import ThemePanel from '@/components/ThemePanel'
 import { Trash2 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { listAdmins, addAdmin, removeAdmin, isOwner, OWNER_EMAIL, ALLOWED_DOMAINS, type AdminRow } from '@/lib/access'
@@ -175,6 +176,9 @@ export default function Admin() {
             and the email domain (lib/access.ts), so there is no list to manage. */}
         <SettingsForm canEdit={canEdit} />
       </div>
+      {/* Appearance first of the panels: it is the one everybody has an opinion about,
+          and the only one a non-admin can act on. */}
+      <ThemePanel canEdit={canEdit} />
       <AdminsPanel />
       <PmDirectoryPanel canEdit={canEdit} />
       <FxRatesPanel canEdit={canEdit} actor={email || OWNER_EMAIL} />
