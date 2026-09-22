@@ -86,6 +86,12 @@ const segOf = (s?: string) => {
   return 'Other'
 }
 
+// The five buckets the business is actually run by. LP and HUB are one team, so they are
+// one row here — this mirrors biz_bucket() behind Business Numbers, and the two pages
+// have to agree or "what did WEB-UK do this month" has two answers.
+const BIZ_ORDER = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation']
+const bizOf = (s?: string) => { const v = segOf(s); return v === 'LP' || v === 'HUB' ? 'LP/HUB' : v }
+
 export default function Dashboard() {
   const [rev, setRev] = useState<RevenueRow[]>([])
   const [clients, setClients] = useState<Client[]>([])
@@ -252,6 +258,31 @@ export default function Dashboard() {
   const daysGone = now.getDate()
   const daysInMonth = monthEnd(now).getDate()
 
+  // Where this month's money came from, by service.
+  //
+  // This month is counted by the sheet's Month column, so the five cards add up to the
+  // headline figure above them. Last month is counted to TODAY'S DATE on the start date,
+  // exactly as Business Numbers does it — held against a finished month, every service
+  // reads as collapsing, every month, until the 30th.
+  const bizNow = useMemo(() => {
+    const curKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
+    const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const prevFrom = ymd(monthStart(pm))
+    // Clamped, so the 31st does not run off the end of a 30-day month.
+    const prevTo = ymd(new Date(pm.getFullYear(), pm.getMonth(), Math.min(daysGone, monthEnd(pm).getDate())))
+    const m: Record<string, { now: number; prev: number }> = {}
+    bookingRows.forEach(b => {
+      const k = bizOf(b.service_name)
+      m[k] = m[k] || { now: 0, prev: 0 }
+      if ((b.booking_month || '').slice(0, 7) === curKey) m[k].now += b.booking_amount || 0
+      const d = (b.booking_date || '').slice(0, 10)
+      if (d >= prevFrom && d <= prevTo) m[k].prev += b.booking_amount || 0
+    })
+    const rows = [...BIZ_ORDER]
+    if (m['Other'] && (m['Other'].now || m['Other'].prev)) rows.push('Other')
+    return { rows, m }
+  }, [bookingRows, daysGone])
+
   // Same days of each month rather than a part month against a whole one. On the 22nd,
   // September against a finished August reads as a 49% collapse every single time, which
   // is a fact about the calendar and not about the business.
@@ -353,6 +384,101 @@ export default function Dashboard() {
         <KPICard label="Bookings (period)" value={String(bookings)} />
       </div>
 
+      {/* Company-wide by service, so this is an admin's view: a PM's accounts sit inside
+          one of these cards and the other four are somebody else's. */}
+      {(!scoped || mine.isAdmin) && (
+        <div className="mb-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <div className="text-sm font-medium">This month by service</div>
+            <div className="text-xs text-mav-muted">
+              {monthLabel(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`)} · against last month to the same date
+            </div>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            {bizNow.rows.map(seg => {
+              const v = bizNow.m[seg] || { now: 0, prev: 0 }
+              const d = v.prev > 0 ? ((v.now - v.prev) / v.prev) * 100 : null
+              return (
+                <div key={seg} className="bg-mav-panel border border-mav-line rounded-xl p-4 border-t-2"
+                  style={{ borderTopColor: 'var(--section)' }}>
+                  <div className="text-xs text-mav-muted truncate" title={seg}>{seg}</div>
+                  <div className="text-xl font-semibold mt-1.5 tabular-nums">{fmtUsd(v.now)}</div>
+                  <div className={`text-xs mt-1 ${d === null ? 'text-mav-muted' : d >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {/* Nothing last month is not "up infinity per cent". Say what happened. */}
+                    {d === null ? (v.now > 0 ? 'new' : '—') : `${d >= 0 ? '+' : ''}${d.toFixed(0)}%`}
+                  </div>
+                  <div className="text-[11px] text-mav-muted mt-0.5 tabular-nums">{fmtUsd(v.prev)} last</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* THE ORDER OF THIS PAGE IS DELIBERATE: where this month's money came from,
+          then the same question month on month, then the six-month shape with the
+          clients behind it — and only last, what the numbers do not say. AI Insights
+          used to sit second, above every figure it was commenting on. */}
+
+      {/* Revenue by segment — month over month.
+          Company-wide, by service department, so it answers a question a PM does not
+          have: their own accounts sit inside one department and the other five rows are
+          somebody else's. It stays for admins, who are the ones comparing departments,
+          and for anyone who has cleared the scope to see all of Web. */}
+      {(!scoped || mine.isAdmin) && (
+      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+        <div className="flex items-baseline justify-between px-5 pt-5 mb-3">
+          <div className="text-sm font-medium">Revenue by segment — month over month</div>
+          <div className="text-xs text-mav-muted">Service department · trailing 6 months · USD</div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="text-left text-mav-muted border-b border-mav-line">
+              <tr>
+                <th className="px-5 py-3 font-medium">Segment</th>
+                {segMonths.map(k => <th key={k} className="px-4 py-3 font-medium text-right whitespace-nowrap">{monthLabel(k)}</th>)}
+                <th className="px-5 py-3 font-medium text-right whitespace-nowrap">6-mo total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {segRows.map(seg => (
+                <tr key={seg} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                  <td className="px-5 py-3 font-medium whitespace-nowrap">{seg}</td>
+                  {segMonths.map(k => <td key={k} className="px-4 py-3 text-right text-mav-muted whitespace-nowrap">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
+                  <td className="px-5 py-3 text-right font-medium whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-mav-line bg-mav-dark/30">
+                <td className="px-5 py-3 font-semibold">Total</td>
+                {segMonths.map(k => <td key={k} className="px-4 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(colTotal(k))}</td>)}
+                <td className="px-5 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="lg:col-span-2"><RevenueChart data={trendSeries} title={scoped ? 'Your revenue — last 6 months' : 'Revenue — last 6 months'}
+          note="The last bar is the month still running, so it is part of a month against five whole ones." /></div>
+        <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
+          <div className="text-sm font-medium mb-4">Top clients</div>
+          {monthSeries.length === 0 ? (
+            <p className="text-sm text-mav-muted">No revenue in the selected range.</p>
+          ) : (
+            <ul className="space-y-3">
+              {topClients(rangeRev).map((c, i) => (
+                <li key={c.client_name} className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2"><span className="text-mav-muted w-4">{i + 1}</span>{c.client_name}</span>
+                  <span className="font-medium">{fmtUsd(c.revenue)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
       {insights.length > 0 && (
         <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
           <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
@@ -412,65 +538,6 @@ export default function Dashboard() {
             })}
           </div>
         </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="lg:col-span-2"><RevenueChart data={trendSeries} title={scoped ? 'Your revenue — last 6 months' : 'Revenue — last 6 months'}
-          note="The last bar is the month still running, so it is part of a month against five whole ones." /></div>
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-          <div className="text-sm font-medium mb-4">Top clients</div>
-          {monthSeries.length === 0 ? (
-            <p className="text-sm text-mav-muted">No revenue in the selected range.</p>
-          ) : (
-            <ul className="space-y-3">
-              {topClients(rangeRev).map((c, i) => (
-                <li key={c.client_name} className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-2"><span className="text-mav-muted w-4">{i + 1}</span>{c.client_name}</span>
-                  <span className="font-medium">{fmtUsd(c.revenue)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-
-      {/* Revenue by segment — month over month.
-          Company-wide, by service department, so it answers a question a PM does not
-          have: their own accounts sit inside one department and the other five rows are
-          somebody else's. It stays for admins, who are the ones comparing departments,
-          and for anyone who has cleared the scope to see all of Web. */}
-      {(!scoped || mine.isAdmin) && (
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
-        <div className="flex items-baseline justify-between px-5 pt-5 mb-3">
-          <div className="text-sm font-medium">Revenue by segment — month over month</div>
-          <div className="text-xs text-mav-muted">Service department · trailing 6 months · USD</div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
-            <thead className="text-left text-mav-muted border-b border-mav-line">
-              <tr>
-                <th className="px-5 py-3 font-medium">Segment</th>
-                {segMonths.map(k => <th key={k} className="px-4 py-3 font-medium text-right whitespace-nowrap">{monthLabel(k)}</th>)}
-                <th className="px-5 py-3 font-medium text-right whitespace-nowrap">6-mo total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {segRows.map(seg => (
-                <tr key={seg} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                  <td className="px-5 py-3 font-medium whitespace-nowrap">{seg}</td>
-                  {segMonths.map(k => <td key={k} className="px-4 py-3 text-right text-mav-muted whitespace-nowrap">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
-                  <td className="px-5 py-3 text-right font-medium whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
-                </tr>
-              ))}
-              <tr className="border-t border-mav-line bg-mav-dark/30">
-                <td className="px-5 py-3 font-semibold">Total</td>
-                {segMonths.map(k => <td key={k} className="px-4 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(colTotal(k))}</td>)}
-                <td className="px-5 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
       )}
 
     </div>
