@@ -18,11 +18,6 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const monthStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
 const monthEnd = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0)
-const prevMonthKey = (k: string) => {
-  const [y, m] = k.split('-').map(Number)
-  const d = new Date(y, m - 2, 1)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
-}
 const monthLabel = (key: string) =>
   new Date(key + '-01T00:00:00').toLocaleDateString('en', { month: 'short', year: '2-digit' })
 
@@ -266,7 +261,6 @@ export default function Dashboard() {
   const engColTotal = (g: Eng, k: string) => segRows.reduce((s, seg) => s + engCell(seg, g, k), 0)
 
   const periodTotal = monthSeries.reduce((s, x) => s + x.revenue, 0)
-  const latestKey = monthSeries.length ? monthSeries[monthSeries.length - 1].key : null
 
   // In scope but ignoring the date filter. The same-days comparison and the "starting
   // later this month" note both need days the filter has deliberately cut off.
@@ -315,19 +309,18 @@ export default function Dashboard() {
   //
   // Both sides are returned, not just the percentage: "down 9.7%" says nothing about
   // whether that is $2k or $20k, and it is the money people act on.
+  // ONLY for "This month". Over a 3-month, 6-month or year-to-date range there is no
+  // "last month" to hold the headline against: the card would show a quarter's revenue
+  // and, under it, a percentage comparing two single months inside that quarter. The two
+  // numbers are unrelated, which is worse than having no comparison at all.
   const mom = useMemo(() => {
-    if (isMtd) {
-      const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      // Clamped, so the 31st does not run off the end of a 30-day month.
-      const end = Math.min(now.getDate(), monthEnd(pm).getDate())
-      const prev = sumBetween(ymd(pm), ymd(new Date(pm.getFullYear(), pm.getMonth(), end)))
-      return { pct: prev ? ((periodTotal - prev) / prev) * 100 : null, cur: periodTotal, prev, to: end }
-    }
-    if (!latestKey) return { pct: null, cur: 0, prev: 0, to: 0 }
-    const prev = allMonthTotals[prevMonthKey(latestKey)] || 0
-    const cur = allMonthTotals[latestKey] || 0
-    return { pct: prev ? ((cur - prev) / prev) * 100 : null, cur, prev, to: 0 }
-  }, [isMtd, periodTotal, latestKey, allMonthTotals, scopedRev])
+    if (!isMtd) return { pct: null, prev: 0 }
+    const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    // Clamped, so the 31st does not run off the end of a 30-day month.
+    const end = Math.min(now.getDate(), monthEnd(pm).getDate())
+    const prev = sumBetween(ymd(pm), ymd(new Date(pm.getFullYear(), pm.getMonth(), end)))
+    return { pct: prev ? ((periodTotal - prev) / prev) * 100 : null, prev }
+  }, [isMtd, periodTotal, scopedRev])
 
   // Everything below reads these, not the raw lists. A booking or a delight names only a
   // company, so ownership comes from the client record; a deal names its PM directly.
@@ -420,7 +413,7 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <KPICard label={isMtd ? 'Revenue (this month)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom.pct}
-          changeLabel={isMtd ? `vs ${fmtUsd(mom.prev)} by this date last month` : `vs ${fmtUsd(mom.prev)} last month`}
+          changeLabel={`vs ${fmtUsd(mom.prev)} by this date last month`}
           note={isMtd && daysGone < daysInMonth ? `${daysGone} of ${daysInMonth} days gone — the month is still filling` : undefined} />
         <KPICard label="Active clients" value={String(activeClients)} />
         <KPICard label="Open opportunities" value={fmtUsd(openPipeline.usd)}
