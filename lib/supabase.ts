@@ -134,7 +134,9 @@ if (/waiting for details|waiting for detail/.test(v)) return { prob: 40, read: '
 if (/on hold/.test(v)) return { prob: 25, read: 'On hold — stalled and at risk unless re-engaged.' }
 return { prob: 45, read: 'Open quote — outcome not yet clear from the sheet.' }
 }
-export interface RevenueRow { client_name: string; month: string; amount_usd: number }
+// `month` is the month the work STARTS, and `date` is that start date. Both come from
+// web_revenue_start, not the old booking-month aggregate — see migration 052.
+export interface RevenueRow { client_name: string; month: string; amount_usd: number; date?: string }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; technology?: string; engagement_model?: string; geo?: string; sme?: string; sales_person?: string; contact_email?: string }
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
 export interface EmailSignal { id: number; thread_id?: string; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
@@ -520,12 +522,19 @@ flag,
 return out.length ? out : (await import('./mockData')).mockOpportunities
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
-const live = await read<{ company_name: string; booking_month: string; booking_amount: number }>('web_revenue',
-'company_name, booking_month, booking_amount', 'id')
-if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount }))
+// web_revenue_start, not web_revenue: the business dates revenue on the start date, and
+// reading the booking-month aggregate here is what made the Dashboard and Business
+// Numbers disagree about the same September.
+const live = await read<{ company_name: string; booking_month: string; booking_date: string; booking_amount: number }>('web_revenue_start',
+'company_name, booking_month, booking_date, booking_amount', 'id')
+if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date }))
 return (await import('./mockData')).mockRevenue
 }
-export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue', 'id, company_name, booking_month, booking_date, booking_amount, service_name, technology, engagement_model, geo, sme, sales_person, contact_email', 'id')) || [] }
+// Same switch, for everything that reads whole booking rows — the PM scorecards, Client
+// 360, Forecast, Business Trend and the quarter-over-quarter review. They are now all on
+// the start date, and on the ledger's real line items rather than the merged aggregate,
+// so their row counts line up with Web, Hub & LP.
+export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue_start', 'id, company_name, booking_month, booking_date, booking_amount, service_name, technology, engagement_model, geo, sme, sales_person, contact_email', 'id')) || [] }
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
 // Feedback keyed to the PM who owns it, for the PM scorecard. Kept apart from
 // getFeedback() because that one is the Delights feed and selects a different set

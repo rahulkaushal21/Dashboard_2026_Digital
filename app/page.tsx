@@ -26,8 +26,11 @@ const monthLabel = (key: string) =>
   new Date(key + '-01T00:00:00').toLocaleDateString('en', { month: 'short', year: '2-digit' })
 
 const now = new Date()
+// Every preset ends TODAY, not at the end of this month. Revenue is dated on the day the
+// work starts, so a range running to the 30th silently counts jobs that have not started
+// yet — that was $2,931 of September sitting in a figure captioned "this month".
 function presetRange(key: string): { from: string; to: string } {
-  const to = ymd(monthEnd(now))
+  const to = ymd(now)
   if (key === 'ytd') return { from: `${now.getFullYear()}-01-01`, to }
   const back = key === 'm3' ? 2 : key === 'm6' ? 5 : key === 'm12' ? 11 : 0 // 'mtd' -> 0
   return { from: ymd(monthStart(new Date(now.getFullYear(), now.getMonth() - back, 1))), to }
@@ -169,8 +172,13 @@ export default function Dashboard() {
   const onFrom = (v: string) => { setFrom(v); setPreset('') }
   const onTo = (v: string) => { setTo(v); setPreset('') }
 
-  // month-level range test ('YYYY-MM-DD' first-of-month vs from/to)
-  const inMonthRange = (m?: string) => { if (!m) return false; const d = m.slice(0, 10); return d >= from && d <= to }
+  // Tested on the row's own start date, falling back to its month. It used to compare the
+  // FIRST OF THE MONTH against the range, which meant any date inside September pulled in
+  // the whole of September — so "this month" could never mean "so far".
+  const inMonthRange = (m?: string, d?: string) => {
+    const v = (d || m || '').slice(0, 10)
+    return v ? v >= from && v <= to : false
+  }
   const inDayRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return false; return v >= from && v <= to }
 
   // Scoped before the date range, so every figure on the page — the revenue total, the
@@ -178,7 +186,7 @@ export default function Dashboard() {
   // accounts. A dashboard that greets you by name and then shows the company's numbers
   // is just the company's dashboard with your name on it.
   const rangeRev = useMemo(
-    () => rev.filter(r => inMonthRange(r.month)).filter(r => !scoped || mine.ownsClient(r.client_name)),
+    () => rev.filter(r => inMonthRange(r.month, r.date)).filter(r => !scoped || mine.ownsClient(r.client_name)),
     [rev, from, to, scoped, mine])
 
   // monthly totals within range (drives period total)
@@ -234,12 +242,43 @@ export default function Dashboard() {
 
   const periodTotal = monthSeries.reduce((s, x) => s + x.revenue, 0)
   const latestKey = monthSeries.length ? monthSeries[monthSeries.length - 1].key : null
+
+  // In scope but ignoring the date filter. The same-days comparison and the "starting
+  // later this month" note both need days the filter has deliberately cut off.
+  const scopedRev = useMemo(
+    () => rev.filter(r => !scoped || mine.ownsClient(r.client_name)),
+    [rev, scoped, mine])
+  const sumBetween = (a: string, b: string) => scopedRev.reduce((s, r) => {
+    const v = (r.date || r.month || '').slice(0, 10)
+    return v >= a && v <= b ? s + (r.amount_usd || 0) : s
+  }, 0)
+
+  // True while the range is "this month so far", which is the default view.
+  const isMtd = from === ymd(monthStart(now)) && to === ymd(now)
+
+  // What is booked to start later this month and so is not in the figure above. Without
+  // it the honest month-to-date number just looks like money that went missing.
+  const laterThisMonth = useMemo(
+    () => isMtd ? Math.round(sumBetween(ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)), ymd(monthEnd(now)))) : 0,
+    [isMtd, scopedRev])
+
+  // Same days of each month rather than a part month against a whole one. On the 22nd,
+  // September against a finished August reads as a 49% collapse every single time, which
+  // is a fact about the calendar and not about the business.
   const mom = useMemo(() => {
+    if (isMtd) {
+      const d = now.getDate()
+      const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      // Clamped, so the 31st does not run off the end of a 30-day month.
+      const end = Math.min(d, monthEnd(pm).getDate())
+      const prev = sumBetween(ymd(pm), ymd(new Date(pm.getFullYear(), pm.getMonth(), end)))
+      return prev ? ((periodTotal - prev) / prev) * 100 : null
+    }
     if (!latestKey) return null
     const prev = allMonthTotals[prevMonthKey(latestKey)]
     const cur = allMonthTotals[latestKey]
     return prev ? ((cur - prev) / prev) * 100 : null
-  }, [latestKey, allMonthTotals])
+  }, [isMtd, periodTotal, latestKey, allMonthTotals, scopedRev])
 
   // Everything below reads these, not the raw lists. A booking or a delight names only a
   // company, so ownership comes from the client record; a deal names its PM directly.
@@ -316,7 +355,9 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KPICard label="Revenue (period)" value={fmtUsd(periodTotal)} change={mom} />
+        <KPICard label={isMtd ? 'Revenue (this month so far)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom}
+          changeLabel={isMtd ? 'vs same days last month' : 'vs last month'}
+          note={laterThisMonth ? `+${fmtUsd(laterThisMonth)} booked to start later this month` : undefined} />
         <KPICard label="Active clients" value={String(activeClients)} />
         <KPICard label="Open opportunities" value={String(openOpps)} />
         <KPICard label="Bookings (period)" value={String(bookings)} />

@@ -1,5 +1,5 @@
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
-export default function KPICard({ label, value, change }: { label: string; value: string; change?: number | null }) {
+export default function KPICard({ label, value, change, changeLabel = 'vs last month', note }: { label: string; value: string; change?: number | null; changeLabel?: string; note?: string }) {
   const up = (change ?? 0) >= 0
   return (
     // A 2px edge in the section's colour: enough to group the headline cards and tell
@@ -12,9 +12,12 @@ export default function KPICard({ label, value, change }: { label: string; value
       {change != null && (
         <div className={`flex items-center gap-1 text-sm mt-2 ${up ? 'text-green-400' : 'text-red-400'}`}>
           {up ? <ArrowUpRight size={15} /> : <ArrowDownRight size={15} />}
-          {Math.abs(change).toFixed(1)}% vs last month
+          {Math.abs(change).toFixed(1)}% {changeLabel}
         </div>
       )}
+      {/* Anything the headline figure deliberately leaves out. Saying so under the number
+          is the difference between a careful total and one that looks wrong. */}
+      {note && <div className="text-[11px] text-mav-muted mt-1.5 leading-snug">{note}</div>}
     </div>
   )
 }
