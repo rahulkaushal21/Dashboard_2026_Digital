@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import { useThemeInk } from '@/lib/use-theme-ink'
 import { RefreshCw } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts'
 import Header from '@/components/Header'
@@ -27,7 +28,10 @@ const MODEL_COLOR: Record<string, string> = {
   'Dedicated': '#FFDB2D', 'Partial Dedicated': '#f59e0b', 'New Development': '#3b82f6',
   'Maintanance': '#10b981', 'Ad-hoc': '#a855f7', 'Additional Pages': '#0284c7', 'Change Request': '#f43f5e',
 }
-const colorFor = (m: string) => MODEL_COLOR[m] || '#333333'
+// A neutral mid-grey for an engagement model the palette does not name. Fixed rather
+// than themed: it sits in a chart legend beside seven other fixed colours, and it
+// reads on both backgrounds.
+const colorFor = (m: string) => MODEL_COLOR[m] || '#9ca3af'
 
 // The history table owns everything up to its last month; web_revenue owns
 // everything after. web_revenue holds 13 stray rows in Jan and Mar 2025 that the
@@ -104,6 +108,7 @@ const Move = ({ label, amount, n, max }: { label: string; amount: number; n: num
 }
 
 export default function RevenueHistory() {
+  const ink = useThemeInk()
   const [rows, setRows] = useState<RevenueHistoryRow[]>([])
   const [live, setLive] = useState<BookingRow[]>([])
   const [sources, setSources] = useState<RevenueSource[]>([])
@@ -312,8 +317,8 @@ export default function RevenueHistory() {
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={d.series} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                <XAxis dataKey="label" stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} interval={1} />
-                <YAxis stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} width={48}
+                <XAxis dataKey="label" stroke={ink.axis} fontSize={10} tickLine={false} axisLine={false} interval={1} />
+                <YAxis stroke={ink.axis} fontSize={10} tickLine={false} axisLine={false} width={48}
                   tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} />
                 {/* The bars get their colour from <Cell>, so the Bar itself has no
                     `fill` — and recharts then falls back to #000 for the tooltip
@@ -321,7 +326,7 @@ export default function RevenueHistory() {
                     colours explicitly rather than relying on the series colour. */}
                 <Tooltip cursor={{ fill: '#ffffff14' }}
                   contentStyle={{ background: '#2e2e2e', border: '1px solid #4a4a4a', borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: '#9a9a9a', marginBottom: 2 }}
+                  labelStyle={{ color: ink.axis, marginBottom: 2 }}
                   itemStyle={{ color: '#f2f2f2' }}
                   formatter={(v: number) => [fmtUsd(v), 'Billed']} />
                 <Bar dataKey="amount" radius={[3, 3, 0, 0]}>
@@ -348,8 +353,8 @@ export default function RevenueHistory() {
               {ya.years.filter(y => ya.years.includes(y - 1)).map(y => (
                 <button key={y} onClick={() => setSelFy(y)}
                   className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-                    y === ya.cur ? 'bg-mav-yellow text-black border-mav-yellow font-medium'
-                                 : 'border-mav-line text-mav-muted hover:text-white'}`}>
+                    y === ya.cur ? 'bg-mav-fill text-black border-mav-yellow font-medium'
+                                 : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
                   {fyLabel(y)}
                 </button>
               ))}
@@ -611,7 +616,7 @@ export default function RevenueHistory() {
 
           <Panel title="Source" right={
             <button onClick={resync} disabled={syncing}
-              className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-mav-yellow text-black font-medium disabled:opacity-60">
+              className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-mav-fill text-black font-medium disabled:opacity-60">
               <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Reloading…' : 'Reload from sheets'}
             </button>
           }>

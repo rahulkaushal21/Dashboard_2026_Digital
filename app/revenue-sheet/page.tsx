@@ -317,7 +317,7 @@ export default function ProjectLedger() {
         </select>
         <input type="month" value={fFrom} onChange={e => setFFrom(e.target.value)} className={sel} title="From month" />
         <input type="month" value={fTo} onChange={e => setFTo(e.target.value)} className={sel} title="To month" />
-        {anyFilter && <button onClick={clearAll} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors">Clear</button>}
+        {anyFilter && <button onClick={clearAll} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">Clear</button>}
         <button onClick={() => { setFModel('Dedicated'); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
           className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
           This month&rsquo;s Dedicated
@@ -326,7 +326,7 @@ export default function ProjectLedger() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="text-sm text-mav-muted">
-          {loading ? 'Loading…' : <>{shown.length.toLocaleString()} line{shown.length === 1 ? '' : 's'} · {clients} client{clients === 1 ? '' : 's'} · <span className="text-white">{money(total)}</span>
+          {loading ? 'Loading…' : <>{shown.length.toLocaleString()} line{shown.length === 1 ? '' : 's'} · {clients} client{clients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(total)}</span>
             {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}</>}
         </div>
         <div className="flex items-center gap-2">
@@ -334,7 +334,7 @@ export default function ProjectLedger() {
             className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
             {sheetView ? 'Compact view' : 'All sheet columns'}
           </button>
-          <button onClick={exportCsv} className="text-xs px-3 py-1.5 rounded-md border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-colors">Export CSV</button>
+          <button onClick={exportCsv} className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg hover:border-mav-fg/40 transition-colors">Export CSV</button>
         </div>
       </div>
 
@@ -351,7 +351,7 @@ export default function ProjectLedger() {
             className="text-xs px-4 py-1.5 rounded-md bg-green-500 text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
             {busy ? `Moving ${pickedRows.length}…` : `Move ${pickedRows.length} to ${monLabel(target)}`}
           </button>
-          <button onClick={() => setPicked(new Set())} className="text-xs text-mav-muted hover:text-white">Clear selection</button>
+          <button onClick={() => setPicked(new Set())} className="text-xs text-mav-muted hover:text-mav-fg">Clear selection</button>
         </div>
       )}
 
@@ -365,7 +365,7 @@ export default function ProjectLedger() {
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-left text-white/70 border-b border-mav-line">
+          <thead className="text-left text-mav-fg/70 border-b border-mav-line">
             <tr>
               <th className="px-3 py-2 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label="Select all filtered" /></th>
               {/* Click to sort, click again to reverse, a third time to go back to
@@ -375,7 +375,7 @@ export default function ProjectLedger() {
               {cols.map(c => (
                 <th key={c.key} className={`${th} ${c.right ? 'text-right' : ''}`}>
                   <button onClick={() => handleSort(c.key)}
-                    className={`inline-flex items-center gap-1 hover:text-white transition-colors ${sortKey === c.key ? 'text-mav-yellow' : ''}`}
+                    className={`inline-flex items-center gap-1 hover:text-mav-fg transition-colors ${sortKey === c.key ? 'text-mav-yellow' : ''}`}
                     title={`Sort by ${c.label}`}>
                     {c.label}
                     <span className="text-[10px] opacity-70">{sortKey === c.key ? (sortAsc ? '▲' : '▼') : ''}</span>
@@ -398,7 +398,7 @@ export default function ProjectLedger() {
                   return (
                     <td key={c.key}
                       onDoubleClick={editable ? () => setCell({ rowKey: r.row_key, col: c.key, value: rawOf(r, c) }) : undefined}
-                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-white/25' : 'text-white/80'} ${open ? '' : 'max-w-[16rem] truncate'} ${editable && !open ? 'cursor-text hover:bg-white/5' : ''}`}
+                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-mav-fg/25' : 'text-mav-fg/80'} ${open ? '' : 'max-w-[16rem] truncate'} ${editable && !open ? 'cursor-text hover:bg-mav-fg/5' : ''}`}
                       title={open ? '' : editable ? `${v === '—' ? 'Empty' : v} — double-click to edit` : (v === '—' ? '' : v)}>
                       {open ? (
                         <input autoFocus disabled={cellBusy}
@@ -412,7 +412,7 @@ export default function ProjectLedger() {
                             // cell opened by accident is to save something.
                             if (e.key === 'Escape') { e.preventDefault(); setCell(null) }
                           }}
-                          className="w-36 bg-mav-dark border border-mav-yellow rounded px-1.5 py-0.5 text-xs text-white outline-none" />
+                          className="w-36 bg-mav-dark border border-mav-yellow rounded px-1.5 py-0.5 text-xs text-mav-fg outline-none" />
                       ) : c.key === 'agency' && v !== '—' ? (
                         // The Agency cell opens that client's Client 360 record: the row
                         // says what was billed, and the next question is always who they
@@ -425,7 +425,7 @@ export default function ProjectLedger() {
                 })}
                 <td className={td}>
                   {r.in_sheet
-                    ? <span className="text-xs text-white/50">yes</span>
+                    ? <span className="text-xs text-mav-fg/50">yes</span>
                     : <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/50 text-amber-300">pending</span>}
                 </td>
                 <td className={td}>
@@ -434,7 +434,7 @@ export default function ProjectLedger() {
                       to the row's own PC/SME, which is the rule both RPCs enforce. */}
                   {canEditLedgerRow(r, me, isAdmin)
                     ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
-                    : <span className="text-xs text-white/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
+                    : <span className="text-xs text-mav-fg/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
                 </td>
               </tr>
             ))}
@@ -446,7 +446,7 @@ export default function ProjectLedger() {
       {monthPages.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
           <span className="text-mav-muted text-xs">
-            Showing <span className="text-white">{pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)}</span>
+            Showing <span className="text-mav-fg">{pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)}</span>
             {' '}&middot; {pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} &middot; {money(pageTotal)}
             {' '}&middot; month {Math.min(page, pages - 1) + 1} of {pages} &middot; ticking the header selects all {shown.length.toLocaleString()} filtered lines, not just this month
           </span>
@@ -457,20 +457,20 @@ export default function ProjectLedger() {
               {monthPages.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
             </select>
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 transition-colors">Newer month</button>
+              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 transition-colors">Newer month</button>
             <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 transition-colors">Older month</button>
+              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 transition-colors">Older month</button>
           </div>
         </div>
       )}
 
       <p className="text-xs text-mav-muted mt-4 max-w-3xl">
-        Shown in the <span className="text-white">Web, Hub &amp; LP</span> tab&rsquo;s own columns and order.
+        Shown in the <span className="text-mav-fg">Web, Hub &amp; LP</span> tab&rsquo;s own columns and order.
         <span className="text-amber-300"> Pending</span> means confirmed here and not yet carried into the sheet by the
-        hourly writer. A greyed <span className="text-white/40">&mdash;</span> on a sheet line is a column the dashboard has
+        hourly writer. A greyed <span className="text-mav-fg/40">&mdash;</span> on a sheet line is a column the dashboard has
         never stored, not an empty one; those values are in the source spreadsheet.
         <br />
-        <span className="text-white">Double-click a cell to fill it in</span> &mdash; Project Id, Quote ID, Expert, dates,
+        <span className="text-mav-fg">Double-click a cell to fill it in</span> &mdash; Project Id, Quote ID, Expert, dates,
         hours, invoice &mdash; or use Edit at the end of the row for the lot. Only the row&rsquo;s own PC/SME can change it
         {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
         the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.

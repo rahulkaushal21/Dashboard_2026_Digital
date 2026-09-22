@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import { useThemeInk } from '@/lib/use-theme-ink'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import { getBookingsFull, getOpportunities, type BookingRow, type Opportunity } from '@/lib/supabase'
@@ -38,6 +39,7 @@ const Card = ({ title, note, children }: { title: string; note?: string; childre
 //
 // `embedded` drops its own page header when it is a tab under Business Trend's.
 export default function ForecastPanel({ embedded = false }: { embedded?: boolean } = {}) {
+  const ink = useThemeInk()
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [loading, setLoading] = useState(true)
@@ -89,7 +91,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
               : 'Not enough history to forecast'}
         </span>
         <button onClick={load} disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white hover:border-mav-yellow disabled:opacity-50">
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg hover:border-mav-yellow disabled:opacity-50">
           <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Recalculate
         </button>
       </div>
@@ -123,13 +125,13 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
             {fc.gap > 0 && fc.monthsRemaining > 0 && (
               <p className="text-sm leading-relaxed mt-3 text-mav-muted">
                 Reaching target needs{' '}
-                <span className="text-white font-medium tabular-nums">{fmtUsd(Math.round(fc.neededPerMonth))}</span>{' '}
+                <span className="text-mav-fg font-medium tabular-nums">{fmtUsd(Math.round(fc.neededPerMonth))}</span>{' '}
                 in each of the {fc.monthsRemaining} full months left, on top of however the month in progress closes.
                 The best month on record is{' '}
-                <span className="text-white tabular-nums">{fmtUsd(Math.round(fc.bestMonth.value))}</span> ({fc.bestMonth.label})
+                <span className="text-mav-fg tabular-nums">{fmtUsd(Math.round(fc.bestMonth.value))}</span> ({fc.bestMonth.label})
                 {fc.neededPerMonth > fc.bestMonth.value && <>
                   {' '}— so target means beating the all-time record by{' '}
-                  <span className="text-white font-medium">
+                  <span className="text-mav-fg font-medium">
                     {Math.round(((fc.neededPerMonth - fc.bestMonth.value) / fc.bestMonth.value) * 100)}%
                   </span>, every month, {fc.monthsRemaining} times running.
                 </>}
@@ -159,16 +161,16 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
               {drag.perMonth > 0 && (
                 <>
                   <p className="text-mav-muted">
-                    That is not because nothing is happening. <span className="text-white">{drag.clients} accounts</span> that
+                    That is not because nothing is happening. <span className="text-mav-fg">{drag.clients} accounts</span> that
                     used to bill regularly have gone quiet, and at their own historical rate they were worth{' '}
-                    <span className="text-white font-medium tabular-nums">{fmtUsd(Math.round(drag.perMonth))} a month</span>{' '}
+                    <span className="text-mav-fg font-medium tabular-nums">{fmtUsd(Math.round(drag.perMonth))} a month</span>{' '}
                     between them. That revenue is gone — yet the monthly total has not fallen.
                   </p>
                   <p className="text-mav-muted">
                     Something is replacing roughly {fmtUsd(Math.round(drag.perMonth))} of run-rate every month and landing
                     almost exactly where the losses left off. That equilibrium is what produces a flat line. The acquisition
                     work is real; it is being spent standing still.{' '}
-                    <span className="text-white">Growth needs acquisition to exceed replacement, or churn to fall below it.</span>
+                    <span className="text-mav-fg">Growth needs acquisition to exceed replacement, or churn to fall below it.</span>
                   </p>
                 </>
               )}
@@ -310,24 +312,24 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
               <ol className="space-y-2 text-sm text-mav-muted list-decimal pl-4 leading-relaxed">
                 <li>Roll revenue to complete calendar months. The month in progress is never used to fit anything, because revenue books to the month and today&apos;s month is always short.</li>
                 <li>Build a seasonal index per calendar month — that month&apos;s average against the all-month average.</li>
-                <li>Divide each of the last six complete months by its own index and average them. That is the underlying level: <span className="text-white tabular-nums">{fmtUsd(Math.round(fc.level))}</span>.</li>
+                <li>Divide each of the last six complete months by its own index and average them. That is the underlying level: <span className="text-mav-fg tabular-nums">{fmtUsd(Math.round(fc.level))}</span>.</li>
                 <li>Forecast each remaining month as level × its index.</li>
-                <li>Band it by the historical standard deviation of monthly revenue (<span className="text-white tabular-nums">{fmtUsd(Math.round(fc.sd))}</span>).</li>
+                <li>Band it by the historical standard deviation of monthly revenue (<span className="text-mav-fg tabular-nums">{fmtUsd(Math.round(fc.sd))}</span>).</li>
               </ol>
               <p className="text-xs text-mav-muted mt-3 leading-relaxed">
                 Nothing here is stored. A forecast that stops updating keeps sounding confident while the ground moves,
-                so every figure is recomputed from <span className="text-white">web_revenue</span> on each load.
+                so every figure is recomputed from <span className="text-mav-fg">web_revenue</span> on each load.
               </p>
             </div>
 
             <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
               <div className="text-sm font-medium mb-3">What this cannot see</div>
               <ul className="space-y-2 text-sm text-mav-muted leading-relaxed">
-                <li>• <span className="text-white">Structural change.</span> Winning or losing one major account moves the year by more than every scenario above combined.</li>
-                <li>• <span className="text-white">The month in progress</span> is part-booked, so its estimate is the least certain figure here and the year total moves with it.</li>
-                <li>• <span className="text-white">Price and headcount changes</span>, and any deal not yet in the Quotes tab.</li>
-                <li>• <span className="text-white">The band</span> covers ordinary fluctuation, not a break in the trend.</li>
-                <li>• <span className="text-white">The target itself.</span> {usdK(fc.target)} is taken as given from Business Trend; nothing here judges whether it was the right number when it was set.</li>
+                <li>• <span className="text-mav-fg">Structural change.</span> Winning or losing one major account moves the year by more than every scenario above combined.</li>
+                <li>• <span className="text-mav-fg">The month in progress</span> is part-booked, so its estimate is the least certain figure here and the year total moves with it.</li>
+                <li>• <span className="text-mav-fg">Price and headcount changes</span>, and any deal not yet in the Quotes tab.</li>
+                <li>• <span className="text-mav-fg">The band</span> covers ordinary fluctuation, not a break in the trend.</li>
+                <li>• <span className="text-mav-fg">The target itself.</span> {usdK(fc.target)} is taken as given from Business Trend; nothing here judges whether it was the right number when it was set.</li>
               </ul>
             </div>
           </div>
@@ -339,6 +341,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
 
 /* ------------------------------------------------------------------ chart --- */
 function TrendChart({ fc }: { fc: Forecast }) {
+  const ink = useThemeInk()
   const W = 900, H = 260, PADL = 52, PADR = 12, PADT = 14, PADB = 26
   const hist = fc.history
   const fut = fc.months.filter(m => !m.actual)
@@ -365,8 +368,8 @@ function TrendChart({ fc }: { fc: Forecast }) {
         aria-label={`Monthly revenue, ${hist.length} actual months followed by ${fut.length} forecast months, against the pace needed for the target`}>
         {ticks.map(t => (
           <g key={t}>
-            <line x1={PADL} y1={y(t)} x2={W - PADR} y2={y(t)} stroke="#333333" strokeWidth="1" />
-            <text x={PADL - 8} y={y(t) + 3} fontSize="10" fill="#9a9a9a" textAnchor="end" className="tabular-nums">
+            <line x1={PADL} y1={y(t)} x2={W - PADR} y2={y(t)} stroke={ink.grid} strokeWidth="1" />
+            <text x={PADL - 8} y={y(t) + 3} fontSize="10" fill={ink.axis} textAnchor="end" className="tabular-nums">
               {t === 0 ? '$0' : `$${t / 1000}k`}
             </text>
           </g>
@@ -386,7 +389,7 @@ function TrendChart({ fc }: { fc: Forecast }) {
         <line x1={x(ji)} y1={PADT} x2={x(ji)} y2={H - PADB} stroke="#555" strokeWidth="1" strokeDasharray="2 3" />
         {pts.map((p, i) =>
           i % 3 === 0 || i === pts.length - 1 ? (
-            <text key={p.key} x={x(i)} y={H - 8} fontSize="9" fill="#9a9a9a" textAnchor="middle">{p.label}</text>
+            <text key={p.key} x={x(i)} y={H - 8} fontSize="9" fill={ink.axis} textAnchor="middle">{p.label}</text>
           ) : null)}
       </svg>
       <div className="flex flex-wrap gap-4 text-xs text-mav-muted mt-2">

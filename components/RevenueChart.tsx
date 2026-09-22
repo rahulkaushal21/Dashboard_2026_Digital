@@ -1,7 +1,9 @@
 'use client'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { useThemeInk } from '@/lib/use-theme-ink'
 type Pt = { month: string; revenue: number; monthLabel?: string }
 export default function RevenueChart({ data, title = 'Revenue trend (last 3 months)', from, to }: { data: Pt[]; title?: string; from?: string; to?: string }) {
+  const ink = useThemeInk()
   // from/to are 'YYYY-MM' month keys (from <input type="month">); compare against the raw month key.
   const inRange = (p: Pt) => {
     const k = (p.month || '').slice(0, 7)
@@ -22,10 +24,10 @@ export default function RevenueChart({ data, title = 'Revenue trend (last 3 mont
               <stop offset="100%" stopColor="#FFDB2D" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-          <XAxis dataKey="label" stroke="#9a9a9a" fontSize={12} tickLine={false} axisLine={false} />
-          <YAxis stroke="#9a9a9a" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v / 1000}k`} />
-          <Tooltip contentStyle={{ background: '#1B1B1B', border: '1px solid #333', borderRadius: 8 }} />
+          <CartesianGrid strokeDasharray="3 3" {...{stroke: ink.grid}} vertical={false} />
+          <XAxis dataKey="label" stroke={ink.axis} fontSize={12} tickLine={false} axisLine={false} />
+          <YAxis stroke={ink.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v / 1000}k`} />
+          <Tooltip contentStyle={{ background: ink.tip, border: '1px solid #333', borderRadius: 8 }} />
           <Area type="monotone" dataKey="revenue" stroke="#FFDB2D" strokeWidth={2} fill="url(#g)" />
         </AreaChart>
       </ResponsiveContainer>

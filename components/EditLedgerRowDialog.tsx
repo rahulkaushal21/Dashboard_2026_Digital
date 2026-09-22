@@ -76,19 +76,19 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
     setError(res.error || 'Could not save')
   }
 
-  const ctl = `mt-1 w-full bg-mav-dark border border-white/20 rounded-md px-3 py-2 text-sm text-white
-    placeholder:text-white/35 focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors`
+  const ctl = `mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg
+    placeholder:text-mav-fg/35 focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors`
   const F = ({ label, hint, wide, children }: { label: string; hint?: string; wide?: boolean; children: React.ReactNode }) => (
     <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
-      <span className="text-xs font-medium text-white/85">{label}</span>
+      <span className="text-xs font-medium text-mav-fg/85">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-[11px] text-white/50">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-mav-fg/50">{hint}</span>}
     </label>
   )
   const Group = ({ title, blurb, children }: { title: string; blurb: string; children: React.ReactNode }) => (
     <section className="border-t border-mav-line pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
       <h3 className="text-sm font-semibold">{title}</h3>
-      <p className="text-[11px] text-white/55 mt-0.5 mb-3">{blurb}</p>
+      <p className="text-[11px] text-mav-fg/55 mt-0.5 mb-3">{blurb}</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{children}</div>
     </section>
   )
@@ -99,11 +99,11 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         <div className="px-5 pt-5 pb-4 border-b border-mav-line flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold">{row.company_name || 'This row'}</h2>
-            <p className="text-xs text-white/60 mt-0.5">
+            <p className="text-xs text-mav-fg/60 mt-0.5">
               {row.project_name || 'No project name'} · {(row.booking_month || '').slice(0, 7)}
             </p>
           </div>
-          <button onClick={onClose} className="text-white/60 hover:text-white text-xl leading-none">&times;</button>
+          <button onClick={onClose} className="text-mav-fg/60 hover:text-mav-fg text-xl leading-none">&times;</button>
         </div>
 
         <div className="px-5 py-4 overflow-y-auto">
@@ -184,11 +184,11 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         </div>
 
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
-          <span className="text-[11px] text-white/60">Value, owner and month are set at confirmation and cannot be changed here.</span>
+          <span className="text-[11px] text-mav-fg/60">Value, owner and month are set at confirmation and cannot be changed here.</span>
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-colors">Cancel</button>
+            <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg hover:border-mav-fg/40 transition-colors">Cancel</button>
             <button onClick={save} disabled={saving}
-              className="text-xs px-4 py-1.5 rounded-md bg-mav-yellow text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
+              className="text-xs px-4 py-1.5 rounded-md bg-mav-fill text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
               {saving ? 'Saving…' : 'Save'}
             </button>
           </div>

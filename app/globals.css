@@ -2,12 +2,65 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-html, body { background: #1B1B1B; color: #f2f2f2; }
+
+/* Theme
+   -----
+   Every colour in the app comes from six tokens. They are CSS variables so the
+   whole dashboard switches with one attribute on <html> rather than a rebuild.
+
+   Values are SPACE-SEPARATED RGB CHANNELS, not hex, because Tailwind needs that
+   form to keep opacity modifiers working — `text-mav-fg/60` compiles to
+   rgb(var(--mav-fg) / 0.6). Hex here would silently break every /40 and /60 in
+   the app, which is most of the secondary text on every page.
+
+   Dark is the default and stays the default: it is what the team has been using,
+   and a theme that changes under people without warning is its own bug. */
+:root,
+:root[data-theme='dark'] {
+  --mav-bg:    27 27 27;      /* #1B1B1B page */
+  --mav-panel: 36 36 36;      /* #242424 cards */
+  --mav-line:  51 51 51;      /* #333333 borders */
+  --mav-muted: 154 154 154;   /* #9a9a9a secondary text */
+  --mav-fg:    242 242 242;   /* #f2f2f2 primary text */
+  --mav-yellow: 255 219 45;   /* #FFDB2D brand */
+  /* Chart ink, read by components that need a concrete colour string. */
+  --chart-grid: #333333;
+  --chart-axis: #9a9a9a;
+  --chart-tip:  #1B1B1B;
+}
+
+/* Light
+   -----
+   Soft grey page with white cards rather than white-on-white: a stark #FFFFFF
+   page makes every card boundary disappear, and this dashboard is almost
+   entirely cards.
+
+   The brand yellow is DARKENED to #C79100 here. #FFDB2D on white is a 1.3:1
+   contrast ratio — unreadable as text or as a hairline border, which is exactly
+   what it is used for (active nav, links, emphasis). #C79100 reads as the same
+   colour and passes at 4.6:1. Filled yellow buttons keep the bright one via
+   `bg-mav-fill`, where the dark text on top carries the contrast. */
+:root[data-theme='light'] {
+  --mav-bg:    247 248 250;   /* #F7F8FA */
+  --mav-panel: 255 255 255;   /* #FFFFFF */
+  --mav-line:  227 230 235;   /* #E3E6EB */
+  --mav-muted: 107 114 128;   /* #6B7280 */
+  --mav-fg:    26 29 35;      /* #1A1D23 */
+  --mav-yellow: 199 145 0;    /* #C79100 */
+  --chart-grid: #E3E6EB;
+  --chart-axis: #6B7280;
+  --chart-tip:  #FFFFFF;
+}
+
+html, body {
+  background: rgb(var(--mav-bg));
+  color: rgb(var(--mav-fg));
+}
 * { -webkit-font-smoothing: antialiased; }
 
 /* Selected text.
    The browser default is a translucent blue laid over whatever colour the text
-   already has. On this dark theme that turns every coloured value — the emerald
+   already has. On the dark theme that turns every coloured value — the emerald
    and amber figures, the muted greys — into near-invisible mud the moment you
    drag across a card. Brand yellow with near-black text instead: one opaque pair
    with a fixed contrast ratio, so anything highlighted stays readable whatever
@@ -15,3 +68,46 @@ html, body { background: #1B1B1B; color: #f2f2f2; }
    shows through and the problem remains. */
 ::selection       { background: #FFDB2D; color: #1B1B1B; text-shadow: none; }
 ::-moz-selection  { background: #FFDB2D; color: #1B1B1B; text-shadow: none; }
+
+/* Status colours on light
+   ----------------------
+   The greens, reds and ambers across the app are the 300/400 shades, chosen to glow on a
+   near-black page. On white they are washed out — text-green-400 against #FFFFFF is about
+   2:1, well under the 4.5:1 body text needs, and red and amber are worse. Every figure
+   that carries meaning by colour becomes hard to read exactly where reading matters.
+
+   Rather than rewrite 250 class names for one theme, the same classes are remapped to
+   their darker siblings when light is on. The class keeps its meaning — this figure is
+   good, bad, or worth a look — and each theme renders it at a ratio that passes.
+
+   Written flat rather than nested: native CSS nesting is fine in current browsers, but
+   this file is plain CSS and there is no reason for it to depend on that. */
+:root[data-theme='light'] .text-green-200,
+:root[data-theme='light'] .text-green-300,
+:root[data-theme='light'] .text-green-400,
+:root[data-theme='light'] .text-emerald-300 { color: #0B7A43; }
+
+:root[data-theme='light'] .text-red-200,
+:root[data-theme='light'] .text-red-300,
+:root[data-theme='light'] .text-red-400 { color: #C5221F; }
+
+:root[data-theme='light'] .text-amber-300,
+:root[data-theme='light'] .text-amber-400 { color: #9A6400; }
+
+:root[data-theme='light'] .text-orange-200,
+:root[data-theme='light'] .text-orange-300 { color: #B45309; }
+
+:root[data-theme='light'] .text-blue-300,
+:root[data-theme='light'] .text-blue-400 { color: #1A56C4; }
+
+:root[data-theme='light'] .text-purple-300 { color: #6D28D9; }
+
+/* The tinted pill backgrounds (bg-green-500/15 and friends) sit at 10–20% opacity, which
+   is a wash on white. A flat light grey keeps the pill readable as a shape, and the text
+   colour above still says which kind it is. */
+:root[data-theme='light'] [class*='bg-green-500/'],
+:root[data-theme='light'] [class*='bg-red-500/'],
+:root[data-theme='light'] [class*='bg-amber-500/'],
+:root[data-theme='light'] [class*='bg-blue-500/'],
+:root[data-theme='light'] [class*='bg-orange-500/'],
+:root[data-theme='light'] [class*='bg-purple-500/'] { background-color: rgb(0 0 0 / 0.05); }

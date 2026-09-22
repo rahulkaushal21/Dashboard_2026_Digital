@@ -93,7 +93,7 @@ export default function Escalations() {
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
         <span className="text-xs text-mav-muted">To</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
-        <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
+        <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <KPICard label="Major process gaps" value={String(e.length)} />
@@ -106,9 +106,9 @@ export default function Escalations() {
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
               {[
-                <button key="date" onClick={() => handleSort('date')} className="hover:text-white cursor-pointer">Date{getSortIndicator('date')}</button>,
-                <button key="company" onClick={() => handleSort('company')} className="hover:text-white cursor-pointer">Company{getSortIndicator('company')}</button>,
-                <button key="type" onClick={() => handleSort('type')} className="hover:text-white cursor-pointer">Type{getSortIndicator('type')}</button>,
+                <button key="date" onClick={() => handleSort('date')} className="hover:text-mav-fg cursor-pointer">Date{getSortIndicator('date')}</button>,
+                <button key="company" onClick={() => handleSort('company')} className="hover:text-mav-fg cursor-pointer">Company{getSortIndicator('company')}</button>,
+                <button key="type" onClick={() => handleSort('type')} className="hover:text-mav-fg cursor-pointer">Type{getSortIndicator('type')}</button>,
                 'Situation',
                 'Impact',
                 'GEO',
@@ -139,7 +139,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return (
     <div className="flex gap-3 py-2 border-b border-mav-line/40 last:border-0">
       <div className="w-32 shrink-0 text-xs uppercase tracking-wide text-mav-muted pt-0.5">{label}</div>
-      <div className="text-sm text-white/90 break-words min-w-0">{children}</div>
+      <div className="text-sm text-mav-fg/90 break-words min-w-0">{children}</div>
     </div>
   )
 }
@@ -152,7 +152,7 @@ function EscalationDetail({ e, onClose }: { e: Escalation; onClose: () => void }
       <div onClick={ev => ev.stopPropagation()} className="bg-mav-panel border border-mav-line rounded-xl w-full max-w-2xl my-4 shadow-2xl">
         <div className="flex items-start justify-between gap-4 p-5 border-b border-mav-line">
           <div>
-            <div className="text-lg font-semibold text-white">{e.company_name || 'Major process gap'}</div>
+            <div className="text-lg font-semibold text-mav-fg">{e.company_name || 'Major process gap'}</div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
               <span className={`px-2 py-0.5 rounded-full border ${major ? 'border-red-500/50 text-red-400' : 'border-mav-line text-mav-muted'}`}>{e.escalation_type || 'Major process gap'}</span>
               {e.business_impact && <span className="px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">{e.business_impact} impact</span>}
@@ -160,13 +160,13 @@ function EscalationDetail({ e, onClose }: { e: Escalation; onClose: () => void }
               <span className="text-mav-muted">{e.tracking_date || e.month || ''}</span>
             </div>
           </div>
-          <button onClick={onClose} className="text-mav-muted hover:text-white text-xl leading-none px-2">×</button>
+          <button onClick={onClose} className="text-mav-muted hover:text-mav-fg text-xl leading-none px-2">×</button>
         </div>
         <div className="p-5">
           {e.evidence && (
             <div className="mb-4 rounded-lg bg-mav-dark/50 border border-mav-line p-4">
               <div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">What happened — email insight</div>
-              <div className="text-sm text-white/90 italic whitespace-pre-wrap">“{e.evidence}”</div>
+              <div className="text-sm text-mav-fg/90 italic whitespace-pre-wrap">“{e.evidence}”</div>
             </div>
           )}
           <div className="rounded-lg border border-mav-line/60 px-4">

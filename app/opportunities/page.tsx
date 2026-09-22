@@ -556,11 +556,11 @@ return (
 <div className="flex items-baseline justify-between mb-3">
 <div className="text-sm font-medium">{m.label}</div>
 <div className="text-xs text-mav-muted">
-{m.winRate == null ? 'no quotes' : <>win rate <span className="text-white font-semibold">{m.winRate}%</span> <span className="opacity-60">of all quotes</span>{m.decidedRate != null && <span className="opacity-60"> · {m.decidedRate}% of decided</span>}</>}
+{m.winRate == null ? 'no quotes' : <>win rate <span className="text-mav-fg font-semibold">{m.winRate}%</span> <span className="opacity-60">of all quotes</span>{m.decidedRate != null && <span className="opacity-60"> · {m.decidedRate}% of decided</span>}</>}
 </div>
 </div>
 <div className="flex gap-2 xl:gap-3">
-<Stat label="Quotes shared" n={m.shared} v={m.sharedValue} tone="text-white" title="Every quote dated in this month. Equals Pending + Won + Lost." />
+<Stat label="Quotes shared" n={m.shared} v={m.sharedValue} tone="text-mav-fg" title="Every quote dated in this month. Equals Pending + Won + Lost." />
 <Stat label="Pending" n={m.pending} v={m.pendingValue} tone="text-amber-400"
   title={`Not yet decided = Open + On Hold. Open ${money(m.openOnlyValue)} (${m.openOnly}) + On Hold ${money(m.holdValue)} (${m.hold}). The "Open pipeline value" KPI below counts Open ONLY, so it is the smaller number.`} />
 <Stat label="Won" n={m.won} v={m.wonValue} tone="text-green-400" />
@@ -704,8 +704,8 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 )}
 
 {iAmAdmin && (<>
-<div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).
-{onHold.length > 0 && <> Open pipeline here excludes On Hold; the cards above count both as pending — <span className="text-white">{money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}</span> still undecided.</>}</div>
+<div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-mav-fg">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).
+{onHold.length > 0 && <> Open pipeline here excludes On Hold; the cards above count both as pending — <span className="text-mav-fg">{money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}</span> still undecided.</>}</div>
 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
 <KPICard label="Open opportunities" value={String(open.length)} />
 <KPICard label={unlikelyOpen.length ? `Open pipeline, excl. On Hold (${money(likelyValue)} likely)` : 'Open pipeline value (excl. On Hold)'} value={money(openValue)} />
@@ -741,19 +741,19 @@ return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</opti
 <select value={fTech} onChange={e => setFTech(e.target.value)} className={selCls}><option value="">All tech</option>{uniq(all.map(x => x.technology)).map(t => <option key={t} value={t}>{t}</option>)}</select>
 <select value={fAM} onChange={e => setFAM(e.target.value)} className={selCls}><option value="">All AMs</option>{uniqNames(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
 <select value={fPM} onChange={e => { pmTouched.current = true; setFPM(e.target.value) }} className={selCls}><option value="">All PMs</option>{uniqNames(all.map(x => x.pm_owner)).map(pm => <option key={pm} value={pm}>{pm}</option>)}</select>
-<button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
-<button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
+<button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
+<button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
 {misTagged.length > 0 && (
-<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Quotes-sheet rows tagged "New" in Business Type (col P) whose owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. Each one is fixable in the sheet; they read as Repeat until it is. Email-only deals are not listed: they have no Business Type cell to correct.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Tagged New, not NBD ({misTagged.length})</button>
+<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Quotes-sheet rows tagged "New" in Business Type (col P) whose owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. Each one is fixable in the sheet; they read as Repeat until it is. Email-only deals are not listed: they have no Business Type cell to correct.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Tagged New, not NBD ({misTagged.length})</button>
 )}
 {lagRows.length > 0 && (
-<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Sheet not updated ({lagRows.length})</button>
+<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Sheet not updated ({lagRows.length})</button>
 )}
 {committedRows.length > 0 && (
-<button onClick={() => { setCommittedOnly(v => !v); setFStatus('') }} title="Still Open in the Quotes sheet, but the client has already said approved / please proceed, or has started discussing the invoice. Threads like these confirmed 96% of the time — these are most likely wins nobody has logged yet." className={`text-sm px-3 py-2 rounded-md border transition-colors ${committedOnly ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>✍ Client said yes ({committedRows.length})</button>
+<button onClick={() => { setCommittedOnly(v => !v); setFStatus('') }} title="Still Open in the Quotes sheet, but the client has already said approved / please proceed, or has started discussing the invoice. Threads like these confirmed 96% of the time — these are most likely wins nobody has logged yet." className={`text-sm px-3 py-2 rounded-md border transition-colors ${committedOnly ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✍ Client said yes ({committedRows.length})</button>
 )}
 {markedRows.length > 0 && (
-<button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-sm px-3 py-2 rounded-md border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>✎ Marked by hand ({markedRows.length})</button>
+<button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-sm px-3 py-2 rounded-md border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✎ Marked by hand ({markedRows.length})</button>
 )}
 <span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
 <span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
@@ -768,13 +768,13 @@ return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</opti
 const active = b.min === vMin && b.max === vMax
 return (
 <button key={b.label} onClick={() => { setVMin(active ? '' : b.min); setVMax(active ? '' : b.max) }}
-className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
 {b.label}
 </button>
 )
 })}
-{bandOn && <button onClick={() => { setVMin(''); setVMax('') }} className="text-xs px-2 py-1 rounded-md border border-mav-line text-mav-muted hover:text-white">clear</button>}
-<button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
+{bandOn && <button onClick={() => { setVMin(''); setVMax('') }} className="text-xs px-2 py-1 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">clear</button>}
+<button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>
 <span className="text-xs text-mav-muted ml-auto">
 {o.length} shown · {money(o.reduce((s, x) => s + (x.value || 0), 0))}
 {hiddenNoValue > 0 && <span className="text-amber-300/80" title="These match every other filter but carry no quoted figure, so a value band cannot place them. Clear the band to see them."> · {hiddenNoValue} hidden (no quoted value)</span>}
@@ -785,7 +785,7 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 <div className="overflow-x-auto">
 <table className="w-full text-sm min-w-[1180px]">
 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{COLS.map(c => (
-<th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-white">
+<th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-mav-fg">
 {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
 </th>
 ))}</tr></thead>
@@ -821,13 +821,13 @@ return (
 </div>
 {o.length > 0 && (
 <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-mav-line text-sm">
-<span className="text-mav-muted">Showing <span className="text-white">{curPage * perPage + 1}–{Math.min((curPage + 1) * perPage, o.length)}</span> of <span className="text-white">{o.length}</span></span>
+<span className="text-mav-muted">Showing <span className="text-mav-fg">{curPage * perPage + 1}–{Math.min((curPage + 1) * perPage, o.length)}</span> of <span className="text-mav-fg">{o.length}</span></span>
 <div className="flex items-center gap-1 ml-auto">
-<button onClick={() => setPage(0)} disabled={curPage === 0} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">« First</button>
-<button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={curPage === 0} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">‹ Prev</button>
-<span className="px-2 text-mav-muted">Page <span className="text-white">{curPage + 1}</span> / {pageCount}</span>
-<button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={curPage >= pageCount - 1} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">Next ›</button>
-<button onClick={() => setPage(pageCount - 1)} disabled={curPage >= pageCount - 1} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-white disabled:opacity-40">Last »</button>
+<button onClick={() => setPage(0)} disabled={curPage === 0} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-mav-fg disabled:opacity-40">« First</button>
+<button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={curPage === 0} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-mav-fg disabled:opacity-40">‹ Prev</button>
+<span className="px-2 text-mav-muted">Page <span className="text-mav-fg">{curPage + 1}</span> / {pageCount}</span>
+<button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={curPage >= pageCount - 1} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-mav-fg disabled:opacity-40">Next ›</button>
+<button onClick={() => setPage(pageCount - 1)} disabled={curPage >= pageCount - 1} className="px-2 py-1 rounded border border-mav-line text-mav-muted enabled:hover:text-mav-fg disabled:opacity-40">Last »</button>
 </div>
 <select value={perPage} onChange={e => setPerPage(Number(e.target.value))} className={selCls} title="Rows per page">
 {[25, 50, 100, 250].map(n => <option key={n} value={n}>{n} / page</option>)}
@@ -859,7 +859,7 @@ return (
 {(sel.sources || (sel.source ? [sel.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}
 </div>
 </div>
-<button onClick={() => setSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+<button onClick={() => setSel(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
 </div>
 
 <div className="mb-4 flex items-center justify-between rounded-lg border border-mav-line bg-mav-dark/40 px-4 py-3">
@@ -902,18 +902,18 @@ Mark Confirmed
     confirmation made by mistake. */}
 {sel.email_won && (
 <button disabled={savingWon} onClick={() => toggleConfirmed(sel)}
-className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors disabled:opacity-50">
+className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors disabled:opacity-50">
 {savingWon ? 'Saving…' : 'Undo confirm'}
 </button>
 )}
 <button disabled={savingLost} onClick={() => toggleLost(sel)}
-className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-white' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
+className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-mav-fg' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
 {savingLost ? 'Saving…' : sel.email_lost ? 'Undo Lost' : '✗ Mark Lost'}
 </button>
 {/* "Might not come" is a pipeline-confidence call, so it only applies while the deal is still live. */}
 {(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || sel.unlikely) && (
 <button disabled={savingUnlikely} onClick={() => toggleUnlikely(sel)}
-className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-line text-mav-muted hover:text-white' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/15'}`}>
+className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-line text-mav-muted hover:text-mav-fg' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/15'}`}>
 {savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo unlikely' : '🚫 Might not come'}
 </button>
 )}
@@ -966,7 +966,7 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
   className={`text-xs font-semibold px-2 py-1 rounded cursor-help ${TIER_STYLE[sel.intent_tier]}`}>{sel.intent_tier} · {sel.intent_score}</span>
 </div>
 <p className="text-sm text-mav-muted mb-3">
-<span className="text-white">{sel.intent_tier} = {TIER_LABEL[sel.intent_tier]}</span> ({TIER_MEANING[sel.intent_tier]?.range}).{' '}
+<span className="text-mav-fg">{sel.intent_tier} = {TIER_LABEL[sel.intent_tier]}</span> ({TIER_MEANING[sel.intent_tier]?.range}).{' '}
 {TIER_MEANING[sel.intent_tier]?.what}{' '}
 Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since April 2026, ones shaped like this converted about {sel.intent_score}% of the time.
 {sel.win_probability != null && Math.abs(sel.win_probability - sel.intent_score) >= 25 && (
@@ -1010,13 +1010,13 @@ Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since Apr
 <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 tabular-nums">
   <span>base {Math.round(BASE_RATE * 100)}%</span>
   <span className="opacity-50">×</span>
-  <span className="text-white">{effect(sel.intent_relationship, PIVOT.relationship)?.toFixed(2) ?? '—'}</span>
+  <span className="text-mav-fg">{effect(sel.intent_relationship, PIVOT.relationship)?.toFixed(2) ?? '—'}</span>
   <span className="opacity-50">relationship ×</span>
-  <span className="text-white">{effect(sel.intent_value_factor, PIVOT.value)?.toFixed(2) ?? '—'}</span>
+  <span className="text-mav-fg">{effect(sel.intent_value_factor, PIVOT.value)?.toFixed(2) ?? '—'}</span>
   <span className="opacity-50">value ×</span>
-  <span className="text-white">{effect(sel.intent_signal, PIVOT.email)?.toFixed(2) ?? '—'}</span>
+  <span className="text-mav-fg">{effect(sel.intent_signal, PIVOT.email)?.toFixed(2) ?? '—'}</span>
   <span className="opacity-50">email ×</span>
-  <span className="text-white">{sel.intent_recency?.toFixed(2) ?? '—'}</span>
+  <span className="text-mav-fg">{sel.intent_recency?.toFixed(2) ?? '—'}</span>
   <span className="opacity-50">silence</span>
   <span className="opacity-50">=</span>
   <span className={`font-semibold ${TIER_STYLE[sel.intent_tier]} px-1.5 py-0.5 rounded`}>{sel.intent_score}%</span>

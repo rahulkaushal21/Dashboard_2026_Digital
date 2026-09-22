@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useThemeInk } from '@/lib/use-theme-ink'
 import Header from '@/components/Header'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
@@ -121,12 +122,12 @@ const isJunk = (e: Escalation) => /^(source|escalation type|type of situation)$/
 function Stat({ label, value, sub, tone }: {
   label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: 'good' | 'warn' | 'bad'
 }) {
-  const colour = tone === 'good' ? 'text-green-300' : tone === 'warn' ? 'text-amber-300' : tone === 'bad' ? 'text-red-300' : 'text-white'
+  const colour = tone === 'good' ? 'text-green-300' : tone === 'warn' ? 'text-amber-300' : tone === 'bad' ? 'text-red-300' : 'text-mav-fg'
   return (
     <div className="rounded-lg border border-mav-line bg-mav-dark/40 px-3.5 py-3">
       <div className="text-[11px] uppercase tracking-wide text-mav-muted">{label}</div>
       <div className={`text-lg font-semibold mt-0.5 tabular-nums ${colour}`}>{value}</div>
-      {sub && <div className="text-[11px] text-white/50 mt-0.5 leading-snug">{sub}</div>}
+      {sub && <div className="text-[11px] text-mav-fg/50 mt-0.5 leading-snug">{sub}</div>}
     </div>
   )
 }
@@ -185,7 +186,7 @@ const scoreOf = (i: {
 
   const score = Math.max(0, Math.min(100, 70 + parts.reduce((sum, x) => sum + x.points, 0)))
   const band = score >= 80 ? 'Strong' : score >= 60 ? 'Steady' : score >= 40 ? 'Worth a call' : 'At risk'
-  const tone = score >= 80 ? 'text-green-400' : score >= 60 ? 'text-white' : score >= 40 ? 'text-amber-400' : 'text-red-400'
+  const tone = score >= 80 ? 'text-green-400' : score >= 60 ? 'text-mav-fg' : score >= 40 ? 'text-amber-400' : 'text-red-400'
   return { score, band, tone, parts: parts.sort((a, b) => a.points - b.points) }
 }
 
@@ -245,6 +246,7 @@ const monthsSince = (v?: string | null) => {
 }
 
 export default function Clients() {
+  const ink = useThemeInk()
   const [clients, setClients] = useState<Client[]>([])
   const [c360, setC360] = useState<Record<string, Client360>>({})
   // Per-client detail, loaded only when a drawer opens. Delivery history alone is 3,218
@@ -786,13 +788,13 @@ export default function Clients() {
       {pageCount > 1 && (
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
-            className="px-2 py-1 rounded border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 disabled:hover:text-mav-muted">← Prev</button>
+            className="px-2 py-1 rounded border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 disabled:hover:text-mav-muted">← Prev</button>
           {pageNums.map((n, i) => n === '…'
             ? <span key={`e${i}`} className="px-1 text-mav-muted">…</span>
             : <button key={n} onClick={() => setPage(n)}
-                className={`px-2.5 py-1 rounded border transition-colors ${n === safePage ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>{n}</button>)}
+                className={`px-2.5 py-1 rounded border transition-colors ${n === safePage ? 'bg-mav-fill text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{n}</button>)}
           <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={safePage === pageCount}
-            className="px-2 py-1 rounded border border-mav-line text-mav-muted hover:text-white disabled:opacity-30 disabled:hover:text-mav-muted">Next →</button>
+            className="px-2 py-1 rounded border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 disabled:hover:text-mav-muted">Next →</button>
         </div>
       )}
     </div>
@@ -832,13 +834,13 @@ export default function Clients() {
           <option value="Positive">🟢 Positive ({statCount('Positive')})</option>
           <option value="Neutral">🟡 Neutral ({statCount('Neutral')})</option>
         </select>
-        <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
-        <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${dipOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>📉 Revenue dip{dipByClient.size ? ` (${dipByClient.size})` : ''}</button>
-        <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
+        <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-fill text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
+        <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${dipOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>📉 Revenue dip{dipByClient.size ? ` (${dipByClient.size})` : ''}</button>
+        <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-fill text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
         <div className="ml-auto flex items-center gap-2">
           <div className="flex rounded-md border border-mav-line overflow-hidden">
-            <button onClick={() => setMode('clients')} className={`text-xs px-3 py-2 transition-colors ${mode === 'clients' ? 'bg-mav-yellow text-black font-medium' : 'text-mav-muted hover:text-white'}`}>Revenue clients ({clients.length})</button>
-            <button onClick={() => setMode('directory')} className={`text-xs px-3 py-2 transition-colors ${mode === 'directory' ? 'bg-mav-yellow text-black font-medium' : 'text-mav-muted hover:text-white'}`}>Full directory ({dir.length})</button>
+            <button onClick={() => setMode('clients')} className={`text-xs px-3 py-2 transition-colors ${mode === 'clients' ? 'bg-mav-fill text-black font-medium' : 'text-mav-muted hover:text-mav-fg'}`}>Revenue clients ({clients.length})</button>
+            <button onClick={() => setMode('directory')} className={`text-xs px-3 py-2 transition-colors ${mode === 'directory' ? 'bg-mav-fill text-black font-medium' : 'text-mav-muted hover:text-mav-fg'}`}>Full directory ({dir.length})</button>
           </div>
           <span className="text-xs text-mav-muted">{mode === 'clients' ? rows.length : dirRows.length} shown</span>
         </div>
@@ -849,7 +851,7 @@ export default function Clients() {
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">and</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-white">✕ clear dates</button>}
+        {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear dates</button>}
         <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
       </div>
 
@@ -867,16 +869,16 @@ export default function Clients() {
             return (
               <button key={name} onClick={() => setInd(active ? '' : name)} title={`${n} client${n === 1 ? '' : 's'} — click to ${active ? 'clear' : 'filter'}`}
                 className="w-full flex items-center gap-3 text-left group py-0.5">
-                <span className={`w-44 shrink-0 truncate text-xs ${active ? 'text-mav-yellow font-medium' : 'text-mav-muted group-hover:text-white'}`}>{name}</span>
+                <span className={`w-44 shrink-0 truncate text-xs ${active ? 'text-mav-yellow font-medium' : 'text-mav-muted group-hover:text-mav-fg'}`}>{name}</span>
                 <span className="flex-1 h-4 rounded bg-mav-dark overflow-hidden">
                   <span className={`block h-full rounded ${active ? 'bg-mav-yellow' : 'bg-mav-yellow/40 group-hover:bg-mav-yellow/70'}`} style={{ width: `${pct}%` }} />
                 </span>
-                <span className={`w-8 text-right text-xs font-semibold ${active ? 'text-mav-yellow' : 'text-white'}`}>{n}</span>
+                <span className={`w-8 text-right text-xs font-semibold ${active ? 'text-mav-yellow' : 'text-mav-fg'}`}>{n}</span>
               </button>
             )
           })}
         </div>
-        {ind && <button onClick={() => setInd('')} className="mt-3 text-xs text-mav-muted hover:text-white">✕ Clear industry filter</button>}
+        {ind && <button onClick={() => setInd('')} className="mt-3 text-xs text-mav-muted hover:text-mav-fg">✕ Clear industry filter</button>}
       </div>
 
       {mode === 'clients' ? (
@@ -885,15 +887,15 @@ export default function Clients() {
           <table className="w-full text-sm min-w-[980px]">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
               {['', 
-                <button key="client" onClick={() => handleSort('name')} className="hover:text-white cursor-pointer">Client{getSortIndicator('name')}</button>,
+                <button key="client" onClick={() => handleSort('name')} className="hover:text-mav-fg cursor-pointer">Client{getSortIndicator('name')}</button>,
                 'Industry',
-                <button key="geo" onClick={() => handleSort('geo')} className="hover:text-white cursor-pointer">GEO{getSortIndicator('geo')}</button>,
-                <button key="owner" onClick={() => handleSort('owner')} className="hover:text-white cursor-pointer">Owner{getSortIndicator('owner')}</button>,
+                <button key="geo" onClick={() => handleSort('geo')} className="hover:text-mav-fg cursor-pointer">GEO{getSortIndicator('geo')}</button>,
+                <button key="owner" onClick={() => handleSort('owner')} className="hover:text-mav-fg cursor-pointer">Owner{getSortIndicator('owner')}</button>,
                 'Health',
-                <button key="activity" onClick={() => handleSort('activity')} className="hover:text-white cursor-pointer">Last activity{getSortIndicator('activity')}</button>,
+                <button key="activity" onClick={() => handleSort('activity')} className="hover:text-mav-fg cursor-pointer">Last activity{getSortIndicator('activity')}</button>,
                 'Escal.',
                 'Convos',
-                <button key="ltv" onClick={() => handleSort('ltv')} title={`All-time billed revenue for this client${ltvWindow ? ` — every booking we hold, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)} (${ltvWindow.months} months)` : ''}. Not a rolling 12 months and not a forecast.`} className="hover:text-white cursor-pointer">LTV{getSortIndicator('ltv')}</button>
+                <button key="ltv" onClick={() => handleSort('ltv')} title={`All-time billed revenue for this client${ltvWindow ? ` — every booking we hold, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)} (${ltvWindow.months} months)` : ''}. Not a rolling 12 months and not a forecast.`} className="hover:text-mav-fg cursor-pointer">LTV{getSortIndicator('ltv')}</button>
               ].map((h, i) => <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody>
@@ -912,7 +914,7 @@ export default function Clients() {
                     <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
                     <td className="px-4 py-3"><button onClick={e => { e.stopPropagation(); setStat(b => b === st ? '' : st) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${tone(st)}`}>{st || '—'}</button></td>
                     <td className="px-4 py-3 whitespace-nowrap">{act.last
-                      ? <span className="inline-flex items-center gap-1.5"><span className={isRecent ? 'text-white' : 'text-mav-muted'}>{act.last}</span><span className="text-[11px] tracking-tight">{act.convo ? '💬' : ''}{act.esc ? '⚠' : ''}{act.quote ? '💰' : ''}</span>{isRecent && <span className="inline-block w-1.5 h-1.5 rounded-full bg-mav-yellow" title="active in the last 14 days" />}</span>
+                      ? <span className="inline-flex items-center gap-1.5"><span className={isRecent ? 'text-mav-fg' : 'text-mav-muted'}>{act.last}</span><span className="text-[11px] tracking-tight">{act.convo ? '💬' : ''}{act.esc ? '⚠' : ''}{act.quote ? '💰' : ''}</span>{isRecent && <span className="inline-block w-1.5 h-1.5 rounded-full bg-mav-yellow" title="active in the last 14 days" />}</span>
                       : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{r.escs.length ? <span className="text-xs px-2 py-1 rounded-full bg-red-500/15 text-red-400 font-medium">⚠ {r.escs.length}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
                     <td className="px-4 py-3">{nc ? <span className="text-xs px-2 py-1 rounded-full bg-blue-500/15 text-blue-400 font-medium">💬 {nc}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
@@ -931,9 +933,9 @@ export default function Clients() {
             only on hover, which meant nobody knew the tick was there to be hovered. */}
         <div className="px-4 py-3 border-b border-mav-line flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
           <span className="text-mav-muted">How each industry was decided:</span>
-          <span><span className="text-white">✓</span> <span className="text-mav-muted">read from the company&rsquo;s own website &mdash; confirmed ({dirSrc.verified.toLocaleString()})</span></span>
-          <span><span className="text-white">◌</span> <span className="text-mav-muted">read from the website, but the page was thin &mdash; worth a check ({dirSrc.thin.toLocaleString()})</span></span>
-          <span><span className="text-white">no mark</span> <span className="text-mav-muted">taken from the sheet, never verified against the site ({dirSrc.sheet.toLocaleString()})</span></span>
+          <span><span className="text-mav-fg">✓</span> <span className="text-mav-muted">read from the company&rsquo;s own website &mdash; confirmed ({dirSrc.verified.toLocaleString()})</span></span>
+          <span><span className="text-mav-fg">◌</span> <span className="text-mav-muted">read from the website, but the page was thin &mdash; worth a check ({dirSrc.thin.toLocaleString()})</span></span>
+          <span><span className="text-mav-fg">no mark</span> <span className="text-mav-muted">taken from the sheet, never verified against the site ({dirSrc.sheet.toLocaleString()})</span></span>
           <span className="text-mav-muted">Smaller grey text under the group name is the granular industry it was merged from.</span>
         </div>
         <div className="overflow-x-auto">
@@ -991,16 +993,16 @@ export default function Clients() {
         </div>
         <p className="text-xs text-mav-muted mb-4 max-w-4xl leading-relaxed">
           Where each industry still runs on a person, a spreadsheet and an inbox — and what Mavlers.ai could sell against it.
-          {aiBook.count > 0 && <>Booked <span className="text-mav-yellow">AI &amp; Automation</span> revenue is <span className="text-white">{fmtUsd(aiBook.total)} across {aiBook.count} booking{aiBook.count === 1 ? '' : 's'}</span>
-          {aiBook.topName && <>, and <span className="text-white">{aiBook.topShare}% of it is one client</span> ({aiBook.topName} — timesheet sync, warranty accounting, a nightly SAP cleanse, an AI translation plugin)</>}. </>}
+          {aiBook.count > 0 && <>Booked <span className="text-mav-yellow">AI &amp; Automation</span> revenue is <span className="text-mav-fg">{fmtUsd(aiBook.total)} across {aiBook.count} booking{aiBook.count === 1 ? '' : 's'}</span>
+          {aiBook.topName && <>, and <span className="text-mav-fg">{aiBook.topShare}% of it is one client</span> ({aiBook.topName} — timesheet sync, warranty accounting, a nightly SAP cleanse, an AI translation plugin)</>}. </>}
           Against a directory of {autoTotals.companies.toLocaleString()} companies who already trust us with their websites, that is the gap this section is about.
           Click an industry to open its plays.
         </p>
         <p className="text-[11px] text-mav-muted mb-4 max-w-4xl leading-relaxed">
-          <span className="text-white">How the LTV figure on each industry is calculated:</span> it is the sum of every dollar we have billed
+          <span className="text-mav-fg">How the LTV figure on each industry is calculated:</span> it is the sum of every dollar we have billed
           the <em>already-booked</em> clients in that industry &mdash; all-time, not a rolling window, and not a projection for the whole industry.
           It comes from the bookings master (all business units), plus any client that appears only in the web-revenue feed, so nothing is double-counted.
-          {ltvWindow && <> The revenue we hold runs <span className="text-white">{monLabel(ltvWindow.lo)} &rarr; {monLabel(ltvWindow.hi)}</span> ({ltvWindow.months} months),
+          {ltvWindow && <> The revenue we hold runs <span className="text-mav-fg">{monLabel(ltvWindow.lo)} &rarr; {monLabel(ltvWindow.hi)}</span> ({ltvWindow.months} months),
           so &ldquo;lifetime&rdquo; means that window &mdash; a client who spent with us before {monLabel(ltvWindow.lo)} will read low here.</>}
           {' '}The {autoTotals.companies.toLocaleString()}-company count beside it is the whole directory, booked or not, which is why a big list can sit next to a small LTV.
         </p>
@@ -1011,7 +1013,7 @@ export default function Clients() {
             magnitude. */}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 mb-5">
           {[
-            { n: autoTotals.companies.toLocaleString(), label: 'Addressable', sub: 'companies in the directory, all with an industry playbook below', cls: 'text-white' },
+            { n: autoTotals.companies.toLocaleString(), label: 'Addressable', sub: 'companies in the directory, all with an industry playbook below', cls: 'text-mav-fg' },
             { n: autoTotals.booked.toLocaleString(), label: 'Warm', sub: 'already buying from us — we hold the relationship and built the site', cls: 'text-mav-yellow' },
             { n: autoTotals.demand.toLocaleString(), label: 'Demand already heard', sub: 'have asked us for automation, integration or dashboard work in a quote or a conversation', cls: 'text-green-400' },
             { n: `${dirAi.native} + ${dirAi.adjacent}`, label: 'AI-native / AI-positioned', sub: `across the whole directory, read from each company's own site text — ${dirAi.unknown} more have no site text and are unknown, not no`, cls: 'text-blue-400' },
@@ -1028,9 +1030,9 @@ export default function Clients() {
           <span className="text-xs text-mav-muted">Filter by build type:</span>
           {(Object.keys(PLAY_TYPE_TONE) as PlayType[]).map(t => (
             <button key={t} onClick={() => setPlayType(playType === t ? '' : t)}
-              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${playType === t ? 'bg-mav-yellow text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>{t}</button>
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${playType === t ? 'bg-mav-fill text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{t}</button>
           ))}
-          {playType && <button onClick={() => setPlayType('')} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
+          {playType && <button onClick={() => setPlayType('')} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
         </div>
 
         <div className="space-y-2">
@@ -1059,7 +1061,7 @@ export default function Clients() {
                 </button>
                 {open && (
                   <div className="px-5 pb-5 border-t border-mav-line pt-4">
-                    <p className="text-xs leading-relaxed text-mav-muted mb-4 max-w-4xl"><span className="text-white font-medium">Where the manual effort sits: </span>{r.book.pain}</p>
+                    <p className="text-xs leading-relaxed text-mav-muted mb-4 max-w-4xl"><span className="text-mav-fg font-medium">Where the manual effort sits: </span>{r.book.pain}</p>
                     <div className="grid gap-3 md:grid-cols-3">
                       {plays.map(p => (
                         <div key={p.name} className="rounded-lg border border-mav-line bg-mav-dark/40 p-4">
@@ -1089,7 +1091,7 @@ export default function Clients() {
                       </div>
                     )}
                     <button onClick={() => { setInd(r.name); setMode('directory'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
-                      className="mt-4 text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white transition-colors">
+                      className="mt-4 text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">
                       → See the {r.companies.toLocaleString()} {r.name} companies in the directory
                     </button>
                   </div>
@@ -1138,7 +1140,7 @@ export default function Clients() {
                   {selC.ai_focus && <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">⚡ AI &amp; Automation</span>}
                   {selC.website && <div className="text-xs text-mav-muted mt-1">{selC.website}</div>}
                 </div>
-                <button onClick={() => setSelC(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+                <button onClick={() => setSelC(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
               </div>
 
               {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.unresolved ? 'border-amber-500/50 bg-amber-500/10 text-amber-300' : r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.unresolved ? '⚑ Unresolved' : r.level === 'At risk' ? '🔴 At risk' : '🟠 Watch'}:</span> {r.reasons.join(' · ')}</div>}
@@ -1170,8 +1172,8 @@ export default function Clients() {
                 {([['overview', 'Overview'], ['work', 'Revenue & work'], ['projects', 'Projects & quotes'], ['health', 'Health & talk'], ['qbr', 'QBR']] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setCTab(k)}
                     className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${cTab === k
-                      ? 'border-mav-yellow text-white font-medium'
-                      : 'border-transparent text-mav-muted hover:text-white'}`}>
+                      ? 'border-mav-yellow text-mav-fg font-medium'
+                      : 'border-transparent text-mav-muted hover:text-mav-fg'}`}>
                     {label}
                   </button>
                 ))}
@@ -1297,12 +1299,12 @@ export default function Clients() {
                     <ResponsiveContainer width="100%" height={150}>
                       <BarChart data={bill.series} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                        <XAxis dataKey="label" stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} interval={0} />
-                        <YAxis stroke="#9a9a9a" fontSize={10} tickLine={false} axisLine={false} width={44}
+                        <XAxis dataKey="label" stroke={ink.axis} fontSize={10} tickLine={false} axisLine={false} interval={0} />
+                        <YAxis stroke={ink.axis} fontSize={10} tickLine={false} axisLine={false} width={44}
                           tickFormatter={(v: number) => v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`} />
                         <Tooltip
                           cursor={{ fill: '#ffffff08' }}
-                          contentStyle={{ background: '#1B1B1B', border: '1px solid #333', borderRadius: 8, fontSize: 12 }}
+                          contentStyle={{ background: ink.tip, border: `1px solid ${ink.grid}`, borderRadius: 8, fontSize: 12 }}
                           labelFormatter={(_l: any, pl: any) => pl?.[0]?.payload?.full || ''}
                           formatter={(v: number) => [fmtUsd(v), 'Billed']} />
                         <Bar dataKey="amount" fill="#FFDB2D" radius={[3, 3, 0, 0]} />
@@ -1404,7 +1406,7 @@ export default function Clients() {
                         : (
                           <div className="overflow-x-auto rounded-lg border border-mav-line">
                             <table className="w-full text-sm">
-                              <thead className="text-left text-white/70 border-b border-mav-line bg-mav-dark/40">
+                              <thead className="text-left text-mav-fg/70 border-b border-mav-line bg-mav-dark/40">
                                 <tr>
                                   <th className="px-3 py-2 font-medium whitespace-nowrap">Date</th>
                                   <th className="px-3 py-2 font-medium">Quote</th>
@@ -1447,7 +1449,7 @@ export default function Clients() {
                         : (
                           <div className="overflow-x-auto rounded-lg border border-mav-line">
                             <table className="w-full text-sm">
-                              <thead className="text-left text-white/70 border-b border-mav-line bg-mav-dark/40">
+                              <thead className="text-left text-mav-fg/70 border-b border-mav-line bg-mav-dark/40">
                                 <tr>
                                   <th className="px-3 py-2 font-medium whitespace-nowrap">Month</th>
                                   <th className="px-3 py-2 font-medium">Project</th>

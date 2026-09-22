@@ -293,7 +293,7 @@ export default function LndPage() {
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <button onClick={syncNow} disabled={syncing}
           title="Re-read the L&D sheet now instead of waiting for the hourly pull"
-          className="flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-mav-line hover:border-mav-yellow hover:text-white text-mav-muted disabled:opacity-60 disabled:hover:border-mav-line">
+          className="flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-mav-line hover:border-mav-yellow hover:text-mav-fg text-mav-muted disabled:opacity-60 disabled:hover:border-mav-line">
           <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
           {syncing ? 'Syncing…' : 'Sync now'}
         </button>
@@ -411,18 +411,18 @@ export default function LndPage() {
           <option value="activity">Sort: last activity</option>
         </select>
         <button onClick={() => setOnly(only === 'zero' ? '' : 'zero')}
-          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'zero' ? 'border-red-400 text-red-300 bg-red-500/10' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'zero' ? 'border-red-400 text-red-300 bg-red-500/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
           Never started ({k.zero})
         </button>
         <button onClick={() => setOnly(only === 'stalled' ? '' : 'stalled')}
-          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'stalled' ? 'border-amber-400 text-amber-300 bg-amber-500/10' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'stalled' ? 'border-amber-400 text-amber-300 bg-amber-500/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
           Stalled ({k.stalled})
         </button>
         <button onClick={() => setOnly(only === 'done' ? '' : 'done')}
-          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'done' ? 'border-green-400 text-green-300 bg-green-500/10' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'done' ? 'border-green-400 text-green-300 bg-green-500/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
           Complete ({k.complete})
         </button>
-        {(q || level || mgr || only) && <button onClick={() => { setQ(''); setLevel(''); setMgr(''); setOnly('') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
+        {(q || level || mgr || only) && <button onClick={() => { setQ(''); setLevel(''); setMgr(''); setOnly('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
         <span className="text-xs text-mav-muted ml-auto">{filtered.length} learners</span>
       </div>
 
@@ -503,7 +503,7 @@ export default function LndPage() {
                     </span>
                   </div>
                 </div>
-                <button onClick={() => setPicked(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+                <button onClick={() => setPicked(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
               </div>
 
               <div className="grid grid-cols-3 gap-2 mb-6 text-center">

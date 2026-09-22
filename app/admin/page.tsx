@@ -49,7 +49,7 @@ function SettingsForm({ canEdit }: { canEdit: boolean }) {
       </div>
       {canEdit && (
         <div className="flex items-center gap-4">
-          <button onClick={save} className="bg-mav-yellow text-black font-medium rounded-md px-5 py-2 text-sm">Save settings</button>
+          <button onClick={save} className="bg-mav-fill text-black font-medium rounded-md px-5 py-2 text-sm">Save settings</button>
           {status && <span className="text-sm text-mav-muted">{status}</span>}
         </div>
       )}
@@ -102,7 +102,7 @@ function AdminsPanel() {
         Admins see every PM&rsquo;s scorecard and can edit Settings. A PM without admin sees only their own scorecard,
         and anyone who is neither sees none of it. Everything else in the dashboard is open to all{' '}
         {ALLOWED_DOMAINS.join(' and ')} accounts. Only the super admin,{' '}
-        <span className="text-white">{OWNER_EMAIL}</span>, can change this list.
+        <span className="text-mav-fg">{OWNER_EMAIL}</span>, can change this list.
       </p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-4">
@@ -140,7 +140,7 @@ function AdminsPanel() {
           onKeyDown={e => e.key === 'Enter' && add()} className={`${inp} w-64`} />
         <input value={note} onChange={e => setNote(e.target.value)} placeholder="Why (optional)" className={`${inp} w-64`} />
         <button onClick={add} disabled={busy}
-          className="bg-mav-yellow text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+          className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
           {busy ? 'Saving…' : 'Add admin'}
         </button>
         {status && <span className="text-sm text-mav-muted">{status}</span>}
@@ -167,7 +167,7 @@ export default function Admin() {
             there is no way to tell whether the page is read-only by design or
             because something went wrong. */}
         <p className="-mt-2 mb-5 text-xs text-mav-muted">
-          Signed in as <span className="text-white">{email}</span>
+          Signed in as <span className="text-mav-fg">{email}</span>
           <span className={`ml-2 px-2 py-0.5 rounded-full border ${
             role === 'View only' ? 'border-mav-line text-mav-muted' : 'border-mav-yellow/40 text-mav-yellow'}`}>{role}</span>
         </p>

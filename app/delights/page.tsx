@@ -54,13 +54,13 @@ export default function Delights() {
           {geos.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
         {(['sheet', 'email'] as const).map(k => (
-          <button key={k} onClick={() => setSrc(v => v === k ? '' : k)} className={`text-xs px-2.5 py-2 rounded-md border transition-colors ${src === k ? (k === 'email' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-green-500/20 text-green-300 border-green-500/50') : 'border-mav-line text-mav-muted hover:text-white'}`}>{k === 'email' ? '✉ From email' : '📋 From sheet'} ({srcCounts[k]})</button>
+          <button key={k} onClick={() => setSrc(v => v === k ? '' : k)} className={`text-xs px-2.5 py-2 rounded-md border transition-colors ${src === k ? (k === 'email' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-green-500/20 text-green-300 border-green-500/50') : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{k === 'email' ? '✉ From email' : '📋 From sheet'} ({srcCounts[k]})</button>
         ))}
         <span className="text-xs text-mav-muted">From</span>
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo || src || from || to) && <button onClick={() => { setQ(''); setGeo(''); setSrc(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
+        {(q || geo || src || from || to) && <button onClick={() => { setQ(''); setGeo(''); setSrc(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
         <span className="text-xs text-mav-muted ml-auto">{filtered.length} happy clients</span>
       </div>
 
@@ -79,7 +79,7 @@ export default function Delights() {
                 {!!r.email_count && <span title={`${r.email_count} picked up in the email review`} className="text-[11px] px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300">✉ {r.email_count} from email</span>}
               </div>
               {r.headline
-                ? <p className="text-sm leading-relaxed line-clamp-4 text-white/90">&ldquo;{r.headline}&rdquo;</p>
+                ? <p className="text-sm leading-relaxed line-clamp-4 text-mav-fg/90">&ldquo;{r.headline}&rdquo;</p>
                 : <p className="text-sm text-mav-muted italic">{r.headline_evidence ? 'Great feedback captured as a screenshot' : 'Positive feedback on record'}{r.headline_project ? ` — ${r.headline_project}` : ''}.</p>}
               <div className="mt-2 flex items-center gap-2 text-[11px] text-mav-muted">
                 {r.headline_evidence && <a href={r.headline_evidence} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-green-400 hover:underline">📷 View feedback</a>}
@@ -105,7 +105,7 @@ export default function Delights() {
                   {sel_.client_email && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.client_email}</span>}
                 </div>
               </div>
-              <button onClick={() => setSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+              <button onClick={() => setSel(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
             </div>
 
             <div className="text-xs uppercase tracking-wide text-green-300/80 mb-2">What the client said</div>

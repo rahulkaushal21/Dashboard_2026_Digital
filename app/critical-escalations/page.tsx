@@ -81,7 +81,7 @@ export default function CriticalEscalations() {
       <Header title="Critical Escalations" subtitle="Major negative feedback raised by clients over email — one row per client. Escalations stay here even after they're resolved; mark them Fixed or Positive yourself." />
 
       <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-red-300 font-semibold">How this works:</span> one entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="text-white">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-300">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-300">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="text-mav-muted">Remove</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.
+        <span className="text-red-300 font-semibold">How this works:</span> one entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="text-mav-fg">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-300">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-300">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="text-mav-muted">Remove</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
@@ -100,7 +100,7 @@ export default function CriticalEscalations() {
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo(''); setFrom(''); setTo(''); setStatus('all') }} className="text-xs text-mav-muted hover:text-white">✕ clear</button>}
+        {(q || geo || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo(''); setFrom(''); setTo(''); setStatus('all') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
         <span className="text-xs text-mav-muted ml-auto">{filtered.length} clients · {openCount} open · {unresolvedCount} unresolved</span>
       </div>
 
@@ -160,7 +160,7 @@ export default function CriticalEscalations() {
                   {sel_.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.geo}</span>}
                 </div>
               </div>
-              <button onClick={() => setSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+              <button onClick={() => setSel(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
             </div>
 
             <div className="space-y-4">

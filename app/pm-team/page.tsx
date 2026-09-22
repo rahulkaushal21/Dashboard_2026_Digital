@@ -83,7 +83,7 @@ export default function PmTeam() {
           <h2 className="text-lg font-semibold mb-2">Nothing to show here</h2>
           <p className="text-sm text-mav-muted">
             This section holds individual PM scorecards. You&rsquo;re signed in as{' '}
-            <span className="text-white">{email}</span>, which isn&rsquo;t on the PM roster, so there is no
+            <span className="text-mav-fg">{email}</span>, which isn&rsquo;t on the PM roster, so there is no
             scorecard of your own to show. Ask {OWNER_EMAIL} for admin access if you need to see the team&rsquo;s.
           </p>
         </div>
@@ -175,7 +175,7 @@ function Row({ label, hint, kpi, weight, target, cells, render }: {
 }) {
   return (
     <tr className={kpi ? 'border-t border-mav-line/60' : ''}>
-      <th className={`sticky left-0 z-20 bg-mav-dark text-left px-4 py-2.5 border-r border-mav-line font-normal ${kpi ? 'text-white' : 'text-mav-muted'}`}>
+      <th className={`sticky left-0 z-20 bg-mav-dark text-left px-4 py-2.5 border-r border-mav-line font-normal ${kpi ? 'text-mav-fg' : 'text-mav-muted'}`}>
         {label}
         <span className="block text-[11px] text-mav-muted">
           {kpi ? `${Math.round((weight || 0) * 100)}% weight · full marks at ${target}` : hint}

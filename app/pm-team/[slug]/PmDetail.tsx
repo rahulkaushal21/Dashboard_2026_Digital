@@ -112,7 +112,7 @@ export default function PmDetail({ slug }: { slug: string }) {
 
   return (
     <div>
-      <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-muted hover:text-white mb-3">
+      <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-muted hover:text-mav-fg mb-3">
         <ArrowLeft size={14} /> {isAdmin ? 'PM Team' : 'My scorecard'}
       </Link>
       <Header title={pm.name} subtitle="Project manager — quarterly KPI, bookings and open quotes" />
@@ -170,7 +170,7 @@ export default function PmDetail({ slug }: { slug: string }) {
 
         <div className="px-5 py-3 border-t border-mav-line text-xs text-mav-muted space-y-1">
           <p>
-            <span className="text-white">Base {money(base)} a month.</span>{' '}
+            <span className="text-mav-fg">Base {money(base)} a month.</span>{' '}
             {raised
               ? `Raised from a last-year average of ${money(pm.lastYearAvg)} — that bar was cleared earlier this year, so the higher figure stands from here.`
               : `This is the last-year monthly average, still the bar because it has not been beaten this year yet.`}

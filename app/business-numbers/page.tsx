@@ -53,7 +53,7 @@ const Bars = ({ now, before, max }: { now: number; before: number; max: number }
       <div className="h-full bg-mav-yellow rounded-sm" style={{ width: `${max > 0 ? (now / max) * 100 : 0}%` }} />
     </div>
     <div className="h-2 rounded-sm bg-mav-dark overflow-hidden">
-      <div className="h-full bg-white/25 rounded-sm" style={{ width: `${max > 0 ? (before / max) * 100 : 0}%` }} />
+      <div className="h-full bg-mav-fg/25 rounded-sm" style={{ width: `${max > 0 ? (before / max) * 100 : 0}%` }} />
     </div>
   </div>
 )
@@ -102,9 +102,9 @@ export default function BusinessNumbers() {
       {loading ? <p className="text-sm text-mav-muted">Loading…</p> : (
         <>
           <p className="text-xs text-mav-muted mb-4 max-w-4xl">
-            <span className="text-white">{thisLabel}</span> against <span className="text-white">{prevLabel}</span> —
+            <span className="text-mav-fg">{thisLabel}</span> against <span className="text-mav-fg">{prevLabel}</span> —
             the same days in both months, so the comparison is not just "the month is not over yet".
-            Revenue is dated on <span className="text-white">Start Date</span>, the same basis as the Business
+            Revenue is dated on <span className="text-mav-fg">Start Date</span>, the same basis as the Business
             Overview sheet, so the two agree. Won money and quoted money are shown apart and never added together.
           </p>
 
@@ -129,7 +129,7 @@ export default function BusinessNumbers() {
 
           <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto mb-8">
             <table className="w-full text-sm">
-              <thead className="text-left text-white/70 border-b border-mav-line">
+              <thead className="text-left text-mav-fg/70 border-b border-mav-line">
                 <tr>
                   <th className={th}>Service</th>
                   <th className={`${th} text-right`}>Revenue</th>
@@ -137,7 +137,7 @@ export default function BusinessNumbers() {
                   <th className={th}>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="inline-block w-2 h-2 rounded-sm bg-mav-yellow" />this
-                      <span className="inline-block w-2 h-2 rounded-sm bg-white/25 ml-2" />last
+                      <span className="inline-block w-2 h-2 rounded-sm bg-mav-fg/25 ml-2" />last
                     </span>
                   </th>
                   <th className={`${th} text-right`}>Projects</th>
@@ -200,7 +200,7 @@ export default function BusinessNumbers() {
           </p>
           <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-white/70 border-b border-mav-line">
+              <thead className="text-left text-mav-fg/70 border-b border-mav-line">
                 <tr>
                   <th className={th}>Client</th>
                   <th className={th}>What it is</th>

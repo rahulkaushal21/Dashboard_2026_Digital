@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2 } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
+import ThemeToggle from './ThemeToggle'
 import { NAV_EVENT } from '@/lib/use-close-on-nav'
 
 // A nav entry is either a link or a group of links. Groups exist so Operations can
@@ -79,7 +80,7 @@ export default function Sidebar() {
       {/* Mobile top bar. Fixed so it survives the page's own scroll container. */}
       <div className="lg:hidden fixed top-0 inset-x-0 z-40 flex items-center gap-3 h-14 px-4 bg-mav-dark border-b border-mav-line">
         <button onClick={() => setOpen(true)} aria-label="Open menu" aria-expanded={open}
-          className="p-2 -ml-2 rounded-md text-mav-muted hover:text-white hover:bg-mav-panel">
+          className="p-2 -ml-2 rounded-md text-mav-muted hover:text-mav-fg hover:bg-mav-panel">
           <Menu size={20} />
         </button>
         <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
@@ -93,7 +94,7 @@ export default function Sidebar() {
         fixed inset-y-0 left-0 z-50 transition-transform duration-200 lg:static lg:translate-x-0
         ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <button onClick={() => setOpen(false)} aria-label="Close menu"
-          className="lg:hidden absolute top-3 right-3 p-2 rounded-md text-mav-muted hover:text-white hover:bg-mav-panel">
+          className="lg:hidden absolute top-3 right-3 p-2 rounded-md text-mav-muted hover:text-mav-fg hover:bg-mav-panel">
           <X size={18} />
         </button>
       <div className="flex items-center gap-2 px-2 py-3 mb-4">
@@ -105,9 +106,13 @@ export default function Sidebar() {
           ? <NavGroup key={entry.label} group={entry} path={path} />
           : <NavLink key={entry.href} leaf={entry} path={path} />)}
       </nav>
-      <div className="mt-auto pt-4 border-t border-mav-line px-3">
+      <div className="mt-auto pt-4 border-t border-mav-line">
+        {/* Light or dark, remembered per browser. Dark stays the default. */}
+        <div className="px-3 mb-2 -mx-0"><ThemeToggle /></div>
+      </div>
+      <div className="pt-3 border-t border-mav-line px-3">
         {email && <p className="text-xs text-mav-muted truncate mb-2" title={email}>{email}</p>}
-        <button onClick={signOut} className="flex items-center gap-2 text-xs text-mav-muted hover:text-white">
+        <button onClick={signOut} className="flex items-center gap-2 text-xs text-mav-muted hover:text-mav-fg">
           <LogOut size={13} /> Sign out
         </button>
       </div>
@@ -127,7 +132,7 @@ const samePath = (path: string | null, href: string) =>
 
 const linkCls = (active: boolean, indent = false) =>
   `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-sm transition-colors
-   ${active ? 'bg-mav-yellow text-black font-medium' : 'text-mav-muted hover:text-white hover:bg-mav-panel'}`
+   ${active ? 'bg-mav-fill text-black font-medium' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
 
 function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
   const { href, label, icon: Icon } = leaf
@@ -153,7 +158,7 @@ function NavGroup({ group, path }: { group: Group; path: string }) {
       <button
         onClick={() => setOpen(o => !o)}
         aria-expanded={expanded}
-        className={`w-full ${linkCls(false)} justify-between ${hasActive ? 'text-white' : ''}`}
+        className={`w-full ${linkCls(false)} justify-between ${hasActive ? 'text-mav-fg' : ''}`}
       >
         <span className="flex items-center gap-3"><Icon size={16} /> {label}</span>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}

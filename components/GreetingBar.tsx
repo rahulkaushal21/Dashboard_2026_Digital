@@ -66,7 +66,7 @@ export default function GreetingBar() {
         </h1>
         <p className="text-xs text-mav-muted mt-1">
           {me?.team
-            ? <>You are on <span className="text-white">{me.team}</span>. Revenue, clients and pipeline at a glance.</>
+            ? <>You are on <span className="text-mav-fg">{me.team}</span>. Revenue, clients and pipeline at a glance.</>
             : <>Revenue, clients and pipeline at a glance.</>}
         </p>
       </div>
@@ -93,7 +93,7 @@ export default function GreetingBar() {
             // one" is the answer somebody actually wanted.
             <p className="text-sm text-mav-muted">
               Clear for three weeks.
-              {next && <> Next is <span className="text-white">{next.name}</span>, {label(next.on_date)}.</>}
+              {next && <> Next is <span className="text-mav-fg">{next.name}</span>, {label(next.on_date)}.</>}
             </p>
           )}
         </div>

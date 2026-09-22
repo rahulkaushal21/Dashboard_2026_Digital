@@ -46,7 +46,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
 
   const active = rows.filter(r => r.active)
   const retired = rows.filter(r => !r.active)
-  const inp = 'bg-mav-dark border border-white/20 rounded-md px-3 py-2 text-sm text-white placeholder:text-white/35 outline-none focus:border-mav-yellow'
+  const inp = 'bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow'
 
   return (
     <div>
@@ -58,7 +58,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
           <tbody>
             {active.map((r, i) => (
               <tr key={r.value} className="border-b border-mav-line/60 last:border-0">
-                <td className="px-4 py-2.5 w-8 text-white/35 text-xs">{i + 1}</td>
+                <td className="px-4 py-2.5 w-8 text-mav-fg/35 text-xs">{i + 1}</td>
                 <td className="px-2 py-2.5">{r.value}</td>
                 <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   {canEdit && (
@@ -77,7 +77,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
             placeholder="Add a name" className={`${inp} w-56`} />
-          <button onClick={add} disabled={busy} className="bg-mav-yellow text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+          <button onClick={add} disabled={busy} className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
             {busy ? 'Saving…' : 'Add'}
           </button>
           {status && <span className="text-sm text-mav-muted">{status}</span>}
@@ -86,7 +86,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
 
       {retired.length > 0 && (
         <div>
-          <button onClick={() => setShowRetired(v => !v)} className="text-xs text-mav-muted hover:text-white">
+          <button onClick={() => setShowRetired(v => !v)} className="text-xs text-mav-muted hover:text-mav-fg">
             {showRetired ? 'Hide' : 'Show'} {retired.length} retired
           </button>
           {showRetired && (
@@ -99,7 +99,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
               ))}
             </div>
           )}
-          <p className="text-[11px] text-white/45 mt-2 max-w-xl">
+          <p className="text-[11px] text-mav-fg/45 mt-2 max-w-xl">
             Retired names stay on every project they already built. They are only removed from the dropdown for new work.
           </p>
         </div>

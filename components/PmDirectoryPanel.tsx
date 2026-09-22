@@ -123,7 +123,7 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
                     <input type="checkbox" checked={draft.active} onChange={e => setDraft({ ...draft, active: e.target.checked })} className="mr-1 align-middle" />active
                   </label>
                   <button onClick={saveEdit} disabled={busy} className="text-xs text-mav-yellow hover:underline mr-2">Save</button>
-                  <button onClick={() => { setEditing(null); setDraft(null) }} className="text-xs text-mav-muted hover:text-white">Cancel</button>
+                  <button onClick={() => { setEditing(null); setDraft(null) }} className="text-xs text-mav-muted hover:text-mav-fg">Cancel</button>
                 </td>
               </tr>
             ) : (
@@ -143,7 +143,7 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
                 <td className="px-4 py-3 text-mav-muted text-xs">{r.aliases.join(', ')}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   {canEdit && (<>
-                    <button onClick={() => startEdit(r)} className="text-xs text-mav-muted hover:text-white mr-3">Edit</button>
+                    <button onClick={() => startEdit(r)} className="text-xs text-mav-muted hover:text-mav-fg mr-3">Edit</button>
                     <button onClick={() => drop(r.email)} disabled={busy} className="text-mav-muted hover:text-red-400 disabled:opacity-50 align-middle" aria-label={`Remove ${r.email}`}><Trash2 size={15} /></button>
                   </>)}
                 </td>
@@ -165,7 +165,7 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
             </select>
             <input value={nAliases} onChange={e => setNAliases(e.target.value)} placeholder="spellings, comma separated" className={`${inp} w-72`} />
             <button onClick={add} disabled={busy || !nName.trim() || !nEmail.trim()}
-              className="bg-mav-yellow text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+              className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
               {busy ? 'Saving…' : 'Add to directory'}
             </button>
           </div>

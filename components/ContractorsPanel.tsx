@@ -55,20 +55,20 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
 
   const active = rows.filter(r => r.active)
   const retired = rows.filter(r => !r.active)
-  const inp = 'bg-mav-dark border border-white/20 rounded-md px-3 py-2 text-sm text-white placeholder:text-white/35 outline-none focus:border-mav-yellow'
+  const inp = 'bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow'
 
   return (
     <div className="mb-10">
       <h2 className="text-base font-semibold mb-1">Contractors</h2>
       <p className="text-sm text-mav-muted mb-4">
-        Who outsourced work goes to. Offered once a deal&rsquo;s Expert is set to <span className="text-white">Contractor</span>,
+        Who outsourced work goes to. Offered once a deal&rsquo;s Expert is set to <span className="text-mav-fg">Contractor</span>,
         and their cost lands in the sheet&rsquo;s Outsource Price column. Choosing one sets the cost currency to whatever
-        they invoice in. <span className="text-white">Any PM or admin can add one</span> &mdash; you do not need to raise a request.
+        they invoice in. <span className="text-mav-fg">Any PM or admin can add one</span> &mdash; you do not need to raise a request.
       </p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto mb-3">
         <table className="w-full text-sm">
-          <thead className="text-left text-white/70 border-b border-mav-line">
+          <thead className="text-left text-mav-fg/70 border-b border-mav-line">
             <tr>
               <th className="px-4 py-2 font-medium">Name</th>
               <th className="px-4 py-2 font-medium">Agency</th>
@@ -81,9 +81,9 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
             {active.map(c => (
               <tr key={c.name} className="border-b border-mav-line/60 last:border-0">
                 <td className="px-4 py-2.5">{c.name}</td>
-                <td className="px-4 py-2.5 text-white/60">{c.agency || '—'}</td>
+                <td className="px-4 py-2.5 text-mav-fg/60">{c.agency || '—'}</td>
                 <td className="px-4 py-2.5">{c.default_currency}</td>
-                <td className="px-4 py-2.5 text-white/60">{c.email || '—'}</td>
+                <td className="px-4 py-2.5 text-mav-fg/60">{c.email || '—'}</td>
                 <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   {canEdit && (
                     <>
@@ -107,7 +107,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
           <div className="text-sm font-medium mb-3">{editing ? `Editing ${editing}` : 'Add a contractor'}</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <label className="block">
-              <span className="text-xs font-medium text-white/85">Name</span>
+              <span className="text-xs font-medium text-mav-fg/85">Name</span>
               {/* The name is the key, so renaming means adding a new record. Locked while
                   editing rather than silently creating a second contractor. */}
               <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })}
@@ -115,31 +115,31 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
                 className={`${inp} w-full mt-1 ${editing ? 'opacity-60 cursor-not-allowed' : ''}`} />
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-white/85">Agency <span className="text-white/45">(optional)</span></span>
+              <span className="text-xs font-medium text-mav-fg/85">Agency <span className="text-mav-fg/45">(optional)</span></span>
               <input value={draft.agency} onChange={e => setDraft({ ...draft, agency: e.target.value })}
                 className={`${inp} w-full mt-1`} />
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-white/85">Default currency</span>
+              <span className="text-xs font-medium text-mav-fg/85">Default currency</span>
               <select value={draft.default_currency} onChange={e => setDraft({ ...draft, default_currency: e.target.value })}
                 className={`${inp} w-full mt-1`}>
                 {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-white/85">Email</span>
+              <span className="text-xs font-medium text-mav-fg/85">Email</span>
               <input type="email" value={draft.email} onChange={e => setDraft({ ...draft, email: e.target.value })}
                 className={`${inp} w-full mt-1`} />
             </label>
           </div>
           <div className="flex items-center gap-2 mt-3">
             <button onClick={save} disabled={busy}
-              className="bg-mav-yellow text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+              className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
               {busy ? 'Saving…' : editing ? 'Save changes' : 'Add contractor'}
             </button>
             {editing && (
               <button onClick={() => { setEditing(null); setDraft({ ...blank }) }}
-                className="text-xs px-3 py-2 rounded-md border border-white/20 text-white/70 hover:text-white">Cancel</button>
+                className="text-xs px-3 py-2 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg">Cancel</button>
             )}
             {status && <span className="text-sm text-mav-muted">{status}</span>}
           </div>
@@ -148,7 +148,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
 
       {retired.length > 0 && (
         <div>
-          <button onClick={() => setShowRetired(v => !v)} className="text-xs text-mav-muted hover:text-white">
+          <button onClick={() => setShowRetired(v => !v)} className="text-xs text-mav-muted hover:text-mav-fg">
             {showRetired ? 'Hide' : 'Show'} {retired.length} retired
           </button>
           {showRetired && (
@@ -161,7 +161,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
               ))}
             </div>
           )}
-          <p className="text-[11px] text-white/45 mt-2 max-w-xl">
+          <p className="text-[11px] text-mav-fg/45 mt-2 max-w-xl">
             Retired contractors stay named on every project they already built. They are only removed from the dropdown for new work.
           </p>
         </div>

@@ -36,9 +36,9 @@ import {
 // the scroll position and the focused field every time anything changed. Choosing
 // Contractor was just the first change big enough for anyone to notice.
 
-const ctl = `mt-1 w-full bg-mav-dark border rounded-md px-3 py-2 text-sm text-white placeholder:text-white/35
+const ctl = `mt-1 w-full bg-mav-dark border rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35
   focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors`
-const border = (bad: boolean) => bad ? 'border-amber-400/70' : 'border-white/20'
+const border = (bad: boolean) => bad ? 'border-amber-400/70' : 'border-mav-fg/20'
 
 /** One labelled control. `need` turns it amber; `auto`/`guess` mark a filled-in value. */
 function F({ label, need, auto, guess, hint, wide, from, children }: {
@@ -48,7 +48,7 @@ function F({ label, need, auto, guess, hint, wide, from, children }: {
   return (
     <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
       <span className="flex items-center gap-1.5 text-xs">
-        <span className={`font-medium ${need ? 'text-amber-300' : 'text-white/85'}`}>{label}</span>
+        <span className={`font-medium ${need ? 'text-amber-300' : 'text-mav-fg/85'}`}>{label}</span>
         {need && <span className="text-amber-300">· needed</span>}
         {auto && !need && (
           <span title={`Filled in from ${from || 'this client'}'s last project — check it`}
@@ -58,13 +58,13 @@ function F({ label, need, auto, guess, hint, wide, from, children }: {
         )}
         {guess && !auto && !need && (
           <span title="The usual answer across all projects — this client has no history here, so check it properly"
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-white/10 text-white/65">
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-mav-fg/10 text-mav-fg/65">
             <Sparkles size={10} /> usual
           </span>
         )}
       </span>
       {children}
-      {hint && <span className="mt-1 block text-[11px] text-white/50">{hint}</span>}
+      {hint && <span className="mt-1 block text-[11px] text-mav-fg/50">{hint}</span>}
     </label>
   )
 }
@@ -79,7 +79,7 @@ function Section({ n, title, blurb, children }: {
           <span className="grid place-items-center w-5 h-5 rounded-full bg-mav-yellow/15 border border-mav-yellow/40 text-[10px] font-semibold text-mav-yellow">{n}</span>
           {title}
         </h3>
-        <p className="text-[11px] text-white/55 mt-1 ml-7">{blurb}</p>
+        <p className="text-[11px] text-mav-fg/55 mt-1 ml-7">{blurb}</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 ml-0 sm:ml-7">{children}</div>
     </section>
@@ -306,11 +306,11 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold">Confirm {deal.company_name || 'this deal'}</h2>
-              <p className="text-xs text-white/60 mt-0.5">
+              <p className="text-xs text-mav-fg/60 mt-0.5">
                 This books the deal as revenue and writes its row into the sheet.
               </p>
             </div>
-            <button onClick={onClose} className="text-white/60 hover:text-white text-xl leading-none">&times;</button>
+            <button onClick={onClose} className="text-mav-fg/60 hover:text-mav-fg text-xl leading-none">&times;</button>
           </div>
 
           {sheetClient && filled.size > 0 && (
@@ -372,7 +372,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
 
           <Section n={3} title="The client" blurb="The agency is the company; the client name is the person at it.">
             <F label="Agency">
-              <input className={`${ctl} border-white/10 bg-white/[0.04] text-white/70 cursor-not-allowed`} value={deal.company_name || ''} readOnly
+              <input className={`${ctl} border-mav-fg/10 bg-white/[0.04] text-mav-fg/70 cursor-not-allowed`} value={deal.company_name || ''} readOnly
                 title="The company this deal belongs to. Changing it would make it a different deal." />
             </F>
             <F label="Client name" need={missing.includes('Client name')} auto={has('clientName')} from={deal.company_name}>
@@ -420,8 +420,8 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
                 GBP quote stored raw would overstate the pipeline by a third — showing the
                 converted figure here means nobody discovers that later. */}
             {converted && (
-              <div className="sm:col-span-2 rounded-lg bg-mav-yellow/10 border border-mav-yellow/30 px-3 py-2 text-xs text-white/75">
-                Books as <span className="text-white font-medium">
+              <div className="sm:col-span-2 rounded-lg bg-mav-yellow/10 border border-mav-yellow/30 px-3 py-2 text-xs text-mav-fg/75">
+                Books as <span className="text-mav-fg font-medium">
                   ${usd!.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
                 </span>
                 <span className="ml-1">· 1 {currency.toUpperCase()} = ${rate} USD, from Settings</span>
@@ -507,12 +507,12 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
 
         {/* Footer — also fixed, so Confirm is reachable without scrolling to the bottom. */}
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
-          <span className="text-[11px] text-white/60">
+          <span className="text-[11px] text-mav-fg/60">
             {ready ? 'Ready.' : `${missing.length} field${missing.length === 1 ? '' : 's'} left`}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose}
-              className="text-xs px-3 py-1.5 rounded-md border border-white/20 text-white/70 hover:text-white hover:border-white/40 transition-colors">
+              className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg hover:border-mav-fg/40 transition-colors">
               Cancel
             </button>
             {/* Not disabled when incomplete: the checklist above says what is missing, and

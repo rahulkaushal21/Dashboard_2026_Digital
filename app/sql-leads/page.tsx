@@ -43,7 +43,7 @@ export default function SqlLeads() {
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
         <span className="text-xs text-mav-muted">To</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
-        <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>
+        <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <KPICard label="SQLs" value={String(s.length)} />

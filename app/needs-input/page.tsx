@@ -63,11 +63,11 @@ export default function NeedsInput() {
 
       <div className="flex flex-wrap items-center gap-2 mb-5">
         <button onClick={() => setMineOnly(true)}
-          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${mineOnly ? 'border-mav-yellow/50 text-mav-yellow bg-mav-yellow/10' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${mineOnly ? 'border-mav-yellow/50 text-mav-yellow bg-mav-yellow/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
           Mine ({mineCount})
         </button>
         <button onClick={() => setMineOnly(false)}
-          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${!mineOnly ? 'border-mav-yellow/50 text-mav-yellow bg-mav-yellow/10' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${!mineOnly ? 'border-mav-yellow/50 text-mav-yellow bg-mav-yellow/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
           Everyone ({rows.length})
         </button>
         <span className="w-px h-5 bg-mav-line mx-1" />
@@ -75,7 +75,7 @@ export default function NeedsInput() {
           const n = rows.filter(x => x.reason === r.key).length
           return (
             <button key={r.key} onClick={() => setReason(reason === r.key ? '' : r.key)}
-              className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${reason === r.key ? r.tone + ' bg-white/5' : 'border-mav-line text-mav-muted hover:text-white'}`}>
+              className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${reason === r.key ? r.tone + ' bg-mav-fg/5' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
               {r.label} ({n})
             </button>
           )

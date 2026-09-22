@@ -19,11 +19,11 @@ const Field = ({ label, hint, value, onChange }: {
   label: string; hint?: string; value: string; onChange: (v: string) => void
 }) => (
   <label className="block">
-    <span className="text-xs font-medium text-white/85">{label}</span>
-    {hint && <span className="block text-[11px] text-white/50 mb-1">{hint}</span>}
+    <span className="text-xs font-medium text-mav-fg/85">{label}</span>
+    {hint && <span className="block text-[11px] text-mav-fg/50 mb-1">{hint}</span>}
     <textarea value={value} onChange={e => onChange(e.target.value)} rows={3}
-      className="mt-1 w-full bg-mav-dark border border-white/20 rounded-md px-3 py-2 text-sm text-white
-        placeholder:text-white/35 outline-none focus:border-mav-yellow transition-colors resize-y" />
+      className="mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg
+        placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow transition-colors resize-y" />
   </label>
 )
 
@@ -79,7 +79,7 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
           {rows.length > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-medium">{rows.length}</span>}
         </div>
         {canEdit && !form && (
-          <button onClick={() => start()} className="text-xs px-3 py-1.5 rounded-md bg-mav-yellow text-black font-medium hover:brightness-110 transition">
+          <button onClick={() => start()} className="text-xs px-3 py-1.5 rounded-md bg-mav-fill text-black font-medium hover:brightness-110 transition">
             Record a QBR
           </button>
         )}
@@ -94,14 +94,14 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
         <div className="rounded-lg border border-mav-yellow/30 bg-mav-yellow/5 p-4 mb-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
-              <span className="text-xs font-medium text-white/85">QBR date</span>
+              <span className="text-xs font-medium text-mav-fg/85">QBR date</span>
               <input type="date" value={form.qbr_date} onChange={e => set('qbr_date')(e.target.value)}
-                className="mt-1 w-full bg-mav-dark border border-white/20 rounded-md px-3 py-2 text-sm text-white outline-none focus:border-mav-yellow" />
+                className="mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg outline-none focus:border-mav-yellow" />
             </label>
             <label className="block">
-              <span className="text-xs font-medium text-white/85">Taken from</span>
+              <span className="text-xs font-medium text-mav-fg/85">Taken from</span>
               <select value={form.source} onChange={e => set('source')(e.target.value)}
-                className="mt-1 w-full bg-mav-dark border border-white/20 rounded-md px-3 py-2 text-sm text-white outline-none focus:border-mav-yellow">
+                className="mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg outline-none focus:border-mav-yellow">
                 {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
@@ -114,11 +114,11 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
           {error && <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</div>}
           <div className="flex items-center gap-2">
             <button onClick={save} disabled={busy}
-              className="text-xs px-4 py-1.5 rounded-md bg-mav-yellow text-black font-medium disabled:opacity-50 hover:brightness-110 transition">
+              className="text-xs px-4 py-1.5 rounded-md bg-mav-fill text-black font-medium disabled:opacity-50 hover:brightness-110 transition">
               {busy ? 'Saving…' : 'Save review'}
             </button>
-            <button onClick={() => setForm(null)} className="text-xs px-3 py-1.5 rounded-md border border-white/20 text-white/70 hover:text-white">Cancel</button>
-            <span className="text-[11px] text-white/50">Saving over the same date replaces that review.</span>
+            <button onClick={() => setForm(null)} className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg">Cancel</button>
+            <span className="text-[11px] text-mav-fg/50">Saving over the same date replaces that review.</span>
           </div>
         </div>
       )}

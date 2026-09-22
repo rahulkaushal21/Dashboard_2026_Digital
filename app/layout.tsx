@@ -1,5 +1,6 @@
 import './globals.css'
 import AuthProvider from '@/components/AuthProvider'
+import { themeScript } from '@/components/ThemeToggle'
 export const metadata = {
   title: 'Digital Dashboard',
   description: 'Digital dashboard — revenue, clients & opportunities',
@@ -13,7 +14,14 @@ export const metadata = {
 export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' as const }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark">
+      <head>
+        {/* Sets the saved theme before the first paint. Without it the page paints dark,
+            then React mounts and switches to light — a black flash on every load for
+            anybody using light mode. An inline blocking script is the only place that
+            can be prevented. */}
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="font-sans">
         <AuthProvider>{children}</AuthProvider>
       </body>

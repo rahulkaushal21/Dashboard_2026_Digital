@@ -134,7 +134,7 @@ function RouteGuard({ children }: { children: React.ReactNode }) {
 function Centered({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-screen flex flex-col items-center justify-center gap-4 text-mav-muted">
-      <MavlersLogo className="h-6 w-auto text-white/70" />
+      <MavlersLogo className="h-6 w-auto text-mav-fg/70" />
       <span className="text-xs uppercase tracking-[0.18em]">{children}</span>
     </div>
   )
@@ -189,7 +189,7 @@ function LoginScreen({ refused }: { refused: string | null }) {
 
         <div className="relative">
           <div className="flex items-center gap-3">
-            <MavlersLogo className="h-7 w-auto text-white sm:h-8" />
+            <MavlersLogo className="h-7 w-auto text-mav-fg sm:h-8" />
             <span className="h-5 w-px bg-mav-line" />
             <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-mav-muted">
               Digital
@@ -212,7 +212,7 @@ function LoginScreen({ refused }: { refused: string | null }) {
           <ul className="mt-9 space-y-5 max-w-md">
             {CAPABILITIES.map(c => (
               <li key={c.title} className="border-l-2 border-mav-yellow/40 pl-4">
-                <p className="text-sm font-semibold text-white">{c.title}</p>
+                <p className="text-sm font-semibold text-mav-fg">{c.title}</p>
                 <p className="mt-0.5 text-[13px] leading-relaxed text-mav-muted">{c.body}</p>
               </li>
             ))}
@@ -246,7 +246,7 @@ function LoginScreen({ refused }: { refused: string | null }) {
 
           <button onClick={google} disabled={busy}
             className="mt-7 w-full flex items-center justify-center gap-3 bg-white text-[#1f1f1f] font-semibold rounded-lg
-                       py-3 text-sm transition-colors hover:bg-white/90 disabled:opacity-60
+                       py-3 text-sm transition-colors hover:bg-mav-fg/90 disabled:opacity-60
                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mav-yellow focus-visible:ring-offset-2
                        focus-visible:ring-offset-mav-dark">
             <GoogleMark />

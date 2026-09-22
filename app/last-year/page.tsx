@@ -143,9 +143,9 @@ export default function LastYearReview() {
       <Header title="Quarter over Quarter Review" subtitle={`Quarter against quarter and year against year — who’s growing, slipping or dropped off`} />
 
       <div className="mb-4 text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
-        Pick any two quarters with the <span className="text-white">Compare / vs</span> selectors — use two <em>completed</em> quarters (e.g. {qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete. <span className="text-white">Dropped</span> = had revenue in {qLabel(QS[qBase])} but none in {qLabel(QS[qCur])}; <span className="text-white">New</span> = the reverse. The FY columns&rsquo; <span className="text-white">&ldquo;to date&rdquo;</span> still counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.
+        Pick any two quarters with the <span className="text-mav-fg">Compare / vs</span> selectors — use two <em>completed</em> quarters (e.g. {qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete. <span className="text-mav-fg">Dropped</span> = had revenue in {qLabel(QS[qBase])} but none in {qLabel(QS[qCur])}; <span className="text-mav-fg">New</span> = the reverse. The FY columns&rsquo; <span className="text-mav-fg">&ldquo;to date&rdquo;</span> still counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.
         {upcoming > 0 && <span> Excludes <span className="text-mav-yellow">{money(upcoming)}</span> in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</span>}
-        <span> <span className="text-white">PM</span> is whoever is on the client&rsquo;s most recent booking; a <span className="text-white">+n</span> beside it means the account changed hands during the period — hover to see everyone who held it. Filtering by PM narrows every figure on the page to that PM&rsquo;s bookings only.</span>
+        <span> <span className="text-mav-fg">PM</span> is whoever is on the client&rsquo;s most recent booking; a <span className="text-mav-fg">+n</span> beside it means the account changed hands during the period — hover to see everyone who held it. Filtering by PM narrows every figure on the page to that PM&rsquo;s bookings only.</span>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -180,7 +180,7 @@ export default function LastYearReview() {
         <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">To</span>
         <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(from || to || fGeo || fService || fPm) && <button onClick={() => { setFrom(''); setTo(''); setFGeo(''); setFService(''); setFPm('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-white">Reset</button>}
+        {(from || to || fGeo || fService || fPm) && <button onClick={() => { setFrom(''); setTo(''); setFGeo(''); setFService(''); setFPm('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>}
         <span className="text-xs text-mav-muted ml-auto">{view.length} clients · scroll right for all quarters →</span>
       </div>
 
@@ -193,7 +193,7 @@ export default function LastYearReview() {
                 <th className="px-4 py-3 font-medium whitespace-nowrap">PM</th>
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(lyStart).slice(2)}-{String(tyStart).slice(2)}</th>
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(tyStart).slice(2)} TD</th>
-                {QS.map((f, i) => <th key={i} className={`px-4 py-3 font-medium text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow' : i === qBase ? 'text-white' : ''}`}>{qLabel(f)}{i === qCur ? ' (compare)' : i === qBase ? ' (vs)' : ''}</th>)}
+                {QS.map((f, i) => <th key={i} className={`px-4 py-3 font-medium text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow' : i === qBase ? 'text-mav-fg' : ''}`}>{qLabel(f)}{i === qCur ? ' (compare)' : i === qBase ? ' (vs)' : ''}</th>)}
                 <th className="px-4 py-3 font-medium text-right whitespace-nowrap">QoQ Δ</th>
                 <th className="px-5 py-3 font-medium">Qtr trend</th>
               </tr>

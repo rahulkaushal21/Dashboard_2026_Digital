@@ -73,7 +73,7 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
       <p className="text-sm text-mav-muted mb-4">
         How a quote in another currency becomes USD — the value is multiplied by the rate.
         Every figure in the dashboard is USD, so these decide what a non-USD deal books at.
-        Changing a rate affects deals confirmed <span className="text-white">from now on</span>; anything
+        Changing a rate affects deals confirmed <span className="text-mav-fg">from now on</span>; anything
         already booked keeps the figure it was booked at.
       </p>
       {/* Unlike the contractor list, this stays admin-only: a rate is not local knowledge
@@ -113,7 +113,7 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
                     <div className="text-[11px] text-mav-muted mt-0.5">
                       {r.updated_by
                         ? <>{r.updated_by}{r.updated_at ? ` · ${fmtDate(r.updated_at)}` : ''}</>
-                        : <span className="text-white/35">never changed here</span>}
+                        : <span className="text-mav-fg/35">never changed here</span>}
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -148,7 +148,7 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
         <div className="flex flex-wrap items-center gap-2">
           <input value={newCur} onChange={e => setNewCur(e.target.value.toUpperCase())} placeholder="Code, e.g. ZAR" className={`${inp} w-32`} maxLength={5} />
           <input value={newRate} onChange={e => setNewRate(e.target.value)} placeholder="Rate to USD" className={`${inp} w-40`} />
-          <button onClick={add} disabled={busy} className="bg-mav-yellow text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+          <button onClick={add} disabled={busy} className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
             {busy ? 'Saving…' : 'Add currency'}
           </button>
           {status && <span className="text-sm text-mav-muted">{status}</span>}

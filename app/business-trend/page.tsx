@@ -11,7 +11,7 @@ import { fmtUsd } from '@/lib/metrics'
 
 // FY 2026-27 revenue goal. One constant — the progress bar, the shortfall line and
 // the plan below it all read from here, so the number can never disagree with itself.
-const selCls = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow text-white font-medium cursor-pointer'
+const selCls = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow text-mav-fg font-medium cursor-pointer'
 const ym = (s?: string) => (s || '').slice(0, 7)
 const ymd = (s?: string) => (s || '').slice(0, 10)
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -384,8 +384,8 @@ export default function BusinessTrendPage() {
         {([['trend', 'Trend'], ['forecast', 'Forecast']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${tab === k
-              ? 'border-mav-yellow text-white font-medium'
-              : 'border-transparent text-mav-muted hover:text-white'}`}>{label}</button>
+              ? 'border-mav-yellow text-mav-fg font-medium'
+              : 'border-transparent text-mav-muted hover:text-mav-fg'}`}>{label}</button>
         ))}
       </div>
 
@@ -400,7 +400,7 @@ export default function BusinessTrendPage() {
           <span className="uppercase tracking-wide text-mav-muted">To</span>
           <input type="month" value={toMonth} onChange={e => setToMonth(e.target.value)} className={selCls} />
         </label>
-        <button onClick={() => { setFromMonth(''); setToMonth('') }} className="mt-6 text-xs px-3 py-2 bg-mav-line border border-mav-line text-mav-muted rounded hover:border-mav-yellow hover:text-white transition-colors">
+        <button onClick={() => { setFromMonth(''); setToMonth('') }} className="mt-6 text-xs px-3 py-2 bg-mav-line border border-mav-line text-mav-muted rounded hover:border-mav-yellow hover:text-mav-fg transition-colors">
           Reset
         </button>
         <span className="text-xs text-mav-muted ml-4">
@@ -457,10 +457,10 @@ export default function BusinessTrendPage() {
           <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-4">
             <div className="text-xs font-medium text-mav-yellow mb-3">Definitions</div>
             <div className="text-xs text-mav-muted space-y-1">
-              <p><strong className="text-white">Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
-              <p><strong className="text-white">Target:</strong> {FY_TARGET_LABEL} total revenue</p>
-              <p><strong className="text-white">Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
-              <p><strong className="text-white">Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
+              <p><strong className="text-mav-fg">Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
+              <p><strong className="text-mav-fg">Target:</strong> {FY_TARGET_LABEL} total revenue</p>
+              <p><strong className="text-mav-fg">Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
+              <p><strong className="text-mav-fg">Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
             </div>
           </div>
           <div>
@@ -498,8 +498,8 @@ export default function BusinessTrendPage() {
                 />
               </div>
               <div className="flex justify-between mt-3 text-xs text-mav-muted">
-                <span>Projected: <span className="text-white font-medium">{fmtUsd(fy26Analysis.projected)}</span></span>
-                <span>Target: <span className="text-white font-medium">{FY_TARGET_LABEL}</span></span>
+                <span>Projected: <span className="text-mav-fg font-medium">{fmtUsd(fy26Analysis.projected)}</span></span>
+                <span>Target: <span className="text-mav-fg font-medium">{FY_TARGET_LABEL}</span></span>
               </div>
               {!fy26Analysis.onTrack && (
                 <p className="text-xs text-red-400 mt-3">
@@ -711,7 +711,7 @@ export default function BusinessTrendPage() {
                   {pushDetail.slip && <span className={`text-xs px-2 py-1 rounded-full ${pushDetail.slip.lapsed ? 'bg-red-500/15 text-red-400' : 'bg-orange-500/15 text-orange-300'}`}>{pushDetail.slip.lapsed ? 'Stopped billing' : 'Slowing'}</span>}
                 </div>
               </div>
-              <button onClick={() => setPushSel(null)} className="text-mav-muted hover:text-white text-2xl leading-none">×</button>
+              <button onClick={() => setPushSel(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
             </div>
 
             {pushDetail.slip && (
@@ -741,8 +741,8 @@ export default function BusinessTrendPage() {
                           <span>{fmtUsd(Math.round(l.booking_amount || 0))}</span>
                         </div>
                         <div className="mt-1 text-xs text-mav-muted">
-                          {l.sme ? <>SME <span className="text-white">{l.sme}</span></> : 'SME —'}
-                          {l.sales_person ? <> · Owner <span className="text-white">{l.sales_person}</span></> : ''}
+                          {l.sme ? <>SME <span className="text-mav-fg">{l.sme}</span></> : 'SME —'}
+                          {l.sales_person ? <> · Owner <span className="text-mav-fg">{l.sales_person}</span></> : ''}
                         </div>
                       </div>
                     ))}

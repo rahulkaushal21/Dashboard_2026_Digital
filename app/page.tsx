@@ -260,7 +260,7 @@ export default function Dashboard() {
           <Sparkles size={13} className={(scanState === 'queued' || scanState === 'running') ? 'animate-pulse' : ''} /> {scanState === 'queued' ? 'Queued…' : scanState === 'running' ? 'Scanning…' : 'Run scan'}
         </button>
         <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-white hover:border-mav-yellow disabled:opacity-50">
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg hover:border-mav-yellow disabled:opacity-50">
           <RefreshCw size={13} className={(syncing || refreshing) ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
         </button>
       </div>
@@ -269,8 +269,8 @@ export default function Dashboard() {
         {PRESETS.map(p => (
           <button key={p.key} onClick={() => applyPreset(p.key)}
             className={`text-sm px-3 py-2 rounded-md border transition-colors ${preset === p.key
-              ? 'bg-mav-yellow text-black border-mav-yellow font-medium'
-              : 'border-mav-line text-mav-muted hover:text-white'}`}>{p.label}</button>
+              ? 'bg-mav-fill text-black border-mav-yellow font-medium'
+              : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{p.label}</button>
         ))}
         <span className="text-xs text-mav-muted ml-2">From</span>
         <input type="date" value={from} onChange={e => onFrom(e.target.value)} className={selCls} />
@@ -334,7 +334,7 @@ export default function Dashboard() {
 
                   {ins.link && (
                     <Link href={ins.link.href}
-                      className="mt-auto pt-1 text-xs text-mav-muted hover:text-white inline-flex items-center gap-1 w-fit">
+                      className="mt-auto pt-1 text-xs text-mav-muted hover:text-mav-fg inline-flex items-center gap-1 w-fit">
                       {ins.link.label} <ArrowRight size={12} />
                     </Link>
                   )}
