@@ -2,7 +2,7 @@
  * The Mavlers wordmark and chevron mark, taken from mavlers.com/images/MavlersLogo.svg.
  *
  * Inlined rather than served from public/ on purpose: the GitHub Pages build sets
- * basePath, so every static asset needs a "/Dashboard_2026_Digital" prefix that is
+ * a basePath when there is no custom domain, so static assets need a "/Dashboard_2026_Digital" prefix that is
  * easy to forget and fails silently as a broken image. Inline SVG has no such trap,
  * and it lets the two halves take different colours — the source art is a flat
  * #1B1B1B, which is invisible on this dashboard's own background.

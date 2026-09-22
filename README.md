@@ -30,15 +30,19 @@ npm run dev
   Auth (Google), gated by the `dashboard_users` allowlist.
 
 ## Deploy (GitHub Pages)
-1. Create a repo named **Dashboard_2026_Digital** (the name must match `basePath`
-   in `next.config.js`; change both if you use a different name).
-2. Push this code to `main`.
-3. Repo → Settings → Pages → Source: **GitHub Actions**.
-4. The included workflow (`.github/workflows/deploy.yml`) builds the static export
+1. Push this code to `main`.
+2. Repo → Settings → Pages → Source: **GitHub Actions**, Custom domain:
+   **webdashboard.mavlers.io** (DNS: `CNAME webdashboard → rahulkaushal21.github.io`).
+3. The included workflow (`.github/workflows/deploy.yml`) builds the static export
    (`DEPLOY_TARGET=github`) and publishes it on every push to `main`.
-5. Your site: `https://<user>.github.io/Dashboard_2026_Digital/`.
-6. Add that URL to Supabase -> Authentication -> URL Configuration (Site URL +
-   `https://<user>.github.io/Dashboard_2026_Digital/**`) so magic-link login works.
+   `public/CNAME` carries the domain into the export.
+4. Your site: `https://webdashboard.mavlers.io/`. The old
+   `https://rahulkaushal21.github.io/Dashboard_2026_Digital/` redirects there.
+5. Add that URL to Supabase -> Authentication -> URL Configuration (Site URL +
+   `https://webdashboard.mavlers.io/**`) so Google sign-in can return to it.
+
+Without a custom domain a project site sits under `/<repo>/`; set
+`PAGES_CUSTOM_DOMAIN=` (empty) in the workflow to restore the `basePath`.
 
 The Supabase URL + anon key are public (RLS-protected) and are baked in at build
 time by the workflow. To point at a different project, set repo Variables
