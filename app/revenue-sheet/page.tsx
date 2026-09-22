@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from '@/components/Header'
 import Link from 'next/link'
 import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow } from '@/lib/supabase'
@@ -98,11 +98,18 @@ const COLUMNS: Col[] = [
   { key: 'month', label: 'Month-Year', compact: true, get: r => ym(r.booking_month) },
 ]
 
-// When this line was entered. The sheet's Confirmation Date is the one somebody types on
-// the day they book it, so that is what "newest first" means here; a line with none falls
-// back to its start date and then to its month, rather than sinking to the bottom.
-const entryDate = (r: LedgerRow) =>
-  (r.confirmed_at || '').slice(0, 10) || (r.start_date || '').slice(0, 10) || (r.booking_month || '')
+// WHICH DATE A LINE BELONGS TO — Start Date.
+//
+// The business reports on Start Date: the Business Overview sheet is built on it, and
+// Business Numbers was corrected onto it after WEB-US read nearly double on Confirmation
+// Date. Filtering and paging this page by anything else would put the same line in a
+// different month depending on which screen you were looking at.
+//
+// A line with no start date falls back to its confirmation date, then to its booking
+// month, rather than dropping out of every window and disappearing from the page.
+const rowDate = (r: LedgerRow) =>
+  (r.start_date || '').slice(0, 10) || (r.confirmed_at || '').slice(0, 10) || (r.booking_month || '')
+const rowMonth = (r: LedgerRow) => rowDate(r).slice(0, 7)
 
 export default function ProjectLedger() {
   const [rows, setRows] = useState<LedgerRow[]>([])
@@ -116,8 +123,16 @@ export default function ProjectLedger() {
   const [fPm, setFPm] = useState('')
   const [fAm, setFAm] = useState('')
   const [fSource, setFSource] = useState('')
+  // Opens on THIS MONTH rather than all 3,221 lines. The monthly job is this month's;
+  // everything else is two clicks away. Set after mount, because working out "now" during
+  // render makes the static export's prerendered HTML disagree with the browser.
   const [fFrom, setFFrom] = useState('')
   const [fTo, setFTo] = useState('')
+  const filtersTouched = useRef(false)
+  useEffect(() => {
+    const m = monthKey(new Date())
+    setFFrom(m); setFTo(m)
+  }, [])
   const [page, setPage] = useState(0)
   // Sorting. Default is the newest entry in the month first, which is what somebody
   // reconciling today's bookings opens this page for.
@@ -141,7 +156,16 @@ export default function ProjectLedger() {
   const [errors, setErrors] = useState<string[]>([])
 
   const load = () => getProjectLedger().then(setRows).finally(() => setLoading(false))
-  useEffect(() => { setIsAdmin(!!getStoredProfile()?.is_admin); getDirectoryMember(currentEmail()).then(setMe); load() }, [])
+  useEffect(() => {
+    setIsAdmin(!!getStoredProfile()?.is_admin)
+    getDirectoryMember(currentEmail()).then(m => {
+      setMe(m)
+      // A PM opens this page to work their own lines, so it starts on theirs. Only if
+      // nobody has touched the filter, so a deliberate choice is never overwritten.
+      if (m?.name) setFPm(prev => (prev === '' && !filtersTouched.current) ? m.name : prev)
+    })
+    load()
+  }, [])
 
   const opts = useMemo(() => ({
     dept: uniq(rows.map(r => r.service_dept)),
@@ -161,8 +185,8 @@ export default function ProjectLedger() {
       .filter(r => !fPm || r.pm_owner === fPm)
       .filter(r => !fAm || r.sales_person === fAm)
       .filter(r => !fSource || (fSource === 'sheet' ? r.in_sheet : !r.in_sheet))
-      .filter(r => !fFrom || ym(r.booking_month) >= fFrom)
-      .filter(r => !fTo || ym(r.booking_month) <= fTo)
+      .filter(r => !fFrom || rowMonth(r) >= fFrom)
+      .filter(r => !fTo || rowMonth(r) <= fTo)
       // Newest month first, and within a month the newest entry first — so today's
       // bookings are at the top on the 21st, then the 20th, then the 19th. A column sort
       // replaces the second half of that, never the month grouping, because the page is
@@ -180,7 +204,7 @@ export default function ProjectLedger() {
             if (d) return sortAsc ? d : -d
           }
         }
-        return entryDate(b).localeCompare(entryDate(a)) || (a.company_name || '').localeCompare(b.company_name || '')
+        return rowDate(b).localeCompare(rowDate(a)) || (a.company_name || '').localeCompare(b.company_name || '')
       })
   }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fSource, fFrom, fTo, sortKey, sortAsc])
 
@@ -191,7 +215,7 @@ export default function ProjectLedger() {
   // the unit the pager moves in.
   const monthPages = useMemo(() => {
     const out: string[] = []
-    for (const r of shown) { const m = ym(r.booking_month) || '—'; if (out[out.length - 1] !== m) if (!out.includes(m)) out.push(m) }
+    for (const r of shown) { const m = rowMonth(r) || '—'; if (out[out.length - 1] !== m) if (!out.includes(m)) out.push(m) }
     return out
   }, [shown])
 
@@ -206,10 +230,10 @@ export default function ProjectLedger() {
   const notInSheet = shown.filter(r => !r.in_sheet)
   const pages = Math.max(1, monthPages.length)
   const pageMonth = monthPages[Math.min(page, monthPages.length - 1)] || ''
-  const pageRows = useMemo(() => shown.filter(r => (ym(r.booking_month) || '—') === pageMonth), [shown, pageMonth])
+  const pageRows = useMemo(() => shown.filter(r => (rowMonth(r) || '—') === pageMonth), [shown, pageMonth])
   const pageTotal = pageRows.reduce((s, r) => s + (r.amount_usd || 0), 0)
 
-  const clearAll = () => { setSearch(''); setFDept(''); setFModel(''); setFGeo(''); setFPm(''); setFAm(''); setFSource(''); setFFrom(''); setFTo('') }
+  const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept(''); setFModel(''); setFGeo(''); setFPm(''); setFAm(''); setFSource(''); setFFrom(''); setFTo('') }
   const anyFilter = search || fDept || fModel || fGeo || fPm || fAm || fSource || fFrom || fTo
 
   const toggle = (k: string) => setPicked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })
@@ -310,15 +334,15 @@ export default function ProjectLedger() {
         <select value={fModel} onChange={e => setFModel(e.target.value)} className={sel}><option value="">All models</option>{opts.model.map(x => <option key={x}>{x}</option>)}</select>
         <select value={fDept} onChange={e => setFDept(e.target.value)} className={sel}><option value="">All depts</option>{opts.dept.map(x => <option key={x}>{x}</option>)}</select>
         <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={sel}><option value="">All GEOs</option>{opts.geo.map(x => <option key={x}>{x}</option>)}</select>
-        <select value={fPm} onChange={e => setFPm(e.target.value)} className={sel}><option value="">All PMs</option>{opts.pm.map(x => <option key={x}>{x}</option>)}</select>
+        <select value={fPm} onChange={e => { filtersTouched.current = true; setFPm(e.target.value) }} className={sel}><option value="">All PMs</option>{opts.pm.map(x => <option key={x}>{x}</option>)}</select>
         <select value={fAm} onChange={e => setFAm(e.target.value)} className={sel}><option value="">All AMs</option>{opts.am.map(x => <option key={x}>{x}</option>)}</select>
         <select value={fSource} onChange={e => setFSource(e.target.value)} className={sel}>
           <option value="">Sheet + dashboard</option><option value="sheet">In the sheet</option><option value="dashboard">Confirmed here only</option>
         </select>
-        <input type="month" value={fFrom} onChange={e => setFFrom(e.target.value)} className={sel} title="From month" />
-        <input type="month" value={fTo} onChange={e => setFTo(e.target.value)} className={sel} title="To month" />
+        <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={sel} title="From month — on Start Date" />
+        <input type="month" value={fTo} onChange={e => { filtersTouched.current = true; setFTo(e.target.value) }} className={sel} title="To month — on Start Date" />
         {anyFilter && <button onClick={clearAll} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">Clear</button>}
-        <button onClick={() => { setFModel('Dedicated'); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
+        <button onClick={() => { filtersTouched.current = true; setFModel('Dedicated'); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
           className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
           This month&rsquo;s Dedicated
         </button>
@@ -327,6 +351,7 @@ export default function ProjectLedger() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="text-sm text-mav-muted">
           {loading ? 'Loading…' : <>{shown.length.toLocaleString()} line{shown.length === 1 ? '' : 's'} · {clients} client{clients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(total)}</span>
+            <span className="ml-1 text-mav-muted/80">in {fFrom && fFrom === fTo ? monLabel(fFrom) : fFrom || fTo ? 'the chosen months' : 'all months'}{fPm ? `, ${fPm}` : ''}</span>
             {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}</>}
         </div>
         <div className="flex items-center gap-2">
@@ -466,6 +491,9 @@ export default function ProjectLedger() {
 
       <p className="text-xs text-mav-muted mt-4 max-w-3xl">
         Shown in the <span className="text-mav-fg">Web, Hub &amp; LP</span> tab&rsquo;s own columns and order.
+        Filtering and paging are on <span className="text-mav-fg">Start Date</span>, the same basis as Business Numbers
+        and the Business Overview sheet, so a line sits in the same month wherever you look at it.
+        It opens on this month and on your own lines &mdash; clear the filters to see everything.
         <span className="text-amber-300"> Pending</span> means confirmed here and not yet carried into the sheet by the
         hourly writer. A greyed <span className="text-mav-fg/40">&mdash;</span> on a sheet line is a column the dashboard has
         never stored, not an empty one; those values are in the source spreadsheet.
