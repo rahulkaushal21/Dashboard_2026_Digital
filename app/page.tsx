@@ -462,11 +462,18 @@ export default function Dashboard() {
           project: new development, ad-hoc, maintenance, additional pages.
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
-            <thead className="text-left text-mav-muted border-b border-mav-line">
-              <tr>
-                <th className="px-5 py-3 font-medium">Segment</th>
-                {segMonths.map(k => <th key={k} className="px-4 py-3 font-medium text-right whitespace-nowrap">{monthLabel(k)}</th>)}
+          {/* A real grid, not just row rules.
+              The lines are mav-FG at low alpha rather than mav-line, so they follow the
+              theme in the right direction on their own: fg is near-white on the dark
+              themes, where a visible line has to be LIGHTER than the panel, and
+              near-black on the light ones, where it has to be darker. A fixed
+              border-mav-line was doing neither well enough to separate a month from the
+              month beside it. */}
+          <table className="w-full text-sm min-w-[720px] border-collapse">
+            <thead className="text-left text-mav-muted">
+              <tr className="border-b-2 border-mav-fg/25">
+                <th className="px-5 py-3 font-medium border-r border-mav-fg/15">Segment</th>
+                {segMonths.map(k => <th key={k} className="px-4 py-3 font-medium text-right whitespace-nowrap border-r border-mav-fg/15">{monthLabel(k)}</th>)}
                 <th className="px-5 py-3 font-medium text-right whitespace-nowrap">6-mo total</th>
               </tr>
             </thead>
@@ -475,29 +482,31 @@ export default function Dashboard() {
                 // A fragment, not nested tables: the segment total and its two parts have to
                 // stay in ONE table or the month columns stop lining up across segments.
                 <Fragment key={seg}>
-                  <tr className="border-b border-mav-line/40 hover:bg-mav-dark/40">
-                    <td className="px-5 pt-3 pb-1.5 font-medium whitespace-nowrap">{seg}</td>
-                    {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right whitespace-nowrap">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
+                  {/* The heavier rule goes ABOVE each segment, so the three rows that
+                      belong together read as one block rather than three stripes. */}
+                  <tr className="border-t-2 border-mav-fg/20 hover:bg-mav-dark/40">
+                    <td className="px-5 pt-3 pb-1.5 font-medium whitespace-nowrap border-r border-mav-fg/15">{seg}</td>
+                    {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
                     <td className="px-5 pt-3 pb-1.5 text-right font-medium whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
                   </tr>
-                  {ENG.map((g, gi) => (
-                    <tr key={g} className={`text-xs text-mav-muted hover:bg-mav-dark/40 ${gi === ENG.length - 1 ? 'border-b border-mav-line/60' : ''}`}>
-                      <td className="pl-9 pr-5 py-1 whitespace-nowrap">{g}</td>
-                      {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(engCell(seg, g, k))}</td>)}
+                  {ENG.map(g => (
+                    <tr key={g} className="text-xs text-mav-muted hover:bg-mav-dark/40 border-t border-mav-fg/10">
+                      <td className="pl-9 pr-5 py-1 whitespace-nowrap border-r border-mav-fg/15">{g}</td>
+                      {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(engCell(seg, g, k))}</td>)}
                       <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(engRowTotal(seg, g))}</td>
                     </tr>
                   ))}
                 </Fragment>
               ))}
-              <tr className="border-t border-mav-line bg-mav-dark/30">
-                <td className="px-5 pt-3 pb-1.5 font-semibold">Total</td>
-                {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-semibold whitespace-nowrap">{fmtUsd(colTotal(k))}</td>)}
+              <tr className="border-t-2 border-mav-fg/30 bg-mav-dark/30">
+                <td className="px-5 pt-3 pb-1.5 font-semibold border-r border-mav-fg/15">Total</td>
+                {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-semibold whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(colTotal(k))}</td>)}
                 <td className="px-5 pt-3 pb-1.5 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
               </tr>
               {ENG.map(g => (
-                <tr key={g} className="text-xs text-mav-muted bg-mav-dark/30">
-                  <td className="pl-9 pr-5 py-1 whitespace-nowrap">{g}</td>
-                  {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(engColTotal(g, k))}</td>)}
+                <tr key={g} className="text-xs text-mav-muted bg-mav-dark/30 border-t border-mav-fg/10">
+                  <td className="pl-9 pr-5 py-1 whitespace-nowrap border-r border-mav-fg/15">{g}</td>
+                  {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(engColTotal(g, k))}</td>)}
                   <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + engColTotal(g, k), 0))}</td>
                 </tr>
               ))}
