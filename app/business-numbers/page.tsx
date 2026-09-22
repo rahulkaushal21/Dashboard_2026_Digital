@@ -12,9 +12,12 @@ import { fmtUsd } from '@/lib/metrics'
 // collapsing, every month, until the 30th — and a page that cries wolf for three weeks in
 // four stops being read.
 //
-// Dated on CONFIRMATION, not booking month. "What have we won this month" and "what is
-// billed this month" are different questions, and a retainer booked forward answers them
-// differently. This page asks the first one.
+// DATED ON START DATE, because that is what the Business Overview sheet the team already
+// reads is dated on. Confirmation date is defensible on its own terms — "what did we win
+// this month" — but it disagreed with the sheet on WEB-US by nearly double ($60,116
+// against $31,445 for 1–22 August), and a second set of numbers nobody can reconcile is
+// worse than no numbers. The other four services barely moved either way: their work
+// usually starts in the month it is confirmed in, and WEB-US books further ahead.
 //
 // Won and quoted are kept apart and never added together. They are different money at
 // different certainty, and a single headline number that mixes them is the fastest way to
@@ -101,15 +104,15 @@ export default function BusinessNumbers() {
           <p className="text-xs text-mav-muted mb-4 max-w-4xl">
             <span className="text-white">{thisLabel}</span> against <span className="text-white">{prevLabel}</span> —
             the same days in both months, so the comparison is not just "the month is not over yet".
-            Revenue is what was <span className="text-white">confirmed</span> in the window, not what is billed in it.
-            Won money and quoted money are shown apart and never added together.
+            Revenue is dated on <span className="text-white">Start Date</span>, the same basis as the Business
+            Overview sheet, so the two agree. Won money and quoted money are shown apart and never added together.
           </p>
 
           {/* The four numbers a leader checks first. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
             {[
-              { label: 'Confirmed this month', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue, sub: `${fmtUsd(t.prev_revenue)} by this day last month` },
-              { label: 'Deals won', value: String(t.this_deals), now: t.this_deals, before: t.prev_deals, sub: `${t.prev_deals} by this day last month` },
+              { label: 'Revenue this month', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue, sub: `${fmtUsd(t.prev_revenue)} by this day last month` },
+              { label: 'Projects started', value: String(t.this_deals), now: t.this_deals, before: t.prev_deals, sub: `${t.prev_deals} by this day last month` },
               { label: 'Quotes raised', value: String(t.this_quotes), now: t.this_quotes, before: t.prev_quotes, sub: `${fmtUsd(t.this_quotes_usd)} quoted · ${t.prev_quotes} last month` },
               { label: 'Open pipeline', value: fmtUsd(t.open_quotes_usd), now: 0, before: 0, sub: `${t.open_quotes} quotes still in play, all time` },
             ].map(c => (
@@ -129,7 +132,7 @@ export default function BusinessNumbers() {
               <thead className="text-left text-white/70 border-b border-mav-line">
                 <tr>
                   <th className={th}>Service</th>
-                  <th className={`${th} text-right`}>Confirmed</th>
+                  <th className={`${th} text-right`}>Revenue</th>
                   <th className={`${th} text-right`}>vs last month</th>
                   <th className={th}>
                     <span className="inline-flex items-center gap-1.5">
@@ -137,7 +140,7 @@ export default function BusinessNumbers() {
                       <span className="inline-block w-2 h-2 rounded-sm bg-white/25 ml-2" />last
                     </span>
                   </th>
-                  <th className={`${th} text-right`}>Deals</th>
+                  <th className={`${th} text-right`}>Projects</th>
                   <th className={`${th} text-right`}>Clients</th>
                   <th className={`${th} text-right`}>Quotes raised</th>
                   <th className={`${th} text-right`}>Open pipeline</th>

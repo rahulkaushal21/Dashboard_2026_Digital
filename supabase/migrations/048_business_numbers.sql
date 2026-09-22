@@ -23,3 +23,17 @@
 -- start being asked for just to make a page add up — so it falls back to the department
 -- that client's own revenue is booked under (by value), then to their GEO, then Other.
 -- That moved 54 open quotes out of Other and put WEB-UK's $240k pipeline where it belongs.
+
+-- ── Corrected 22 Sep 2026: revenue is dated on START DATE, not Confirmation Date ─────
+-- The first version dated revenue on confirmation, which is defensible on its own terms
+-- ("what did we win this month") but disagreed with the Business Overview sheet the team
+-- actually reads. WEB-US was where it showed: $60,116 against the sheet's $31,445 for
+-- 1–22 August, nearly double. The other four services barely moved either way — their
+-- work usually starts in the month it is confirmed in, and WEB-US books further ahead,
+-- so the two dates only pull apart there.
+--
+-- A second set of numbers nobody can reconcile is worse than no numbers. Verified after
+-- the change: 1–22 Aug reads 19,335 / 24,015 / 49,660 / 31,444 / 950 against the sheet's
+-- 19,335 / 24,014 / 49,662 / 31,445 / 950, and all of September totals $109,911 on both
+-- sides. Rows with no start date fall in no month, exactly as the sheet treats them —
+-- 6 revenue-bearing rows out of 3,221.
