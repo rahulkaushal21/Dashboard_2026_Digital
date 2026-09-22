@@ -1840,6 +1840,23 @@ export interface BizRow {
   open_quotes: number; open_quotes_usd: number
 }
 
+/**
+ * Rows where the sheet's Month column and the Start Date disagree about the month.
+ *
+ * Should always be empty. When it is not, whole-month and part-month figures will differ
+ * by the amount listed, which is exactly the discrepancy that took two dashboards side by
+ * side to spot. Business Numbers shows this inline rather than anybody having to look.
+ */
+export interface MonthDateMismatch {
+  row_key: string; company_name?: string; project_name?: string; service_dept?: string
+  pm_owner?: string; booking_month?: string; start_date?: string; amount_usd?: number; project_id?: string
+}
+export async function getMonthDateMismatches(): Promise<MonthDateMismatch[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_month_date_mismatch').select('*').order('booking_month', { ascending: false })
+  return (data as MonthDateMismatch[]) || []
+}
+
 /** The five services the business is run by, plus Other, in a fixed order. */
 export const BIZ_ORDER = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation', 'Other']
 

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import Link from 'next/link'
-import { getBusinessNumbers, getBigOpenDeals, BIZ_ORDER, type BizRow, type Opportunity } from '@/lib/supabase'
+import { getBusinessNumbers, getBigOpenDeals, getMonthDateMismatches, BIZ_ORDER, type BizRow, type MonthDateMismatch, type Opportunity } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Business Numbers — the month, by service, for somebody who runs the business.
@@ -22,6 +22,13 @@ import { fmtUsd } from '@/lib/metrics'
 // Won and quoted are kept apart and never added together. They are different money at
 // different certainty, and a single headline number that mixes them is the fastest way to
 // a forecast nobody believes.
+
+// The Month column is a month, so print it as one — "month 1 Sep" reads like a date.
+const monLabel = (v?: string) => {
+  const m = /^(\d{4})-(\d{2})/.exec(v || '')
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  return m ? `${MON[+m[2] - 1]} ${m[1]}` : '—'
+}
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -77,6 +84,8 @@ export default function BusinessNumbers() {
   const [deals, setDeals] = useState<Opportunity[]>([])
   const [unpriced, setUnpriced] = useState(0)
   const [loading, setLoading] = useState(true)
+  // Normally empty, and then this renders nothing at all.
+  const [mismatch, setMismatch] = useState<MonthDateMismatch[]>([])
 
   // Opens on the whole of the current month, first day to last.
   const now = useMemo(() => new Date(), [])
@@ -98,6 +107,7 @@ export default function BusinessNumbers() {
 
   useEffect(() => {
     getBigOpenDeals(25).then(d => { setDeals(d.rows); setUnpriced(d.unpriced) })
+    getMonthDateMismatches().then(setMismatch)
   }, [])
 
   // "Other" earns its row only when it holds something. An empty bucket on a leadership
@@ -160,6 +170,31 @@ export default function BusinessNumbers() {
         {from > to && <span className="text-xs text-red-400">From is after To.</span>}
       </div>
 
+      {/* Silent when the sheet is clean, which is nearly always. A row here makes the
+          whole-month and part-month figures differ by its own value, and it is invisible
+          in the sheet itself — the one that got through was found by holding two pages
+          side by side, which is not a process. */}
+      {mismatch.length > 0 && (
+        <div className="mb-4 text-xs rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 max-w-4xl">
+          <span className="text-mav-fg">
+            {mismatch.length === 1 ? 'One row has' : `${mismatch.length} rows have`} a Month column and a Start Date in
+            different months, worth {fmtUsd(mismatch.reduce((a, r) => a + (Number(r.amount_usd) || 0), 0))}.
+          </span>{' '}
+          Whole months are counted by the Month column and shorter ranges by the Start Date, so these rows change the
+          answer depending on the dates you pick. Fix them in the sheet:
+          <ul className="mt-1.5 space-y-0.5">
+            {mismatch.slice(0, 5).map(r => (
+              <li key={r.row_key} className="text-mav-muted">
+                <span className="text-mav-fg">{r.company_name || '—'}</span>
+                {r.project_name ? ` · ${r.project_name}` : ''} — month {monLabel(r.booking_month)},
+                starts {dayLabel(r.start_date) || '—'} · {fmtUsd(Number(r.amount_usd) || 0)}
+              </li>
+            ))}
+            {mismatch.length > 5 && <li className="text-mav-muted">…and {mismatch.length - 5} more</li>}
+          </ul>
+        </div>
+      )}
+
       {futureDays > 0 && (
         <div className="mb-4 text-xs rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 max-w-4xl">
           <span className="text-mav-fg">The month is still filling &mdash; {futureDays} of its days have not happened yet.</span>{' '}
@@ -182,7 +217,8 @@ export default function BusinessNumbers() {
               ? <> A whole month is counted by the web revenue sheet&rsquo;s <span className="text-mav-fg">Month</span> column,
                   so this page and the Dashboard report the same figure the sheet does.</>
               : <> A range narrower than a month is counted on <span className="text-mav-fg">Start Date</span>, because a
-                  month column cannot tell you about the 12th &mdash; so it can differ slightly from the whole-month figure.</>}
+                  month column cannot tell you about the 12th. The two agree row for row, so this adds up to the
+                  whole-month figure.</>}
             {' '}Won money and quoted money are shown apart and never added together.
           </p>
 
