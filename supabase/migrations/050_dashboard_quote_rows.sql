@@ -1,0 +1,22 @@
+-- The Quotes tab's dashboard-only rows, with the blanks filled in. Applied 22 Sep 2026.
+-- Pull the current definition with:
+--   select pg_get_viewdef('public.web_dashboard_quotes'::regclass, true);
+--
+-- All 101 of these came from the mail scan, and three columns were going out empty or
+-- wrong. Resolved in a view rather than inside the writer so it can be checked with a
+-- query instead of by reading Deno.
+--
+-- QUOTE ID was printing the row's internal key — "email:19f7d75088b8b0a8", a Gmail thread
+-- id. Nobody can look that up, and in a column people match on it is worse than a blank.
+-- Only a real QUT reference is written now; the rest stay empty, which is the honest
+-- answer: the scan found a deal, not a quote number.
+--
+-- CLIENT EMAIL is never set on a scanned deal (0 of 101). Recovered from the client
+-- record first, then from the most recent email signal for that company — that second one
+-- is literally the address the scan read the deal from. 82 of 101 resolve.
+--
+-- SERVICE DEPARTMENT is never set either. Taken from the PM's team, so Nitin and Madhav's
+-- deals read LP/HUB and Bonny's read WEB-UK; then from the department that client's own
+-- revenue is booked under. 89 of 101 resolve. The remaining 12 are owned by people
+-- outside the four teams, or by nobody, and have no revenue history — so they stay blank
+-- rather than being guessed.

@@ -416,51 +416,52 @@ const QUOTE_HEADERS = [
 ];
 
 async function buildQuotes(sb: any): Promise<string[][]> {
-  const grid: string[][] = [QUOTE_HEADERS];
+  const rows: { date: string; cells: string[] }[] = [];
 
   const { data: qs, error } = await sb.from("quotes")
     .select("quote_id, added_date, service_dept, technology, subject_project, agency, client_email, pc_sme, project_type, currency_type, estimated_cost, usd_value, status, notes, geo, business_type, sales_person, confirmed_in_days")
     .order("id");
   if (error) throw new Error("quotes: " + error.message);
   for (const q of qs || []) {
-    grid.push([
+    rows.push({ date: s(q.added_date), cells: [
       s(q.quote_id), sheetDate(q.added_date), s(q.service_dept), s(q.technology), s(q.subject_project),
       s(q.agency), s(q.client_email), s(q.pc_sme), s(q.project_type), s(q.currency_type), money(q.estimated_cost),
       money(q.usd_value), s(q.status), s(q.notes), s(q.geo), s(q.business_type), s(q.sales_person),
       q.confirmed_in_days === null || q.confirmed_in_days === undefined ? "" : String(q.confirmed_in_days),
-    ]);
+    ] });
   }
 
   // Deals that exist only here — entered by hand or found in email, open ones included.
   // Sheet-origin rows are excluded because they are already above, from the quotes table.
   //
-  // OPEN QUOTES MATTER MOST HERE. A quote still in play is the pipeline; leaving it out
-  // and writing only what closed would make the tab a record of the past instead of a
-  // working list. Status is carried through as the dashboard holds it, and an open deal
-  // that has never been given one reads "Open" rather than an empty cell, because a blank
-  // in a status column looks like missing data rather than a stage.
-  //
-  // Confirmed in Days is left blank: it is the Quotes sheet's own measure of how long a
-  // quote took to close, and for a deal that has not closed there is no such number.
-  const { data: opps, error: oe } = await sb.from("opportunities")
-    .select("quote_key, quote_id, source_date, service_dept, technology, source_subject, company_name, contact_email, pm_owner, project_type, currency, local_value, est_value, status, gist, geo, business_type, sales_person, origin, won, confirmed_at, unlikely, email_lost")
-    .in("origin", ["pm", "email", "recurring"]);
-  if (oe) throw new Error("opportunities: " + oe.message);
-  for (const o of opps || []) {
-    const status = s(o.status).trim()
-      || (o.won ? "Confirmed" : o.email_lost ? "Lost" : o.unlikely ? "Unlikely" : "Open");
-    // A confirmed deal's cycle is knowable; an open one's is not.
-    const days = (o.won && o.confirmed_at && o.source_date)
-      ? String(Math.max(0, Math.round((new Date(o.confirmed_at).getTime() - new Date(o.source_date).getTime()) / 86400000)))
-      : "";
-    grid.push([
-      s(o.quote_id) || s(o.quote_key), sheetDate(o.source_date), s(o.service_dept), s(o.technology), s(o.source_subject),
-      s(o.company_name), s(o.contact_email), s(o.pm_owner), s(o.project_type), s(o.currency || "USD"),
-      money(o.local_value ?? o.est_value), money(o.est_value), status, s(o.gist), geoRegion(o.geo),
-      s(o.business_type), s(o.sales_person), days,
-    ]);
+  // Read from web_dashboard_quotes, not from `opportunities` directly. Three columns on
+  // a scanned deal are empty or wrong at source and are resolved in that view, where the
+  // resolution can be checked with a query instead of being buried in here:
+  //   • Quote ID was printing the row's internal key — "email:19f7d75088b8b0a8", a Gmail
+  //     thread id. In a column people match on, that is worse than a blank.
+  //   • Client Email is never set by the scan; it comes from the client record, then from
+  //     the address the scan actually read the deal from.
+  //   • Service Department is never set either; it comes from the PM's team, so Nitin and
+  //     Madhav's deals read LP/HUB.
+  const { data: dash, error: de } = await sb.from("web_dashboard_quotes")
+    .select("quote_id, added_date, service_dept, technology, subject_project, agency, client_email, pc_sme, project_type, currency_type, estimated_cost, usd_value, status, notes, geo, business_type, sales_person, confirmed_in_days");
+  if (de) throw new Error("web_dashboard_quotes: " + de.message);
+  for (const q of dash || []) {
+    rows.push({ date: s(q.added_date), cells: [
+      s(q.quote_id), sheetDate(q.added_date), s(q.service_dept), s(q.technology), s(q.subject_project),
+      s(q.agency), s(q.client_email), s(q.pc_sme), s(q.project_type), s(q.currency_type), money(q.estimated_cost),
+      money(q.usd_value), s(q.status), s(q.notes), s(q.geo), s(q.business_type), s(q.sales_person),
+      q.confirmed_in_days === null || q.confirmed_in_days === undefined ? "" : String(q.confirmed_in_days),
+    ] });
   }
-  return grid;
+
+  // NEWEST FIRST, across both sources. Until now the tab was two blocks in two different
+  // orders — the quotes table by row id, then the dashboard's deals — so the dates ran
+  // forwards, stopped, and started again. Sorted on the ISO date rather than the printed
+  // one, because "21-Sep-2026" sorts alphabetically and nonsensically. Rows with no date
+  // go last: they are not the oldest, they are undated.
+  rows.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return [QUOTE_HEADERS, ...rows.map((r) => r.cells)];
 }
 
 const FEEDBACK_HEADERS = [
