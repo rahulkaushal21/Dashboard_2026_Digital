@@ -307,22 +307,25 @@ export default function Dashboard() {
     return { rows, m }
   }, [bookingRows, daysGone])
 
-  // Same days of each month rather than a part month against a whole one. On the 22nd,
-  // September against a finished August reads as a 49% collapse every single time, which
-  // is a fact about the calendar and not about the business.
+  // The comparison stops at today's DATE last month rather than running to the end of it.
+  // Held against a finished month, this month reads as a 49% collapse every single time
+  // until the 30th — a fact about the calendar, not about the business. Same rule as
+  // Business Numbers, so the two pages agree.
+  //
+  // Both sides are returned, not just the percentage: "down 9.7%" says nothing about
+  // whether that is $2k or $20k, and it is the money people act on.
   const mom = useMemo(() => {
     if (isMtd) {
-      const d = now.getDate()
       const pm = new Date(now.getFullYear(), now.getMonth() - 1, 1)
       // Clamped, so the 31st does not run off the end of a 30-day month.
-      const end = Math.min(d, monthEnd(pm).getDate())
+      const end = Math.min(now.getDate(), monthEnd(pm).getDate())
       const prev = sumBetween(ymd(pm), ymd(new Date(pm.getFullYear(), pm.getMonth(), end)))
-      return prev ? ((periodTotal - prev) / prev) * 100 : null
+      return { pct: prev ? ((periodTotal - prev) / prev) * 100 : null, cur: periodTotal, prev, to: end }
     }
-    if (!latestKey) return null
-    const prev = allMonthTotals[prevMonthKey(latestKey)]
-    const cur = allMonthTotals[latestKey]
-    return prev ? ((cur - prev) / prev) * 100 : null
+    if (!latestKey) return { pct: null, cur: 0, prev: 0, to: 0 }
+    const prev = allMonthTotals[prevMonthKey(latestKey)] || 0
+    const cur = allMonthTotals[latestKey] || 0
+    return { pct: prev ? ((cur - prev) / prev) * 100 : null, cur, prev, to: 0 }
   }, [isMtd, periodTotal, latestKey, allMonthTotals, scopedRev])
 
   // Everything below reads these, not the raw lists. A booking or a delight names only a
@@ -415,8 +418,8 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KPICard label={isMtd ? 'Revenue (this month)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom}
-          changeLabel={isMtd ? 'vs same days last month' : 'vs last month'}
+        <KPICard label={isMtd ? 'Revenue (this month)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom.pct}
+          changeLabel={isMtd ? `vs ${fmtUsd(mom.prev)} by this date last month` : `vs ${fmtUsd(mom.prev)} last month`}
           note={isMtd && daysGone < daysInMonth ? `${daysGone} of ${daysInMonth} days gone — the month is still filling` : undefined} />
         <KPICard label="Active clients" value={String(activeClients)} />
         <KPICard label="Open opportunities" value={fmtUsd(openPipeline.usd)}
