@@ -35,11 +35,11 @@ const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 const monthStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
 const monthEnd = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0)
 
-// Ranges people actually ask for. "This month" runs to the last day, as the default; "so
-// far" stops at today, which is the honest like-for-like while a month is still running.
+// Ranges people actually ask for. There is deliberately no "this month so far": the whole
+// month is the number the business reports, and the fair comparison is made by cutting
+// the PREVIOUS month short at today's date rather than by cutting this one short.
 const RANGES = (n: Date) => [
   { key: 'month', label: 'This month', from: ymd(monthStart(n)), to: ymd(monthEnd(n)) },
-  { key: 'mtd', label: 'This month so far', from: ymd(monthStart(n)), to: ymd(n) },
   { key: 'prev', label: 'Last month', from: ymd(monthStart(new Date(n.getFullYear(), n.getMonth() - 1, 1))), to: ymd(monthEnd(new Date(n.getFullYear(), n.getMonth() - 1, 1))) },
   { key: 'q', label: 'Last 3 months', from: ymd(monthStart(new Date(n.getFullYear(), n.getMonth() - 2, 1))), to: ymd(monthEnd(n)) },
 ]
@@ -131,14 +131,6 @@ export default function BusinessNumbers() {
   const prevLabel = w ? `${dayLabel(w.prev_start)} – ${dayLabel(w.prev_end)}` : ''
   const maxRev = Math.max(...shown.map(r => Math.max(r.this_revenue, r.prev_revenue)), 1)
 
-  // Days in the chosen range that have not happened yet. The default range runs to the
-  // last of the month, so for most of any month this page is comparing a part month
-  // against a whole one — which reads as a collapse that is purely the calendar. Saying
-  // so, with the fix one click away, is the difference between a number and a scare.
-  const today = ymd(now)
-  const futureDays = to > today
-    ? Math.round((new Date(to + 'T00:00:00').getTime() - new Date(today + 'T00:00:00').getTime()) / 86400000)
-    : 0
   const activeRange = ranges.find(r => r.from === from && r.to === to)?.key || ''
 
   const td = 'px-3 py-3 whitespace-nowrap'
@@ -148,7 +140,7 @@ export default function BusinessNumbers() {
   return (
     <div>
       <Header title="Business Numbers"
-        subtitle="How each service is doing, against the same span of the month before" />
+        subtitle="How each service is doing, against the same point of the month before" />
 
       {/* Outside the loading gate on purpose: changing a date refetches, and controls
           that vanish while the numbers reload are controls you cannot correct a typo in. */}
@@ -195,16 +187,11 @@ export default function BusinessNumbers() {
         </div>
       )}
 
-      {futureDays > 0 && (
-        <div className="mb-4 text-xs rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 max-w-4xl">
-          <span className="text-mav-fg">The month is still filling &mdash; {futureDays} of its days have not happened yet.</span>{' '}
-          The revenue figures are the month the web revenue sheet reports, so they match the Dashboard, but the
-          <span className="text-mav-fg"> vs last month</span> column is holding a part month against a whole one and
-          will read low until the month is out.{' '}
-          <button onClick={() => { const r = ranges[1]; setFrom(r.from); setTo(r.to) }}
-            className="underline underline-offset-2 text-mav-fg hover:text-mav-yellow">
-            Compare the same days instead
-          </button>
+      {w?.prev_capped && (
+        <div className="mb-4 text-xs rounded-lg border border-mav-line bg-mav-dark px-3 py-2 max-w-4xl text-mav-muted">
+          The month is still running, so the comparison stops at the same date last month:{' '}
+          <span className="text-mav-fg">{thisLabel}</span> against <span className="text-mav-fg">{prevLabel}</span>.
+          Holding it against a finished month instead would show every service collapsing, every month, until the 30th.
         </div>
       )}
 
@@ -212,7 +199,8 @@ export default function BusinessNumbers() {
         <>
           <p className="text-xs text-mav-muted mb-4 max-w-4xl">
             <span className="text-mav-fg">{thisLabel}</span> against <span className="text-mav-fg">{prevLabel}</span> —
-            the same span of the month before, so the comparison holds whichever dates you pick.
+            the month before, stopping at today's date while this month is still running, so the two are worth
+            putting side by side.
             {w?.whole_month
               ? <> A whole month is counted by the web revenue sheet&rsquo;s <span className="text-mav-fg">Month</span> column,
                   so this page and the Dashboard report the same figure the sheet does.</>

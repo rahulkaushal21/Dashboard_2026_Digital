@@ -15,11 +15,20 @@
 --     about the 12th. The page says so when this is what it is doing, since the two can
 --     differ slightly (they do, by $650, for one Impel.ai row — see migration 052).
 --
--- THE COMPARISON WINDOW IS THE SAME RANGE SHIFTED BACK ONE MONTH: 1–22 Sep compares
--- against 1–22 Aug, 1–30 Sep against the whole of August. Postgres clamps a month
--- subtraction to the shorter month, so 31 Oct goes back to 30 Sep rather than
--- overflowing. When the range runs past today the page says so in as many words, because
--- a part month against a whole one reads as a collapse that is purely the calendar.
+-- THE COMPARISON WINDOW IS THE SAME RANGE ONE MONTH BACK, BUT NEVER RUNS PAST THE SAME
+-- DATE OF LAST MONTH. So the whole of September ($110,561) is held against August up to
+-- the 22nd ($124,754) — what is on the books now against what was on the books by this
+-- point last month. Against a finished August it would read as a 49% collapse, every
+-- month, until the 30th.
+--
+-- The fair comparison is made by cutting the PREVIOUS month short, not this one. That is
+-- why there is no "this month so far" range: the whole month is the number the business
+-- reports, and it should not have to be shrunk to be compared.
+--
+-- A month that is already over compares against a whole month, because nothing needs
+-- cutting short — pick August and it sits against the whole of July. When the previous
+-- window IS cut short it has to be counted on the start date rather than the Month
+-- column, since a Month column cannot stop on the 22nd.
 --
 -- The old views are left exactly as they were, still answering "this month so far".
 

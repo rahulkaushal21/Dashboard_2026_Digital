@@ -1831,6 +1831,9 @@ export interface BizRow {
   // True when the range is whole calendar months, which are counted by the sheet's Month
   // column. Anything narrower falls back to the start date.
   whole_month?: boolean
+  // True when the comparison period was cut short at today's date last month, which is
+  // what happens whenever the range runs past today.
+  prev_capped?: boolean
   this_revenue: number; prev_revenue: number
   this_deals: number; prev_deals: number
   this_clients: number; prev_clients: number
@@ -1865,8 +1868,13 @@ export const BIZ_ORDER = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automati
  *
  * A whole calendar month is counted by the sheet's Month column, so this page reports the
  * same September the web revenue sheet does. Narrower ranges are counted on the start
- * date, which is the only per-day date a row carries. The comparison period is always the
- * same range shifted back one month.
+ * date, which is the only per-day date a row carries.
+ *
+ * The comparison period is the same range one month back, but it never runs past the same
+ * date of last month. So the whole of September is held against August up to the 22nd,
+ * not against a finished August — comparing what is on the books now with what was on the
+ * books by this point last month. A month that is already over compares against a whole
+ * month, because nothing needs cutting short.
  */
 export async function getBusinessNumbers(from?: string, to?: string): Promise<BizRow[]> {
   if (!supabase) return []
