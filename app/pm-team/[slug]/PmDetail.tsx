@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import ClientLink from '@/components/ClientLink'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
@@ -276,7 +277,7 @@ export default function PmDetail({ slug }: { slug: string }) {
                 {pending.rows.map(o => (
                   <tr key={o.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
                     <td className="px-5 py-2.5 text-mav-muted whitespace-nowrap">{oppDate(o).slice(0, 10)}</td>
-                    <td className="px-5 py-2.5">{o.company_name}</td>
+                    <td className="px-5 py-2.5"><ClientLink name={o.company_name} /></td>
                     <td className="px-5 py-2.5 text-mav-muted max-w-[260px] truncate" title={o.source_subject}>{o.source_subject}</td>
                     <td className="px-5 py-2.5 tabular-nums">{o.est_value ? money(o.est_value) : <span className="text-mav-muted">—</span>}</td>
                     <td className="px-5 py-2.5"><SourcePill s={o.origin === 'email' ? 'email' : 'sheet'} /></td>

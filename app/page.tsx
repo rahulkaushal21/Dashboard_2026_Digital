@@ -1,5 +1,6 @@
 'use client'
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import ClientLink from '@/components/ClientLink'
 import GreetingBar from '@/components/GreetingBar'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
@@ -556,7 +557,7 @@ export default function Dashboard() {
             <ul className="space-y-3">
               {topClients(rangeRev).map((c, i) => (
                 <li key={c.client_name} className="flex items-center justify-between text-sm">
-                  <span className="flex items-center gap-2"><span className="text-mav-muted w-4">{i + 1}</span>{c.client_name}</span>
+                  <span className="flex items-center gap-2 min-w-0"><span className="text-mav-muted w-4 shrink-0">{i + 1}</span><ClientLink name={c.client_name} className="truncate" /></span>
                   <span className="font-medium">{fmtUsd(c.revenue)}</span>
                 </li>
               ))}

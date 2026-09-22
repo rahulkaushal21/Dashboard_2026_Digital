@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import ForecastPanel from '@/components/ForecastPanel'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
@@ -599,7 +600,7 @@ export default function BusinessTrendPage() {
                 <tbody>
                   {plan.openDeals.slice(0, 12).map(o => (
                     <tr key={o.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                      <td className="px-3 py-2">{o.company_name}</td>
+                      <td className="px-3 py-2"><ClientLink name={o.company_name} /></td>
                       <td className="px-3 py-2 text-right">{fmtUsd(o.value || 0)}</td>
                       <td className="px-3 py-2 text-right">{o.win ? `${o.win}%` : '—'}</td>
                       <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(o.expected)}</td>

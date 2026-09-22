@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
@@ -168,7 +169,7 @@ export default function CriticalEscalations() {
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={`inline-block w-2.5 h-2.5 rounded-full ${sel_.status === 'resolved' ? 'bg-green-500' : sel_.status === 'unresolved' ? 'bg-amber-400' : 'bg-red-500'}`} />
-                  <h2 className="text-xl font-semibold">{sel_.company_name}</h2>
+                  <h2 className="text-xl font-semibold"><ClientLink name={sel_.company_name} /></h2>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   <span className={`text-xs px-2 py-1 rounded-full ${statusTone(sel_.status)}`}>{statusLabel(sel_.status)}</span>

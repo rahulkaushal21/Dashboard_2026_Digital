@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getDelights, type Delight } from '@/lib/supabase'
@@ -109,7 +110,7 @@ export default function Delights() {
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-lg">💚</span><h2 className="text-xl font-semibold">{sel_.company_name}</h2>
+                  <span className="text-lg">💚</span><h2 className="text-xl font-semibold"><ClientLink name={sel_.company_name} /></h2>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {sel_.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.geo}</span>}

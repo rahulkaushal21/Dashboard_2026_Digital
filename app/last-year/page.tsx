@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
@@ -203,7 +204,7 @@ export default function LastYearReview() {
                 const st = qStatus(r); const p = qPct(r); const d = qDelta(r)
                 return (
                   <tr key={r.client} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                    <td className="px-5 py-3 font-medium whitespace-nowrap sticky left-0 bg-mav-panel">{r.client}</td>
+                    <td className="px-5 py-3 font-medium whitespace-nowrap sticky left-0 bg-mav-panel"><ClientLink name={r.client} /></td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {r.pm
                         ? <>

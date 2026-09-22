@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
+import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
@@ -131,7 +132,7 @@ export default function Escalations() {
           <tbody>{e.slice(0, 400).map(x => (
             <tr key={x.id} onClick={() => setSel(x)} className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
               <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.tracking_date || x.month || '—'}</td>
-              <td className="px-4 py-3">{x.company_name}</td>
+              <td className="px-4 py-3"><ClientLink name={x.company_name} /></td>
               <td className="px-4 py-3"><span className={`text-xs ${isMajor(x) ? 'text-red-400' : 'text-mav-muted'}`}>{x.escalation_type || '—'}</span></td>
               <td className="px-4 py-3 text-mav-muted">{x.situation_type}</td>
               <td className="px-4 py-3 text-mav-muted">{x.business_impact}</td>
