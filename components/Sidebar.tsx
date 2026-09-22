@@ -6,6 +6,7 @@ import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Spark
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
+import { hueFor } from '@/lib/section-hue'
 import { NAV_EVENT } from '@/lib/use-close-on-nav'
 
 // A nav entry is either a link or a group of links. Groups exist so Operations can
@@ -130,18 +131,25 @@ const trim = (p?: string | null) => { const v = (p || '/').split(/[?#]/)[0]; ret
 const samePath = (path: string | null, href: string) =>
   trim(path) === trim(href) || (href !== '/' && trim(path).startsWith(trim(href) + '/'))
 
+// The active item is filled with ITS OWN section colour rather than the one brand yellow:
+// the nav is where you learn what each section's colour is, so every page's heading rule
+// and card edges are already familiar by the time you get there. White text on these,
+// since they are all dark enough to carry it in both themes.
 const linkCls = (active: boolean, indent = false) =>
   `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-sm transition-colors
-   ${active ? 'bg-mav-fill text-black font-medium' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
+   ${active ? 'text-white font-medium' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
 
 function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
   const { href, label, icon: Icon } = leaf
+  const active = samePath(path, href)
+  const hue = hueFor(href)
   return (
     // Announce the click so any open drawer closes itself. Needed because clicking the
     // section you are ALREADY on is a navigation to the same route: nothing re-renders,
     // so a drawer left open would stay open and the link would look broken.
     <Link href={href} onClick={() => window.dispatchEvent(new Event(NAV_EVENT))}
-      className={linkCls(samePath(path, href), indent)}>
+      className={linkCls(active, indent)}
+      style={active ? { background: `var(--nav-${hue.name}, ${hue.dark})` } : undefined}>
       <Icon size={16} /> {label}
     </Link>
   )

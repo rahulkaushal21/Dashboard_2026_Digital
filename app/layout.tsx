@@ -1,6 +1,7 @@
 import './globals.css'
 import AuthProvider from '@/components/AuthProvider'
 import { themeScript } from '@/components/ThemeToggle'
+import SectionTheme from '@/components/SectionTheme'
 export const metadata = {
   title: 'Digital Dashboard',
   description: 'Digital dashboard — revenue, clients & opportunities',
@@ -23,6 +24,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="font-sans">
+        {/* Publishes the current section's colour for the heading rule, the nav and
+            the headline cards to pick up. */}
+        <SectionTheme />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
