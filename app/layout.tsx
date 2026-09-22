@@ -1,6 +1,11 @@
 import './globals.css'
 import AuthProvider from '@/components/AuthProvider'
-export const metadata = { title: 'Digital Dashboard', description: 'Digital dashboard — revenue, clients & opportunities' }
+export const metadata = {
+  title: 'Digital Dashboard',
+  description: 'Digital dashboard — revenue, clients & opportunities',
+  // Internal tool: keep it out of search engines. Mirrored by public/robots.txt.
+  robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
+}
 // Without this every page is laid out at ~980px and then zoomed out on a phone,
 // which is why the whole dashboard read as unusable on mobile regardless of the
 // responsive classes underneath. maximum-scale is deliberately NOT set: capping
