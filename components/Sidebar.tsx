@@ -22,6 +22,9 @@ const isGroup = (e: Entry): e is Group => 'children' in e
 
 const nav: Entry[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  // Business Numbers sits second: it is the "how is the month going" answer, and the
+  // pages under it are where you go once it raises a question.
+  { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   // Needs Input is deliberately NOT here. The page still exists and still works at
   // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
@@ -32,9 +35,6 @@ const nav: Entry[] = [
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
   { href: '/delights', label: 'Delights', icon: Sparkles },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
-  // Business Numbers first of the three: it is the one somebody opens to answer "how is
-  // the month going", and the other two are where you go after it raises a question.
-  { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
   // Forecast used to sit here. It is a tab inside Business Trend now — the two answered
   // the same question from opposite ends, and reading one without the other was how the
   // same month got two different explanations.

@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
-import Header from '@/components/Header'
+import GreetingBar from '@/components/GreetingBar'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, requestScan, getLatestScanRequest, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
@@ -236,7 +236,10 @@ export default function Dashboard() {
 
   return (
     <div>
-      <Header title="Dashboard" subtitle="Revenue, clients and pipeline at a glance" />
+      {/* The greeting replaces the page header here: "Dashboard / Revenue, clients and
+          pipeline at a glance" told a returning user nothing they did not know. The name
+          and their client region's holidays do. */}
+      <GreetingBar />
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5 text-xs">
         <span className="uppercase tracking-wide text-mav-muted">Last sync</span>

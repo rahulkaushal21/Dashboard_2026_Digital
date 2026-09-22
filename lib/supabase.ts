@@ -1879,3 +1879,36 @@ export async function getBigOpenDeals(limit = 25): Promise<{ rows: Opportunity[]
     unpriced: live.length - priced.length,
   }
 }
+
+// ── Public holidays in the client's country ──────────────────────────────────────────
+//
+// The point is the CLIENT's country, not ours. A PM on WEB-UK needs to know the UK is
+// shut on the 25th; a chased approval that lands on a bank holiday is a week lost, and
+// nobody checks another country's calendar unprompted.
+
+export interface Holiday { region: string; on_date: string; name: string }
+
+/** Which country a PM's team sells into. LP/HUB spans all three, so it has no one answer. */
+export const TEAM_REGION: Record<string, string | null> = {
+  'WEB-UK': 'UK', 'WEB-US': 'US', 'WEB-AU': 'AU', 'LP/HUB': null,
+}
+
+/**
+ * Upcoming holidays for a region.
+ *
+ * Returns the ones inside `days`, and separately the next one after that — a three-week
+ * window is empty most of the year, and "nothing for three weeks, next is Christmas Day"
+ * is a useful answer where an empty box is not.
+ */
+export async function getUpcomingHolidays(region: string | null, days = 21): Promise<{ soon: Holiday[]; next?: Holiday }> {
+  if (!supabase || !region) return { soon: [] }
+  const today = new Date().toISOString().slice(0, 10)
+  const { data, error } = await supabase.from('holidays')
+    .select('region, on_date, name').eq('region', region).gte('on_date', today)
+    .order('on_date').limit(12)
+  if (error || !data) return { soon: [] }
+  const rows = data as Holiday[]
+  const cutoff = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10)
+  const soon = rows.filter(h => h.on_date <= cutoff)
+  return { soon, next: soon.length ? undefined : rows[0] }
+}

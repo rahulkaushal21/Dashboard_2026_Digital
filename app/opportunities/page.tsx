@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import Header from '@/components/Header'
 import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
@@ -232,7 +232,7 @@ const cohort = useMemo(() => decidedCohort(all), [all])
 const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
 // Rows the Quotes sheet tags "New" under an owner who isn't on the NBD team.
 const [misTagOnly, setMisTagOnly] = useState(false)
-const [fAM, setFAM] = useState(''); const [fPM, setFPM] = useState(''); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
+const [fAM, setFAM] = useState(''); const [fPM, setFPM] = useState(''); const pmTouched = useRef(false); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
 const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
 // Quote-value band. Held as strings so "empty" is distinguishable from 0: an
 // empty box means the bound is not set, while a typed 0 still switches the band
@@ -286,7 +286,14 @@ const [showAdd, setShowAdd] = useState(false)
 const [confirming, setConfirming] = useState<Opportunity | null>(null)
 useEffect(() => {
 setIAmAdmin(!!getStoredProfile()?.is_admin)
-getDirectoryMember(currentEmail()).then(setMe)
+getDirectoryMember(currentEmail()).then(m => {
+  setMe(m)
+  // A PM opens this page to work their own deals, so it starts on theirs rather than on
+  // everybody's. Only on first load, and only if nobody has touched the filter — a deep
+  // link that names a PM, or a filter already changed, is left exactly as it is.
+  // Admins are not defaulted: they come here to see the whole board.
+  if (m?.name) setFPM(prev => (prev === '' && !pmTouched.current) ? m.name : prev)
+})
 }, [])
 const canEnter = iAmAdmin || !!me
 const reload = () => getOpportunities().then(setAll)
@@ -678,7 +685,15 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 </div>
 )}
 
-{monthsAgg.length > 0 && (
+{/* ── Leadership summary: admins only ────────────────────────────────────────
+    The month cards, the headline totals and the three breakdowns answer "how
+    is the business doing". A PM opening this page is here to work their own
+    list, and a wall of company-wide money above it is noise they scroll past
+    every day. They get the list and the filters, which is the whole job.
+
+    This hides it, it does not protect it — the data still loads with the anon
+    key. It is a tidier page for PMs, not a permission boundary. */}
+{iAmAdmin && monthsAgg.length > 0 && (
 <div className="mb-6">
 <div className="flex items-baseline gap-2 mb-2">
 <h2 className="text-sm font-medium">Last 2 months</h2>
@@ -688,6 +703,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 </div>
 )}
 
+{iAmAdmin && (<>
 <div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-white">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).
 {onHold.length > 0 && <> Open pipeline here excludes On Hold; the cards above count both as pending — <span className="text-white">{money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}</span> still undecided.</>}</div>
 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
@@ -703,6 +719,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 <Panel title="By Service" rows={bySvc} active={fSvc} onPick={k => { setFStatus('Open'); setFSvc(k) }} />
 <Panel title="By Technology" rows={byTech} active={fTech} onPick={k => { setFStatus('Open'); setFTech(k === '—' ? '' : k) }} />
 </div>
+</>)}
 
 <div className="flex flex-wrap items-center gap-2 mb-4">
 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client…" className={`${selCls} w-44`} />
@@ -723,7 +740,7 @@ return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</opti
 <select value={fSvc} onChange={e => setFSvc(e.target.value)} className={selCls}><option value="">All services</option>{uniq(all.map(svcOf)).map(s => <option key={s} value={s}>{s}</option>)}</select>
 <select value={fTech} onChange={e => setFTech(e.target.value)} className={selCls}><option value="">All tech</option>{uniq(all.map(x => x.technology)).map(t => <option key={t} value={t}>{t}</option>)}</select>
 <select value={fAM} onChange={e => setFAM(e.target.value)} className={selCls}><option value="">All AMs</option>{uniqNames(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
-<select value={fPM} onChange={e => setFPM(e.target.value)} className={selCls}><option value="">All PMs</option>{uniqNames(all.map(x => x.pm_owner)).map(pm => <option key={pm} value={pm}>{pm}</option>)}</select>
+<select value={fPM} onChange={e => { pmTouched.current = true; setFPM(e.target.value) }} className={selCls}><option value="">All PMs</option>{uniqNames(all.map(x => x.pm_owner)).map(pm => <option key={pm} value={pm}>{pm}</option>)}</select>
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
 <button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-white'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
 {misTagged.length > 0 && (
