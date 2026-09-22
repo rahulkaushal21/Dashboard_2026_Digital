@@ -229,7 +229,11 @@ export default function ProjectLedger() {
     // One at a time, so a row that is refused does not take the rest of the batch with
     // it. Every refusal is reported with the client's name.
     for (const r of pickedRows) {
-      const res = await copyRowToMonth(r.source, r.source_id, target, r.local_value ?? r.amount_usd)
+      // copy_row_to_month works on the LIVE sheet_raw id, because it reads the row now.
+      // Editing uses source_id (the sheet's own row number), which is the one that
+      // survives a re-sync. Two ids for one row, each for the thing it is stable for.
+      const rowId = r.source === 'raw' ? (r.sheet_raw_id ?? r.source_id) : r.source_id
+      const res = await copyRowToMonth(r.source, rowId, target, r.local_value ?? r.amount_usd)
       if (res.error) errs.push(`${r.company_name}: ${res.error}`)
       else ok++
     }

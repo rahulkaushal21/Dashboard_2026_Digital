@@ -65,3 +65,21 @@ revoke insert, update, delete on public.sheet_row_overrides from anon, authentic
 --    row's own PC/SME (directory_owner_match, the same helper the dashboard rows use) or
 --    an admin, and treats a null parameter as "not sent" rather than "clear it", because
 --    the inline editors send one field at a time.
+
+-- ── 047 (applied 22 Sep 2026): re-keyed on the sheet's own row number ────────────────
+-- 046 above assumed sheet_raw was upserted on (tab, row_index) and that an id was
+-- therefore stable. IT IS NOT. The ingest replaces the tab wholesale — every row on the
+-- revenue tab carries the same synced_at, to the second — so ids are reassigned on every
+-- sync. Caught by a dry run: a row read as id 12869 an hour earlier no longer existed.
+--
+-- An id-keyed override would have detached from its row within the hour. The fingerprint
+-- guard meant it would have failed SAFE (the edit stops showing) rather than landing on
+-- somebody else's project, but a PM's edit silently vanishing is still the bug.
+--
+-- The key is now row_index — the row's position in the spreadsheet, which survives a full
+-- rewrite and is unique per tab (3,221 of 3,221). The fingerprint stays as the guard,
+-- because row_index does not survive a row being inserted mid-sheet, and it cannot be the
+-- key itself: 25 rows share an (agency, project name, month) with another row.
+--
+-- web_project_ledger's row_key and source_id are now the row number too, and it carries
+-- sheet_raw_id separately for copy_row_to_month, which acts on this minute's snapshot.

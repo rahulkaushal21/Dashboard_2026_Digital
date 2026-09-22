@@ -1370,7 +1370,12 @@ export async function duplicateBookingToMonth(bookingId: number, month: string, 
 export interface LedgerRow {
   // 'raw' is a line of the Web, Hub & LP tab itself; 'dashboard' is one confirmed
   // here. ('sheet' was the old web_revenue aggregate and no longer appears.)
+  // For a sheet line, source_id is the SHEET'S OWN ROW NUMBER, not a sheet_raw id:
+  // sheet_raw is replaced wholesale on every sync and its ids are reassigned within the
+  // hour. sheet_raw_id is that live id, carried for the one thing that still needs it —
+  // duplicating a row into next month, which acts on this minute's snapshot.
   row_key: string; source: 'raw' | 'sheet' | 'dashboard'; source_id: number
+  sheet_raw_id?: number
   company_name?: string; project_name?: string; contact_email?: string
   service_dept?: string; engagement_model?: string; technology?: string; geo?: string
   pm_owner?: string; sales_person?: string; booking_month?: string
@@ -1769,12 +1774,12 @@ export interface SheetRowEdits {
   integration?: string; invoice_no?: string; invoice_currency?: string; invoice_amount?: number | null
 }
 
-export async function updateSheetRowFields(sheetRowId: number, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
-  if (!supabase || !sheetRowId) return { ok: false, error: 'Supabase not configured' }
+export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase || !rowIndex) return { ok: false, error: 'Supabase not configured' }
   const t = (v?: string) => v === undefined ? null : v
   const n = (v?: number | null) => v ?? null
   const { error } = await supabase.rpc('update_sheet_row_fields', {
-    p_sheet_row_id: sheetRowId,
+    p_row_index: rowIndex,
     p_project_id: t(f.project_id), p_quote_id: t(f.quote_id), p_expert: t(f.expert),
     p_contractor_name: t(f.contractor_name), p_outsource_currency: t(f.outsource_currency),
     p_outsource_price: n(f.outsource_price), p_project_status: t(f.delivery_status),
@@ -1790,7 +1795,7 @@ export async function updateSheetRowFields(sheetRowId: number, f: SheetRowEdits)
 /** Save to whichever side of the ledger this row came from. */
 export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
   return row.source === 'raw'
-    ? updateSheetRowFields(row.source_id, f)
+    ? updateSheetRowFields(row.source_id, f)   // source_id is the sheet's row number
     : updateProjectFields(row.source_id, f)
 }
 
