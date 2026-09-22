@@ -189,16 +189,21 @@ export default function Dashboard() {
   }, [rangeRev])
 
   // full-data monthly totals (for MoM + trend)
+  // Scoped like the rest of the page. This feeds the trend chart and the month-on-month
+  // change, so leaving it company-wide would have put everybody's revenue in the one
+  // chart on a dashboard that says it is yours.
   const allMonthTotals = useMemo(() => {
     const m: Record<string, number> = {}
-    rev.forEach(r => { const k = (r.month || '').slice(0, 7); if (k) m[k] = (m[k] || 0) + (r.amount_usd || 0) })
+    rev.filter(r => !scoped || mine.ownsClient(r.client_name))
+       .forEach(r => { const k = (r.month || '').slice(0, 7); if (k) m[k] = (m[k] || 0) + (r.amount_usd || 0) })
     return m
-  }, [rev])
+  }, [rev, scoped, mine])
 
-  // Revenue trend chart always shows the trailing 3 months, independent of the KPI date filter.
+  // Six months, always — independent of the KPI date filter above. Three months is two
+  // comparisons, which is not enough to tell a trend from a quiet month.
   const trendSeries = useMemo(() => {
     const keys: string[] = []
-    for (let i = 2; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
+    for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
     return keys.map(k => ({ key: k, month: monthLabel(k), revenue: Math.round(allMonthTotals[k] || 0) }))
   }, [allMonthTotals])
 
@@ -379,7 +384,8 @@ export default function Dashboard() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div className="lg:col-span-2"><RevenueChart data={trendSeries} /></div>
+        <div className="lg:col-span-2"><RevenueChart data={trendSeries} title={scoped ? 'Your revenue — last 6 months' : 'Revenue — last 6 months'}
+          note="The last bar is the month still running, so it is part of a month against five whole ones." /></div>
         <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
           <div className="text-sm font-medium mb-4">Top clients</div>
           {monthSeries.length === 0 ? (
@@ -397,6 +403,12 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Revenue by segment — month over month.
+          Company-wide, by service department, so it answers a question a PM does not
+          have: their own accounts sit inside one department and the other five rows are
+          somebody else's. It stays for admins, who are the ones comparing departments,
+          and for anyone who has cleared the scope to see all of Web. */}
+      {(!scoped || mine.isAdmin) && (
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="flex items-baseline justify-between px-5 pt-5 mb-3">
           <div className="text-sm font-medium">Revenue by segment — month over month</div>
@@ -428,6 +440,8 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+      )}
+
     </div>
   )
 }
