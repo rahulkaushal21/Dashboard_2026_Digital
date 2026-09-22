@@ -431,18 +431,33 @@ async function buildQuotes(sb: any): Promise<string[][]> {
     ]);
   }
 
-  // Deals that exist only here — entered by hand or found in email. Sheet-origin rows are
-  // excluded because they are already above, from the quotes table itself.
+  // Deals that exist only here — entered by hand or found in email, open ones included.
+  // Sheet-origin rows are excluded because they are already above, from the quotes table.
+  //
+  // OPEN QUOTES MATTER MOST HERE. A quote still in play is the pipeline; leaving it out
+  // and writing only what closed would make the tab a record of the past instead of a
+  // working list. Status is carried through as the dashboard holds it, and an open deal
+  // that has never been given one reads "Open" rather than an empty cell, because a blank
+  // in a status column looks like missing data rather than a stage.
+  //
+  // Confirmed in Days is left blank: it is the Quotes sheet's own measure of how long a
+  // quote took to close, and for a deal that has not closed there is no such number.
   const { data: opps, error: oe } = await sb.from("opportunities")
-    .select("quote_key, quote_id, source_date, service_dept, technology, source_subject, company_name, contact_email, pm_owner, project_type, currency, local_value, est_value, status, gist, geo, business_type, sales_person, origin")
+    .select("quote_key, quote_id, source_date, service_dept, technology, source_subject, company_name, contact_email, pm_owner, project_type, currency, local_value, est_value, status, gist, geo, business_type, sales_person, origin, won, confirmed_at, unlikely, email_lost")
     .in("origin", ["pm", "email", "recurring"]);
   if (oe) throw new Error("opportunities: " + oe.message);
   for (const o of opps || []) {
+    const status = s(o.status).trim()
+      || (o.won ? "Confirmed" : o.email_lost ? "Lost" : o.unlikely ? "Unlikely" : "Open");
+    // A confirmed deal's cycle is knowable; an open one's is not.
+    const days = (o.won && o.confirmed_at && o.source_date)
+      ? String(Math.max(0, Math.round((new Date(o.confirmed_at).getTime() - new Date(o.source_date).getTime()) / 86400000)))
+      : "";
     grid.push([
       s(o.quote_id) || s(o.quote_key), sheetDate(o.source_date), s(o.service_dept), s(o.technology), s(o.source_subject),
       s(o.company_name), s(o.contact_email), s(o.pm_owner), s(o.project_type), s(o.currency || "USD"),
-      money(o.local_value ?? o.est_value), money(o.est_value), s(o.status), s(o.gist), geoRegion(o.geo),
-      s(o.business_type), s(o.sales_person), "",
+      money(o.local_value ?? o.est_value), money(o.est_value), status, s(o.gist), geoRegion(o.geo),
+      s(o.business_type), s(o.sales_person), days,
     ]);
   }
   return grid;
@@ -463,6 +478,28 @@ async function buildFeedback(sb: any): Promise<string[][]> {
     grid.push([
       sheetDate(f.added_date), s(f.service_dept), s(f.pc_sme), s(f.feedback_type), s(f.visibility), s(f.nature),
       s(f.agency), s(f.geo), s(f.client_email), s(f.project_names), s(f.comments), sheetMonth(f.month_year), s(f.evidence),
+    ]);
+  }
+
+  // Praise the mail scan found — what the Delights board shows.
+  //
+  // These have never reached a spreadsheet. The feedback table is filled in by hand, and
+  // a client writing "this was brilliant, thank you" in a reply is never typed into it —
+  // so the best evidence we have of clients being happy lived on one screen and nowhere
+  // else. It goes in the same columns as the rest.
+  //
+  // Nature is 'Positive' because that is the only sentiment selected here; Feedback Type
+  // says Email so a reader can tell at a glance which rows somebody logged deliberately
+  // and which the scan picked up.
+  const { data: sigs, error: se } = await sb.from("email_signals")
+    .select("company_name, client_email, summary, source_subject, source_date, signal_type")
+    .eq("sentiment", "Positive").order("source_date");
+  if (se) throw new Error("email_signals: " + se.message);
+  for (const g of sigs || []) {
+    grid.push([
+      sheetDate(g.source_date), "", "", "Email", "", "Positive",
+      s(g.company_name), "", s(g.client_email), s(g.source_subject), s(g.summary),
+      sheetMonth(g.source_date), "",
     ]);
   }
   return grid;

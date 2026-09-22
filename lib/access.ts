@@ -46,9 +46,13 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/critical-escalations', label: 'Critical Escalations' },
   { href: '/delights', label: 'Delights' },
   { href: '/sql-leads', label: 'SQL / Leads' },
+  { href: '/business-numbers', label: 'Business Numbers' },
+  // Forecast is no longer offered on its own — it is a tab inside Business Trend. The
+  // route stays in this list so an old bookmark still resolves rather than bouncing
+  // somebody to the dashboard, and so the route guard keeps covering it.
   { href: '/business-trend', label: 'Business Trend' },
   { href: '/forecast', label: 'Forecast' },
-  { href: '/last-year', label: 'Last Year Review' },
+  { href: '/last-year', label: 'Quarter over Quarter Review' },
   { href: '/pm-team', label: 'PM Team' },
 ]
 

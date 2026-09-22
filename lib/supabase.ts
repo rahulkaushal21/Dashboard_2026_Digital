@@ -1809,3 +1809,73 @@ export function canEditLedgerRow(row: LedgerRow, me: DirectoryMember | null, isA
   if (!me || !(row.pm_owner || '').trim()) return false
   return ownerMatches(row.pm_owner, me.aliases)
 }
+
+// ── Business numbers ─────────────────────────────────────────────────────────────────
+//
+// One screen for "how is Web doing this month". Per service, this month against the SAME
+// DAYS last month — on the 22nd, a whole August against three weeks of September says
+// every service is collapsing, every month, until the 30th.
+
+export interface BizRow {
+  bucket: string
+  this_start: string; this_end: string; prev_start: string; prev_end: string
+  this_revenue: number; prev_revenue: number
+  this_deals: number; prev_deals: number
+  this_clients: number; prev_clients: number
+  // From web_business_quotes, joined on the bucket.
+  this_quotes: number; prev_quotes: number
+  this_quotes_usd: number; prev_quotes_usd: number
+  open_quotes: number; open_quotes_usd: number
+}
+
+/** The five services the business is run by, plus Other, in a fixed order. */
+export const BIZ_ORDER = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation', 'Other']
+
+export async function getBusinessNumbers(): Promise<BizRow[]> {
+  if (!supabase) return []
+  const [n, q] = await Promise.all([
+    supabase.from('web_business_numbers').select('*'),
+    supabase.from('web_business_quotes').select('*'),
+  ])
+  if (n.error || !n.data) return []
+  const byBucket = new Map<string, any>()
+  for (const r of (q.data as any[]) || []) byBucket.set(r.bucket, r)
+  const num = (v: any) => Number(v ?? 0)
+  return (n.data as any[])
+    .map(r => {
+      const x = byBucket.get(r.bucket) || {}
+      return {
+        ...r,
+        this_revenue: num(r.this_revenue), prev_revenue: num(r.prev_revenue),
+        this_deals: num(r.this_deals), prev_deals: num(r.prev_deals),
+        this_clients: num(r.this_clients), prev_clients: num(r.prev_clients),
+        this_quotes: num(x.this_quotes), prev_quotes: num(x.prev_quotes),
+        this_quotes_usd: num(x.this_quotes_usd), prev_quotes_usd: num(x.prev_quotes_usd),
+        open_quotes: num(x.open_quotes), open_quotes_usd: num(x.open_quotes_usd),
+      } as BizRow
+    })
+    // Biggest first, but always in a stable order when two are equal, so the table does
+    // not reshuffle between loads.
+    .sort((a, b) => b.this_revenue - a.this_revenue || BIZ_ORDER.indexOf(a.bucket) - BIZ_ORDER.indexOf(b.bucket))
+}
+
+/**
+ * The open deals worth a leader's attention, biggest first.
+ *
+ * Only deals carrying a real quoted value: a deal with no figure is not a small deal, it
+ * is an unpriced one, and ranking it as $0 would bury it. Those are counted separately so
+ * the gap is visible rather than silently dropped.
+ */
+export async function getBigOpenDeals(limit = 25): Promise<{ rows: Opportunity[]; unpriced: number }> {
+  if (!supabase) return { rows: [], unpriced: 0 }
+  const { data, error } = await supabase.from('opportunities')
+    .select('id, company_name, source_subject, gist, est_value, local_value, currency, pm_owner, sales_person, service_dept, geo, status, rfq_status, source_date, win_probability, origin, quote_key, quote_id')
+    .eq('won', false).or('unlikely.is.null,unlikely.eq.false').is('email_lost', null)
+  if (error || !data) return { rows: [], unpriced: 0 }
+  const live = (data as Opportunity[]).filter(o => !/lost|cancel|reject|drop/i.test(o.status || ''))
+  const priced = live.filter(o => (o.est_value || 0) > 0)
+  return {
+    rows: priced.sort((a, b) => (b.est_value || 0) - (a.est_value || 0)).slice(0, limit),
+    unpriced: live.length - priced.length,
+  }
+}

@@ -140,7 +140,7 @@ export default function LastYearReview() {
 
   return (
     <div>
-      <Header title="Last Year Review" subtitle={`Year-on-year + quarter-over-quarter — who's growing, slipping or dropped off`} />
+      <Header title="Quarter over Quarter Review" subtitle={`Quarter against quarter and year against year — who’s growing, slipping or dropped off`} />
 
       <div className="mb-4 text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
         Pick any two quarters with the <span className="text-white">Compare / vs</span> selectors — use two <em>completed</em> quarters (e.g. {qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete. <span className="text-white">Dropped</span> = had revenue in {qLabel(QS[qBase])} but none in {qLabel(QS[qCur])}; <span className="text-white">New</span> = the reverse. The FY columns&rsquo; <span className="text-white">&ldquo;to date&rdquo;</span> still counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.

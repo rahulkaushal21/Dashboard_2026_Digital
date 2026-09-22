@@ -1,0 +1,25 @@
+-- Business Numbers: how each service is doing this month, against the SAME DAYS last month.
+--
+-- Applied live on 22 Sep 2026 as three objects — pull the current definitions with:
+--   select pg_get_functiondef('public.biz_bucket'::regproc);
+--   select pg_get_viewdef('public.web_business_numbers'::regclass, true);
+--   select pg_get_viewdef('public.web_business_quotes'::regclass, true);
+--
+-- SAME DAYS, not same months. On the 22nd, a whole August against three weeks of
+-- September says every service is collapsing — every month, until the 30th. A page that
+-- cries wolf for three weeks in four stops being read.
+--
+-- Dated on CONFIRMATION, not booking month: "what have we won this month" and "what is
+-- billed this month" are different questions, and a retainer booked forward answers them
+-- differently. This asks the first.
+--
+-- biz_bucket() maps Service Department to the five the business is run by. LP and HUB are
+-- one team; WEB-US (KS) is WEB-US with a sub-team tag. Anything unrecognised stays as
+-- 'Other' rather than being dropped, so the parts still add to the whole.
+--
+-- The quotes view needs one more thing: all 101 hand-entered and email-found deals carry
+-- a BLANK Service Department, so they all landed in Other and WEB-UK looked like it had
+-- no pipeline at all. Department is not asked for when a deal is created and should not
+-- start being asked for just to make a page add up — so it falls back to the department
+-- that client's own revenue is booked under (by value), then to their GEO, then Other.
+-- That moved 54 open quotes out of Other and put WEB-UK's $240k pipeline where it belongs.

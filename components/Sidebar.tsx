@@ -32,9 +32,14 @@ const nav: Entry[] = [
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
   { href: '/delights', label: 'Delights', icon: Sparkles },
   { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
+  // Business Numbers first of the three: it is the one somebody opens to answer "how is
+  // the month going", and the other two are where you go after it raises a question.
+  { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
+  // Forecast used to sit here. It is a tab inside Business Trend now — the two answered
+  // the same question from opposite ends, and reading one without the other was how the
+  // same month got two different explanations.
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
-  { href: '/forecast', label: 'Forecast', icon: LineChart },
-  { href: '/last-year', label: 'Last Year Review', icon: History },
+  { href: '/last-year', label: 'Quarter over Quarter', icon: History },
   { href: '/pm-team', label: 'PM Team', icon: UserCog },
   {
     label: 'Operations', icon: Cog, children: [

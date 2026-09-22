@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
+import ForecastPanel from '@/components/ForecastPanel'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
@@ -78,6 +79,9 @@ function deduplicateOpportunities(opps: Opportunity[]): Opportunity[] {
 }
 
 export default function BusinessTrendPage() {
+  // Which half of the picture is on screen. Trend first: it is the one you open to see
+  // what happened, and the forecast is what you go to after it raises a question.
+  const [tab, setTab] = useState<'trend' | 'forecast'>('trend')
   const [fromMonth, setFromMonth] = useState('')
   const [toMonth, setToMonth] = useState('')
   const [revenue, setRevenue] = useState<RevenueRow[]>([])
@@ -370,7 +374,23 @@ export default function BusinessTrendPage() {
 
   return (
     <div>
-      <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes/confirmations tracking, and FY 2026-27 forecast" />
+      <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes and confirmations, and where the year lands" />
+
+      {/* Trend and Forecast were two pages answering the same question from opposite
+          ends — what the year is pacing at, and what it will land at. Reading one
+          without the other is how the same month got two different explanations in the
+          same week. One page, two tabs. */}
+      <div className="flex gap-1 border-b border-mav-line mb-6">
+        {([['trend', 'Trend'], ['forecast', 'Forecast']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)}
+            className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${tab === k
+              ? 'border-mav-yellow text-white font-medium'
+              : 'border-transparent text-mav-muted hover:text-white'}`}>{label}</button>
+        ))}
+      </div>
+
+      {tab === 'forecast' ? <ForecastPanel embedded /> : (
+      <>
       <div className="flex gap-4 items-center mb-6 text-xs">
         <label className="flex flex-col gap-1">
           <span className="uppercase tracking-wide text-mav-muted">From</span>
@@ -759,6 +779,8 @@ export default function BusinessTrendPage() {
             )}
           </aside>
         </div>
+      )}
+      </>
       )}
     </div>
   )
