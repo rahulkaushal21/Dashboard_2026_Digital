@@ -3,8 +3,8 @@ import AuthProvider from '@/components/AuthProvider'
 import { themeScript } from '@/components/ThemeToggle'
 import SectionTheme from '@/components/SectionTheme'
 export const metadata = {
-  title: 'Digital Dashboard',
-  description: 'Digital dashboard — revenue, clients & opportunities',
+  title: 'Web Digital Dashboard',
+  description: 'Web digital dashboard — revenue, clients & opportunities',
   // Internal tool: keep it out of search engines. Mirrored by public/robots.txt.
   robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
 }

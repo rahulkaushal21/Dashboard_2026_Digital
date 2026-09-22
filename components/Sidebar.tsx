@@ -85,7 +85,7 @@ export default function Sidebar() {
           <Menu size={20} />
         </button>
         <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
-        <span className="font-semibold tracking-tight truncate">Digital Dashboard</span>
+        <span className="font-semibold tracking-tight truncate">Web Digital Dashboard</span>
       </div>
 
       {/* Scrim. Only rendered when open so it can never swallow taps on desktop. */}
@@ -98,9 +98,12 @@ export default function Sidebar() {
           className="lg:hidden absolute top-3 right-3 p-2 rounded-md text-mav-muted hover:text-mav-fg hover:bg-mav-panel">
           <X size={18} />
         </button>
-      <div className="flex items-center gap-2 px-2 py-3 mb-4">
-        <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
-        <span className="font-semibold tracking-tight">Digital Dashboard</span>
+      {/* The rail is 240px, and the longer name no longer fits on one line at this
+          weight. Allowed to wrap rather than truncated — "Web Digital Dash…" in the one
+          place that says what the product is would be worse than two lines. */}
+      <div className="flex items-start gap-2 px-2 py-3 mb-4">
+        <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow shrink-0 mt-1" />
+        <span className="font-semibold tracking-tight leading-tight min-w-0">Web Digital Dashboard</span>
       </div>
       <nav className="space-y-1">
         {items.map(entry => isGroup(entry)
