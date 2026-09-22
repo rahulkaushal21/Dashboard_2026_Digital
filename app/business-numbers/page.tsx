@@ -23,6 +23,20 @@ import { fmtUsd } from '@/lib/metrics'
 // different certainty, and a single headline number that mixes them is the fastest way to
 // a forecast nobody believes.
 
+const pad = (n: number) => String(n).padStart(2, '0')
+const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const monthStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1)
+const monthEnd = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0)
+
+// Ranges people actually ask for. "This month" runs to the last day, as the default; "so
+// far" stops at today, which is the honest like-for-like while a month is still running.
+const RANGES = (n: Date) => [
+  { key: 'month', label: 'This month', from: ymd(monthStart(n)), to: ymd(monthEnd(n)) },
+  { key: 'mtd', label: 'This month so far', from: ymd(monthStart(n)), to: ymd(n) },
+  { key: 'prev', label: 'Last month', from: ymd(monthStart(new Date(n.getFullYear(), n.getMonth() - 1, 1))), to: ymd(monthEnd(new Date(n.getFullYear(), n.getMonth() - 1, 1))) },
+  { key: 'q', label: 'Last 3 months', from: ymd(monthStart(new Date(n.getFullYear(), n.getMonth() - 2, 1))), to: ymd(monthEnd(n)) },
+]
+
 const pct = (now: number, before: number): number | null =>
   before > 0 ? Math.round(((now - before) / before) * 100) : null
 
@@ -64,10 +78,26 @@ export default function BusinessNumbers() {
   const [unpriced, setUnpriced] = useState(0)
   const [loading, setLoading] = useState(true)
 
+  // Opens on the whole of the current month, first day to last.
+  const now = useMemo(() => new Date(), [])
+  const ranges = useMemo(() => RANGES(now), [now])
+  const [from, setFrom] = useState(() => ymd(monthStart(new Date())))
+  const [to, setTo] = useState(() => ymd(monthEnd(new Date())))
+
+  // Every figure on the page comes from the database for this window, so the dates are
+  // not a filter over something already fetched — changing them refetches.
   useEffect(() => {
-    Promise.all([getBusinessNumbers(), getBigOpenDeals(25)])
-      .then(([n, d]) => { setRows(n); setDeals(d.rows); setUnpriced(d.unpriced) })
-      .finally(() => setLoading(false))
+    if (!from || !to || from > to) return
+    let live = true
+    setLoading(true)
+    getBusinessNumbers(from, to)
+      .then(n => { if (live) setRows(n) })
+      .finally(() => { if (live) setLoading(false) })
+    return () => { live = false }
+  }, [from, to])
+
+  useEffect(() => {
+    getBigOpenDeals(25).then(d => { setDeals(d.rows); setUnpriced(d.unpriced) })
   }, [])
 
   // "Other" earns its row only when it holds something. An empty bucket on a leadership
@@ -91,29 +121,77 @@ export default function BusinessNumbers() {
   const prevLabel = w ? `${dayLabel(w.prev_start)} – ${dayLabel(w.prev_end)}` : ''
   const maxRev = Math.max(...shown.map(r => Math.max(r.this_revenue, r.prev_revenue)), 1)
 
+  // Days in the chosen range that have not happened yet. The default range runs to the
+  // last of the month, so for most of any month this page is comparing a part month
+  // against a whole one — which reads as a collapse that is purely the calendar. Saying
+  // so, with the fix one click away, is the difference between a number and a scare.
+  const today = ymd(now)
+  const futureDays = to > today
+    ? Math.round((new Date(to + 'T00:00:00').getTime() - new Date(today + 'T00:00:00').getTime()) / 86400000)
+    : 0
+  const activeRange = ranges.find(r => r.from === from && r.to === to)?.key || ''
+
   const td = 'px-3 py-3 whitespace-nowrap'
   const th = 'px-3 py-2 font-medium whitespace-nowrap'
+  const dateBox = 'bg-mav-dark border border-mav-line rounded-md px-2 py-1.5 text-sm text-mav-fg [color-scheme:dark]'
 
   return (
     <div>
       <Header title="Business Numbers"
-        subtitle="How each service is doing this month, against the same days last month" />
+        subtitle="How each service is doing, against the same span of the month before" />
+
+      {/* Outside the loading gate on purpose: changing a date refetches, and controls
+          that vanish while the numbers reload are controls you cannot correct a typo in. */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <label className="text-xs text-mav-muted">From</label>
+        <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} className={dateBox} />
+        <label className="text-xs text-mav-muted">To</label>
+        <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} className={dateBox} />
+        <div className="flex flex-wrap gap-1.5 ml-1">
+          {ranges.map(r => (
+            <button key={r.key} onClick={() => { setFrom(r.from); setTo(r.to) }}
+              className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${activeRange === r.key
+                ? 'border-mav-yellow text-mav-fg bg-mav-yellow/10'
+                : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+        {from > to && <span className="text-xs text-red-400">From is after To.</span>}
+      </div>
+
+      {futureDays > 0 && (
+        <div className="mb-4 text-xs rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 max-w-4xl">
+          <span className="text-mav-fg">The month is still filling &mdash; {futureDays} of its days have not happened yet.</span>{' '}
+          The revenue figures are the month the web revenue sheet reports, so they match the Dashboard, but the
+          <span className="text-mav-fg"> vs last month</span> column is holding a part month against a whole one and
+          will read low until the month is out.{' '}
+          <button onClick={() => { const r = ranges[1]; setFrom(r.from); setTo(r.to) }}
+            className="underline underline-offset-2 text-mav-fg hover:text-mav-yellow">
+            Compare the same days instead
+          </button>
+        </div>
+      )}
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p> : (
         <>
           <p className="text-xs text-mav-muted mb-4 max-w-4xl">
             <span className="text-mav-fg">{thisLabel}</span> against <span className="text-mav-fg">{prevLabel}</span> —
-            the same days in both months, so the comparison is not just "the month is not over yet".
-            Revenue is dated on <span className="text-mav-fg">Start Date</span>, the same basis as the Business
-            Overview sheet, so the two agree. Won money and quoted money are shown apart and never added together.
+            the same span of the month before, so the comparison holds whichever dates you pick.
+            {w?.whole_month
+              ? <> A whole month is counted by the web revenue sheet&rsquo;s <span className="text-mav-fg">Month</span> column,
+                  so this page and the Dashboard report the same figure the sheet does.</>
+              : <> A range narrower than a month is counted on <span className="text-mav-fg">Start Date</span>, because a
+                  month column cannot tell you about the 12th &mdash; so it can differ slightly from the whole-month figure.</>}
+            {' '}Won money and quoted money are shown apart and never added together.
           </p>
 
           {/* The four numbers a leader checks first. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
             {[
-              { label: 'Revenue this month', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue, sub: `${fmtUsd(t.prev_revenue)} by this day last month` },
-              { label: 'Projects started', value: String(t.this_deals), now: t.this_deals, before: t.prev_deals, sub: `${t.prev_deals} by this day last month` },
-              { label: 'Quotes raised', value: String(t.this_quotes), now: t.this_quotes, before: t.prev_quotes, sub: `${fmtUsd(t.this_quotes_usd)} quoted · ${t.prev_quotes} last month` },
+              { label: 'Revenue', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue, sub: `${fmtUsd(t.prev_revenue)} in ${prevLabel}` },
+              { label: 'Projects started', value: String(t.this_deals), now: t.this_deals, before: t.prev_deals, sub: `${t.prev_deals} in ${prevLabel}` },
+              { label: 'Quotes raised', value: String(t.this_quotes), now: t.this_quotes, before: t.prev_quotes, sub: `${fmtUsd(t.this_quotes_usd)} quoted · ${t.prev_quotes} in ${prevLabel}` },
               { label: 'Open pipeline', value: fmtUsd(t.open_quotes_usd), now: 0, before: 0, sub: `${t.open_quotes} quotes still in play, all time` },
             ].map(c => (
               <div key={c.label} className="bg-mav-panel border border-mav-line rounded-xl p-4">

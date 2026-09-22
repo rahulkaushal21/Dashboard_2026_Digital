@@ -26,11 +26,8 @@ const monthLabel = (key: string) =>
   new Date(key + '-01T00:00:00').toLocaleDateString('en', { month: 'short', year: '2-digit' })
 
 const now = new Date()
-// Every preset ends TODAY, not at the end of this month. Revenue is dated on the day the
-// work starts, so a range running to the 30th silently counts jobs that have not started
-// yet — that was $2,931 of September sitting in a figure captioned "this month".
 function presetRange(key: string): { from: string; to: string } {
-  const to = ymd(now)
+  const to = ymd(monthEnd(now))
   if (key === 'ytd') return { from: `${now.getFullYear()}-01-01`, to }
   const back = key === 'm3' ? 2 : key === 'm6' ? 5 : key === 'm12' ? 11 : 0 // 'mtd' -> 0
   return { from: ymd(monthStart(new Date(now.getFullYear(), now.getMonth() - back, 1))), to }
@@ -172,13 +169,10 @@ export default function Dashboard() {
   const onFrom = (v: string) => { setFrom(v); setPreset('') }
   const onTo = (v: string) => { setTo(v); setPreset('') }
 
-  // Tested on the row's own start date, falling back to its month. It used to compare the
-  // FIRST OF THE MONTH against the range, which meant any date inside September pulled in
-  // the whole of September — so "this month" could never mean "so far".
-  const inMonthRange = (m?: string, d?: string) => {
-    const v = (d || m || '').slice(0, 10)
-    return v ? v >= from && v <= to : false
-  }
+  // Tested on the MONTH the row belongs to, because that is how the web revenue sheet
+  // reports a month and the two have to agree. The start date is used for the
+  // month-on-month comparison below, where a per-day date is the only thing that works.
+  const inMonthRange = (m?: string) => { if (!m) return false; const d = m.slice(0, 10); return d >= from && d <= to }
   const inDayRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return false; return v >= from && v <= to }
 
   // Scoped before the date range, so every figure on the page — the revenue total, the
@@ -186,7 +180,7 @@ export default function Dashboard() {
   // accounts. A dashboard that greets you by name and then shows the company's numbers
   // is just the company's dashboard with your name on it.
   const rangeRev = useMemo(
-    () => rev.filter(r => inMonthRange(r.month, r.date)).filter(r => !scoped || mine.ownsClient(r.client_name)),
+    () => rev.filter(r => inMonthRange(r.month)).filter(r => !scoped || mine.ownsClient(r.client_name)),
     [rev, from, to, scoped, mine])
 
   // monthly totals within range (drives period total)
@@ -253,14 +247,10 @@ export default function Dashboard() {
     return v >= a && v <= b ? s + (r.amount_usd || 0) : s
   }, 0)
 
-  // True while the range is "this month so far", which is the default view.
-  const isMtd = from === ymd(monthStart(now)) && to === ymd(now)
-
-  // What is booked to start later this month and so is not in the figure above. Without
-  // it the honest month-to-date number just looks like money that went missing.
-  const laterThisMonth = useMemo(
-    () => isMtd ? Math.round(sumBetween(ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)), ymd(monthEnd(now)))) : 0,
-    [isMtd, scopedRev])
+  // True while the range is the current month, which is the default view.
+  const isMtd = from === ymd(monthStart(now)) && to === ymd(monthEnd(now))
+  const daysGone = now.getDate()
+  const daysInMonth = monthEnd(now).getDate()
 
   // Same days of each month rather than a part month against a whole one. On the 22nd,
   // September against a finished August reads as a 49% collapse every single time, which
@@ -355,9 +345,9 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KPICard label={isMtd ? 'Revenue (this month so far)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom}
+        <KPICard label={isMtd ? 'Revenue (this month)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom}
           changeLabel={isMtd ? 'vs same days last month' : 'vs last month'}
-          note={laterThisMonth ? `+${fmtUsd(laterThisMonth)} booked to start later this month` : undefined} />
+          note={isMtd && daysGone < daysInMonth ? `${daysGone} of ${daysInMonth} days gone — the month is still filling` : undefined} />
         <KPICard label="Active clients" value={String(activeClients)} />
         <KPICard label="Open opportunities" value={String(openOpps)} />
         <KPICard label="Bookings (period)" value={String(bookings)} />

@@ -134,8 +134,9 @@ if (/waiting for details|waiting for detail/.test(v)) return { prob: 40, read: '
 if (/on hold/.test(v)) return { prob: 25, read: 'On hold — stalled and at risk unless re-engaged.' }
 return { prob: 45, read: 'Open quote — outcome not yet clear from the sheet.' }
 }
-// `month` is the month the work STARTS, and `date` is that start date. Both come from
-// web_revenue_start, not the old booking-month aggregate — see migration 052.
+// `month` is the sheet's Month column, which is what decides the monthly figure the
+// business reports. `date` is the start date, carried for comparisons narrower than a
+// month — a Month column cannot tell you about the 12th. See migration 054.
 export interface RevenueRow { client_name: string; month: string; amount_usd: number; date?: string }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; technology?: string; engagement_model?: string; geo?: string; sme?: string; sales_person?: string; contact_email?: string }
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
@@ -522,19 +523,18 @@ flag,
 return out.length ? out : (await import('./mockData')).mockOpportunities
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
-// web_revenue_start, not web_revenue: the business dates revenue on the start date, and
-// reading the booking-month aggregate here is what made the Dashboard and Business
-// Numbers disagree about the same September.
-const live = await read<{ company_name: string; booking_month: string; booking_date: string; booking_amount: number }>('web_revenue_start',
+// web_revenue_lines: the same rows as the old web_revenue aggregate, un-merged into the
+// ledger's real line items, and carrying the start date alongside the month.
+const live = await read<{ company_name: string; booking_month: string; booking_date: string; booking_amount: number }>('web_revenue_lines',
 'company_name, booking_month, booking_date, booking_amount', 'id')
 if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date }))
 return (await import('./mockData')).mockRevenue
 }
 // Same switch, for everything that reads whole booking rows — the PM scorecards, Client
-// 360, Forecast, Business Trend and the quarter-over-quarter review. They are now all on
-// the start date, and on the ledger's real line items rather than the merged aggregate,
-// so their row counts line up with Web, Hub & LP.
-export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue_start', 'id, company_name, booking_month, booking_date, booking_amount, service_name, technology, engagement_model, geo, sme, sales_person, contact_email', 'id')) || [] }
+// 360, Forecast, Business Trend and the quarter-over-quarter review. Same months as
+// before; the ledger's real line items rather than the merged aggregate, so their row
+// counts line up with Web, Hub & LP.
+export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue_lines', 'id, company_name, booking_month, booking_date, booking_amount, service_name, technology, engagement_model, geo, sme, sales_person, contact_email', 'id')) || [] }
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
 // Feedback keyed to the PM who owns it, for the PM scorecard. Kept apart from
 // getFeedback() because that one is the Delights feed and selects a different set
@@ -1828,6 +1828,9 @@ export function canEditLedgerRow(row: LedgerRow, me: DirectoryMember | null, isA
 export interface BizRow {
   bucket: string
   this_start: string; this_end: string; prev_start: string; prev_end: string
+  // True when the range is whole calendar months, which are counted by the sheet's Month
+  // column. Anything narrower falls back to the start date.
+  whole_month?: boolean
   this_revenue: number; prev_revenue: number
   this_deals: number; prev_deals: number
   this_clients: number; prev_clients: number
@@ -1840,11 +1843,25 @@ export interface BizRow {
 /** The five services the business is run by, plus Other, in a fixed order. */
 export const BIZ_ORDER = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation', 'Other']
 
-export async function getBusinessNumbers(): Promise<BizRow[]> {
+/**
+ * The window is a parameter, defaulting to the whole current month.
+ *
+ * A whole calendar month is counted by the sheet's Month column, so this page reports the
+ * same September the web revenue sheet does. Narrower ranges are counted on the start
+ * date, which is the only per-day date a row carries. The comparison period is always the
+ * same range shifted back one month.
+ */
+export async function getBusinessNumbers(from?: string, to?: string): Promise<BizRow[]> {
   if (!supabase) return []
+  const d = new Date()
+  const pad2 = (n: number) => String(n).padStart(2, '0')
+  const p = {
+    p_from: from || `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`,
+    p_to: to || (() => { const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${pad2(e.getMonth() + 1)}-${pad2(e.getDate())}` })(),
+  }
   const [n, q] = await Promise.all([
-    supabase.from('web_business_numbers').select('*'),
-    supabase.from('web_business_quotes').select('*'),
+    supabase.rpc('business_numbers', p),
+    supabase.rpc('business_quotes', p),
   ])
   if (n.error || !n.data) return []
   const byBucket = new Map<string, any>()
