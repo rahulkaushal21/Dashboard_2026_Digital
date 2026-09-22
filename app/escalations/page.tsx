@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
+import { useMine } from '@/lib/mine'
+import MineFilter from '@/components/MineFilter'
 import KPICard from '@/components/KPICard'
 import { getEscalations, type Escalation } from '@/lib/supabase'
 
@@ -20,6 +22,11 @@ export default function Escalations() {
   const [sortBy, setSortBy] = useState<SortField>('date')
   const [sortAsc, setSortAsc] = useState(false)
   const [sel, setSel] = useState<Escalation | null>(null)
+  // Starts on this person's own clients. An escalation names a company, not a PM, so
+  // "mine" comes from the client record's PC/SME. One click shows everybody's.
+  const mine = useMine()
+  const [justMine, setJustMine] = useState(true)
+  useEffect(() => { if (mine.ready && !mine.canScope) setJustMine(false) }, [mine.ready, mine.canScope])
 
   useEffect(() => { getEscalations().then(setAll) }, [])
   useEffect(() => {
@@ -31,6 +38,7 @@ export default function Escalations() {
   
   const e = useMemo(() => {
     let result = all
+      .filter(x => !justMine || mine.ownsClient(x.company_name))
       .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
       .filter(x => !fType || (x.escalation_type || '') === fType)
       .filter(x => !fGeo || (x.geo || '') === fGeo)
@@ -64,7 +72,7 @@ export default function Escalations() {
     })
     
     return result
-  }, [all, search, fType, fGeo, from, to, sortBy, sortAsc])
+  }, [all, search, fType, fGeo, from, to, sortBy, sortAsc, justMine, mine])
   
   const handleSort = (field: SortField) => {
     if (sortBy === field) {
@@ -86,6 +94,10 @@ export default function Escalations() {
     <div>
       <Header title="Major Process Gap" subtitle="Client escalations & experience triggers — filter by type, GEO and date, click headers to sort" />
       <div className="flex flex-wrap items-center gap-2 mb-4">
+        {mine.canScope && (
+          <MineFilter on={justMine} onChange={setJustMine} label="My clients"
+            hidden={all.filter(x => !mine.ownsClient(x.company_name)).length} />
+        )}
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company…" className={`${selCls} w-44`} />
         <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option>{uniq(all.map(x => x.escalation_type)).map(t => <option key={t} value={t}>{t}</option>)}</select>
         <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>

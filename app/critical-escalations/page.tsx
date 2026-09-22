@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
+import { useMine } from '@/lib/mine'
+import MineFilter from '@/components/MineFilter'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
@@ -28,6 +30,11 @@ export default function CriticalEscalations() {
   const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [status, setStatus] = useState<'all' | 'open' | 'unresolved' | 'resolved'>('all')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<CriticalEscalation | null>(null)
+  // Starts on this person's own clients. These are the ones they have to act on; the
+  // rest is somebody else's queue. One click shows the whole board.
+  const mine = useMine()
+  const [justMine, setJustMine] = useState(true)
+  useEffect(() => { if (mine.ready && !mine.canScope) setJustMine(false) }, [mine.ready, mine.canScope])
   // Using the sidebar closes this drawer — including a click on the section you are
   // already on, which is not a route change and so re-renders nothing by itself.
   useCloseOnNav(useCallback(() => setSel(null), []))
@@ -41,6 +48,7 @@ export default function CriticalEscalations() {
   const unresolvedCount = rows.filter(r => r.status === 'unresolved').length
 
   const filtered = useMemo(() => rows.filter(r => {
+    if (justMine && !mine.ownsClient(r.company_name)) return false
     if (status !== 'all' && r.status !== status) return false
     if (geo && (r.geo || '') !== geo) return false
     if (q) { const hay = `${r.company_name} ${r.headline || ''} ${r.items.map(i => i.escalation_summary).join(' ')}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
@@ -48,7 +56,7 @@ export default function CriticalEscalations() {
     if (from && (!d || d < from)) return false
     if (to && (!d || d > to)) return false
     return true
-  }), [rows, q, geo, status, from, to])
+  }), [rows, q, geo, status, from, to, justMine, mine])
 
   const key = (r: CriticalEscalation) => r.threadIds.join(',')
   const patch = (r: CriticalEscalation, fields: Partial<CriticalEscalation>) => {
@@ -85,6 +93,10 @@ export default function CriticalEscalations() {
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
+        {mine.canScope && (
+          <MineFilter on={justMine} onChange={setJustMine} label="My clients"
+            hidden={rows.filter(r => !mine.ownsClient(r.company_name)).length} />
+        )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or detail…" className={`${sel} min-w-[220px] flex-1`} />
         <select value={status} onChange={e => setStatus(e.target.value as 'all' | 'open' | 'unresolved' | 'resolved')} className={sel}>
           <option value="all">All statuses</option>

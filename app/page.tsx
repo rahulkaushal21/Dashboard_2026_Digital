@@ -7,6 +7,8 @@ import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatu
 import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { buildInsights, type Tone } from '@/lib/insights'
+import { useMine } from '@/lib/mine'
+import MineFilter from '@/components/MineFilter'
 import { RefreshCw, Sparkles, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 
@@ -88,6 +90,13 @@ export default function Dashboard() {
   const [rev, setRev] = useState<RevenueRow[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [opps, setOpps] = useState<Opportunity[]>([])
+  // The dashboard opens on this person's own accounts: their revenue, their clients,
+  // their open deals, and insights read from their numbers rather than the company's.
+  // Somebody not in the PM directory sees everything, because none of it is theirs.
+  const mine = useMine()
+  const [justMine, setJustMine] = useState(true)
+  useEffect(() => { if (mine.ready && !mine.canScope) setJustMine(false) }, [mine.ready, mine.canScope])
+  const scoped = justMine && mine.canScope
   const [bookingRows, setBookingRows] = useState<BookingRow[]>([])
   // 90th-percentile days-to-confirm, so the stale-pipeline insight argues from evidence.
   const [closeSpeed, setCloseSpeed] = useState<{ median: number; p90: number; n: number } | null>(null)
@@ -164,7 +173,13 @@ export default function Dashboard() {
   const inMonthRange = (m?: string) => { if (!m) return false; const d = m.slice(0, 10); return d >= from && d <= to }
   const inDayRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return false; return v >= from && v <= to }
 
-  const rangeRev = useMemo(() => rev.filter(r => inMonthRange(r.month)), [rev, from, to])
+  // Scoped before the date range, so every figure on the page — the revenue total, the
+  // month-on-month change, the active client count, the chart — is about this person's
+  // accounts. A dashboard that greets you by name and then shows the company's numbers
+  // is just the company's dashboard with your name on it.
+  const rangeRev = useMemo(
+    () => rev.filter(r => inMonthRange(r.month)).filter(r => !scoped || mine.ownsClient(r.client_name)),
+    [rev, from, to, scoped, mine])
 
   // monthly totals within range (drives period total)
   const monthSeries = useMemo(() => {
@@ -221,17 +236,28 @@ export default function Dashboard() {
     return prev ? ((cur - prev) / prev) * 100 : null
   }, [latestKey, allMonthTotals])
 
+  // Everything below reads these, not the raw lists. A booking or a delight names only a
+  // company, so ownership comes from the client record; a deal names its PM directly.
+  const myBookings = useMemo(
+    () => scoped ? bookingRows.filter(b => mine.ownsClient(b.company_name)) : bookingRows,
+    [bookingRows, scoped, mine])
+  const myOpps = useMemo(
+    // A deal counts as theirs by its PM, or by the client being theirs — an email-found
+    // deal often has no PM on it yet, and dropping those would hide the newest work.
+    () => scoped ? opps.filter(o => mine.ownsPm(o.pm_owner) || mine.ownsClient(o.company_name)) : opps,
+    [opps, scoped, mine])
+
   const activeClients = useMemo(() =>
     new Set(rangeRev.filter(r => (r.amount_usd || 0) !== 0).map(r => r.client_name)).size, [rangeRev])
-  const openOpps = opps.filter(o => inDayRange(o.source_date) && (o.rfq_status === 'pending' || o.rfq_status === 'received')).length
+  const openOpps = myOpps.filter(o => inDayRange(o.source_date) && (o.rfq_status === 'pending' || o.rfq_status === 'received')).length
   const bookings = rangeRev.length
 
   // AI Insights read the WHOLE history, not the date filter — a six-month trend
   // cannot be computed from a one-month window, and silently narrowing it to the
   // filter would make the panel say something different (and wrong) on every click.
   const insights = useMemo(
-    () => buildInsights(bookingRows, opps, closeSpeed?.p90 ?? null),
-    [bookingRows, opps, closeSpeed],
+    () => buildInsights(myBookings, myOpps, closeSpeed?.p90 ?? null),
+    [myBookings, myOpps, closeSpeed],
   )
 
   return (
@@ -272,6 +298,12 @@ export default function Dashboard() {
               ? 'bg-mav-fill text-black border-mav-yellow font-medium'
               : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{p.label}</button>
         ))}
+        {mine.canScope && (
+          <span className="ml-2">
+            <MineFilter on={justMine} onChange={setJustMine} label="My accounts"
+              hidden={clients.filter(c => !mine.ownsClient(c.company_name)).length} />
+          </span>
+        )}
         <span className="text-xs text-mav-muted ml-2">From</span>
         <input type="date" value={from} onChange={e => onFrom(e.target.value)} className={selCls} />
         <span className="text-xs text-mav-muted">To</span>
@@ -296,7 +328,8 @@ export default function Dashboard() {
             </div>
           </div>
           <p className="text-xs text-mav-muted mb-4">
-            What the numbers above don&apos;t say. Ignores the date filter — these read the whole revenue and quote history.
+            What the numbers above don&apos;t say. Ignores the date filter — these read the whole revenue and quote history
+            {scoped ? <> for <span className="text-mav-fg">your accounts</span></> : ''}.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">

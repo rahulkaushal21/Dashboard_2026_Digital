@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import Header from '@/components/Header'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getDelights, type Delight } from '@/lib/supabase'
+import { useMine } from '@/lib/mine'
+import MineFilter from '@/components/MineFilter'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -14,6 +16,11 @@ export default function Delights() {
   const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [src, setSrc] = useState<'' | 'sheet' | 'email'>('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<Delight | null>(null)
+  // Starts on this person's own clients. A PM opens Delights to see their own accounts
+  // being praised; everybody's is a nice read and not the job. One click shows the lot.
+  const mine = useMine()
+  const [justMine, setJustMine] = useState(true)
+  useEffect(() => { if (mine.ready && !mine.canScope) setJustMine(false) }, [mine.ready, mine.canScope])
   // Using the sidebar closes this drawer — including a click on the section you are
   // already on, which is not a route change and so re-renders nothing by itself.
   useCloseOnNav(useCallback(() => setSel(null), []))
@@ -29,6 +36,7 @@ export default function Delights() {
   }), [rows])
 
   const filtered = useMemo(() => rows.filter(r => {
+    if (justMine && !mine.ownsClient(r.company_name)) return false
     if (geo && (r.geo || '') !== geo) return false
     if (src === 'sheet' && !(r.sheet_count || 0)) return false
     if (src === 'email' && !(r.email_count || 0)) return false
@@ -37,7 +45,7 @@ export default function Delights() {
     if (from && (!d || d < from)) return false
     if (to && (!d || d > to)) return false
     return true
-  }), [rows, q, geo, src, from, to])
+  }), [rows, q, geo, src, from, to, justMine, mine])
 
   return (
     <div>
@@ -48,6 +56,10 @@ export default function Delights() {
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
+        {mine.canScope && (
+          <MineFilter on={justMine} onChange={setJustMine} label="My clients"
+            hidden={rows.filter(r => !mine.ownsClient(r.company_name)).length} />
+        )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or quote…" className={`${sel} min-w-[220px] flex-1`} />
         <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}>
           <option value="">All GEOs</option>

@@ -66,7 +66,7 @@ export default function GreetingBar() {
         </h1>
         <p className="text-xs text-mav-muted mt-1">
           {me?.team
-            ? <>You are on <span className="text-mav-fg">{me.team}</span>. Revenue, clients and pipeline at a glance.</>
+            ? <>You are on <span className="text-mav-fg">{me.team}</span>. Everything below is your accounts &mdash; switch to all of Web from the filter.</>
             : <>Revenue, clients and pipeline at a glance.</>}
         </p>
       </div>

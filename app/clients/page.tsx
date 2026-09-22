@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useThemeInk } from '@/lib/use-theme-ink'
 import Header from '@/components/Header'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
+import { useMine } from '@/lib/mine'
+import MineFilter from '@/components/MineFilter'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import Link from 'next/link'
 import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
@@ -266,6 +268,11 @@ export default function Clients() {
   // survives closing one client and opening the next — somebody comparing two accounts
   // on the same measure should not have to find the tab again each time.
   const [cTab, setCTab] = useState<'overview' | 'work' | 'projects' | 'health' | 'qbr'>('overview')
+  // Starts on this person's own accounts. Client 360 is where a PM prepares for a call,
+  // and 405 clients is a directory; theirs is the working list. One click shows the lot.
+  const mine = useMine()
+  const [justMine, setJustMine] = useState(true)
+  useEffect(() => { if (mine.ready && !mine.canScope) setJustMine(false) }, [mine.ready, mine.canScope])
   const [signals, setSignals] = useState<EmailSignal[]>([])
   const [escs, setEscs] = useState<Escalation[]>([])
   // Verdicts a human recorded on Critical Escalations. Honoured here so a client can't be
@@ -726,6 +733,7 @@ export default function Clients() {
     const lo = recentOnly ? (from && from > recentCutoff ? from : recentCutoff) : from
     const hi = to
     let result = allClients
+      .filter(c => !justMine || mine.ownsClient(c.company_name))
       .filter(c => (c.company_name + ' ' + displayName(c.company_name)).toLowerCase().includes(q.toLowerCase()))
       .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
       .filter(c => !stat || statusOf(c) === stat)
@@ -759,7 +767,7 @@ export default function Clients() {
     })
 
     return result
-  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient, verdicts, dipOnly, dipByClient])
+  }, [allClients, q, ind, stat, aiOnly, owner, geo, from, to, recentOnly, recentCutoff, sortBy, sortAsc, escByClient, sigByClient, oppByClient, verdicts, dipOnly, dipByClient, justMine, mine])
 
   // ---- Paging ------------------------------------------------------------------
   // Any change to what is being listed sends you back to page 1 — otherwise you filter
@@ -819,6 +827,10 @@ export default function Clients() {
       <Header title="Client 360" subtitle="Booked clients, sorted by latest action. Click a client for its live discussions — escalations, open quotes & email conversations." />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
+        {mine.canScope && (
+          <MineFilter on={justMine} onChange={setJustMine} label="My clients"
+            hidden={allClients.filter(c => !mine.ownsClient(c.company_name)).length} />
+        )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
         <select value={ind} onChange={e => setInd(e.target.value)} className={sel}><option value="">All industries</option>{(mode === 'clients' ? industries : dirIndustries).map(i => <option key={i} value={i}>{i}</option>)}</select>
         <select value={owner} onChange={e => setOwner(e.target.value)} className={sel}><option value="">All owners</option>{owners.map(o => <option key={o} value={o}>{o}</option>)}</select>
