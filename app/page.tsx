@@ -467,8 +467,10 @@ export default function Dashboard() {
           have: their own accounts sit inside one department and the other five rows are
           somebody else's. It stays for admins, who are the ones comparing departments,
           and for anyone who has cleared the scope to see all of Web. */}
+      {/* mb-6 like every other block here: it lost its gap when it moved above the
+          chart row, and the table ended flush against the next card. */}
       {(!scoped || mine.isAdmin) && (
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
         <div className="flex items-baseline justify-between px-5 pt-5 mb-3">
           <div className="text-sm font-medium">Revenue by segment — month over month</div>
           <div className="text-xs text-mav-muted">Service department · trailing 6 months · USD</div>
