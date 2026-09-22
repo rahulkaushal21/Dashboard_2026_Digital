@@ -1184,8 +1184,11 @@ export default function Clients() {
                 {([['overview', 'Overview'], ['work', 'Revenue & work'], ['projects', 'Projects & quotes'], ['health', 'Health & talk'], ['qbr', 'QBR']] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setCTab(k)}
                     className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${cTab === k
-                      ? 'border-mav-yellow text-mav-fg font-medium'
-                      : 'border-transparent text-mav-muted hover:text-mav-fg'}`}>
+                      // Filled, like every other chosen-state on these pages. A yellow
+                      // underline alone was too quiet to answer "which tab am I on"
+                      // without reading the labels.
+                      ? 'bg-mav-fill text-black border-mav-yellow font-medium rounded-t-md'
+                      : 'border-transparent text-mav-muted hover:text-mav-fg hover:bg-mav-fg/5 rounded-t-md'}`}>
                     {label}
                   </button>
                 ))}
