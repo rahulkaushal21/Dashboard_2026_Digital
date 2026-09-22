@@ -40,3 +40,6 @@ lerna-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Supabase CLI scratch state (which project this checkout is linked to) — local, not shared.
+supabase/.temp/
