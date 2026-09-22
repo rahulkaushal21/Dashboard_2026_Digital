@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import GreetingBar from '@/components/GreetingBar'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
@@ -85,6 +85,21 @@ const segOf = (s?: string) => {
   if (/AI\s*&?\s*Auto/i.test(v)) return 'AI & Automation'
   return 'Other'
 }
+
+// Dedicated against pay-per-project, the two ways this business earns.
+//
+// There is no 'P2P' value in the data — it is everything that is NOT a retainer, which
+// is New Development, Ad-hoc, Maintenance, Additional Pages and Change Request. Matching
+// on 'dedicated' rather than listing the others means a new engagement type added to the
+// sheet lands in P2P by default, which is the right default: a new retainer type would
+// be noticed, a new project type would not.
+//
+// PARTIAL DEDICATED COUNTS AS DEDICATED. It is a retainer with part of a person's time
+// on it, so it behaves like committed revenue rather than won-again-each-time revenue —
+// $89k of the last six months. Worth knowing, since it is the one judgement call here.
+const ENG = ['P2P', 'Dedicated'] as const
+type Eng = typeof ENG[number]
+const engOf = (v?: string): Eng => /dedicated/i.test(v || '') ? 'Dedicated' : 'P2P'
 
 // The five buckets the business is actually run by. LP and HUB are one team, so they are
 // one row here — this mirrors biz_bucket() behind Business Numbers, and the two pages
@@ -221,16 +236,22 @@ export default function Dashboard() {
     for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
     return keys
   }, [])
-  const segData = useMemo(() => {
+  // Two matrices off one pass: the segment totals, and the same split by engagement.
+  const { segData, engData } = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
+    const e: Record<string, Record<Eng, Record<string, number>>> = {}
     bookingRows.forEach(b => {
       const k = (b.booking_month || '').slice(0, 7)
       if (!segMonths.includes(k)) return
       const seg = segOf(b.service_name)
+      const amt = b.booking_amount || 0
       m[seg] = m[seg] || {}
-      m[seg][k] = (m[seg][k] || 0) + (b.booking_amount || 0)
+      m[seg][k] = (m[seg][k] || 0) + amt
+      e[seg] = e[seg] || { P2P: {}, Dedicated: {} }
+      const g = engOf(b.engagement_model)
+      e[seg][g][k] = (e[seg][g][k] || 0) + amt
     })
-    return m
+    return { segData: m, engData: e }
   }, [bookingRows, segMonths])
   const segRows = useMemo(() => {
     const rows = [...SEG_ORDER]
@@ -239,6 +260,9 @@ export default function Dashboard() {
   }, [segData])
   const colTotal = (k: string) => segRows.reduce((s, seg) => s + (segData[seg]?.[k] || 0), 0)
   const rowTotal = (seg: string) => segMonths.reduce((s, k) => s + (segData[seg]?.[k] || 0), 0)
+  const engCell = (seg: string, g: Eng, k: string) => engData[seg]?.[g]?.[k] || 0
+  const engRowTotal = (seg: string, g: Eng) => segMonths.reduce((s, k) => s + engCell(seg, g, k), 0)
+  const engColTotal = (g: Eng, k: string) => segRows.reduce((s, seg) => s + engCell(seg, g, k), 0)
 
   const periodTotal = monthSeries.reduce((s, x) => s + x.revenue, 0)
   const latestKey = monthSeries.length ? monthSeries[monthSeries.length - 1].key : null
@@ -431,6 +455,12 @@ export default function Dashboard() {
           <div className="text-sm font-medium">Revenue by segment — month over month</div>
           <div className="text-xs text-mav-muted">Service department · trailing 6 months · USD</div>
         </div>
+        <div className="px-5 pb-3 text-xs text-mav-muted max-w-3xl">
+          {/* Said once, here, rather than leaving two unlabelled sub-rows to be guessed at. */}
+          Each segment is split into <span className="text-mav-fg">Dedicated</span> — retainers, including
+          Partial Dedicated — and <span className="text-mav-fg">P2P</span>, which is everything won project by
+          project: new development, ad-hoc, maintenance, additional pages.
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
@@ -442,17 +472,35 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {segRows.map(seg => (
-                <tr key={seg} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                  <td className="px-5 py-3 font-medium whitespace-nowrap">{seg}</td>
-                  {segMonths.map(k => <td key={k} className="px-4 py-3 text-right text-mav-muted whitespace-nowrap">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
-                  <td className="px-5 py-3 text-right font-medium whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
-                </tr>
+                // A fragment, not nested tables: the segment total and its two parts have to
+                // stay in ONE table or the month columns stop lining up across segments.
+                <Fragment key={seg}>
+                  <tr className="border-b border-mav-line/40 hover:bg-mav-dark/40">
+                    <td className="px-5 pt-3 pb-1.5 font-medium whitespace-nowrap">{seg}</td>
+                    {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right whitespace-nowrap">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
+                    <td className="px-5 pt-3 pb-1.5 text-right font-medium whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
+                  </tr>
+                  {ENG.map((g, gi) => (
+                    <tr key={g} className={`text-xs text-mav-muted hover:bg-mav-dark/40 ${gi === ENG.length - 1 ? 'border-b border-mav-line/60' : ''}`}>
+                      <td className="pl-9 pr-5 py-1 whitespace-nowrap">{g}</td>
+                      {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(engCell(seg, g, k))}</td>)}
+                      <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(engRowTotal(seg, g))}</td>
+                    </tr>
+                  ))}
+                </Fragment>
               ))}
               <tr className="border-t border-mav-line bg-mav-dark/30">
-                <td className="px-5 py-3 font-semibold">Total</td>
-                {segMonths.map(k => <td key={k} className="px-4 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(colTotal(k))}</td>)}
-                <td className="px-5 py-3 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
+                <td className="px-5 pt-3 pb-1.5 font-semibold">Total</td>
+                {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-semibold whitespace-nowrap">{fmtUsd(colTotal(k))}</td>)}
+                <td className="px-5 pt-3 pb-1.5 text-right font-semibold whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
               </tr>
+              {ENG.map(g => (
+                <tr key={g} className="text-xs text-mav-muted bg-mav-dark/30">
+                  <td className="pl-9 pr-5 py-1 whitespace-nowrap">{g}</td>
+                  {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(engColTotal(g, k))}</td>)}
+                  <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + engColTotal(g, k), 0))}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
