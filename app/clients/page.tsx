@@ -313,6 +313,11 @@ export default function Clients() {
   // Automation section: which industry card is expanded, and an optional play-type filter
   const [openPlayInd, setOpenPlayInd] = useState<string>('')
   const [playType, setPlayType] = useState<PlayType | ''>('')
+  // Both of these open CLOSED. They are reference sections, not the reason anybody comes
+  // to this page — the client table is — and between them they pushed the table most of
+  // a screen down on every visit.
+  const [showInd, setShowInd] = useState(false)
+  const [showAuto, setShowAuto] = useState(false)
   // Both tables page at 50. The directory is ~2,000 rows and was rendering every one
   // of them into the DOM on every keystroke of the search box.
   const PAGE_SIZE = 50
@@ -870,11 +875,20 @@ export default function Clients() {
       <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">📉 revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-        <div className="flex items-baseline justify-between mb-4">
-          <div className="text-sm font-medium">Clients by industry</div>
-          <div className="text-xs text-mav-muted">{(mode === 'clients' ? clients.length : dir.length)} total · click a bar to filter{ind ? ` · showing ${ind}` : ''}</div>
+        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+          <button onClick={() => setShowInd(v => !v)} className="text-sm font-medium inline-flex items-center gap-1.5 hover:text-mav-yellow transition-colors">
+            <span className="text-xs text-mav-muted">{showInd ? '▾' : '▸'}</span>Clients by industry
+            {/* An active filter has to be visible even when the panel is shut, or you
+                are looking at a filtered table with nothing saying why. */}
+            {!showInd && ind && <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/15 text-mav-yellow font-normal">{ind}</span>}
+          </button>
+          <div className="text-xs text-mav-muted">
+            {(mode === 'clients' ? clients.length : dir.length)} total
+            {showInd ? <> · click a bar to filter{ind ? ` · showing ${ind}` : ''}</> : <> · <button onClick={() => setShowInd(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
+            {!showInd && ind && <> · <button onClick={() => setInd('')} className="hover:text-mav-fg underline underline-offset-2">clear filter</button></>}
+          </div>
         </div>
-        <div className="space-y-1.5">
+        <div className={`space-y-1.5 ${showInd ? '' : 'hidden'}`}>
           {(mode === 'clients' ? indCounts : dirIndCounts).map(([name, n]) => {
             const active = ind === name
             const pct = Math.round((n / (mode === 'clients' ? maxIndCount : (dirIndCounts[0]?.[1] || 1))) * 100)
@@ -1000,9 +1014,15 @@ export default function Clients() {
           fixed catalogue in lib/automation-plays.ts. */}
       <div className="mt-8">
         <div className="flex flex-wrap items-baseline justify-between gap-3 mb-1">
-          <h2 className="text-lg font-semibold">⚡ Automation opportunities by industry</h2>
-          <div className="text-xs text-mav-muted">{autoTotals.companies.toLocaleString()} companies in the directory · {autoTotals.booked} already buying · {autoRows.length} industries</div>
+          <button onClick={() => setShowAuto(v => !v)} className="text-lg font-semibold inline-flex items-center gap-2 hover:text-mav-yellow transition-colors">
+            <span className="text-xs text-mav-muted">{showAuto ? '▾' : '▸'}</span>⚡ Automation opportunities by industry
+          </button>
+          <div className="text-xs text-mav-muted">
+            {autoTotals.companies.toLocaleString()} companies in the directory · {autoTotals.booked} already buying · {autoRows.length} industries
+            {!showAuto && <> · <button onClick={() => setShowAuto(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
+          </div>
         </div>
+        {showAuto && <>
         <p className="text-xs text-mav-muted mb-4 max-w-4xl leading-relaxed">
           Where each industry still runs on a person, a spreadsheet and an inbox — and what Mavlers.ai could sell against it.
           {aiBook.count > 0 && <>Booked <span className="text-mav-yellow">AI &amp; Automation</span> revenue is <span className="text-mav-fg">{fmtUsd(aiBook.total)} across {aiBook.count} booking{aiBook.count === 1 ? '' : 's'}</span>
@@ -1131,6 +1151,7 @@ export default function Clients() {
             ))}
           </div>
         </div>
+        </>}
       </div>
 
       {selC && (() => {

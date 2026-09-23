@@ -134,6 +134,40 @@ export default function Reports() {
   }), [base, from, to, fAm, fPm, fEng, fTech, fGeo, fAgency, fDept])
 
   const total = shown.reduce((s, r) => s + (r.amount_usd || 0), 0)
+
+  // The same range one month back, with the end never running past the same date of last
+  // month — the rule Business Numbers uses. Held against a finished month instead, a
+  // range that includes today reads as a collapse every time until the month is out.
+  // Every filter except the dates applies to both sides, or it would not be a comparison.
+  const prev = useMemo(() => {
+    if (!from || !to) return { usd: 0, from: '', to: '' }
+    const shift = (d: string) => {
+      const x = new Date(d + 'T00:00:00')
+      const day = x.getDate()
+      const m = new Date(x.getFullYear(), x.getMonth() - 1, 1)
+      // Clamped, so the 31st does not run off the end of a 30-day month.
+      return ymd(new Date(m.getFullYear(), m.getMonth(), Math.min(day, monthEnd(m).getDate())))
+    }
+    const n = new Date()
+    const pFrom = shift(from)
+    const pTo = [shift(to), shift(ymd(n))].sort()[0]
+    const usd = base.filter(r => {
+      const d = rowDate(r)
+      if (!d || d < pFrom || d > pTo) return false
+      if (fAm && (r.sales_person || '') !== fAm) return false
+      if (fPm && (r.pm_owner || '') !== fPm) return false
+      if (fEng && engOf(r) !== fEng) return false
+      if (fTech && (r.technology || '') !== fTech) return false
+      if (fGeo && (r.geo || '') !== fGeo) return false
+      if (fAgency && (r.company_name || '') !== fAgency) return false
+      if (fDept && deptOf(r.service_dept) !== fDept) return false
+      return true
+    }).reduce((s, r) => s + (r.amount_usd || 0), 0)
+    return { usd, from: pFrom, to: pTo }
+  }, [base, from, to, fAm, fPm, fEng, fTech, fGeo, fAgency, fDept])
+
+  const momPct = prev.usd > 0 ? Math.round(((total - prev.usd) / prev.usd) * 100) : null
+  const dayLabel = (d: string) => { const [y, m, dd] = d.split('-'); return `${+dd} ${MON[+m - 1]}` }
   const pctOf = (v: number) => total > 0 ? Math.round((v / total) * 100) : 0
 
   /** Sum by any key, biggest first. Every breakdown panel is this. */
@@ -147,7 +181,9 @@ export default function Reports() {
       m[k].usd += r.amount_usd || 0
       m[k].n++
     })
-    const out = Object.values(m).sort((a, b) => b.usd - a.usd)
+    // A group with no revenue is noise on a revenue page: a 0% bar of zero width,
+    // taking a row and saying nothing. Dropped everywhere, not just for people.
+    const out = Object.values(m).filter(x => x.usd > 0).sort((a, b) => b.usd - a.usd)
     return limit ? out.slice(0, limit) : out
   }
 
@@ -172,8 +208,8 @@ export default function Reports() {
 
   const byTech = useMemo(() => groupBy(r => r.technology || '', 10), [shown])
   const byGeo = useMemo(() => groupBy(r => r.geo || ''), [shown])
-  const byPm = useMemo(() => groupBy(r => r.pm_owner || '', 10), [shown])
-  const byAm = useMemo(() => groupBy(r => r.sales_person || '', 10), [shown])
+  const byPm = useMemo(() => groupBy(r => r.pm_owner || ''), [shown])
+  const byAm = useMemo(() => groupBy(r => r.sales_person || ''), [shown])
   const byModel = useMemo(() => groupBy(r => r.engagement_model || ''), [shown])
   const byClientType = useMemo(() => groupBy(r => r.client_type || ''), [shown])
   const topAgencies = useMemo(() => groupBy(r => r.company_name || '', 12), [shown])
@@ -278,6 +314,17 @@ export default function Reports() {
           <option value="">All agencies</option>{agencies.map(v => <option key={v} value={v}>{v}</option>)}
         </select>
 
+        {/* The range people ask for most after "this month": the month before, stopped on
+            today's date, so the two are the same number of days. */}
+        <button onClick={() => {
+          const n = new Date()
+          const m = new Date(n.getFullYear(), n.getMonth() - 1, 1)
+          setFrom(ymd(monthStart(m)))
+          setTo(ymd(new Date(m.getFullYear(), m.getMonth(), Math.min(n.getDate(), monthEnd(m).getDate()))))
+        }} className="text-xs px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">
+          Last month, same day
+        </button>
+
         {anyFilter && <button onClick={reset} className="text-xs px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">Reset</button>}
       </div>
 
@@ -291,7 +338,10 @@ export default function Reports() {
 
           {/* The eight figures a leader checks before asking anything else. */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-            <Box label="Revenue" value={fmtUsd(total)} sub={`${shown.length.toLocaleString()} project lines`} />
+            <Box label="Revenue" value={fmtUsd(total)}
+              sub={prev.from
+                ? `${shown.length.toLocaleString()} lines · ${fmtUsd(prev.usd)} in ${dayLabel(prev.from)}–${dayLabel(prev.to)}${momPct === null ? '' : ` (${momPct > 0 ? '+' : ''}${momPct}%)`}`
+                : `${shown.length.toLocaleString()} project lines`} />
             <Box label="Clients" value={String(clients)} sub={clients ? `${fmtUsd(Math.round(total / clients))} average each` : undefined} />
             <Box label="Average project" value={shown.length ? fmtUsd(Math.round(total / shown.length)) : '—'}
               sub={`largest ${topAgencies.length ? fmtUsd(Math.max(...shown.map(r => r.amount_usd || 0))) : '—'}`} />
@@ -308,7 +358,15 @@ export default function Reports() {
           {/* A box per service department. Equal size on purpose: the eye should compare
               the figures, and a box cannot carry relative size without lying about area,
               so the bar underneath does that job. */}
-          <div className="text-sm font-medium mb-3">By service department</div>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+            <span className="text-sm font-medium">By service department</span>
+            {/* The split bar on each box is unlabelled otherwise, and a colour nobody
+                explained is a colour nobody reads. */}
+            <span className="text-xs text-mav-muted">
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-mav-yellow mr-1 align-middle" />Dedicated
+              <span className="inline-block w-2.5 h-2.5 rounded-sm bg-mav-fg/25 ml-3 mr-1 align-middle" />P2P
+            </span>
+          </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
             {depts.map(d => {
               const v = byDept[d] || { usd: 0, lines: 0, clients: new Set<string>(), p2p: 0, ded: 0 }
@@ -358,8 +416,8 @@ export default function Reports() {
             <Breakdown title="By geo" rows={byGeo} total={total} />
             <Breakdown title="By engagement model" note="The raw sheet values behind the Dedicated / P2P split above." rows={byModel} total={total} />
             <Breakdown title="Agency or direct" note="Who we contract with, not who the end client is." rows={byClientType} total={total} />
-            <Breakdown title="By project manager" note="Revenue on lines they own. Top 10." rows={byPm} total={total} />
-            <Breakdown title="By account manager" note="Revenue on accounts they hold. Top 10." rows={byAm} total={total} />
+            <Breakdown title="By project manager" note="Revenue on lines they own. Everyone with revenue in this view." rows={byPm} total={total} />
+            <Breakdown title="By account manager" note="Revenue on accounts they hold. Everyone with revenue in this view." rows={byAm} total={total} />
           </div>
 
           <div className="bg-mav-panel border border-mav-line rounded-xl p-5">

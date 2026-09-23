@@ -27,7 +27,6 @@ const nav: Entry[] = [
   // Business Numbers sits second: it is the "how is the month going" answer, and the
   // pages under it are where you go once it raises a question.
   { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
-  { href: '/reports', label: 'Reports', icon: PieChart },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   // Needs Input is deliberately NOT here. The page still exists and still works at
   // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
@@ -43,6 +42,7 @@ const nav: Entry[] = [
   // same month got two different explanations.
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
   { href: '/last-year', label: 'Quarter over Quarter', icon: History },
+  { href: '/reports', label: 'Reports', icon: PieChart },
   { href: '/pm-team', label: 'PM Team', icon: UserCog },
   {
     label: 'Operations', icon: Cog, children: [
