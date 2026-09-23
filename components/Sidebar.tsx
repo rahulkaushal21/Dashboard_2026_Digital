@@ -42,7 +42,7 @@ const nav: Entry[] = [
   // same month got two different explanations.
   { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
   { href: '/last-year', label: 'Quarter over Quarter', icon: History },
-  { href: '/reports', label: 'KB report', icon: PieChart },
+  { href: '/kb-report', label: 'KB report', icon: PieChart },
   { href: '/pm-team', label: 'PM Team', icon: UserCog },
   {
     label: 'Operations', icon: Cog, children: [

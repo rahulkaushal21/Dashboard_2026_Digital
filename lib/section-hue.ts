@@ -21,7 +21,7 @@ const HUES: [string, Hue][] = [
   ['/business-numbers',           { name: 'teal',   light: '#0F766E', dark: '#2DD4BF' }],
   // Shares emerald with /operations/lnd. All fifteen hues are spoken for, and a
   // reporting page and a training log are never open side by side.
-  ['/reports',                    { name: 'emerald',light: '#065F46', dark: '#6EE7B7' }],
+  ['/kb-report',                  { name: 'emerald',light: '#065F46', dark: '#6EE7B7' }],
   ['/opportunities',              { name: 'blue',   light: '#1D4ED8', dark: '#60A5FA' }],
   ['/revenue-sheet',              { name: 'indigo', light: '#4338CA', dark: '#818CF8' }],
   ['/clients',                    { name: 'violet', light: '#6D28D9', dark: '#A78BFA' }],
