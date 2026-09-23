@@ -884,7 +884,9 @@ export default function Clients() {
           </button>
           <div className="text-xs text-mav-muted">
             {(mode === 'clients' ? clients.length : dir.length)} total
-            {showInd ? <> · click a bar to filter{ind ? ` · showing ${ind}` : ''}</> : <> · <button onClick={() => setShowInd(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
+            {showInd
+              ? <> · click a bar to filter{ind ? ` · showing ${ind}` : ''} · <button onClick={() => setShowInd(false)} className="hover:text-mav-fg underline underline-offset-2">hide</button></>
+              : <> · <button onClick={() => setShowInd(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
             {!showInd && ind && <> · <button onClick={() => setInd('')} className="hover:text-mav-fg underline underline-offset-2">clear filter</button></>}
           </div>
         </div>
@@ -1019,7 +1021,8 @@ export default function Clients() {
           </button>
           <div className="text-xs text-mav-muted">
             {autoTotals.companies.toLocaleString()} companies in the directory · {autoTotals.booked} already buying · {autoRows.length} industries
-            {!showAuto && <> · <button onClick={() => setShowAuto(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
+            {' · '}
+            <button onClick={() => setShowAuto(v => !v)} className="hover:text-mav-fg underline underline-offset-2">{showAuto ? 'hide' : 'show'}</button>
           </div>
         </div>
         {showAuto && <>
