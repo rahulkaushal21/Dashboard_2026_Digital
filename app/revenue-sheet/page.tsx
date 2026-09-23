@@ -225,8 +225,15 @@ export default function ProjectLedger() {
     setSortKey(''); setSortAsc(false)   // third click returns to newest-entry-first
   }
 
-  const total = shown.reduce((s, r) => s + (r.amount_usd || 0), 0)
-  const clients = new Set(shown.map(r => (r.company_name || '').toLowerCase())).size
+  // Awaiting Information is not revenue — the work is not agreed yet, so the figure is a
+  // quote, not money. The lines STAY in the table, because somebody still has to chase
+  // the missing information; they are only kept out of the money total, and the total
+  // says so rather than quietly being short.
+  const awaiting = shown.filter(r => /awaiting/i.test(r.delivery_status || ''))
+  const counted = shown.filter(r => !/awaiting/i.test(r.delivery_status || ''))
+  const total = counted.reduce((s, r) => s + (r.amount_usd || 0), 0)
+  const awaitingTotal = awaiting.reduce((s, r) => s + (r.amount_usd || 0), 0)
+  const clients = new Set(counted.map(r => (r.company_name || '').toLowerCase())).size
   const notInSheet = shown.filter(r => !r.in_sheet)
   const pages = Math.max(1, monthPages.length)
   const pageMonth = monthPages[Math.min(page, monthPages.length - 1)] || ''
@@ -352,7 +359,8 @@ export default function ProjectLedger() {
         <div className="text-sm text-mav-muted">
           {loading ? 'Loading…' : <>{shown.length.toLocaleString()} line{shown.length === 1 ? '' : 's'} · {clients} client{clients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(total)}</span>
             <span className="ml-1 text-mav-muted/80">in {fFrom && fFrom === fTo ? monLabel(fFrom) : fFrom || fTo ? 'the chosen months' : 'all months'}{fPm ? `, ${fPm}` : ''}</span>
-            {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}</>}
+            {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}
+            {awaiting.length > 0 && <span className="ml-2 text-amber-300">· {money(awaitingTotal)} awaiting information, not counted</span>}</>}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setSheetView(v => !v)}
