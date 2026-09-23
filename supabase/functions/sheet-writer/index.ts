@@ -182,6 +182,10 @@ async function writeTab(tok: string, id: string, tab: string, grid: string[][]) 
 // Column positions in the Web, Hub & LP tab, read from its own header row rather than
 // hard-coded: if somebody inserts a column in the source, a fixed index would silently
 // write every later field one place to the left.
+// The far-right column the writer stamps so it can find a row again next run. Named, not
+// hidden: a mystery column people delete is worse than one they can see a reason for.
+const REF_HEADER = "Dashboard Ref";
+
 function indexOfHeader(headers: string[], name: string): number {
   const want = name.trim().toLowerCase();
   return headers.findIndex((h) => (h || "").trim().toLowerCase() === want);
@@ -197,14 +201,137 @@ function toUsd(amount: number, currency: string, rates: Record<string, number>):
   return Number(amount) * rate;
 }
 
-async function buildRevenue(sb: any): Promise<string[][]> {
+// ---- The three columns the accounts team owns ------------------------------
+//
+// Invoice No, Invoice Currency and Invoice Amount are filled in by hand, in the
+// spreadsheet, after everything else about a line is settled. The dashboard has no
+// opinion about them and never will.
+//
+// That is a problem for a writer that CLEARS the tab and rewrites it every run: anything
+// typed into those cells on a dashboard-origin row would survive until the next sync and
+// then vanish, with no trace of who lost what. So those three columns run the other way —
+// the sheet is the source and this writer copies them forward.
+//
+// Rows are matched on a "Dashboard Ref" column the writer stamps on every line
+// (raw:<row index> or opp:<id>). Position cannot be used: the dashboard rows come back
+// from Postgres in no guaranteed order, so row 812 one hour is not row 812 the next. Nor
+// can the project name, which people edit.
+//
+// Everything read is also kept in sheet_invoice_entries, and that copy is the floor: a
+// failed read, a hand-cleared tab or a tab recreated from scratch falls back to it rather
+// than writing blanks over somebody's work.
+type Invoice = { no: string; cur: string; amt: string };
+
+async function readInvoiceColumns(
+  sb: any, tok: string | null, sheetId: string, tab: string,
+): Promise<Map<string, Invoice>> {
+  const out = new Map<string, Invoice>();
+
+  // The durable copy first, so it is never worse than last time.
+  {
+    let from = 0;
+    for (;;) {
+      const { data } = await sb.from("sheet_invoice_entries")
+        .select("ref, invoice_no, invoice_currency, invoice_amount").order("ref").range(from, from + 999);
+      if (!data?.length) break;
+      for (const r of data) {
+        out.set(String(r.ref), { no: s(r.invoice_no), cur: s(r.invoice_currency), amt: s(r.invoice_amount) });
+      }
+      if (data.length < 1000) break;
+      from += 1000;
+    }
+  }
+
+  if (!tok) return out;
+
+  // Then whatever is in the sheet right now, which wins where it has a value.
+  let grid: string[][] = [];
+  try {
+    const range = encodeURIComponent(`'${tab}'`);
+    const j = await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`);
+    grid = (j.values || []) as string[][];
+  } catch {
+    // First run, or the tab does not exist yet. The stored copy stands.
+    return out;
+  }
+  if (grid.length < 2) return out;
+
+  const hdr = (grid[0] || []).map(s);
+  const iRef = indexOfHeader(hdr, REF_HEADER);
+  const iNo = indexOfHeader(hdr, "Invoice No");
+  const iCur = indexOfHeader(hdr, "Invoice Currency");
+  const iAmt = indexOfHeader(hdr, "Invoice Amount");
+  if (iRef < 0) return out;  // written before the ref column existed
+
+  const touched: (Invoice & { ref: string })[] = [];
+  for (let r = 1; r < grid.length; r++) {
+    const row = grid[r] || [];
+    const ref = s(row[iRef]);
+    if (!ref) continue;
+    const v: Invoice = {
+      no: iNo >= 0 ? s(row[iNo]) : "",
+      cur: iCur >= 0 ? s(row[iCur]) : "",
+      amt: iAmt >= 0 ? s(row[iAmt]) : "",
+    };
+    if (!v.no && !v.cur && !v.amt) continue;
+    const prev = out.get(ref);
+    // Field by field: clearing one cell must not drop the other two.
+    out.set(ref, {
+      no: v.no || prev?.no || "",
+      cur: v.cur || prev?.cur || "",
+      amt: v.amt || prev?.amt || "",
+    });
+    touched.push({ ref, ...(out.get(ref) as Invoice) });
+  }
+
+  if (touched.length) {
+    // Chunked, because one upsert of several thousand rows is a request Postgrest will
+    // refuse and a failure here must not stop the sheet being written.
+    for (let i = 0; i < touched.length; i += 500) {
+      const chunk = touched.slice(i, i + 500).map((t) => ({
+        ref: t.ref, invoice_no: t.no || null, invoice_currency: t.cur || null,
+        invoice_amount: t.amt || null, seen_at: new Date().toISOString(),
+      }));
+      await sb.from("sheet_invoice_entries").upsert(chunk, { onConflict: "ref" });
+    }
+  }
+  return out;
+}
+
+async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promise<string[][]> {
   const { data: fx } = await sb.from("fx_rates").select("currency, rate_to_usd");
   const rates: Record<string, number> = {};
   for (const r of fx || []) rates[String(r.currency).toUpperCase()] = Number(r.rate_to_usd);
 
   const { data: hdr } = await sb.from("sheet_raw_header").select("headers").eq("tab", "revenue").maybeSingle();
-  const headers: string[] = hdr?.headers || [];
-  if (!headers.length) throw new Error("no raw header for the revenue tab — run sheet-raw first");
+  const baseHeaders: string[] = hdr?.headers || [];
+  if (!baseHeaders.length) throw new Error("no raw header for the revenue tab — run sheet-raw first");
+
+  // Worked out BEFORE the ref column is appended, or the nameless trailing column stops
+  // being last and every Month-Year would be written into the wrong cell.
+  const trailingMonth = (baseHeaders[baseHeaders.length - 1] || "").trim() === "" ? baseHeaders.length - 1 : -1;
+
+  // One extra column at the far right, so a row can be recognised again next run. It is
+  // the only thing in this tab the team should never type into.
+  const headers: string[] = [...baseHeaders, REF_HEADER];
+  const refCol = headers.length - 1;
+
+  const invoices = await readInvoiceColumns(sb, tok, sheetId, "Web, Hub & LP");
+
+  // Applied LAST on every row, so it beats both the sheet_raw value and any dashboard
+  // override. Only non-empty values are copied: a blank in the sheet means nobody has
+  // invoiced yet, not "erase what the dashboard knows".
+  const inv = { no: -1, cur: -1, amt: -1 };
+  const keepInvoice = (row: string[], ref: string) => {
+    const v = invoices.get(ref);
+    if (!v) return;
+    if (v.no && inv.no >= 0) row[inv.no] = v.no;
+    if (v.cur && inv.cur >= 0) row[inv.cur] = v.cur;
+    if (v.amt && inv.amt >= 0) row[inv.amt] = v.amt;
+  };
+  inv.no = indexOfHeader(headers, "Invoice No");
+  inv.cur = indexOfHeader(headers, "Invoice Currency");
+  inv.amt = indexOfHeader(headers, "Invoice Amount");
 
   const grid: string[][] = [headers];
 
@@ -254,7 +381,7 @@ async function buildRevenue(sb: any): Promise<string[][]> {
 
   let from = 0;
   for (;;) {
-    const { data, error } = await sb.from("sheet_raw").select("id, values")
+    const { data, error } = await sb.from("sheet_raw").select("id, row_index, values")
       .eq("tab", "revenue").order("row_index").range(from, from + 999);
     if (error) throw new Error("sheet_raw: " + error.message);
     if (!data?.length) break;
@@ -273,6 +400,9 @@ async function buildRevenue(sb: any): Promise<string[][]> {
           if (i >= 0) row[i] = value;
         }
       }
+      const ref = `raw:${r.row_index}`;
+      row[refCol] = ref;
+      keepInvoice(row, ref);
       grid.push(row);
     }
     if (data.length < 1000) break;
@@ -320,10 +450,9 @@ async function buildRevenue(sb: any): Promise<string[][]> {
     month: indexOfHeader(headers, "Month-Year"),
     week: indexOfHeader(headers, "Week Start"),
   };
-  // The tab's last column has an EMPTY header and repeats Month-Year. It cannot be found
-  // by name, so it is addressed as the last column — and only when it really is nameless,
-  // so that naming it one day does not start overwriting a real column.
-  const trailingMonth = (headers[headers.length - 1] || "").trim() === "" ? headers.length - 1 : -1;
+  // trailingMonth is computed above, against the headers as the source tab has them —
+  // the tab's last column has an EMPTY header and repeats Month-Year, and it can only be
+  // addressed by position.
 
   const { data: opps, error: oe } = await sb.from("opportunities")
     .select("id, quote_key, project_id, quote_id, company_name, source_subject, client_name, contact_email, client_type, service_dept, service_type, delivery_type, delivery_status, project_type, technology, geo, pm_owner, sales_person, business_type, currency, quote_price, local_value, est_value, start_date, delivery_date, confirmed_at, source_date, origin, expert, internal_delivery, internal_hrs, actual_hrs, integration, outsource_price, outsource_currency, contractor_name, invoice_no, invoice_currency, invoice_amount, feedback_status")
@@ -404,6 +533,12 @@ async function buildRevenue(sb: any): Promise<string[][]> {
     put(col.month, sheetMonth(monthOf));
     put(col.week, sheetWeek(o.start_date));
     if (trailingMonth >= 0) row[trailingMonth] = sheetMonth(monthOf);
+    // Stamped last, and the invoice columns after it: from 1 October these are the rows
+    // that only exist because somebody confirmed a deal here, so they are the ones whose
+    // invoice cells would otherwise be wiped on every run.
+    const ref = `opp:${o.id}`;
+    row[refCol] = ref;
+    keepInvoice(row, ref);
     grid.push(row);
   }
   return grid;
@@ -545,8 +680,13 @@ Deno.serve(async (req) => {
     // A dry run proves the data is right before anything is written to Google.
     const dry = url.searchParams.get("dry") === "1";
 
+    // The token is taken BEFORE the tabs are built, because buildRevenue has to read the
+    // invoice columns out of the target sheet before anything clears it. A dry run takes
+    // one too — it reads, and reading is the point of a dry run.
+    const tok = await accessToken(sa);
+
     const tabs: Record<string, string[][]> = {
-      "Web, Hub & LP": await buildRevenue(sb),
+      "Web, Hub & LP": await buildRevenue(sb, tok, sheetId),
       "Quotes": await buildQuotes(sb),
       "Feedback": await buildFeedback(sb),
     };
@@ -554,7 +694,6 @@ Deno.serve(async (req) => {
 
     if (dry) return json({ ok: true, dry_run: true, service_account: sa.client_email, rows: counts });
 
-    const tok = await accessToken(sa);
     await ensureTabs(tok, sheetId, Object.keys(tabs));
     const written: Record<string, number> = {};
     for (const [name, grid] of Object.entries(tabs)) written[name] = await writeTab(tok, sheetId, name, grid);
