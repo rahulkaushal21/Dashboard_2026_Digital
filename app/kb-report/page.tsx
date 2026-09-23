@@ -247,16 +247,30 @@ export default function Reports() {
     return total > 0 ? Math.round((t / total) * 100) : 0
   }, [topAgencies, total])
 
-  // Forward view. Open deals are NOT filtered by the date range — a range of past months
-  // would show an empty pipeline, which is the opposite of the truth.
+  // Still-open deals RAISED in the selected window, under the filters that a deal also
+  // carries. Technology and engagement are not among them: an open deal has neither
+  // recorded, so filtering on those would empty the box for a reason nobody could see.
+  //
+  // A deal is dated on source_date — when it came in — falling back to confirmed_at.
   const pipeline = useMemo(() => {
-    const open = opps.filter(o => /^open$/i.test((o.status || '').trim()))
+    const open = opps.filter(o => {
+      if (!/^open$/i.test((o.status || '').trim())) return false
+      const d = (o.source_date || o.confirmed_at || '').slice(0, 10)
+      if (from && (!d || d < from)) return false
+      if (to && (!d || d > to)) return false
+      if (fAm && (o.sales_person || '') !== fAm) return false
+      if (fPm && (o.pm_owner || '') !== fPm) return false
+      if (fGeo && (o.geo || '') !== fGeo) return false
+      if (fAgency && (o.company_name || '') !== fAgency) return false
+      if (fDept && deptOf(o.service_dept) !== fDept) return false
+      return true
+    })
     return {
       usd: open.reduce((s, o) => s + (o.est_value || 0), 0),
       n: open.length,
       unpriced: open.filter(o => !o.est_value).length,
     }
-  }, [opps])
+  }, [opps, from, to, fAm, fPm, fGeo, fAgency, fDept])
 
   const anyFilter = !!(fAm || fPm || fEng || fTech || fGeo || fAgency || fDept)
   const reset = () => {
@@ -332,8 +346,9 @@ export default function Reports() {
         <>
           <p className="text-xs text-mav-muted mb-4 max-w-4xl">
             Dated on <span className="text-mav-fg">Start Date</span>, the same basis as Business Numbers and the
-            Business Overview sheet. Awaiting Information is excluded, as everywhere else. Open pipeline ignores the
-            date range on purpose &mdash; a past month would otherwise show no pipeline at all.
+            Business Overview sheet. Awaiting Information is excluded, as everywhere else. Open pipeline counts deals
+            <span className="text-mav-fg"> raised</span> in this window that are still open, so a past month shows what
+            was opened then and has not closed since &mdash; not today&rsquo;s whole pipeline.
           </p>
 
           {/* The eight figures a leader checks before asking anything else. */}
@@ -349,7 +364,7 @@ export default function Reports() {
             <Box label="New business" value={`${pctOf(newBiz)}%`} sub={`${fmtUsd(newBiz)} new · ${fmtUsd(total - newBiz)} repeat`} />
             <Box label="Top 5 clients" value={`${top5Share}%`} sub="of revenue in this view — concentration risk" />
             <Box label="Open pipeline" value={fmtUsd(pipeline.usd)}
-              sub={`${pipeline.n} deals${pipeline.unpriced ? ` · ${pipeline.unpriced} unpriced` : ''} · all dates`} />
+              sub={`${pipeline.n} deal${pipeline.n === 1 ? '' : 's'} raised in this window, still open${pipeline.unpriced ? ` · ${pipeline.unpriced} unpriced` : ''}`} />
             <Box label="Hours delivered" value={hours.planned ? `${Math.round((hours.actual / hours.planned - 1) * 100) > 0 ? '+' : ''}${Math.round((hours.actual / hours.planned - 1) * 100)}%` : '—'}
               tone={hours.planned && hours.actual > hours.planned ? 'text-red-400' : hours.planned ? 'text-green-400' : ''}
               sub={hours.planned ? `${Math.round(hours.actual).toLocaleString()} actual vs ${Math.round(hours.planned).toLocaleString()} planned` : 'no hours recorded'} />
