@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2 } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
@@ -27,6 +27,7 @@ const nav: Entry[] = [
   // Business Numbers sits second: it is the "how is the month going" answer, and the
   // pages under it are where you go once it raises a question.
   { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
+  { href: '/reports', label: 'Reports', icon: PieChart },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   // Needs Input is deliberately NOT here. The page still exists and still works at
   // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
