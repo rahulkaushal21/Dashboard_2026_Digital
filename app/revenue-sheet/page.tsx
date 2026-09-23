@@ -334,7 +334,7 @@ export default function ProjectLedger() {
 
   return (
     <div>
-      <Header title="Web, Hub & LP" subtitle="Every booked line, plus everything confirmed in the dashboard. Filter, tick, and move to the next month." />
+      <Header title="Project sheet Web, Hub & LP" subtitle="Every booked line, plus everything confirmed in the dashboard. Filter, tick, and move to the next month." />
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-56`} />

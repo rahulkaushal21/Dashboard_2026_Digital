@@ -31,7 +31,7 @@ const nav: Entry[] = [
   // Needs Input is deliberately NOT here. The page still exists and still works at
   // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
   // it just is not offered in the nav. Put the entry back here to restore it.
-  { href: '/revenue-sheet', label: 'Web, Hub & LP', icon: Table2 },
+  { href: '/revenue-sheet', label: 'Project sheet Web, Hub & LP', icon: Table2 },
   { href: '/clients', label: 'Client 360', icon: Users },
   { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
@@ -138,8 +138,10 @@ const samePath = (path: string | null, href: string) =>
 // the nav is where you learn what each section's colour is, so every page's heading rule
 // and card edges are already familiar by the time you get there. White text on these,
 // since they are all dark enough to carry it in both themes.
+// items-start, not items-center: the longest label now wraps to two lines on a 240px
+// rail, and centring would float the icon into the middle of them.
 const linkCls = (active: boolean, indent = false) =>
-  `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-sm transition-colors
+  `flex items-start gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-sm leading-snug transition-colors
    ${active ? 'text-white font-medium' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
 
 function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
@@ -153,7 +155,7 @@ function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: bo
     <Link href={href} onClick={() => window.dispatchEvent(new Event(NAV_EVENT))}
       className={linkCls(active, indent)}
       style={active ? { background: `var(--nav-${hue.name}, ${hue.dark})` } : undefined}>
-      <Icon size={16} /> {label}
+      <Icon size={16} className="shrink-0 mt-0.5" /> <span className="min-w-0">{label}</span>
     </Link>
   )
 }
@@ -171,7 +173,7 @@ function NavGroup({ group, path }: { group: Group; path: string }) {
         aria-expanded={expanded}
         className={`w-full ${linkCls(false)} justify-between ${hasActive ? 'text-mav-fg' : ''}`}
       >
-        <span className="flex items-center gap-3"><Icon size={16} /> {label}</span>
+        <span className="flex items-center gap-3"><Icon size={16} className="shrink-0 mt-0.5" /> <span className="min-w-0">{label}</span></span>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
       {expanded && (
