@@ -401,6 +401,10 @@ export default function ProjectLedger() {
           <thead className="text-left text-mav-fg/70 border-b border-mav-line">
             <tr>
               <th className="px-3 py-2 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label="Select all filtered" /></th>
+              {/* Edit leads the row. It was at the far right, past twenty columns of
+                  sheet data, so on any screen narrower than the table you had to scroll
+                  the whole way across to reach the one control you came for. */}
+              <th className={th}>Edit</th>
               {/* Click to sort, click again to reverse, a third time to go back to
                   newest-entry-first. Month grouping is never overridden — the pager
                   moves a month at a time, so a sort that crossed months would page
@@ -416,13 +420,20 @@ export default function ProjectLedger() {
                 </th>
               ))}
               <th className={th}>In sheet</th>
-              <th className={th}></th>
             </tr>
           </thead>
           <tbody>
             {pageRows.map(r => (
               <tr key={r.row_key} className={`border-b border-mav-line/60 ${picked.has(r.row_key) ? 'bg-mav-yellow/5' : ''}`}>
                 <td className="px-3 py-2"><input type="checkbox" checked={picked.has(r.row_key)} onChange={() => toggle(r.row_key)} aria-label={`Select ${r.company_name}`} /></td>
+                <td className={td}>
+                  {/* Every row is editable now, sheet lines included — their answers go
+                      into an overlay beside the sheet rather than into it. Offered only
+                      to the row's own PC/SME, which is the rule both RPCs enforce. */}
+                  {canEditLedgerRow(r, me, isAdmin)
+                    ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
+                    : <span className="text-xs text-mav-fg/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
+                </td>
                 {cols.map(c => {
                   const v = c.get(r)
                   const mine = canEditLedgerRow(r, me, isAdmin)
@@ -460,14 +471,6 @@ export default function ProjectLedger() {
                   {r.in_sheet
                     ? <span className="text-xs text-mav-fg/50">yes</span>
                     : <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/50 text-amber-300">pending</span>}
-                </td>
-                <td className={td}>
-                  {/* Every row is editable now, sheet lines included — their answers go
-                      into an overlay beside the sheet rather than into it. Offered only
-                      to the row's own PC/SME, which is the rule both RPCs enforce. */}
-                  {canEditLedgerRow(r, me, isAdmin)
-                    ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
-                    : <span className="text-xs text-mav-fg/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
                 </td>
               </tr>
             ))}

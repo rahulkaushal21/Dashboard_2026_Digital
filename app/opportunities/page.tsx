@@ -785,7 +785,9 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
 <div className="overflow-x-auto">
 <table className="w-full text-sm min-w-[1180px]">
-<thead className="text-left text-mav-muted border-b border-mav-line"><tr>{COLS.map(c => (
+<thead className="text-left text-mav-muted border-b border-mav-line"><tr>
+<th className="px-3 py-3 w-9" title="Mark a deal confirmed without opening it"></th>
+{COLS.map(c => (
 <th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-mav-fg">
 {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
 </th>
@@ -794,6 +796,25 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 const st = oppStatus(x)
 return (
 <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.unlikely ? 'bg-orange-500/[0.07]' : x.flag ? 'bg-amber-500/5' : ''}`}>
+{/* Confirm, without opening the deal first.
+    Opens the same dialog the drawer's "Mark Confirmed" button does — a deal
+    still needs its six fields checked before it books as revenue, so this is a
+    shortcut to the dialog, never a silent write. stopPropagation because the
+    row itself opens the drawer.
+    Already-won deals show a filled tick that does nothing; deals somebody else
+    owns show an empty one, because the confirm rule is enforced in the database
+    and a button that always fails is worse than a button that is not offered. */}
+<td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+{x.won || x.email_won ? (
+  <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-500/60 bg-green-500/25 text-green-300 text-xs" title="Already confirmed">✓</span>
+) : canConfirmLocally(x, me, iAmAdmin) ? (
+  <button onClick={() => setConfirming(x)} aria-label={`Mark ${x.company_name || 'this deal'} confirmed`}
+    title={`Mark ${x.company_name || 'this deal'} confirmed`}
+    className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-500/50 text-transparent hover:text-green-300 hover:bg-green-500/20 transition-colors text-xs">✓</button>
+) : (
+  <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-mav-line" title={`${x.pm_owner || 'Nobody'} owns this deal`} />
+)}
+</td>
 <td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.email_won && <span className="mr-1.5 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>✓</span>}<ClientLink name={x.company_name} />{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
 <td className={`px-4 py-3 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
 <td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
