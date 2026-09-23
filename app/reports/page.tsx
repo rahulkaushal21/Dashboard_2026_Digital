@@ -270,7 +270,7 @@ export default function Reports() {
 
   return (
     <div>
-      <Header title="Reports"
+      <Header title="KB report"
         subtitle="The whole business through one set of filters — what the revenue is made of, which stack earns it, and whether it was delivered in the hours it was sold on." />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
