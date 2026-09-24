@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, getOpportunityDepts, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, getOpportunityDepts, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import BillTogetherDialog from '@/components/BillTogetherDialog'
@@ -295,6 +295,8 @@ const [showAdd, setShowAdd] = useState(false)
 const [confirming, setConfirming] = useState<Opportunity | null>(null)
 // Ad-hoc jobs picked to go on one invoice. Ids, not rows, so a reload does not strand
 // the selection on stale copies.
+const [ownerMap, setOwnerMap] = useState<Map<string, string[]>>(new Map())
+useEffect(() => { getClientOwners().then(setOwnerMap).catch(() => {}) }, [])
 const [grouped, setGrouped] = useState<Set<number>>(new Set())
 const [billing, setBilling] = useState(false)
 // The other jobs riding on the confirmation that is open.
@@ -497,7 +499,21 @@ const flagged = all.filter(x => x.flag).length
 const misTagged = useMemo(() => all.filter(x => x.mis_tagged_new), [all])
 // Deals whose Lost call hasn't reached the Quotes sheet yet — computed over ALL rows,
 // not the date-filtered set, so the alert can't hide behind a narrow From/To window.
-const lagRows = useMemo(() => all.filter(sheetLag), [all])
+// Whose alert this is.
+//
+// Only the person who has to act on it, plus every admin. The sheet row is the PM's to
+// change, so telling the whole team about somebody else's is noise — and noise on a
+// banner is how people learn to scroll past banners. Admins see the lot because chasing
+// it is their job.
+//
+// Ownership here is the deal's own PM cell or the client being theirs: an email-found
+// deal often has no PM on it yet, and dropping those would leave an alert nobody sees.
+const lagRows = useMemo(
+  () => all.filter(sheetLag).filter(x =>
+    iAmAdmin || !me
+    || ownerMatches(x.pm_owner, me.aliases)
+    || (ownerMap.get(clientKey(x.company_name)) || []).some(p => ownerMatches(p, me.aliases))),
+  [all, iAmAdmin, me, ownerMap])
 const lagWon = lagRows.filter(x => confirmLag(x) || bookedLag(x))
 const lagLost = lagRows.filter(lostLag)
 const markedRows = useMemo(() => all.filter(markedByHand), [all])
@@ -706,7 +722,7 @@ className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-y
 <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
 <div className="flex flex-wrap items-center justify-between gap-3">
 <div>
-<div className="text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} already decided or invoiced {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet</div>
+<div className="text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} already decided or invoiced {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet{iAmAdmin ? <span className="font-normal text-amber-300/70"> · across the team</span> : ''}</div>
 <div className="text-xs text-mav-muted mt-0.5">The sheet is the master record, so nothing books or drops out of pipeline until you update it there. This alert clears itself on the next sync.</div>
 </div>
 <button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setMarkedOnly(false); setSearch('') }}

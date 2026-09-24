@@ -140,7 +140,10 @@ return { prob: 45, read: 'Open quote — outcome not yet clear from the sheet.' 
 // `month` is the sheet's Month column, which is what decides the monthly figure the
 // business reports. `date` is the start date, carried for comparisons narrower than a
 // month — a Month column cannot tell you about the 12th. See migration 054.
-export interface RevenueRow { client_name: string; month: string; amount_usd: number; date?: string }
+// `sme` is the PC/SME cell — the PM whose number this line counts towards. A PM's
+// business figure is the lines with THEIR NAME on them, not the lines belonging to
+// clients they own; on a shared account those are different sums.
+export interface RevenueRow { client_name: string; month: string; amount_usd: number; date?: string; sme?: string }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; technology?: string; engagement_model?: string; geo?: string; sme?: string; sales_person?: string; contact_email?: string }
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
 export interface EmailSignal { id: number; thread_id?: string; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
@@ -528,9 +531,9 @@ return out.length ? out : (await import('./mockData')).mockOpportunities
 export async function getRevenue(): Promise<RevenueRow[]> {
 // web_revenue_lines: the same rows as the old web_revenue aggregate, un-merged into the
 // ledger's real line items, and carrying the start date alongside the month.
-const live = await read<{ company_name: string; booking_month: string; booking_date: string; booking_amount: number }>('web_revenue_lines',
-'company_name, booking_month, booking_date, booking_amount', 'id')
-if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date }))
+const live = await read<{ company_name: string; booking_month: string; booking_date: string; booking_amount: number; sme: string }>('web_revenue_lines',
+'company_name, booking_month, booking_date, booking_amount, sme', 'id')
+if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date, sme: b.sme }))
 return (await import('./mockData')).mockRevenue
 }
 // Same switch, for everything that reads whole booking rows — the PM scorecards, Client

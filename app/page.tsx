@@ -194,10 +194,17 @@ export default function Dashboard() {
 
   // Scoped before the date range, so every figure on the page — the revenue total, the
   // month-on-month change, the active client count, the chart — is about this person's
-  // accounts. A dashboard that greets you by name and then shows the company's numbers
-  // is just the company's dashboard with your name on it.
+  // work. A dashboard that greets you by name and then shows the company's numbers is
+  // just the company's dashboard with your name on it.
+  //
+  // MONEY IS SCOPED BY THE NAME ON THE LINE, not by who owns the client. They are
+  // different questions, and this page was answering the wrong one: on an account two
+  // people share by service, filtering by client owner put the whole month on one of
+  // them and nothing on the other. Checked line by line against the revenue sheet's own
+  // Q2 pivot, per person per month, summing the lines whose PC/SME cell is this person
+  // is what reproduces it.
   const rangeRev = useMemo(
-    () => rev.filter(r => inMonthRange(r.month)).filter(r => !scoped || mine.ownsClient(r.client_name)),
+    () => rev.filter(r => inMonthRange(r.month)).filter(r => !scoped || mine.ownsPm(r.sme)),
     [rev, from, to, scoped, mine])
 
   // monthly totals within range (drives period total)
@@ -213,7 +220,7 @@ export default function Dashboard() {
   // chart on a dashboard that says it is yours.
   const allMonthTotals = useMemo(() => {
     const m: Record<string, number> = {}
-    rev.filter(r => !scoped || mine.ownsClient(r.client_name))
+    rev.filter(r => !scoped || mine.ownsPm(r.sme))
        .forEach(r => { const k = (r.month || '').slice(0, 7); if (k) m[k] = (m[k] || 0) + (r.amount_usd || 0) })
     return m
   }, [rev, scoped, mine])
@@ -265,7 +272,7 @@ export default function Dashboard() {
   // In scope but ignoring the date filter. The same-days comparison and the "starting
   // later this month" note both need days the filter has deliberately cut off.
   const scopedRev = useMemo(
-    () => rev.filter(r => !scoped || mine.ownsClient(r.client_name)),
+    () => rev.filter(r => !scoped || mine.ownsPm(r.sme)),
     [rev, scoped, mine])
   const sumBetween = (a: string, b: string) => scopedRev.reduce((s, r) => {
     const v = (r.date || r.month || '').slice(0, 10)
@@ -322,10 +329,11 @@ export default function Dashboard() {
     return { pct: prev ? ((periodTotal - prev) / prev) * 100 : null, prev }
   }, [isMtd, periodTotal, scopedRev])
 
-  // Everything below reads these, not the raw lists. A booking or a delight names only a
-  // company, so ownership comes from the client record; a deal names its PM directly.
+  // Everything below reads these, not the raw lists. A booking carries its own PC/SME
+  // cell, so it is scoped by the name on it like every other figure here; a delight or an
+  // escalation names only a company, and ownership of those still comes from the client.
   const myBookings = useMemo(
-    () => scoped ? bookingRows.filter(b => mine.ownsClient(b.company_name)) : bookingRows,
+    () => scoped ? bookingRows.filter(b => mine.ownsPm(b.sme)) : bookingRows,
     [bookingRows, scoped, mine])
   const myOpps = useMemo(
     // A deal counts as theirs by its PM, or by the client being theirs — an email-found
