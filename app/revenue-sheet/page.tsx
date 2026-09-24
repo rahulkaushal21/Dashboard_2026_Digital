@@ -24,6 +24,9 @@ const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 // Where the revenue sheet begins. Nothing is booked before it, so the month list stops
 // here rather than scrolling into empty years.
 const SHEET_START = '2025-04'
+// The single page a From/To range collapses to. Not a month, so it can never collide
+// with one.
+const RANGE = '__range__'
 const nextMonth = () => { const d = new Date(); return monthKey(new Date(d.getFullYear(), d.getMonth() + 1, 1)) }
 const ym = (s?: string) => (s || '').slice(0, 7)
 const uniq = (xs: (string | undefined)[]) => Array.from(new Set(xs.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -257,7 +260,23 @@ export default function ProjectLedger() {
   const [thisMonth, setThisMonth] = useState('')
   useEffect(() => { setThisMonth(monthKey(new Date())) }, [])
 
-  const monthPages = useMemo(() => {
+  // ONE MONTH CONTROL AT A TIME. There were two — this dropdown, and a From/To pair —
+  // and they fought: the dropdown said August while From/To said September, so the page
+  // showed August's slice of a September-only filter, which is nothing. Neither control
+  // was broken; having both was.
+  //
+  // So a range TAKES OVER. Set From or To and the whole span becomes the single thing on
+  // screen, with the pager gone because there is nothing to page through. Pick a month
+  // from the dropdown and the range clears. Either, never both.
+  const rangeMode = !!(fFrom || fTo)
+  const rangeLabel =
+    fFrom && fTo ? (fFrom === fTo ? monLabel(fFrom) : `${monLabel(fFrom)} – ${monLabel(fTo)}`)
+    : fFrom ? `${monLabel(fFrom)} onwards`
+    : fTo ? `up to ${monLabel(fTo)}` : ''
+
+  // Every month the dropdown offers, whether or not a range is currently in force — so
+  // choosing one is always a way back out of a range.
+  const monthPagesAll = useMemo(() => {
     const inData = new Set(shown.map(r => rowMonth(r) || '—'))
     const out: string[] = []
     if (thisMonth) {
@@ -273,6 +292,9 @@ export default function ProjectLedger() {
     if (inData.has('—')) out.push('—')
     return out
   }, [shown, thisMonth])
+  // What the pager actually walks: one page when a range is in force, every month
+  // otherwise.
+  const monthPages = useMemo(() => rangeMode ? [RANGE] : monthPagesAll, [rangeMode, monthPagesAll])
 
   const handleSort = (key: string) => {
     if (sortKey !== key) { setSortKey(key); setSortAsc(false); return }
@@ -282,7 +304,10 @@ export default function ProjectLedger() {
 
   const pages = Math.max(1, monthPages.length)
   const pageMonth = monthPages[Math.min(page, monthPages.length - 1)] || ''
-  const pageRows = useMemo(() => shown.filter(r => (rowMonth(r) || '—') === pageMonth), [shown, pageMonth])
+  const pageRows = useMemo(
+    () => pageMonth === RANGE ? shown : shown.filter(r => (rowMonth(r) || '—') === pageMonth),
+    [shown, pageMonth])
+  const periodLabel = pageMonth === RANGE ? rangeLabel : pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)
 
   // THE HEADLINE IS THE MONTH ON SCREEN. It used to count every month the filters left
   // standing, which read as a contradiction: the picker said September and the total said
@@ -427,9 +452,16 @@ export default function ProjectLedger() {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-56`} />
         {/* The month sits with the filters, not under the table. It is the control people
             reach for most, and it was the one you had to scroll past everything to find. */}
-        <select value={pageMonth} onChange={e => setPage(monthPages.indexOf(e.target.value))}
-          className={`${sel} max-h-60`} size={1} aria-label="Month" title="Month — newest first, back to April 2025">
-          {monthPages.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
+        <select value={rangeMode ? RANGE : pageMonth}
+          onChange={e => {
+            // Picking a month ends the range — that is the "either" half of either/or.
+            filtersTouched.current = true
+            setFFrom(''); setFTo('')
+            setPage(Math.max(0, monthPagesAll.indexOf(e.target.value)))
+          }}
+          className={`${sel} max-h-60`} size={1} aria-label="Month" title="Month — newest first, back to April 2025. Setting a From/To range below replaces this.">
+          {rangeMode && <option value={RANGE}>{rangeLabel} (range)</option>}
+          {monthPagesAll.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
         </select>
         <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
         <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
@@ -456,7 +488,7 @@ export default function ProjectLedger() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="text-sm text-mav-muted">
           {loading ? 'Loading…' : <>{pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} · {pageClients} client{pageClients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(pageTotal)}</span>
-            <span className="ml-1 text-mav-muted/80">in {pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</span>
+            <span className="ml-1 text-mav-muted/80">in {periodLabel}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</span>
             {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}
             {mAwaiting.length > 0 && <span className="ml-2 text-amber-300">· {money(pageAwaitingTotal)} awaiting information, not counted</span>}</>}
         </div>
@@ -588,7 +620,7 @@ export default function ProjectLedger() {
               <tr><td colSpan={cols.length + 3} className="px-3 py-6 text-center text-mav-muted">
                 {shown.length === 0
                   ? 'Nothing matches those filters.'
-                  : `Nothing in ${pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)} matches those filters — ${shown.length.toLocaleString()} line${shown.length === 1 ? '' : 's'} in other months do.`}
+                  : `Nothing in ${periodLabel} matches those filters${rangeMode ? '.' : ` — ${shown.length.toLocaleString()} line${shown.length === 1 ? '' : 's'} in other months do.`}`}
               </td></tr>
             )}
           </tbody>
@@ -598,11 +630,14 @@ export default function ProjectLedger() {
       {monthPages.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
           <span className="text-mav-muted text-xs">
-            Month {Math.min(page, pages - 1) + 1} of {pages}
-            {shown.length > pageRows.length && <> &middot; {(shown.length - pageRows.length).toLocaleString()} more line{shown.length - pageRows.length === 1 ? '' : 's'} match these filters in other months</>}
+            {rangeMode
+              ? <>Showing the whole range &middot; the month picker is off while a From/To is set</>
+              : <>Month {Math.min(page, pages - 1) + 1} of {pages}
+                  {shown.length > pageRows.length && <> &middot; {(shown.length - pageRows.length).toLocaleString()} more line{shown.length - pageRows.length === 1 ? '' : 's'} match these filters in other months</>}</>}
             {' '}&middot; ticking the header selects the {pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} on screen
           </span>
-          <div className="flex items-center gap-2">
+          {/* Nothing to page through when the range IS the page. */}
+          <div className={`flex items-center gap-2 ${rangeMode ? 'hidden' : ''}`}>
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
               className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 transition-colors">Newer month</button>
             <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}
