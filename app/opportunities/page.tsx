@@ -71,6 +71,11 @@ const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
 const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >= 60 ? 'bg-green-500/15 text-green-400' : p >= 45 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
+// Mirrored in SQL as opportunity_state(), which the duplicate check in the Add dialog
+// uses. The two disagreed until now: that one looked only at `won` and the sheet's word,
+// so a deal confirmed HERE and still reading Open in the Quotes sheet was offered as a
+// live duplicate — Point B's $5,200. The one case SQL cannot see is booked_month, which
+// is matched against the revenue rows on this side.
 const oppStatus = (x: Opportunity) => {
 if (x.won) return 'Won'                       // a booking always wins
 if (x.email_won) return 'Won'                 // confirmed here; the sheet may not know yet

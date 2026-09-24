@@ -297,7 +297,18 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
         {dupes.length > 0 && (
           <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
             <div className="text-xs font-semibold text-amber-300">{dupes.length} live deal{dupes.length > 1 ? 's' : ''} look similar — check this is not already recorded</div>
-            <div className="text-[11px] text-mav-muted mt-0.5">An email deal is often named for the end client while a hand-entered one is named for the agency, so the names can differ on the same deal. The value is the reliable signal.</div>
+            <div className="text-[11px] text-mav-muted mt-0.5">
+              An email deal is often named for the end client while a hand-entered one is named for the agency, so the
+              names can differ on the same deal. The value is the reliable signal.
+              {/* Said out loud because this list will not match what the Opportunities page is showing, and that is
+                  deliberate: the page opens on your own deals in a date range, this ignores all of it. What it does
+                  NOT ignore is whether a deal is decided — a deal confirmed here but still reading Open in the Quotes
+                  sheet used to appear here as live, which is the warning working backwards. */}
+              <span className="block mt-1">
+                Every still-open deal for this client, whatever the Opportunities page is filtered to. Anything already
+                won or lost is left out.
+              </span>
+            </div>
             <div className="mt-2 space-y-1">
               {dupes.slice(0, 5).map(d => (
                 <div key={d.id} className="text-xs flex items-center justify-between gap-2">
