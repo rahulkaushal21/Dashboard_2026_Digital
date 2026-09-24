@@ -1,0 +1,19 @@
+-- Two spellings of one client are two clients, everywhere.
+--
+-- "Geraint Manning Design" (14 lines, $9,943) and "Gearaint manning" (1 line, $50) are
+-- the same company on the same domain. The dashboard keys clients on their booking name,
+-- so the second spelling gets its own row on the Clients page, its own Client 360, its
+-- own empty QBR tab, and its $50 is missing from the first one's lifetime value.
+--
+-- web_client_duplicates finds them the only way that works: by the DOMAIN of the contact
+-- address on their own revenue lines. 32 domains carry more than one spelling.
+--
+-- IT DOES NOT MERGE ANYTHING, and that is deliberate. A shared domain is not proof of a
+-- duplicate — "hummingbird ideas" and "humanandthebeast" share one, and they are an
+-- agency and its end client, not a typo. Merging those would move real revenue onto the
+-- wrong company, which is the exact failure this system exists to prevent. The letters
+-- give a hint (`looks_like_a_typo`, an edit distance under a third of the name), and
+-- eight pairs clear it — but "hexagroup" and "bege group" clear it too and are different
+-- companies. So it is a review list. A person says which spelling wins.
+create extension if not exists fuzzystrmatch;
+-- web_client_duplicates; see this commit for the executed definition.

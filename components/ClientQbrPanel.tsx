@@ -112,6 +112,23 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
         </div>
       )}
 
+      {/* NEVER RENDER NOTHING. An absent panel and a panel with nothing to say look
+          identical, and "the QBR section is blank" has cost three rounds of guessing at
+          which one it was. It now always states which it is, and names the key it looked
+          under so a mismatch is visible rather than silent. */}
+      {!briefError && brief && !(brief.talking_points && brief.talking_points.length) && (
+        <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-4 mb-4 text-sm text-mav-muted">
+          Nothing to raise that the system can see for <span className="text-mav-fg">{company}</span> — no open
+          escalation, no undecided quote, no feedback and no recorded call. That is an answer, not a failure.
+        </div>
+      )}
+      {!briefError && brief === null && (
+        <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-4 mb-4 text-sm text-mav-muted">
+          No client record matched <span className="text-mav-fg">{company.trim().toLowerCase()}</span>. The brief is
+          keyed on the client&rsquo;s booking name, so a second spelling of the same company gets its own empty page.
+        </div>
+      )}
+
       {brief && brief.talking_points && brief.talking_points.length > 0 && (
         <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-4 mb-4">
           <div className="flex items-baseline justify-between gap-3 flex-wrap">
