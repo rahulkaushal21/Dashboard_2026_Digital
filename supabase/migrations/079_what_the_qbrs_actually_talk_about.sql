@@ -1,0 +1,34 @@
+-- Read the seven QBRs on record, and make the brief watch for what they actually discuss.
+--
+-- All seven were written up from a recording or an email recap, so they are the closest
+-- thing this system has to a transcript of how these meetings really go. The patterns are
+-- not subtle:
+--
+--   AI SEARCH, 3 of 7.  HexaGroup wanted an AIO/GEO deep-dive and said $2,000+/month reads
+--                       too much like a standard SEO plan. Pure Flix agreed it is the right
+--                       direction, sequenced after cleanup. ChowNow had recommendations
+--                       ready and chased twice for a session. Across the whole database it
+--                       has been DISCUSSED with four clients and QUOTED to none of them.
+--   A CALL TO BOOK,  5 of 7.  Every one of those five ends with a session somebody has to
+--                       get into a calendar, and three were still being chased weeks later.
+--   PRICING,         3 of 7.  AIO packaging, flat-fee SEO/schema as a standard line item,
+--                       video editing once samples arrive.
+--   BLOCKED ON THEM, 5 of 7.  A questionnaire, a CRM confirmation in writing, sample video
+--                       clips, Sentry guidance, meeting slots. These are what stall.
+--
+-- So five new points, each from something already recorded:
+--   * what WE promised last time (was already there)
+--   * what THEY owe us from last time - the action_client column nothing had ever read
+--   * this review is N days overdue, on a quarterly cadence from the last one
+--   * AI search has come up and has never been quoted
+--   * what we said would happen next, worded sharper when it names a call
+--   * nobody has logged a word of feedback from them this quarter
+--
+-- web_qbr_patterns holds the cross-source detection: a client counts as having discussed
+-- AI search if it appears in their QBR write-ups OR in the email signals the review
+-- writes, and as quoted only if it appears on an actual opportunity. Discussed-but-never
+-- quoted is the gap worth putting on an agenda.
+--
+-- None of it is a model guessing what a client cares about. Every line is a sentence
+-- somebody already typed, or a date arithmetic on it.
+-- (web_qbr_patterns + web_qbr_brief recreated; see this commit's history for the executed DDL.)
