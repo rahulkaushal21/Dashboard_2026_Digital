@@ -280,10 +280,6 @@ export default function ProjectLedger() {
     setSortKey(''); setSortAsc(false)   // third click returns to newest-entry-first
   }
 
-  // Awaiting Information is not revenue — the work is not agreed yet, so the figure is a
-  // quote, not money. The lines STAY in the table, because somebody still has to chase
-  // the missing information; they are only kept out of the money total, and the total
-  // says so rather than quietly being short.
   const pages = Math.max(1, monthPages.length)
   const pageMonth = monthPages[Math.min(page, monthPages.length - 1)] || ''
   const pageRows = useMemo(() => shown.filter(r => (rowMonth(r) || '—') === pageMonth), [shown, pageMonth])
@@ -293,6 +289,10 @@ export default function ProjectLedger() {
   // $455,090 "in all months" over a table showing September. Two true numbers arguing
   // with each other is worse than either alone, and the one anybody wants is the month
   // they just chose. The pager below still says which month of how many.
+  // Awaiting Information is not revenue — the work is not agreed yet, so the figure is a
+  // quote, not money. The lines STAY in the table, because somebody still has to chase
+  // the missing information; they are only kept out of the money total, and the total
+  // says so rather than quietly being short.
   const mAwaiting = pageRows.filter(r => /awaiting/i.test(r.delivery_status || ''))
   const mCounted = pageRows.filter(r => !/awaiting/i.test(r.delivery_status || ''))
   const pageTotal = mCounted.reduce((s, r) => s + (r.amount_usd || 0), 0)
