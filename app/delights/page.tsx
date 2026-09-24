@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getDelights, type Delight } from '@/lib/supabase'
 import { useMine } from '@/lib/mine'
@@ -11,10 +12,13 @@ const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm ou
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const day = (s?: string) => (s || '').slice(0, 10)
 
+// An empty selection means "all", exactly as the old "All GEOs" option did.
+const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
+
 export default function Delights() {
   const [rows, setRows] = useState<Delight[]>([])
   const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [src, setSrc] = useState<'' | 'sheet' | 'email'>('')
+  const [q, setQ] = useState(''); const [geo, setGeo] = useState<string[]>([]); const [src, setSrc] = useState<'' | 'sheet' | 'email'>('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<Delight | null>(null)
   // Starts on this person's own clients. A PM opens Delights to see their own accounts
@@ -38,7 +42,7 @@ export default function Delights() {
 
   const filtered = useMemo(() => rows.filter(r => {
     if (justMine && !mine.ownsClient(r.company_name)) return false
-    if (geo && (r.geo || '') !== geo) return false
+    if (!keeps(geo, r.geo)) return false
     if (src === 'sheet' && !(r.sheet_count || 0)) return false
     if (src === 'email' && !(r.email_count || 0)) return false
     if (q) { const hay = `${r.company_name} ${r.headline || ''} ${r.items.map(i => `${i.quote || ''} ${i.project || ''}`).join(' ')}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
@@ -62,10 +66,7 @@ export default function Delights() {
             hidden={rows.filter(r => !mine.ownsClient(r.company_name)).length} />
         )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or quote…" className={`${sel} min-w-[220px] flex-1`} />
-        <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}>
-          <option value="">All GEOs</option>
-          {geos.map(g => <option key={g} value={g}>{g}</option>)}
-        </select>
+        <MultiSelect label="All GEOs" options={geos} selected={geo} onChange={setGeo} className="w-36" />
         {(['sheet', 'email'] as const).map(k => (
           <button key={k} onClick={() => setSrc(v => v === k ? '' : k)} className={`text-xs px-2.5 py-2 rounded-md border transition-colors ${src === k ? (k === 'email' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-green-500/20 text-green-300 border-green-500/50') : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{k === 'email' ? '✉ From email' : '📋 From sheet'} ({srcCounts[k]})</button>
         ))}
@@ -73,7 +74,7 @@ export default function Delights() {
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo || src || from || to) && <button onClick={() => { setQ(''); setGeo(''); setSrc(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
+        {(q || geo.length > 0 || src || from || to) && <button onClick={() => { setQ(''); setGeo([]); setSrc(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
         <span className="text-xs text-mav-muted ml-auto">{filtered.length} happy clients</span>
       </div>
 

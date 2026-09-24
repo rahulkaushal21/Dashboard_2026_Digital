@@ -372,12 +372,12 @@ if (!bandOn) return 0
 return all
 .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
 .filter(x => !fType || typeLabel(x).includes(fType))
-.filter(x => !fGeo || (x.geo || '') === fGeo)
-.filter(x => !fAM || splitNames(x.sales_person).includes(fAM))
-.filter(x => !fPM || splitNames(x.pm_owner).includes(fPM))
+.filter(x => !fGeo.length || fGeo.includes(x.geo || ''))
+.filter(x => !fAM.length || splitNames(x.sales_person).some(n => fAM.includes(n)))
+.filter(x => !fPM.length || splitNames(x.pm_owner).some(n => fPM.includes(n)))
 .filter(x => !fStatus || oppStatus(x) === fStatus)
-.filter(x => !fSvc || svcOf(x) === fSvc)
-.filter(x => !fTech || (x.technology || '') === fTech)
+.filter(x => !fSvc.length || fSvc.includes(svcOf(x)))
+.filter(x => !fTech.length || fTech.includes(x.technology || ''))
 .filter(x => !flagOnly || x.flag)
 .filter(x => !unlikelyOnly || x.unlikely)
 .filter(x => !lagOnly || sheetLag(x))
@@ -629,12 +629,17 @@ Bankable = pending deals likely to confirm (tier A 80%+ or B 60–80%), at full 
 )
 }
 
-const Panel = ({ title, rows, active, onPick }: { title: string; rows: [string, { count: number; value: number }][]; active: string; onPick: (k: string) => void }) => (
+// Clicking a bar behaves like ticking its box: it adds, and a second click removes.
+// The unlabelled group ("—") is not a value, so picking it clears instead.
+const pickIn = (cur: string[], k: string) =>
+k === '—' ? [] : cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k]
+
+const Panel = ({ title, rows, active, onPick }: { title: string; rows: [string, { count: number; value: number }][]; active: string[]; onPick: (k: string) => void }) => (
 <div className="bg-mav-panel border border-mav-line rounded-xl p-4">
 <div className="text-sm font-medium mb-3">{title} <span className="text-xs text-mav-muted font-normal">· open pipeline</span></div>
 <div className="space-y-1.5 max-h-64 overflow-y-auto">{rows.map(([k, v]) => (
-<button key={k} onClick={() => onPick(active === k ? '' : k)}
-className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${active === k ? 'bg-mav-yellow/15 text-mav-yellow' : 'hover:bg-mav-dark/50'}`}>
+<button key={k} onClick={() => onPick(k)}
+className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${active.includes(k) ? 'bg-mav-yellow/15 text-mav-yellow' : 'hover:bg-mav-dark/50'}`}>
 <span className="truncate">{k}</span>
 <span className="whitespace-nowrap text-xs"><span className="text-mav-muted">{v.count} ·</span> {money(v.value)}</span>
 </button>
@@ -732,9 +737,9 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 </div>
 
 <div className="grid md:grid-cols-3 gap-4 mb-6">
-<Panel title="By GEO" rows={byGeo} active={fGeo} onPick={k => { setFStatus('Open'); setFGeo(k === '—' ? '' : k) }} />
-<Panel title="By Service" rows={bySvc} active={fSvc} onPick={k => { setFStatus('Open'); setFSvc(k) }} />
-<Panel title="By Technology" rows={byTech} active={fTech} onPick={k => { setFStatus('Open'); setFTech(k === '—' ? '' : k) }} />
+<Panel title="By GEO" rows={byGeo} active={fGeo} onPick={k => { setFStatus('Open'); setFGeo(pickIn(fGeo, k)) }} />
+<Panel title="By Service" rows={bySvc} active={fSvc} onPick={k => { setFStatus('Open'); setFSvc(pickIn(fSvc, k)) }} />
+<Panel title="By Technology" rows={byTech} active={fTech} onPick={k => { setFStatus('Open'); setFTech(pickIn(fTech, k)) }} />
 </div>
 </>)}
 

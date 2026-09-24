@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useThemeInk } from '@/lib/use-theme-ink'
 import Header from '@/components/Header'
+import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
@@ -16,6 +17,8 @@ import ClientQbrPanel from '@/components/ClientQbrPanel'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
+// An empty selection means "all" — the same thing the old "All industries" option meant.
+const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 const norm = (s?: string) => (s || '').trim().toLowerCase()
 const akey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 // Expand a company name into candidate match keys: the whole name, the name minus a
@@ -280,10 +283,10 @@ export default function Clients() {
   const [verdicts, setVerdicts] = useState<{ dismissed: Set<string>; settled: Set<string>; unresolved: Set<string> }>({ dismissed: new Set(), settled: new Set(), unresolved: new Set() })
   const [opps, setOpps] = useState<Opportunity[]>([])
   const [allOpps, setAllOpps] = useState<Opportunity[]>([])
-  const [q, setQ] = useState(''); const [ind, setInd] = useState(''); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
+  const [q, setQ] = useState(''); const [ind, setInd] = useState<string[]>([]); const [stat, setStat] = useState(''); const [aiOnly, setAiOnly] = useState(false)
   // Clients whose billing has fallen off a cliff in the last two completed months.
   const [dipOnly, setDipOnly] = useState(false)
-  const [owner, setOwner] = useState(''); const [geo, setGeo] = useState('')
+  const [owner, setOwner] = useState<string[]>([]); const [geo, setGeo] = useState<string[]>([])
   const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [recentOnly, setRecentOnly] = useState(false)
   const [sortBy, setSortBy] = useState<'name' | 'ltv' | 'owner' | 'geo' | 'activity'>('activity'); const [sortAsc, setSortAsc] = useState(false)
   const [selC, setSelC] = useState<Client | null>(null)
@@ -305,7 +308,7 @@ export default function Clients() {
   // The Client-Backup directory: every client on the sheet, booked or not.
   const [dir, setDir] = useState<ClientDirectory[]>([])
   const [mode, setMode] = useState<'clients' | 'directory'>('clients')
-  const [bu, setBu] = useState(''); const [linked, setLinked] = useState<'' | 'yes' | 'no'>('')
+  const [bu, setBu] = useState<string[]>([]); const [linked, setLinked] = useState<'' | 'yes' | 'no'>('')
   // Directory-only: filter by the AI stance classified from each company's own site text
   const [aiStance, setAiStance] = useState<'' | 'native' | 'adjacent'>('')
   const [bookings, setBookings] = useState<BookingRow[]>([])
@@ -317,6 +320,9 @@ export default function Clients() {
   // to this page — the client table is — and between them they pushed the table most of
   // a screen down on every visit.
   const [showInd, setShowInd] = useState(false)
+  // The chip on the shut industry panel. One industry is worth naming; four are not
+  // worth truncating into nonsense.
+  const indLabel = ind.length === 1 ? ind[0] : `${ind.length} industries`
   const [showAuto, setShowAuto] = useState(false)
   // Both tables page at 50. The directory is ~2,000 rows and was rendering every one
   // of them into the DOM on every keystroke of the search box.
@@ -601,9 +607,9 @@ export default function Clients() {
     const needle = q.toLowerCase()
     return dir
       .filter(d => !needle || `${d.company_name} ${d.domain || ''} ${d.am_name || ''}`.toLowerCase().includes(needle))
-      .filter(d => !ind || (d.industry || 'Other / Unclassified') === ind)
-      .filter(d => !geo || d.geo === geo)
-      .filter(d => !bu || d.bu === bu)
+      .filter(d => keeps(ind, d.industry || 'Other / Unclassified'))
+      .filter(d => keeps(geo, d.geo))
+      .filter(d => keeps(bu, d.bu))
       .filter(d => !linked || (linked === 'yes' ? d.is_revenue_client : !d.is_revenue_client))
       .filter(d => !aiStance || d.ai_stance === aiStance)
       .sort((a, b) => a.company_name.toLowerCase().localeCompare(b.company_name.toLowerCase()))
@@ -740,12 +746,12 @@ export default function Clients() {
     let result = allClients
       .filter(c => !justMine || mine.ownsClient(c.company_name))
       .filter(c => (c.company_name + ' ' + displayName(c.company_name)).toLowerCase().includes(q.toLowerCase()))
-      .filter(c => !ind || (c.industry || 'Other / Unclassified') === ind)
+      .filter(c => keeps(ind, c.industry || 'Other / Unclassified'))
       .filter(c => !stat || statusOf(c) === stat)
       .filter(c => !aiOnly || c.ai_focus)
       .filter(c => !dipOnly || dipByClient.has(norm(c.company_name)))
-      .filter(c => !owner || c.pc_sme === owner)
-      .filter(c => !geo || c.geo === geo)
+      .filter(c => keeps(owner, c.pc_sme))
+      .filter(c => keeps(geo, c.geo))
       .filter(c => {
         if (!lo && !hi) return true
         const d = lastActivity(c)
@@ -837,10 +843,10 @@ export default function Clients() {
             hidden={allClients.filter(c => !mine.ownsClient(c.company_name)).length} />
         )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
-        <select value={ind} onChange={e => setInd(e.target.value)} className={sel}><option value="">All industries</option>{(mode === 'clients' ? industries : dirIndustries).map(i => <option key={i} value={i}>{i}</option>)}</select>
-        <select value={owner} onChange={e => setOwner(e.target.value)} className={sel}><option value="">All owners</option>{owners.map(o => <option key={o} value={o}>{o}</option>)}</select>
-        <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}><option value="">All GEOs</option>{(mode === 'clients' ? geos : dirGeos).map(g => <option key={g} value={g}>{g}</option>)}</select>
-        {mode === 'directory' && <select value={bu} onChange={e => setBu(e.target.value)} className={sel}><option value="">All BUs</option>{dirBus.map(b => <option key={b} value={b}>{b}</option>)}</select>}
+        <MultiSelect label="All industries" options={mode === 'clients' ? industries : dirIndustries} selected={ind} onChange={setInd} className="w-44" />
+        <MultiSelect label="All owners" options={owners} selected={owner} onChange={setOwner} className="w-40" />
+        <MultiSelect label="All GEOs" options={mode === 'clients' ? geos : dirGeos} selected={geo} onChange={setGeo} className="w-36" />
+        {mode === 'directory' && <MultiSelect label="All BUs" options={dirBus} selected={bu} onChange={setBu} className="w-36" />}
         {mode === 'directory' && <select value={linked} onChange={e => setLinked(e.target.value as '' | 'yes' | 'no')} className={sel}><option value="">Booked &amp; not booked</option><option value="yes">Booked revenue</option><option value="no">No revenue yet</option></select>}
         {mode === 'directory' && <select value={aiStance} onChange={e => setAiStance(e.target.value as '' | 'native' | 'adjacent')} title="Classified from each company's own site title and meta description, already cached on the directory row" className={sel}><option value="">Any AI stance</option><option value="native">AI-native ({dirAi.native})</option><option value="adjacent">AI/automation positioning ({dirAi.adjacent})</option></select>}
         <select value={stat} onChange={e => setStat(e.target.value)} title="Two things sit in one list. “Live” is computed here and now from escalations, email tone and booking gaps. “Recorded” is the sentiment stored on the client record by the nightly sentiment pass — a client can carry an at-risk sentiment without anything live against them today." className={sel}>
@@ -880,22 +886,22 @@ export default function Clients() {
             <span className="text-xs text-mav-muted">{showInd ? '▾' : '▸'}</span>Clients by industry
             {/* An active filter has to be visible even when the panel is shut, or you
                 are looking at a filtered table with nothing saying why. */}
-            {!showInd && ind && <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/15 text-mav-yellow font-normal">{ind}</span>}
+            {!showInd && ind.length > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/15 text-mav-yellow font-normal">{indLabel}</span>}
           </button>
           <div className="text-xs text-mav-muted">
             {(mode === 'clients' ? clients.length : dir.length)} total
             {showInd
-              ? <> · click a bar to filter{ind ? ` · showing ${ind}` : ''} · <button onClick={() => setShowInd(false)} className="hover:text-mav-fg underline underline-offset-2">hide</button></>
+              ? <> · click a bar to filter{ind.length ? ` · showing ${indLabel}` : ''} · <button onClick={() => setShowInd(false)} className="hover:text-mav-fg underline underline-offset-2">hide</button></>
               : <> · <button onClick={() => setShowInd(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
-            {!showInd && ind && <> · <button onClick={() => setInd('')} className="hover:text-mav-fg underline underline-offset-2">clear filter</button></>}
+            {!showInd && ind.length > 0 && <> · <button onClick={() => setInd([])} className="hover:text-mav-fg underline underline-offset-2">clear filter</button></>}
           </div>
         </div>
         <div className={`space-y-1.5 ${showInd ? '' : 'hidden'}`}>
           {(mode === 'clients' ? indCounts : dirIndCounts).map(([name, n]) => {
-            const active = ind === name
+            const active = ind.includes(name)
             const pct = Math.round((n / (mode === 'clients' ? maxIndCount : (dirIndCounts[0]?.[1] || 1))) * 100)
             return (
-              <button key={name} onClick={() => setInd(active ? '' : name)} title={`${n} client${n === 1 ? '' : 's'} — click to ${active ? 'clear' : 'filter'}`}
+              <button key={name} onClick={() => setInd(active ? ind.filter(x => x !== name) : [...ind, name])} title={`${n} client${n === 1 ? '' : 's'} — click to ${active ? 'clear' : 'filter'}`}
                 className="w-full flex items-center gap-3 text-left group py-0.5">
                 <span className={`w-44 shrink-0 truncate text-xs ${active ? 'text-mav-yellow font-medium' : 'text-mav-muted group-hover:text-mav-fg'}`}>{name}</span>
                 <span className="flex-1 h-4 rounded bg-mav-dark overflow-hidden">
@@ -906,7 +912,7 @@ export default function Clients() {
             )
           })}
         </div>
-        {ind && <button onClick={() => setInd('')} className="mt-3 text-xs text-mav-muted hover:text-mav-fg">✕ Clear industry filter</button>}
+        {ind.length > 0 && <button onClick={() => setInd([])} className="mt-3 text-xs text-mav-muted hover:text-mav-fg">✕ Clear industry filter</button>}
       </div>
 
       {mode === 'clients' ? (
@@ -1125,7 +1131,7 @@ export default function Clients() {
                         </div>
                       </div>
                     )}
-                    <button onClick={() => { setInd(r.name); setMode('directory'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                    <button onClick={() => { setInd([r.name]); setMode('directory'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
                       className="mt-4 text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">
                       → See the {r.companies.toLocaleString()} {r.name} companies in the directory
                     </button>

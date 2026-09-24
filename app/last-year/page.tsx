@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import MultiSelect from '@/components/MultiSelect'
 import KPICard from '@/components/KPICard'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
 import { PM_REASSIGN } from '@/lib/pm-team'
@@ -59,12 +60,15 @@ type Row = {
   pm: string; pmLatest: string; pmAll: Set<string>
 }
 
+// An empty selection means "all", exactly as the old "All …" option did.
+const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
+
 export default function LastYearReview() {
   const [rows, setRows] = useState<BookingRow[]>([])
   const [q, setQ] = useState('')
   const [mv, setMv] = useState('')      // quarter movement filter
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')   // 'YYYY-MM' month range
-  const [fGeo, setFGeo] = useState(''); const [fService, setFService] = useState(''); const [fPm, setFPm] = useState('')
+  const [fGeo, setFGeo] = useState<string[]>([]); const [fService, setFService] = useState<string[]>([]); const [fPm, setFPm] = useState<string[]>([])
   const [qCur, setQCur] = useState(DEF_CUR)     // index of the quarter being compared
   const [qBase, setQBase] = useState(DEF_BASE)  // index of the quarter compared against
   useEffect(() => { getBookingsFull().then(setRows) }, [])
@@ -80,9 +84,9 @@ export default function LastYearReview() {
     rows.forEach(r => {
       const c = (r.company_name || '').trim()
       if (!c) return
-      if (fGeo && (r.geo || '').trim() !== fGeo) return            // GEO filter
-      if (fService && (r.service_name || '').trim() !== fService) return  // Service filter
-      if (fPm && pmOfBooking(r) !== fPm) return                            // PM filter
+      if (!keeps(fGeo, r.geo)) return                    // GEO filter
+      if (!keeps(fService, r.service_name)) return       // Service filter
+      if (!keeps(fPm, pmOfBooking(r))) return            // PM filter
       const k = (r.booking_month || '').slice(0, 7)
       if (from && k < from) return        // From/To month range narrows the whole analysis
       if (to && k > to) return
@@ -174,14 +178,14 @@ export default function LastYearReview() {
         <select value={qBase} onChange={e => setQBase(+e.target.value)} className={sel} title="Quarter to compare against">
           {QS.map((f, i) => <option key={i} value={i}>{qLabel(f)}{i === CUR_I ? ' · current' : ''}</option>)}
         </select>
-        <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={sel}><option value="">All GEO</option>{geos.map(g => <option key={g} value={g}>{g}</option>)}</select>
-        <select value={fService} onChange={e => setFService(e.target.value)} className={sel}><option value="">All services</option>{services.map(s => <option key={s} value={s}>{s}</option>)}</select>
-        <select value={fPm} onChange={e => setFPm(e.target.value)} className={sel} title="Project manager on the booking"><option value="">All PMs</option>{pms.map(p => <option key={p} value={p}>{p}</option>)}</select>
+        <MultiSelect label="All GEO" options={geos} selected={fGeo} onChange={setFGeo} className="w-36" />
+        <MultiSelect label="All services" options={services} selected={fService} onChange={setFService} className="w-44" />
+        <MultiSelect label="All PMs" options={pms} selected={fPm} onChange={setFPm} className="w-40" />
         <span className="text-xs text-mav-muted ml-1">From</span>
         <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">To</span>
         <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(from || to || fGeo || fService || fPm) && <button onClick={() => { setFrom(''); setTo(''); setFGeo(''); setFService(''); setFPm('') }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>}
+        {(from || to || fGeo.length > 0 || fService.length > 0 || fPm.length > 0) && <button onClick={() => { setFrom(''); setTo(''); setFGeo([]); setFService([]); setFPm([]) }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>}
         <span className="text-xs text-mav-muted ml-auto">{view.length} clients · scroll right for all quarters →</span>
       </div>
 

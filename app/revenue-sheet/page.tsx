@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from '@/components/Header'
+import MultiSelect from '@/components/MultiSelect'
 import Link from 'next/link'
 import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, ledgerFingerprint } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
@@ -24,6 +25,8 @@ const nextMonth = () => { const d = new Date(); return monthKey(new Date(d.getFu
 const ym = (s?: string) => (s || '').slice(0, 7)
 const uniq = (xs: (string | undefined)[]) => Array.from(new Set(xs.map(x => (x || '').trim()).filter(Boolean))).sort()
 const monLabel = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+// An empty selection means "all" — what the old "All PMs" option meant.
+const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 
 // The Web, Hub & LP tab's columns, in its order and under its names.
 //
@@ -117,11 +120,13 @@ export default function ProjectLedger() {
   const [isAdmin, setIsAdmin] = useState(false)
 
   const [search, setSearch] = useState('')
-  const [fDept, setFDept] = useState('')
-  const [fModel, setFModel] = useState('')
-  const [fGeo, setFGeo] = useState('')
-  const [fPm, setFPm] = useState('')
-  const [fAm, setFAm] = useState('')
+  // Lists, not single values: "Kalgi and Prachi's lines" is one question, and it used to
+  // take two passes. An empty list still means all.
+  const [fDept, setFDept] = useState<string[]>([])
+  const [fModel, setFModel] = useState<string[]>([])
+  const [fGeo, setFGeo] = useState<string[]>([])
+  const [fPm, setFPm] = useState<string[]>([])
+  const [fAm, setFAm] = useState<string[]>([])
   const [fSource, setFSource] = useState('')
   // Opens on THIS MONTH rather than all 3,221 lines. The monthly job is this month's;
   // everything else is two clicks away. Set after mount, because working out "now" during
@@ -178,7 +183,7 @@ export default function ProjectLedger() {
       setMe(m)
       // A PM opens this page to work their own lines, so it starts on theirs. Only if
       // nobody has touched the filter, so a deliberate choice is never overwritten.
-      if (m?.name) setFPm(prev => (prev === '' && !filtersTouched.current) ? m.name : prev)
+      if (m?.name) setFPm(prev => (prev.length === 0 && !filtersTouched.current) ? [m.name] : prev)
     })
     load()
   }, [])
@@ -195,11 +200,11 @@ export default function ProjectLedger() {
     const q = search.trim().toLowerCase()
     return rows
       .filter(r => !q || (r.company_name || '').toLowerCase().includes(q) || (r.project_name || '').toLowerCase().includes(q) || (r.contact_email || '').toLowerCase().includes(q))
-      .filter(r => !fDept || r.service_dept === fDept)
-      .filter(r => !fModel || r.engagement_model === fModel)
-      .filter(r => !fGeo || r.geo === fGeo)
-      .filter(r => !fPm || r.pm_owner === fPm)
-      .filter(r => !fAm || r.sales_person === fAm)
+      .filter(r => keeps(fDept, r.service_dept))
+      .filter(r => keeps(fModel, r.engagement_model))
+      .filter(r => keeps(fGeo, r.geo))
+      .filter(r => keeps(fPm, r.pm_owner))
+      .filter(r => keeps(fAm, r.sales_person))
       .filter(r => !fSource || (fSource === 'sheet' ? r.in_sheet : !r.in_sheet))
       .filter(r => !fFrom || rowMonth(r) >= fFrom)
       .filter(r => !fTo || rowMonth(r) <= fTo)
@@ -256,8 +261,8 @@ export default function ProjectLedger() {
   const pageRows = useMemo(() => shown.filter(r => (rowMonth(r) || '—') === pageMonth), [shown, pageMonth])
   const pageTotal = pageRows.reduce((s, r) => s + (r.amount_usd || 0), 0)
 
-  const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept(''); setFModel(''); setFGeo(''); setFPm(''); setFAm(''); setFSource(''); setFFrom(''); setFTo('') }
-  const anyFilter = search || fDept || fModel || fGeo || fPm || fAm || fSource || fFrom || fTo
+  const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFSource(''); setFFrom(''); setFTo('') }
+  const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || [fDept, fModel, fGeo, fPm, fAm].some(x => x.length > 0)
 
   const toggle = (k: string) => setPicked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })
   // Selects the whole FILTERED set, not just this page — the point of filtering to
@@ -354,18 +359,18 @@ export default function ProjectLedger() {
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-56`} />
-        <select value={fModel} onChange={e => setFModel(e.target.value)} className={sel}><option value="">All models</option>{opts.model.map(x => <option key={x}>{x}</option>)}</select>
-        <select value={fDept} onChange={e => setFDept(e.target.value)} className={sel}><option value="">All depts</option>{opts.dept.map(x => <option key={x}>{x}</option>)}</select>
-        <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={sel}><option value="">All GEOs</option>{opts.geo.map(x => <option key={x}>{x}</option>)}</select>
-        <select value={fPm} onChange={e => { filtersTouched.current = true; setFPm(e.target.value) }} className={sel}><option value="">All PMs</option>{opts.pm.map(x => <option key={x}>{x}</option>)}</select>
-        <select value={fAm} onChange={e => setFAm(e.target.value)} className={sel}><option value="">All AMs</option>{opts.am.map(x => <option key={x}>{x}</option>)}</select>
+        <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
+        <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
+        <MultiSelect label="All GEOs" options={opts.geo} selected={fGeo} onChange={setFGeo} className="w-40" />
+        <MultiSelect label="All PMs" options={opts.pm} selected={fPm} onChange={v => { filtersTouched.current = true; setFPm(v) }} className="w-40" />
+        <MultiSelect label="All AMs" options={opts.am} selected={fAm} onChange={setFAm} className="w-40" />
         <select value={fSource} onChange={e => setFSource(e.target.value)} className={sel}>
           <option value="">Sheet + dashboard</option><option value="sheet">In the sheet</option><option value="dashboard">Confirmed here only</option>
         </select>
         <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={sel} title="From month — on Start Date" />
         <input type="month" value={fTo} onChange={e => { filtersTouched.current = true; setFTo(e.target.value) }} className={sel} title="To month — on Start Date" />
         {anyFilter && <button onClick={clearAll} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">Clear</button>}
-        <button onClick={() => { filtersTouched.current = true; setFModel('Dedicated'); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
+        <button onClick={() => { filtersTouched.current = true; setFModel(['Dedicated']); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
           className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
           This month&rsquo;s Dedicated
         </button>
@@ -374,7 +379,7 @@ export default function ProjectLedger() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="text-sm text-mav-muted">
           {loading ? 'Loading…' : <>{shown.length.toLocaleString()} line{shown.length === 1 ? '' : 's'} · {clients} client{clients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(total)}</span>
-            <span className="ml-1 text-mav-muted/80">in {fFrom && fFrom === fTo ? monLabel(fFrom) : fFrom || fTo ? 'the chosen months' : 'all months'}{fPm ? `, ${fPm}` : ''}</span>
+            <span className="ml-1 text-mav-muted/80">in {fFrom && fFrom === fTo ? monLabel(fFrom) : fFrom || fTo ? 'the chosen months' : 'all months'}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</span>
             {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}
             {awaiting.length > 0 && <span className="ml-2 text-amber-300">· {money(awaitingTotal)} awaiting information, not counted</span>}</>}
         </div>

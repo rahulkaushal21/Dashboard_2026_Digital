@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { RefreshCw } from 'lucide-react'
 import Header from '@/components/Header'
+import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getLnd, getLndModules, creditedPct, strictPct, type LndRow, type LndModule } from '@/lib/supabase'
 
@@ -86,12 +87,15 @@ const ProgressBar = ({ r }: { r: LndRow }) => {
   )
 }
 
+// An empty selection means "all", exactly as the old "All …" option did.
+const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
+
 export default function LndPage() {
   const [rows, setRows] = useState<LndRow[]>([])
   const [mods, setMods] = useState<LndModule[]>([])
   const [loading, setLoading] = useState(true)
-  const [level, setLevel] = useState('')
-  const [mgr, setMgr] = useState('')
+  const [level, setLevel] = useState<string[]>([])
+  const [mgr, setMgr] = useState<string[]>([])
   const [q, setQ] = useState('')
   const [only, setOnly] = useState<'' | 'zero' | 'stalled' | 'done'>('')
   const [sort, setSort] = useState<'progress' | 'name' | 'activity'>('progress')
@@ -159,8 +163,8 @@ export default function LndPage() {
 
   const filtered = useMemo(() => {
     let list = current.filter(r => {
-      if (level && r.level !== level) return false
-      if (mgr && (r.reporting_manager || '') !== mgr) return false
+      if (!keeps(level, r.level)) return false
+      if (!keeps(mgr, r.reporting_manager)) return false
       if (q && !`${displayName(r)} ${r.reporting_manager || ''} ${r.remarks || ''}`.toLowerCase().includes(q.toLowerCase())) return false
       if (only === 'zero' && !zeroStart(r)) return false
       if (only === 'stalled' && !stalled(r)) return false
@@ -397,14 +401,8 @@ export default function LndPage() {
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search learner or manager…" className={`${sel} min-w-[200px] flex-1`} />
-        <select value={level} onChange={e => setLevel(e.target.value)} className={sel}>
-          <option value="">All levels</option>
-          {levels.map(l => <option key={l} value={l}>{l}</option>)}
-        </select>
-        <select value={mgr} onChange={e => setMgr(e.target.value)} className={sel}>
-          <option value="">All managers</option>
-          {mgrs.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
+        <MultiSelect label="All levels" options={levels} selected={level} onChange={setLevel} className="w-40" />
+        <MultiSelect label="All managers" options={mgrs} selected={mgr} onChange={setMgr} className="w-44" />
         <select value={sort} onChange={e => setSort(e.target.value as typeof sort)} className={sel}>
           <option value="progress">Sort: progress</option>
           <option value="name">Sort: name</option>
@@ -422,7 +420,7 @@ export default function LndPage() {
           className={`text-xs px-2 py-1.5 rounded-md border ${only === 'done' ? 'border-green-400 text-green-300 bg-green-500/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
           Complete ({k.complete})
         </button>
-        {(q || level || mgr || only) && <button onClick={() => { setQ(''); setLevel(''); setMgr(''); setOnly('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
+        {(q || level.length > 0 || mgr.length > 0 || only) && <button onClick={() => { setQ(''); setLevel([]); setMgr([]); setOnly('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
         <span className="text-xs text-mav-muted ml-auto">{filtered.length} learners</span>
       </div>
 

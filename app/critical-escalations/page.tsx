@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import MultiSelect from '@/components/MultiSelect'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
@@ -25,10 +26,13 @@ const sentBucket = (s?: string) => { const v = (s || '').toLowerCase(); if (/pos
 const kindTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/complaint|churn/.test(v)) return 'bg-red-500/15 text-red-400'; if (/risk|escalat/.test(v)) return 'bg-orange-500/15 text-orange-300'; return 'bg-mav-line text-mav-muted' }
 const kindLabel = (t?: string) => { const v = (t || '').toLowerCase(); if (/complaint/.test(v)) return 'Complaint'; if (/churn/.test(v)) return 'Churn risk'; if (/risk|escalat/.test(v)) return 'At risk'; return t || 'Negative' }
 
+// An empty selection means "all", exactly as the old "All GEOs" option did.
+const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
+
 export default function CriticalEscalations() {
   const [rows, setRows] = useState<CriticalEscalation[]>([])
   const [loading, setLoading] = useState(true)
-  const [q, setQ] = useState(''); const [geo, setGeo] = useState(''); const [status, setStatus] = useState<'all' | 'open' | 'unresolved' | 'resolved'>('all')
+  const [q, setQ] = useState(''); const [geo, setGeo] = useState<string[]>([]); const [status, setStatus] = useState<'all' | 'open' | 'unresolved' | 'resolved'>('all')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<CriticalEscalation | null>(null)
   // Starts on this person's own clients. These are the ones they have to act on; the
@@ -51,7 +55,7 @@ export default function CriticalEscalations() {
   const filtered = useMemo(() => rows.filter(r => {
     if (justMine && !mine.ownsClient(r.company_name)) return false
     if (status !== 'all' && r.status !== status) return false
-    if (geo && (r.geo || '') !== geo) return false
+    if (!keeps(geo, r.geo)) return false
     if (q) { const hay = `${r.company_name} ${r.headline || ''} ${r.items.map(i => i.escalation_summary).join(' ')}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
     const d = day(r.last_flagged_date)
     if (from && (!d || d < from)) return false
@@ -105,15 +109,12 @@ export default function CriticalEscalations() {
           <option value="unresolved">⚑ Unresolved only</option>
           <option value="resolved">✓ Resolved only</option>
         </select>
-        <select value={geo} onChange={e => setGeo(e.target.value)} className={sel}>
-          <option value="">All GEOs</option>
-          {geos.map(g => <option key={g} value={g}>{g}</option>)}
-        </select>
+        <MultiSelect label="All GEOs" options={geos} selected={geo} onChange={setGeo} className="w-36" />
         <span className="text-xs text-mav-muted">From</span>
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
         <span className="text-xs text-mav-muted">to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo(''); setFrom(''); setTo(''); setStatus('all') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
+        {(q || geo.length > 0 || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo([]); setFrom(''); setTo(''); setStatus('all') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
         <span className="text-xs text-mav-muted ml-auto">{filtered.length} clients · {openCount} open · {unresolvedCount} unresolved</span>
       </div>
 

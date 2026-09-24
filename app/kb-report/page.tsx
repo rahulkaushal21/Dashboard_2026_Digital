@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import ClientLink from '@/components/ClientLink'
+import MultiSelect from '@/components/MultiSelect'
 import { getProjectLedger, getOpportunities, type LedgerRow, type Opportunity } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
@@ -46,6 +47,9 @@ const deptOf = (s?: string) => {
 
 const uniq = (xs: (string | undefined)[]) =>
   Array.from(new Set(xs.map(x => (x || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+
+// An empty selection means "all" — the same thing the old "All AMs" option meant.
+const keeps = (picked: string[], v?: string) => picked.length === 0 || picked.includes((v || '').trim())
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 
@@ -93,13 +97,16 @@ export default function Reports() {
 
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const [fAm, setFAm] = useState('')
-  const [fPm, setFPm] = useState('')
-  const [fEng, setFEng] = useState('')
-  const [fTech, setFTech] = useState('')
-  const [fGeo, setFGeo] = useState('')
-  const [fAgency, setFAgency] = useState('')
-  const [fDept, setFDept] = useState('')
+  // Every one of these takes more than one answer. "WEB-UK and WEB-US, excluding AU" is a
+  // question people were answering by exporting to a spreadsheet; an empty list still
+  // means "all", so nothing about the default view changed.
+  const [fAm, setFAm] = useState<string[]>([])
+  const [fPm, setFPm] = useState<string[]>([])
+  const [fEng, setFEng] = useState<string[]>([])
+  const [fTech, setFTech] = useState<string[]>([])
+  const [fGeo, setFGeo] = useState<string[]>([])
+  const [fAgency, setFAgency] = useState<string[]>([])
+  const [fDept, setFDept] = useState<string[]>([])
 
   useEffect(() => {
     Promise.all([getProjectLedger(), getOpportunities()])
@@ -123,13 +130,13 @@ export default function Reports() {
     const d = rowDate(r)
     if (from && (!d || d < from)) return false
     if (to && (!d || d > to)) return false
-    if (fAm && (r.sales_person || '') !== fAm) return false
-    if (fPm && (r.pm_owner || '') !== fPm) return false
-    if (fEng && engOf(r) !== fEng) return false
-    if (fTech && (r.technology || '') !== fTech) return false
-    if (fGeo && (r.geo || '') !== fGeo) return false
-    if (fAgency && (r.company_name || '') !== fAgency) return false
-    if (fDept && deptOf(r.service_dept) !== fDept) return false
+    if (!keeps(fAm, r.sales_person)) return false
+    if (!keeps(fPm, r.pm_owner)) return false
+    if (fEng.length && !fEng.includes(engOf(r))) return false
+    if (!keeps(fTech, r.technology)) return false
+    if (!keeps(fGeo, r.geo)) return false
+    if (!keeps(fAgency, r.company_name)) return false
+    if (fDept.length && !fDept.includes(deptOf(r.service_dept))) return false
     return true
   }), [base, from, to, fAm, fPm, fEng, fTech, fGeo, fAgency, fDept])
 
@@ -154,13 +161,13 @@ export default function Reports() {
     const usd = base.filter(r => {
       const d = rowDate(r)
       if (!d || d < pFrom || d > pTo) return false
-      if (fAm && (r.sales_person || '') !== fAm) return false
-      if (fPm && (r.pm_owner || '') !== fPm) return false
-      if (fEng && engOf(r) !== fEng) return false
-      if (fTech && (r.technology || '') !== fTech) return false
-      if (fGeo && (r.geo || '') !== fGeo) return false
-      if (fAgency && (r.company_name || '') !== fAgency) return false
-      if (fDept && deptOf(r.service_dept) !== fDept) return false
+      if (!keeps(fAm, r.sales_person)) return false
+      if (!keeps(fPm, r.pm_owner)) return false
+      if (fEng.length && !fEng.includes(engOf(r))) return false
+      if (!keeps(fTech, r.technology)) return false
+      if (!keeps(fGeo, r.geo)) return false
+      if (!keeps(fAgency, r.company_name)) return false
+      if (fDept.length && !fDept.includes(deptOf(r.service_dept))) return false
       return true
     }).reduce((s, r) => s + (r.amount_usd || 0), 0)
     return { usd, from: pFrom, to: pTo }
@@ -258,11 +265,11 @@ export default function Reports() {
       const d = (o.source_date || o.confirmed_at || '').slice(0, 10)
       if (from && (!d || d < from)) return false
       if (to && (!d || d > to)) return false
-      if (fAm && (o.sales_person || '') !== fAm) return false
-      if (fPm && (o.pm_owner || '') !== fPm) return false
-      if (fGeo && (o.geo || '') !== fGeo) return false
-      if (fAgency && (o.company_name || '') !== fAgency) return false
-      if (fDept && deptOf(o.service_dept) !== fDept) return false
+      if (!keeps(fAm, o.sales_person)) return false
+      if (!keeps(fPm, o.pm_owner)) return false
+      if (!keeps(fGeo, o.geo)) return false
+      if (!keeps(fAgency, o.company_name)) return false
+      if (fDept.length && !fDept.includes(deptOf(o.service_dept))) return false
       return true
     })
     return {
@@ -289,10 +296,10 @@ export default function Reports() {
   const lastSameDayOn = from === ranges.lastSameDay.from && to === ranges.lastSameDay.to
   const datesChanged = !(from === ranges.thisMonth.from && to === ranges.thisMonth.to)
 
-  const anyFilter = !!(fAm || fPm || fEng || fTech || fGeo || fAgency || fDept)
+  const anyFilter = [fAm, fPm, fEng, fTech, fGeo, fAgency, fDept].some(x => x.length > 0)
   const reset = () => {
     setFrom(ranges.thisMonth.from); setTo(ranges.thisMonth.to)
-    setFAm(''); setFPm(''); setFEng(''); setFTech(''); setFGeo(''); setFAgency(''); setFDept('')
+    setFAm([]); setFPm([]); setFEng([]); setFTech([]); setFGeo([]); setFAgency([]); setFDept([])
   }
 
   const monthValue = months.includes((from || '').slice(0, 7)) && from.slice(8) === '01'
@@ -319,30 +326,13 @@ export default function Reports() {
           {months.map(m => <option key={m} value={m}>{monLabel(m)}</option>)}
         </select>
 
-        <select value={fDept} onChange={e => setFDept(e.target.value)} className={sel} aria-label="Service department">
-          <option value="">All services</option>
-          {DEPT_ORDER.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select value={fAm} onChange={e => setFAm(e.target.value)} className={sel} aria-label="Account manager">
-          <option value="">All AMs</option>{ams.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select value={fPm} onChange={e => setFPm(e.target.value)} className={sel} aria-label="Project manager">
-          <option value="">All PMs</option>{pms.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select value={fEng} onChange={e => setFEng(e.target.value)} className={sel} aria-label="Engagement">
-          <option value="">P2P &amp; Dedicated</option>
-          <option value="Dedicated">Dedicated only</option>
-          <option value="P2P">P2P only</option>
-        </select>
-        <select value={fTech} onChange={e => setFTech(e.target.value)} className={sel} aria-label="Technology">
-          <option value="">All technologies</option>{techs.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={sel} aria-label="Geo">
-          <option value="">All geos</option>{geos.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
-        <select value={fAgency} onChange={e => setFAgency(e.target.value)} className={`${sel} max-w-[13rem]`} aria-label="Agency">
-          <option value="">All agencies</option>{agencies.map(v => <option key={v} value={v}>{v}</option>)}
-        </select>
+        <MultiSelect label="All services" options={DEPT_ORDER} selected={fDept} onChange={setFDept} className="w-40" />
+        <MultiSelect label="All AMs" options={ams} selected={fAm} onChange={setFAm} className="w-40" />
+        <MultiSelect label="All PMs" options={pms} selected={fPm} onChange={setFPm} className="w-40" />
+        <MultiSelect label="P2P &amp; Dedicated" options={['Dedicated', 'P2P']} selected={fEng} onChange={setFEng} className="w-44" />
+        <MultiSelect label="All technologies" options={techs} selected={fTech} onChange={setFTech} className="w-44" />
+        <MultiSelect label="All geos" options={geos} selected={fGeo} onChange={setFGeo} className="w-40" />
+        <MultiSelect label="All agencies" options={agencies} selected={fAgency} onChange={setFAgency} className="w-52" />
 
         {/* The range people ask for most after "this month": the month before, stopped on
             today's date, so the two are the same number of days. It toggles — clicking it

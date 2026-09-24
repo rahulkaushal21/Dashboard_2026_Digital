@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import MultiSelect from '@/components/MultiSelect'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import KPICard from '@/components/KPICard'
@@ -13,11 +14,14 @@ const isMajor = (x: Escalation) => /major/i.test(x.business_impact || '') || /ma
 
 type SortField = 'date' | 'company' | 'type'
 
+// An empty selection means "all", exactly as the old "All GEOs" option did.
+const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
+
 export default function Escalations() {
   const [all, setAll] = useState<Escalation[]>([])
   const [search, setSearch] = useState('')
-  const [fType, setFType] = useState('')
-  const [fGeo, setFGeo] = useState('')
+  const [fType, setFType] = useState<string[]>([])
+  const [fGeo, setFGeo] = useState<string[]>([])
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [sortBy, setSortBy] = useState<SortField>('date')
@@ -41,8 +45,8 @@ export default function Escalations() {
     let result = all
       .filter(x => !justMine || mine.ownsClient(x.company_name))
       .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
-      .filter(x => !fType || (x.escalation_type || '') === fType)
-      .filter(x => !fGeo || (x.geo || '') === fGeo)
+      .filter(x => keeps(fType, x.escalation_type))
+      .filter(x => keeps(fGeo, x.geo))
       .filter(x => inRange(x.tracking_date))
     
     // Apply sorting
@@ -89,7 +93,7 @@ export default function Escalations() {
     return sortAsc ? ' ↑' : ' ↓'
   }
   
-  const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFrom(''); setTo('') }
+  const reset = () => { setSearch(''); setFType([]); setFGeo([]); setFrom(''); setTo('') }
 
   return (
     <div>
@@ -100,8 +104,8 @@ export default function Escalations() {
             hidden={all.filter(x => !mine.ownsClient(x.company_name)).length} />
         )}
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company…" className={`${selCls} w-44`} />
-        <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option>{uniq(all.map(x => x.escalation_type)).map(t => <option key={t} value={t}>{t}</option>)}</select>
-        <select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>
+        <MultiSelect label="All types" options={uniq(all.map(x => x.escalation_type))} selected={fType} onChange={setFType} className="w-44" />
+        <MultiSelect label="All GEO" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} className="w-36" />
         <span className="text-xs text-mav-muted ml-1">From</span>
         <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
         <span className="text-xs text-mav-muted">To</span>
