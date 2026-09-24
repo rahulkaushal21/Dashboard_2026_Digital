@@ -2063,6 +2063,32 @@ export function qbrPoint(p: unknown): { role?: 'PM' | 'AM'; who?: string | null;
   return { role: o.role === 'PM' || o.role === 'AM' ? o.role : undefined, who: o.who, text: String(o.text ?? '') }
 }
 
+/**
+ * Quarters where a review demonstrably happened, whether or not anybody wrote it up.
+ *
+ * Only 7 clients have a typed QBR, which reads on every other client's page as "no
+ * reviews" — when in fact the mailbox holds the recap, the standing calendar series and
+ * the notetaker's report. This lists those quarters so the gap is visible as "held, not
+ * written up" rather than as nothing at all.
+ */
+export interface QbrEvidence {
+  client_key: string
+  kind: 'recap' | 'scheduled' | 'recording'
+  on_date: string
+  quarter_start: string
+  quarter_label: string
+  subject: string
+  thread_id?: string
+  detail?: string | null
+}
+export async function getQbrEvidence(company: string): Promise<QbrEvidence[]> {
+  if (!supabase || !company.trim()) return []
+  const { data } = await supabase.from('web_qbr_evidence').select('*')
+    .eq('client_key', company.trim().toLowerCase())
+    .order('on_date', { ascending: false })
+  return (data as QbrEvidence[]) || []
+}
+
 export async function getClientQbrs(company: string): Promise<ClientQbr[]> {
   if (!supabase || !company.trim()) return []
   const { data, error } = await supabase.from('client_qbr').select('*')

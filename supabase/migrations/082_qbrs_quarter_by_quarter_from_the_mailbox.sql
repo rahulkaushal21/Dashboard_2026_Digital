@@ -1,0 +1,29 @@
+-- "Why are all the clients' QBR sections empty?" Because only seven were ever typed up.
+--
+-- client_qbr has 7 rows. 401 clients have none, and their QBR tab has been saying
+-- "No review recorded for this client yet", which reads as no review having HAPPENED.
+-- That is a different thing, and the mailbox can tell them apart.
+--
+-- A quarterly review leaves three traces, none of which is the write-up:
+--   recap      the summary somebody emailed round afterwards
+--   scheduled  the standing calendar series - "QBR @ Every 3 months on the third
+--              Thursday" - which is how you learn a client has a cadence at all
+--   recording  the notetaker's own report, when the meeting title says QBR
+--
+-- MATCHING THE CLIENT TWICE OVER, because the subject and the sheet rarely spell a
+-- company the same way. A calendar invite says "QBFox Healthcomm X Mavlers"; the revenue
+-- sheet says "QBFoxhc". The name match catches the ones that agree; web_client_domains
+-- catches the rest from the domain of whoever was on the invite (419 domains, learned
+-- from the contact addresses on clients' own revenue lines and deals) and is the stronger
+-- of the two signals.
+--
+-- Our own name is excluded explicitly. Almost every QBR subject reads "<client> x
+-- Mavlers", and "Mavlers" is itself a company_name on some revenue lines, so without that
+-- guard 22 reviews filed themselves against us.
+--
+-- The result: 6 clients, 10 client-quarters. Thin, and honestly so — the answer to the
+-- original question is that these meetings genuinely happen for a handful of accounts.
+-- The panel now marks each quarter written up / held, not written up / scheduled only,
+-- so the gap between "we never met" and "the only record is in somebody's inbox" is
+-- visible instead of collapsed into silence.
+-- web_client_domains + web_qbr_evidence; both definer, email_inbox stays closed.

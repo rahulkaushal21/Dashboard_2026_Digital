@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { saveClientQbr, getQbrBrief, qbrPoint, type ClientQbr, type QbrBrief } from '@/lib/supabase'
+import { saveClientQbr, getQbrBrief, getQbrEvidence, qbrPoint, type ClientQbr, type QbrBrief, type QbrEvidence } from '@/lib/supabase'
 
 // The quarterly review, written up.
 //
@@ -46,6 +46,9 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
   // What to raise, worked out from everything already recorded about this client.
   const [brief, setBrief] = useState<QbrBrief | null>(null)
   const [briefError, setBriefError] = useState('')
+  // Quarters where a review demonstrably happened, from the mailbox.
+  const [evidence, setEvidence] = useState<QbrEvidence[]>([])
+  useEffect(() => { setEvidence([]); getQbrEvidence(company).then(setEvidence).catch(() => {}) }, [company])
   useEffect(() => {
     setBrief(null); setBriefError('')
     getQbrBrief(company)
@@ -147,6 +150,52 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
           </div>
         </div>
       )}
+
+      {/* QUARTER BY QUARTER, from the mailbox rather than from what got typed up.
+          Seven clients have a written review, so everybody else's page said "no reviews"
+          — which is not the same as no reviews having happened. A recap went round, a
+          standing series sits in the calendar, a notetaker filed a report. This shows the
+          quarters that leave a trace, and marks the ones nobody wrote up, because that is
+          a different problem from never having met. */}
+      {evidence.length > 0 && (() => {
+        const written = new Set(rows.map(r => (r.qbr_date || '').slice(0, 7)))
+        const byQuarter = new Map<string, { label: string; items: QbrEvidence[] }>()
+        for (const e of evidence) {
+          const g = byQuarter.get(e.quarter_start) || { label: e.quarter_label, items: [] }
+          g.items.push(e); byQuarter.set(e.quarter_start, g)
+        }
+        const quarters = Array.from(byQuarter.entries()).sort((a, b) => b[0].localeCompare(a[0]))
+        return (
+          <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-4 mb-4">
+            <div className="text-xs uppercase tracking-wide text-mav-muted mb-2">Quarters with a review on record</div>
+            <ul className="space-y-2">
+              {quarters.map(([start, g]) => {
+                const held = g.items.filter(i => i.kind !== 'scheduled')
+                const writtenUp = rows.some(r => (r.qbr_date || '') >= start &&
+                  (r.qbr_date || '') < new Date(new Date(start + 'T00:00:00').setMonth(new Date(start + 'T00:00:00').getMonth() + 3)).toISOString().slice(0, 10))
+                return (
+                  <li key={start} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+                    <span className="font-medium w-36 shrink-0">{g.label}</span>
+                    {writtenUp
+                      ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-300">written up</span>
+                      : held.length
+                        ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">held, not written up</span>
+                        : <span className="text-[11px] px-1.5 py-0.5 rounded bg-mav-line text-mav-muted">scheduled only</span>}
+                    <span className="text-xs text-mav-muted min-w-0 flex-1 truncate" title={g.items.map(i => i.subject).join('\n')}>
+                      {g.items[0].subject}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+            {quarters.some(([start]) => !rows.some(r => (r.qbr_date || '').slice(0, 7) >= start.slice(0, 7) && (r.qbr_date || '').slice(0, 7) <= start.slice(0, 7))) && (
+              <p className="mt-2 text-[11px] text-mav-fg/50">
+                An amber quarter means the meeting happened and the record of it is still only in somebody&rsquo;s inbox.
+              </p>
+            )}
+          </div>
+        )
+      })()}
 
       {form && (
         <div className="rounded-lg border border-mav-yellow/30 bg-mav-yellow/5 p-4 mb-4 space-y-3">
