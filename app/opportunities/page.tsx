@@ -39,6 +39,13 @@ const haystack = (x: Opportunity) => [
 const searchTerms = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean)
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 
+// An NBD owner is not an account manager, and calling them one gets the org chart wrong
+// on the page people read most. Account managers work accounts we already have; NBD open
+// ones we do not — which is the whole basis of the New-vs-Repeat rule two columns to the
+// left. `nbd_owner` is already decided in getOpportunities against lib/nbd.ts, so this
+// only labels what was worked out there.
+const ownerRole = (x: Opportunity) => (x.nbd_owner ? 'NBD' : 'AM')
+
 // Quote-size bands, kept as strings because that is what the number inputs hold —
 // so a preset and a typed value are the same state and the active highlight is a
 // plain string compare. The cuts mirror the deal-size split on the home AI
@@ -121,7 +128,7 @@ const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
 type SortKey = 'company' | 'value' | 'win' | 'intent' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
 { key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'intent', label: 'Intent' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
-{ key: 'type', label: 'Type' }, { key: 'owner', label: 'AM / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
+{ key: 'type', label: 'Type' }, { key: 'owner', label: 'Owner / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
 { key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
 ]
 // Type label from the Quotes tab Business Type (col P). A booked client can send
@@ -856,7 +863,7 @@ return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</opti
 <MultiSelect label="All GEO" className="w-36" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} />
 <MultiSelect label="All services" className="w-44" options={uniq(all.map(svcOf))} selected={fSvc} onChange={setFSvc} />
 <MultiSelect label="All tech" className="w-40" options={uniq(all.map(x => x.technology))} selected={fTech} onChange={setFTech} />
-<MultiSelect label="All AMs" className="w-40" options={uniqNames(all.map(x => x.sales_person))} selected={fAM} onChange={setFAM} />
+<MultiSelect label="All AMs / NBD" className="w-40" options={uniqNames(all.map(x => x.sales_person))} selected={fAM} onChange={setFAM} />
 <MultiSelect label="All PMs" className="w-40" options={uniqNames(all.map(x => x.pm_owner))} selected={fPM} onChange={v => { pmTouched.current = true; setFPM(v) }} />
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
 <button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
@@ -975,7 +982,7 @@ return (
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (bookedLag(x) ? '✓ Booked · sheet open' : confirmLag(x) ? '✓ Won · sheet open' : `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
 <td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
 <td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span>{x.mis_tagged_new && <span className="ml-1 text-xs text-red-400" title={`Sheet says New, but ${x.sales_person || 'no owner'} is not on the NBD team — counted as Repeat.`}>⚠</span>}</td>
-<td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title="Account Manager (AM / NBD)">AM: {x.sales_person}</span> : <span className="text-mav-muted">AM: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
+<td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title={x.nbd_owner ? 'New Business Development — opened this account' : 'Account Manager — works an account we already have'}>{ownerRole(x)}: {x.sales_person}</span> : <span className="text-mav-muted">Owner: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
 <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
 <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>
@@ -1241,7 +1248,7 @@ Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since Apr
 {sel.company_note && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Company</div><p className="text-sm leading-relaxed italic text-mav-muted">{sel.company_note}</p></div>}
 
 <div className="border-t border-mav-line pt-4 grid grid-cols-2 gap-y-3 text-sm">
-<div><div className="text-xs text-mav-muted">AM (account manager / NBD)</div>{sel.sales_person || '—'}</div>
+<div><div className="text-xs text-mav-muted">{sel.nbd_owner ? 'NBD (new business)' : 'AM (account manager)'}</div>{sel.sales_person || '—'}</div>
 <div><div className="text-xs text-mav-muted">PM (project manager)</div>{sel.pm_owner || '—'}</div>
 <div><div className="text-xs text-mav-muted">Service</div>{svcOf(sel)}</div>
 <div><div className="text-xs text-mav-muted">Technology</div>{sel.technology || '—'}</div>
