@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from '@/components/Header'
 import MultiSelect from '@/components/MultiSelect'
 import Link from 'next/link'
-import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, ledgerFingerprint } from '@/lib/supabase'
+import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile, currentEmail } from '@/lib/access'
 
@@ -164,18 +164,23 @@ export default function ProjectLedger() {
   const load = () => getProjectLedger().then(setRows).finally(() => setLoading(false))
   const [removing, setRemoving] = useState<string | null>(null)
 
+  // What is currently hidden, and therefore what the spreadsheet is showing as Deleted.
+  // Admins only, because only they can have put it there or take it back.
+  const [gone, setGone] = useState<LedgerDeletion[]>([])
+  const loadGone = () => { getLedgerDeletions().then(setGone).catch(() => {}) }
+
   // Admin only, gated again in the database. Two prompts on purpose: a confirm that names
   // the line and its value, then a reason. Removing money from the figures should be
   // slightly annoying and should leave a record of who and why.
   const removeRow = async (r: LedgerRow) => {
     const what = `${r.company_name || '(no client)'} — ${r.project_name || '(no project)'} · ${money(r.amount_usd || 0)}`
-    if (!window.confirm(`Remove this line from the ledger?\n\n${what}\n\nIt stops counting everywhere — Dashboard, Business Numbers, KB report. The spreadsheet row is untouched and an admin can put it back.`)) return
+    if (!window.confirm(`Remove this line from the ledger?\n\n${what}\n\nIt stops counting everywhere — Dashboard, Business Numbers, KB report — and the hourly writer marks it Deleted in the spreadsheet, with your name and reason, rather than dropping the row. An admin can put it back.`)) return
     const reason = window.prompt('Why is it being removed? (optional, but it is the only record)') ?? undefined
     setRemoving(r.row_key)
     const res = await deleteLedgerRow(r.row_key, ledgerFingerprint(r), reason)
     setRemoving(null)
     if (!res.ok) { window.alert(`Could not remove it: ${res.error}`); return }
-    load()
+    clearReadCache(); load(); loadGone()
   }
   useEffect(() => {
     setIsAdmin(!!getStoredProfile()?.is_admin)
@@ -186,6 +191,7 @@ export default function ProjectLedger() {
       if (m?.name) setFPm(prev => (prev.length === 0 && !filtersTouched.current) ? [m.name] : prev)
     })
     load()
+    loadGone()
   }, [])
 
   const opts = useMemo(() => ({
@@ -547,6 +553,39 @@ export default function ProjectLedger() {
         {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
         the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
       </p>
+
+      {/* Removed lines. Deliberately at the bottom and admin-only: it is a short list
+          that should stay short, and its job is to make a mistake reversible rather than
+          to be read every day. What is here is exactly what the spreadsheet shows as
+          Deleted, because both read the same view. */}
+      {isAdmin && gone.length > 0 && (
+        <div className="mt-6 bg-mav-panel border border-mav-line rounded-xl p-4">
+          <div className="text-sm font-medium mb-1">Removed lines · {gone.length}</div>
+          <p className="text-xs text-mav-muted mb-3">
+            Out of every figure here, and marked <span className="text-mav-fg">Deleted</span> in the spreadsheet with
+            who removed it and why &mdash; the row itself is kept, so nothing is lost. Put one back and both follow
+            within the hour.
+          </p>
+          <ul className="space-y-1.5">
+            {gone.map(d => {
+              const row = rows.find(r => r.row_key === d.row_key)
+              return (
+                <li key={d.row_key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+                  <span className="text-mav-muted tabular-nums text-xs">{(d.deleted_at || '').slice(0, 10)}</span>
+                  <span className="text-mav-fg">{row ? (row.company_name || '(no client)') : d.row_key}</span>
+                  {d.reason && <span className="text-mav-muted text-xs">&mdash; {d.reason}</span>}
+                  <span className="text-mav-muted text-xs">· {d.deleted_by}</span>
+                  <button onClick={async () => {
+                    const res = await restoreLedgerRow(d.row_key)
+                    if (!res.ok) { window.alert(`Could not put it back: ${res.error}`); return }
+                    clearReadCache(); load(); loadGone()
+                  }} className="text-xs text-mav-yellow hover:underline underline-offset-2">Put it back</button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
 
       {editing && (
         <EditLedgerRowDialog row={editing} onClose={() => setEditing(null)}

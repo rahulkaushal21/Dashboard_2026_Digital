@@ -1508,6 +1508,18 @@ export async function deleteLedgerRow(rowKey: string, fingerprint: string, reaso
   })
   return error ? { ok: false, error: error.message } : { ok: true }
 }
+/**
+ * The lines a deletion is currently hiding — what the spreadsheet shows as Deleted.
+ *
+ * Read from web_ledger_deletions_in_force rather than ledger_deletions: a deletion lapses
+ * when the sheet row it was made against moves, and the view is where that rule lives.
+ * A lapsed one is not listed here because it is not hiding anything any more.
+ */
+export type LedgerDeletion = { row_key: string; reason?: string | null; deleted_by: string; deleted_at: string }
+export async function getLedgerDeletions(): Promise<LedgerDeletion[]> {
+  return (await read<LedgerDeletion>('web_ledger_deletions_in_force', '*', 'deleted_at')) || []
+}
+
 export async function restoreLedgerRow(rowKey: string): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase not configured' }
   const { error } = await supabase.rpc('restore_ledger_row', { p_row_key: rowKey })

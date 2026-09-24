@@ -186,6 +186,35 @@ async function writeTab(tok: string, id: string, tab: string, grid: string[][]) 
 // hidden: a mystery column people delete is worse than one they can see a reason for.
 const REF_HEADER = "Dashboard Ref";
 
+// Two more columns the team never types into. A line removed in the dashboard is MARKED
+// here rather than dropped from the tab: the money is already out of every figure (it is
+// out of web_project_ledger, which the whole dashboard is built on), and what is left is
+// the evidence — what was removed, by whom, and why. A row that silently vanished from
+// the only copy people can read for themselves is indistinguishable from one that was
+// never written, which is not a thing to be vague about when nobody can check by editing.
+const DELETED_HEADER = "Deleted";
+const DELETED_NOTE_HEADER = "Deleted Note";
+
+// Which lines are hidden right now, keyed by the same ref the writer stamps.
+//
+// Read from web_ledger_deletions_in_force, NOT from ledger_deletions: a deletion lapses
+// when the sheet row it was made against moves (see migration 059), and that rule lives
+// in the database. Reading the raw table here would be a second opinion about what is
+// deleted, free to drift from the first, and this file would be the one nobody checks.
+async function readDeletions(sb: any): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const { data, error } = await sb.from("web_ledger_deletions_in_force")
+    .select("row_key, reason, deleted_by, deleted_at");
+  // A failed read must not mark every line deleted, nor stop the sheet being written.
+  if (error || !data) return out;
+  for (const d of data) {
+    const when = s(d.deleted_at).slice(0, 10);
+    const parts = [when, s(d.deleted_by), s(d.reason)].filter(Boolean);
+    out.set(String(d.row_key), parts.join(" \u00b7 "));
+  }
+  return out;
+}
+
 function indexOfHeader(headers: string[], name: string): number {
   const want = name.trim().toLowerCase();
   return headers.findIndex((h) => (h || "").trim().toLowerCase() === want);
@@ -313,8 +342,22 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
 
   // One extra column at the far right, so a row can be recognised again next run. It is
   // the only thing in this tab the team should never type into.
-  const headers: string[] = [...baseHeaders, REF_HEADER];
+  const headers: string[] = [...baseHeaders, DELETED_HEADER, DELETED_NOTE_HEADER, REF_HEADER];
   const refCol = headers.length - 1;
+  const delCol = indexOfHeader(headers, DELETED_HEADER);
+  const delNoteCol = indexOfHeader(headers, DELETED_NOTE_HEADER);
+
+  const deletions = await readDeletions(sb);
+  // Applied on every row, both the sheet-origin ones and the dashboard-origin ones, so a
+  // mistaken entry is marked wherever it came from. Blank is the normal case.
+  const markDeleted = (row: string[], ref: string) => {
+    const note = deletions.get(ref);
+    // Written either way. A source row with more cells than its header has would
+    // otherwise leave a stray value sitting in a column that says "Deleted", and a
+    // restored line has to lose the mark rather than keep it from last run.
+    if (delCol >= 0) row[delCol] = note === undefined ? "" : "Deleted";
+    if (delNoteCol >= 0) row[delNoteCol] = note ?? "";
+  };
 
   const invoices = await readInvoiceColumns(sb, tok, sheetId, "Web, Hub & LP");
 
@@ -403,6 +446,7 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
       const ref = `raw:${r.row_index}`;
       row[refCol] = ref;
       keepInvoice(row, ref);
+      markDeleted(row, ref);
       grid.push(row);
     }
     if (data.length < 1000) break;
@@ -539,6 +583,7 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
     const ref = `opp:${o.id}`;
     row[refCol] = ref;
     keepInvoice(row, ref);
+    markDeleted(row, ref);
     grid.push(row);
   }
   return grid;
