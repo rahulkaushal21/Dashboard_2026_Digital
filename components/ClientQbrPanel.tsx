@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { saveClientQbr, getQbrBrief, type ClientQbr, type QbrBrief } from '@/lib/supabase'
+import { saveClientQbr, getQbrBrief, qbrPoint, type ClientQbr, type QbrBrief } from '@/lib/supabase'
 
 // The quarterly review, written up.
 //
@@ -45,7 +45,13 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
   const [form, setForm] = useState<typeof blank | null>(null)
   // What to raise, worked out from everything already recorded about this client.
   const [brief, setBrief] = useState<QbrBrief | null>(null)
-  useEffect(() => { setBrief(null); getQbrBrief(company).then(setBrief).catch(() => {}) }, [company])
+  const [briefError, setBriefError] = useState('')
+  useEffect(() => {
+    setBrief(null); setBriefError('')
+    getQbrBrief(company)
+      .then(res => res.ok ? setBrief(res.brief) : setBriefError(res.error))
+      .catch(e => setBriefError(String(e?.message || e)))
+  }, [company])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<number | null>(null)
@@ -97,6 +103,12 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
           escalations nobody closed and the client's own words — every line traceable to
           a record elsewhere in this dashboard. It is deliberately blunt: a QBR agenda
           that avoids the awkward item is the reason the client raises it instead. */}
+      {briefError && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 mb-4 text-xs text-amber-200">
+          Could not work out what to raise: {briefError}. The reviews below are unaffected.
+        </div>
+      )}
+
       {brief && brief.talking_points && brief.talking_points.length > 0 && (
         <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-4 mb-4">
           <div className="flex items-baseline justify-between gap-3 flex-wrap">
@@ -111,14 +123,16 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
               dashboard gives. Delivery problems and scoping go to the PM; money,
               decisions and the relationship go to the AM. */}
           <ol className="mt-2 space-y-2">
-            {brief.talking_points.map((t, i) => (
+            {brief.talking_points.map(qbrPoint).map((t, i) => (
               <li key={i} className="flex gap-2 text-sm leading-relaxed">
                 <span className="text-mav-yellow/70 shrink-0 tabular-nums">{i + 1}.</span>
                 <span className="min-w-0">
-                  <span className={`inline-block mr-1.5 align-[1px] text-[10px] font-semibold px-1.5 py-0.5 rounded ${t.role === 'PM' ? 'bg-mav-yellow/15 text-mav-yellow' : 'bg-blue-500/15 text-blue-300'}`}
-                    title={t.role === 'PM' ? 'The project manager takes this one' : 'The account manager takes this one'}>
-                    {t.who ? `${t.role} · ${t.who}` : t.role}
-                  </span>
+                  {t.role && (
+                    <span className={`inline-block mr-1.5 align-[1px] text-[10px] font-semibold px-1.5 py-0.5 rounded ${t.role === 'PM' ? 'bg-mav-yellow/15 text-mav-yellow' : 'bg-blue-500/15 text-blue-300'}`}
+                      title={t.role === 'PM' ? 'The project manager takes this one' : 'The account manager takes this one'}>
+                      {t.who ? `${t.role} · ${t.who}` : t.role}
+                    </span>
+                  )}
                   {t.text}
                 </span>
               </li>

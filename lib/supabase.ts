@@ -2039,11 +2039,28 @@ export interface QbrBrief {
   /** Each point names the role that picks it up, so nobody leaves the call unassigned. */
   talking_points?: { role: 'PM' | 'AM'; who?: string | null; text: string }[]
 }
-export async function getQbrBrief(company: string): Promise<QbrBrief | null> {
-  if (!supabase || !company.trim()) return null
-  const { data } = await supabase.from('web_qbr_brief').select('*')
+export type QbrBriefResult =
+  | { ok: true; brief: QbrBrief | null }
+  | { ok: false; error: string }
+
+export async function getQbrBrief(company: string): Promise<QbrBriefResult> {
+  if (!supabase || !company.trim()) return { ok: true, brief: null }
+  const { data, error } = await supabase.from('web_qbr_brief').select('*')
     .eq('client_key', company.trim().toLowerCase()).maybeSingle()
-  return (data as QbrBrief) || null
+  // A swallowed error here renders an empty panel, which reads as "this client has
+  // nothing to raise" — the same silent blank that hid a 36-second query on the Project
+  // sheet for half a day. Say it could not load instead.
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, brief: (data as QbrBrief) || null }
+}
+
+/** Accept a point in either shape. The view used to return plain strings and now returns
+ *  {role, who, text}; a browser holding yesterday's bundle should degrade to the sentence,
+ *  not crash trying to render an object as a child. */
+export function qbrPoint(p: unknown): { role?: 'PM' | 'AM'; who?: string | null; text: string } {
+  if (typeof p === 'string') return { text: p }
+  const o = (p || {}) as { role?: string; who?: string | null; text?: string }
+  return { role: o.role === 'PM' || o.role === 'AM' ? o.role : undefined, who: o.who, text: String(o.text ?? '') }
 }
 
 export async function getClientQbrs(company: string): Promise<ClientQbr[]> {
