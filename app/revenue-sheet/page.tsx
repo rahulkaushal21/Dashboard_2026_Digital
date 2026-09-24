@@ -183,10 +183,28 @@ export default function ProjectLedger() {
   // Admin only, gated again in the database. Two prompts on purpose: a confirm that names
   // the line and its value, then a reason. Removing money from the figures should be
   // slightly annoying and should leave a record of who and why.
+  //
+  // THE REASON IS REQUIRED. It used to say "optional, but it is the only record", which
+  // is a sentence that argues with itself — the row goes on existing in the spreadsheet
+  // marked Deleted, and this is the only thing that will ever explain why the money
+  // stopped counting. Asking again beats refusing after the fact, so it loops; Cancel
+  // still abandons the whole thing, and the database enforces the same rule regardless.
   const removeRow = async (r: LedgerRow) => {
     const what = `${r.company_name || '(no client)'} — ${r.project_name || '(no project)'} · ${money(r.amount_usd || 0)}`
     if (!window.confirm(`Remove this line from the ledger?\n\n${what}\n\nIt stops counting everywhere — Dashboard, Business Numbers, KB report — and the hourly writer marks it Deleted in the spreadsheet, with your name and reason, rather than dropping the row. An admin can put it back.`)) return
-    const reason = window.prompt('Why is it being removed? (optional, but it is the only record)') ?? undefined
+
+    let reason = ''
+    let ask = `Why is ${r.company_name || 'this line'} being removed?\n\nRequired — it is the only record of why this money stopped counting.`
+    for (;;) {
+      const typed = window.prompt(ask, reason)
+      if (typed === null) return                       // Cancel abandons the removal
+      reason = typed.trim()
+      if (reason.length >= 10) break
+      ask = reason.length === 0
+        ? `A reason is required.\n\nWhy is ${r.company_name || 'this line'} being removed?`
+        : `Say a little more — that sentence is all anybody will have later.\n\nWhy is ${r.company_name || 'this line'} being removed?`
+    }
+
     setRemoving(r.row_key)
     const res = await deleteLedgerRow(r.row_key, ledgerFingerprint(r), reason)
     setRemoving(null)
