@@ -1983,6 +1983,37 @@ export interface ClientQbr {
   opportunities?: string; next_roadmap?: string; source?: string
   added_by?: string; added_at?: string; updated_by?: string; updated_at?: string
 }
+/**
+ * What to raise at the next QBR, assembled from what the system already holds.
+ *
+ * NOTHING HERE IS INVENTED. Every line is a fact already recorded somewhere else —
+ * a revenue movement, an escalation nobody closed, a quote sitting undecided, the
+ * client's own words — phrased as the thing to say out loud. The system reads every
+ * client thread anyway; this is that reading pointed at the one meeting where it is
+ * worth the most.
+ *
+ * It does NOT write the QBR. What was agreed on a call lives in the recording, and
+ * the panel below this one is still typed by whoever ran it. This is the prep.
+ */
+export interface QbrBrief {
+  client_key: string
+  revenue_this_quarter: number; revenue_last_quarter: number; revenue_lifetime: number
+  jobs_this_quarter: number
+  open_deals: number; open_value: number; open_unpriced: number; oldest_open_days?: number
+  escalations_recent: number; escalations_open: number; escalation_since?: string
+  best_words?: string; best_words_at?: string
+  negative_signals: number; positive_signals: number; last_client_contact?: string
+  main_technology?: string; main_technology_pct?: number
+  last_qbr?: string
+  talking_points?: string[]
+}
+export async function getQbrBrief(company: string): Promise<QbrBrief | null> {
+  if (!supabase || !company.trim()) return null
+  const { data } = await supabase.from('web_qbr_brief').select('*')
+    .eq('client_key', company.trim().toLowerCase()).maybeSingle()
+  return (data as QbrBrief) || null
+}
+
 export async function getClientQbrs(company: string): Promise<ClientQbr[]> {
   if (!supabase || !company.trim()) return []
   const { data, error } = await supabase.from('client_qbr').select('*')

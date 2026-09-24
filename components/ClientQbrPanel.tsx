@@ -1,6 +1,6 @@
 'use client'
-import { useState } from 'react'
-import { saveClientQbr, type ClientQbr } from '@/lib/supabase'
+import { useEffect, useState } from 'react'
+import { saveClientQbr, getQbrBrief, type ClientQbr, type QbrBrief } from '@/lib/supabase'
 
 // The quarterly review, written up.
 //
@@ -43,6 +43,9 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
   company: string; rows: ClientQbr[]; canEdit: boolean; onSaved: () => void
 }) {
   const [form, setForm] = useState<typeof blank | null>(null)
+  // What to raise, worked out from everything already recorded about this client.
+  const [brief, setBrief] = useState<QbrBrief | null>(null)
+  useEffect(() => { setBrief(null); getQbrBrief(company).then(setBrief).catch(() => {}) }, [company])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<number | null>(null)
@@ -89,6 +92,36 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
         recording or the minutes. Whoever ran it writes it up here, and the next review opens with these action items
         already in front of it.
       </p>
+
+      {/* PREP, not minutes. Assembled from the revenue lines, the open quotes, the
+          escalations nobody closed and the client's own words — every line traceable to
+          a record elsewhere in this dashboard. It is deliberately blunt: a QBR agenda
+          that avoids the awkward item is the reason the client raises it instead. */}
+      {brief && brief.talking_points && brief.talking_points.length > 0 && (
+        <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-4 mb-4">
+          <div className="flex items-baseline justify-between gap-3 flex-wrap">
+            <span className="text-xs uppercase tracking-wide text-mav-muted">What to raise at the next one</span>
+            <span className="text-[11px] text-mav-fg/45">
+              {brief.last_qbr ? `Last review ${new Date(brief.last_qbr + 'T00:00:00').toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'No review on record'}
+            </span>
+          </div>
+          <ol className="mt-2 space-y-1.5">
+            {brief.talking_points.map((t, i) => (
+              <li key={i} className="flex gap-2 text-sm leading-relaxed">
+                <span className="text-mav-yellow/70 shrink-0">{i + 1}.</span>
+                <span>{t}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-3 pt-2 border-t border-mav-line/60 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-mav-fg/55">
+            <span>This quarter ${Math.round(brief.revenue_this_quarter).toLocaleString('en-US')}</span>
+            <span>Last quarter ${Math.round(brief.revenue_last_quarter).toLocaleString('en-US')}</span>
+            {brief.open_deals > 0 && <span>{brief.open_deals} open · ${Math.round(brief.open_value).toLocaleString('en-US')}</span>}
+            {brief.escalations_open > 0 && <span className="text-red-400">{brief.escalations_open} escalation{brief.escalations_open === 1 ? '' : 's'} open</span>}
+            {brief.last_client_contact && <span>Last heard from {new Date(brief.last_client_contact + 'T00:00:00').toLocaleDateString('en', { day: 'numeric', month: 'short' })}</span>}
+          </div>
+        </div>
+      )}
 
       {form && (
         <div className="rounded-lg border border-mav-yellow/30 bg-mav-yellow/5 p-4 mb-4 space-y-3">
