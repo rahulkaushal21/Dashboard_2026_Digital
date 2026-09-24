@@ -7,6 +7,7 @@ import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation } from '@/lib/supabase'
+import { askReason } from '@/lib/ask'
 import { currentEmail } from '@/lib/access'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -81,7 +82,16 @@ export default function CriticalEscalations() {
   async function remove(r: CriticalEscalation) {
     const many = r.count > 1 ? ` (${r.count} threads)` : ''
     if (!window.confirm(`Remove ${r.company_name}${many} from Critical Escalations?\n\nUse this when it isn't really our escalation — e.g. the client is frustrated for external reasons, not a problem from our side. It's removed from the list (the email signals are preserved). To mark a genuine one as resolved instead, use “Mark fixed / positive” — that keeps it in the list.`)) return
-    const reason = window.prompt('Optional: why isn\'t this our escalation? (e.g. "external frustration, not our issue" — kept for the record)', '') || undefined
+    // REQUIRED, and Cancel means cancel. This is the only record of why a client's
+    // escalation left the board — the signals stay in the database, but nothing else
+    // ever says why somebody decided it was not ours. It also feeds what the review
+    // learns: "quote decline, not a critical escalation" is how the next one gets
+    // classified correctly in the first place.
+    const reason = askReason({
+      question: `Why isn't ${r.company_name} our escalation?\n\ne.g. "external frustration, not our issue" or "quote decline, not an escalation".`,
+      required: true,
+    })
+    if (reason === null) return
     setBusy(key(r))
     const done = await dismissEscalation(r.threadIds, { actor: currentEmail() || undefined, reason })
     setBusy(null)

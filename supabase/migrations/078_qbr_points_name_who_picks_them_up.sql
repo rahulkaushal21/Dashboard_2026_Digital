@@ -1,0 +1,13 @@
+-- A QBR point nobody is named against is a thing that got mentioned.
+--
+-- 074 produced the agenda. This says who takes each line, and adds the one source that
+-- was missing: the last thing the client actually said in email.
+--
+-- The names are not assigned, they are READ — the PM and AM who carry the most of that
+-- client's revenue in the sheet, so the chip agrees with every other page. Delivery
+-- problems, scoping and tone go to the PM; money, decisions and the relationship go to
+-- the AM. Each point is phrased as the thing that person does, not as an observation.
+--
+-- talking_points is jsonb now ({role, who, text}) rather than text[], because a string
+-- that the UI has to parse an owner out of is a format waiting to be got wrong.
+-- Full definition: see the live view; created here identically.

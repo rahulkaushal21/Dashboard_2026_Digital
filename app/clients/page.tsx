@@ -1225,7 +1225,11 @@ export default function Clients() {
                   <div className="text-xs text-mav-muted">{ownersOf(selC.company_name).length > 1 ? 'Owners' : 'Owner'}</div>
                   {ownersOf(selC.company_name).join(', ') || selC.pc_sme || selC.sales_person || '—'}
                 </div>
-                <div><div className="text-xs text-mav-muted" title={`Sum of every booking recorded for this client${ltvWindow ? `, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)}` : ''}`}>Lifetime value{ltvWindow ? <span className="ml-1 opacity-60">({ltvWindow.months}mo)</span> : null}</div>{selC.ltv_usd ? fmtUsd(selC.ltv_usd) : '—'}</div>
+                {/* EVERY figure on this client is USD. The sheet books in eight currencies
+                    and converts, so a bare $ on an AU/NZ client reads as Australian
+                    dollars to the person whose account it is. Said once, here, rather
+                    than repeated on a dozen cards. */}
+                <div><div className="text-xs text-mav-muted" title={`Sum of every booking recorded for this client${ltvWindow ? `, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)}` : ''}. Converted to USD — the sheet's own conversion, whatever the deal was billed in.`}>Lifetime value{ltvWindow ? <span className="ml-1 opacity-60">({ltvWindow.months}mo)</span> : null}</div>{selC.ltv_usd ? <>{fmtUsd(selC.ltv_usd)} <span className="text-xs text-mav-muted font-normal">USD</span></> : '—'}</div>
                 <div><div className="text-xs text-mav-muted">Last booking</div>{ym(selC.last_booking_month) || '—'}</div>
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}
               </div>
@@ -1235,7 +1239,7 @@ export default function Clients() {
                   been delivered, how do they feel about us, and what did we agree on the
                   last call — and stacking all five meant scrolling past four to reach the
                   fifth. */}
-              <div className="mt-5 flex gap-1 border-b border-mav-line overflow-x-auto">
+              <div className="mt-5 flex items-center gap-1 border-b border-mav-line overflow-x-auto">
                 {([['overview', 'Overview'], ['work', 'Revenue & work'], ['projects', 'Projects & quotes'], ['health', 'Health & talk'], ['qbr', 'QBR']] as const).map(([k, label]) => (
                   <button key={k} onClick={() => setCTab(k)}
                     className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${cTab === k
@@ -1247,6 +1251,14 @@ export default function Clients() {
                     {label}
                   </button>
                 ))}
+                {/* Said once, on screen whichever tab is open. Every figure in this
+                    drawer is USD — the sheet books in eight currencies and converts, so a
+                    bare $ on an AU/NZ client reads as Australian dollars to the person
+                    whose account it is. */}
+                <span className="ml-auto pl-3 pr-1 text-[11px] text-mav-muted whitespace-nowrap"
+                  title="Converted with the revenue sheet's own USD conversion, whatever the work was billed in.">
+                  figures in USD
+                </span>
               </div>
 
               {cTab === 'overview' && (() => {

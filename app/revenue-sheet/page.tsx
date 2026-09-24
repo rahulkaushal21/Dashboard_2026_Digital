@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from '@/components/Header'
+import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
 import Link from 'next/link'
 import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
@@ -193,17 +194,11 @@ export default function ProjectLedger() {
     const what = `${r.company_name || '(no client)'} — ${r.project_name || '(no project)'} · ${money(r.amount_usd || 0)}`
     if (!window.confirm(`Remove this line from the ledger?\n\n${what}\n\nIt stops counting everywhere — Dashboard, Business Numbers, KB report — and the hourly writer marks it Deleted in the spreadsheet, with your name and reason, rather than dropping the row. An admin can put it back.`)) return
 
-    let reason = ''
-    let ask = `Why is ${r.company_name || 'this line'} being removed?\n\nRequired — it is the only record of why this money stopped counting.`
-    for (;;) {
-      const typed = window.prompt(ask, reason)
-      if (typed === null) return                       // Cancel abandons the removal
-      reason = typed.trim()
-      if (reason.length >= 10) break
-      ask = reason.length === 0
-        ? `A reason is required.\n\nWhy is ${r.company_name || 'this line'} being removed?`
-        : `Say a little more — that sentence is all anybody will have later.\n\nWhy is ${r.company_name || 'this line'} being removed?`
-    }
+    const reason = askReason({
+      question: `Why is ${r.company_name || 'this line'} being removed?\n\nIt is the only record of why this money stopped counting.`,
+      required: true,
+    })
+    if (reason === null) return                        // Cancel abandons the removal
 
     setRemoving(r.row_key)
     const res = await deleteLedgerRow(r.row_key, ledgerFingerprint(r), reason)

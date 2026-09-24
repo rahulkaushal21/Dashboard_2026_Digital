@@ -2014,7 +2014,10 @@ export interface QbrBrief {
   negative_signals: number; positive_signals: number; last_client_contact?: string
   main_technology?: string; main_technology_pct?: number
   last_qbr?: string
-  talking_points?: string[]
+  /** Whose name the sheet carries most for this client — who the points are addressed to. */
+  pm_owner?: string; am_owner?: string
+  /** Each point names the role that picks it up, so nobody leaves the call unassigned. */
+  talking_points?: { role: 'PM' | 'AM'; who?: string | null; text: string }[]
 }
 export async function getQbrBrief(company: string): Promise<QbrBrief | null> {
   if (!supabase || !company.trim()) return null

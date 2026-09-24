@@ -105,11 +105,22 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
               {brief.last_qbr ? `Last review ${new Date(brief.last_qbr + 'T00:00:00').toLocaleDateString('en', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'No review on record'}
             </span>
           </div>
-          <ol className="mt-2 space-y-1.5">
+          {/* EVERY POINT HAS AN OWNER. A QBR agenda where nobody is named is a list of
+              things that were mentioned — the role comes off who actually holds the
+              account in the revenue sheet, so it is the same answer the rest of the
+              dashboard gives. Delivery problems and scoping go to the PM; money,
+              decisions and the relationship go to the AM. */}
+          <ol className="mt-2 space-y-2">
             {brief.talking_points.map((t, i) => (
               <li key={i} className="flex gap-2 text-sm leading-relaxed">
-                <span className="text-mav-yellow/70 shrink-0">{i + 1}.</span>
-                <span>{t}</span>
+                <span className="text-mav-yellow/70 shrink-0 tabular-nums">{i + 1}.</span>
+                <span className="min-w-0">
+                  <span className={`inline-block mr-1.5 align-[1px] text-[10px] font-semibold px-1.5 py-0.5 rounded ${t.role === 'PM' ? 'bg-mav-yellow/15 text-mav-yellow' : 'bg-blue-500/15 text-blue-300'}`}
+                    title={t.role === 'PM' ? 'The project manager takes this one' : 'The account manager takes this one'}>
+                    {t.who ? `${t.role} · ${t.who}` : t.role}
+                  </span>
+                  {t.text}
+                </span>
               </li>
             ))}
           </ol>

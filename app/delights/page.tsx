@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getDelights, getManualFeedback, decideManualFeedback, getFeedbackApprovers,
@@ -107,8 +108,11 @@ export default function Delights() {
                     ✓ Approve
                   </button>
                   <button onClick={async () => {
-                    const why = window.prompt('Why is it not going on the board? (optional)') ?? undefined
-                    const res = await decideManualFeedback(m.id, false, why)
+                    // Cancel abandons the rejection; an empty note is allowed, because
+                    // the submitter is told who declined it either way.
+                    const why = askReason({ question: 'Why is it not going on the board? (optional)' })
+                    if (why === null) return
+                    const res = await decideManualFeedback(m.id, false, why || undefined)
                     if (!res.ok) { window.alert(res.error); return }
                     loadManual()
                   }} className="text-xs text-mav-muted hover:text-mav-fg">Not this one</button>
