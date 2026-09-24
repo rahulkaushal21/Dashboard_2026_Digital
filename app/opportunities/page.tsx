@@ -1138,6 +1138,74 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 {oppStatus(sel) === 'Won' && !sel.email_won && !bookedLag(sel) && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
 {oppStatus(sel) === 'Lost' && !sel.email_lost && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">✗ Lost — cancelled in the Quotes sheet. Won always overrides if the client later books.</div>}
 
+{/* WHAT THEY WANT COMES FIRST. This used to open on the close-likelihood bar and a
+    scoring panel — a forecast about a request the reader had not read yet. The order
+    is now the order you need it in: what they asked for, what happens next and who
+    owns it, then the analysis of whether it lands. */}
+{(() => {
+  // The Brief should carry the FULL story — the request, the quote/price shared, and
+  // where the discussion stands. `summary` holds that detailed narrative; `gist` is a
+  // shorter one-liner. Show both, longest-first, dropping either if it's already
+  // contained in the other so we never repeat a sentence.
+  const g = (sel.gist || '').trim(), s = (sel.summary || '').trim()
+  const brief = g && s ? (s.includes(g) ? s : g.includes(s) ? g : `${s}\n\n${g}`) : (s || g)
+  return brief
+    ? <div className="mb-4"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Brief — what they asked for</div><p className="text-sm leading-relaxed whitespace-pre-line">{brief}</p></div>
+    : <p className="text-sm text-mav-muted mb-4">No email brief yet for this lead — it comes from an open quote in the sheet.</p>
+})()}
+
+{/* The facts that belong WITH the brief rather than in a grid at the bottom of the
+    drawer: who asked, what it is, what it is worth and how long it has been sitting.
+    Reading a request without knowing it is a $6,000 Shopify build for an AU agency
+    that has been open eleven weeks is reading half of it. Each one is dropped when
+    empty rather than printed as a dash, so a thin deal stays short. */}
+{(() => {
+  const age = (() => {
+    const d = (sel.source_date || sel.first_date || '').slice(0, 10)
+    if (!d || !today) return null
+    const days = Math.round((new Date(today + 'T00:00:00').getTime() - new Date(d + 'T00:00:00').getTime()) / 86400000)
+    return days < 0 ? null : days === 0 ? 'today' : days === 1 ? '1 day old' : days < 60 ? `${days} days old` : `${Math.round(days / 30)} months old`
+  })()
+  const bits: { k: string; v: string }[] = [
+    sel.client_name ? { k: 'Contact', v: sel.client_name } : null,
+    sel.contact_email ? { k: 'Email', v: sel.contact_email } : null,
+    sel.project_type ? { k: 'Project type', v: sel.project_type } : null,
+    sel.technology ? { k: 'Technology', v: sel.technology } : null,
+    sel.service_dept ? { k: 'Department', v: sel.service_dept } : null,
+    sel.geo ? { k: 'GEO', v: sel.geo } : null,
+    sel.currency && sel.local_value ? { k: 'Quoted', v: `${sel.local_value.toLocaleString('en-US')} ${sel.currency}` } : null,
+    sel.quote_price && sel.quote_price !== sel.local_value ? { k: 'Before negotiation', v: `${sel.quote_price.toLocaleString('en-US')} ${sel.currency || 'USD'}` } : null,
+    sel.quote_ref ? { k: 'Quote ref', v: sel.quote_ref } : null,
+    sel.channel ? { k: 'Came in via', v: sel.channel } : null,
+    age ? { k: 'Open for', v: age } : null,
+    sel.days_since_touch != null ? { k: 'Last heard', v: sel.days_since_touch === 0 ? 'today' : `${sel.days_since_touch}d ago` } : null,
+  ].filter(Boolean) as { k: string; v: string }[]
+  if (!bits.length) return null
+  return (
+    <div className="mb-5 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
+      {bits.map(b => (
+        <span key={b.k}><span className="text-mav-muted">{b.k} </span><span className="text-mav-fg/90">{b.v}</span></span>
+      ))}
+    </div>
+  )
+})()}
+{/* Next step and WHO does it, together. A next step nobody is named against is a
+    note, not an action — and the two names were previously in a grid far below it. */}
+{(sel.next_step || sel.pm_owner || sel.sales_person) && (
+<div className="mb-5 rounded-lg border border-mav-yellow/30 bg-mav-yellow/5 px-3 py-2">
+  <div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">▶ Next step</div>
+  {sel.next_step
+    ? <p className="text-sm leading-relaxed">{sel.next_step}</p>
+    : <p className="text-sm leading-relaxed text-mav-muted">Nothing recorded — the next review will fill this in from the thread.</p>}
+  {(sel.pm_owner || sel.sales_person) && (
+    <div className="mt-2 pt-2 border-t border-mav-yellow/20 flex flex-wrap gap-x-5 gap-y-1 text-xs">
+      {sel.sales_person && <span><span className="text-mav-muted">{sel.nbd_owner ? 'NBD ' : 'AM '}</span>{sel.sales_person}</span>}
+      {sel.pm_owner && <span><span className="text-mav-muted">PM </span>{sel.pm_owner}</span>}
+    </div>
+  )}
+</div>
+)}
+
 <div className="mb-5">
 <div className="flex items-baseline justify-between mb-1">
 <span className="text-xs uppercase tracking-wide text-mav-muted">Close likelihood</span>
@@ -1245,18 +1313,6 @@ Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since Apr
 )}
 
 {sel.win_reason && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Will it close?</div><p className="text-sm leading-relaxed text-mav-muted">{sel.win_reason}</p></div>}
-{(() => {
-  // The Brief should carry the FULL story — the request, the quote/price shared, and
-  // where the discussion stands. `summary` holds that detailed narrative; `gist` is a
-  // shorter one-liner. Show both, longest-first, dropping either if it's already
-  // contained in the other so we never repeat a sentence.
-  const g = (sel.gist || '').trim(), s = (sel.summary || '').trim()
-  const brief = g && s ? (s.includes(g) ? s : g.includes(s) ? g : `${s}\n\n${g}`) : (s || g)
-  return brief
-    ? <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Brief — what's happening</div><p className="text-sm leading-relaxed whitespace-pre-line">{brief}</p></div>
-    : <p className="text-sm text-mav-muted mb-5">No email brief yet for this lead — it comes from an open quote in the sheet.</p>
-})()}
-{sel.next_step && <div className="mb-5 rounded-lg border border-mav-yellow/30 bg-mav-yellow/5 px-3 py-2"><div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">▶ Next step</div><p className="text-sm leading-relaxed">{sel.next_step}</p></div>}
 {sel.journey && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Journey</div><p className="text-sm leading-relaxed text-mav-muted whitespace-pre-line">{sel.journey}</p></div>}
 {sel.company_note && <div className="mb-5"><div className="text-xs uppercase tracking-wide text-mav-muted mb-1">Company</div><p className="text-sm leading-relaxed italic text-mav-muted">{sel.company_note}</p></div>}
 
