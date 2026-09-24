@@ -1,0 +1,36 @@
+-- Two fixes that arrived together, one of them caused by the other's feature.
+--
+-- 1. ONE COMPANY, ONE NAME.
+--
+-- "Geraint Manning Design" and "Gearaint manning" are the same company on the same domain
+-- — confirmed by Rahul, 25 Sep 2026 — and the second spelling had its own row on the
+-- Clients page, its own Client 360, its own empty QBR tab, and $50 that never reached the
+-- first one's lifetime value.
+--
+-- client_name_fixes maps the wrong spelling onto the right one, applied in the views and
+-- never written back to the sheet, so it survives every sync and is undone by deleting a
+-- row. client_canonical_name() reads ONE INDEXED ROW from a small table — not a view over
+-- sheet_raw, which is what made contact_display_name() cost the Project sheet 36 seconds.
+--
+-- Applied once, at web_sheet_rows, because web_revenue_lines and web_project_ledger both
+-- read it. The first attempt wrapped the ledger too and the map ran twice; harmless with
+-- no chains in the table, and exactly the kind of thing that stops being harmless later.
+--
+-- NOT applied to the other 31 same-domain pairs. Rahul checked them: "hexagroup" and
+-- "bege group" are different companies, so are "hummingbird ideas" and "humanandthebeast"
+-- — an agency and its end client. A shared domain is a question, not an answer.
+--
+-- 2. THE QBR BRIEF WAS TIMING OUT.
+--
+-- Hanging the notetaker reports off web_qbr_brief meant every load of a client's QBR tab
+-- rescanned 115,275 rows of email_inbox with regex, rebuilt the ledger to get client
+-- names, and then ILIKE'd 398 names against 256 meeting titles: 23 SECONDS, past
+-- PostgREST's statement timeout. The tab went blank.
+--
+-- Three materialized views, refreshed hourly at :46. 23,077ms -> 1,163ms, and the brief
+-- no longer touches email_inbox at all.
+--
+-- Same mistake as 069, three days apart: an expensive derivation called per row from a
+-- view somebody loads interactively. The rule is in the repo now — if a view reads
+-- sheet_raw or email_inbox and something loads it on a page, materialise it.
+-- client_name_fixes + client_canonical_name(); meeting_reports_mv, client_meetings_mv, qbr_patterns_mv; cron refresh-qbr-sources at :46.
