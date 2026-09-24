@@ -1651,10 +1651,19 @@ export async function getClientTopTechnology(): Promise<Map<string, string>> {
  * book nothing of their own — `rolled_into` is the only thing that decides it, so the
  * month shows the invoice once instead of once per job.
  */
-export async function rollUpOpportunities(ids: number[], primary: number): Promise<{ ok: boolean; n?: number; error?: string }> {
+export async function rollUpOpportunities(ids: number[], primary: number, override = false): Promise<{ ok: boolean; n?: number; error?: string; needsOverride?: boolean }> {
   if (!supabase) return { ok: false, error: 'Supabase not configured' }
-  const { data, error } = await supabase.rpc('roll_up_opportunities', { p_ids: ids, p_primary: primary })
-  return error ? { ok: false, error: error.message } : { ok: true, n: data as number }
+  const { data, error } = await supabase.rpc('roll_up_opportunities', { p_ids: ids, p_primary: primary, p_override: override })
+  if (!error) return { ok: true, n: data as number }
+  // The database asks once about a project type nobody has billed together before, and
+  // says so in those words. Everything else it refuses is a real refusal.
+  return { ok: false, error: error.message, needsOverride: /combine anyway/i.test(error.message) }
+}
+
+/** Project types people have actually billed on one invoice. Evidence, not a rule. */
+export async function getCombineHistory(): Promise<Map<string, number>> {
+  const rows = (await read<{ type_key: string; invoices: number }>('web_combine_history')) || []
+  return new Map(rows.map(r => [r.type_key, Number(r.invoices || 0)]))
 }
 
 /** Split a deal back out of the invoice it was billed under. */

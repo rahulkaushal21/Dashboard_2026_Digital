@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, getOpportunityDepts, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import BillTogetherDialog from '@/components/BillTogetherDialog'
@@ -359,18 +359,36 @@ const togglePick = (id: number) => setPicked(prev => {
   const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
 })
 
-// Why several deals cannot go on one invoice, in the same order the database refuses
-// them — so the bar explains it here rather than letting the confirm bounce.
+// What people have already billed together. A project type nobody has combined before
+// is asked about once, at the point of confirming; after that it is precedent and the
+// question stops. So this is not a list of allowed types — it is a record of what the
+// business does, and it grows by itself.
+const [combineSeen, setCombineSeen] = useState<Map<string, number>>(new Map())
+useEffect(() => { getCombineHistory().then(setCombineSeen).catch(() => {}) }, [])
+
+// TWO KINDS OF "no", and they are not the same kind of thing.
+//
+// A blocker is an invariant: an invoice goes to one client in one currency, and no
+// amount of precedent changes that. A caution is a convention — "ad-hoc only" was the
+// rule this started with, and the people doing the work know better than the rule does.
+// The database draws the same line, so the two cannot drift.
 const combineBlocker = useMemo((): string | null => {
   if (pickedRows.length < 2) return null
   if (pickedClients.length > 1) return `Different clients (${pickedClients.join(', ')}) — one invoice covers one client.`
-  const notAdhoc = Array.from(new Set(pickedRows.filter(x => !isAdhoc(x)).map(x => x.project_type!.trim())))
-  if (notAdhoc.length) return `Only ad-hoc jobs go on one invoice — ${notAdhoc.join(', ')} ${notAdhoc.length === 1 ? 'is' : 'are'} billed on their own terms.`
   const curs = Array.from(new Set(pickedRows.map(x => (x.currency || 'USD').trim().toUpperCase())))
   if (curs.length > 1) return `Those deals are in different currencies (${curs.join(', ')}) — bill them separately.`
   return null
-  // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [pickedRows, pickedClients])
+
+const combineCaution = useMemo((): string | null => {
+  if (pickedRows.length < 2 || combineBlocker) return null
+  const unseen = Array.from(new Set(
+    pickedRows.filter(x => !isAdhoc(x)).map(x => (x.project_type || '').trim())
+      .filter(t => t && !combineSeen.has(t.toLowerCase()))))
+  if (!unseen.length) return null
+  return `No ${unseen.join(' or ')} job has gone on one invoice before — you will be asked to confirm that once.`
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [pickedRows, combineBlocker, combineSeen])
 useEffect(() => {
 setIAmAdmin(!!getStoredProfile()?.is_admin)
 getDirectoryMember(currentEmail()).then(m => {
@@ -934,6 +952,7 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
   </span>
   <span className="text-mav-muted">{money(pickedRows.reduce((t, x) => t + (x.value || 0), 0))}{picked.size > 1 ? ' together' : ''}</span>
   {combineBlocker && <span className="text-amber-300">{combineBlocker}</span>}
+  {combineCaution && <span className="text-mav-fg/60">{combineCaution}</span>}
   <button
     onClick={() => picked.size === 1 ? setConfirming(pickedRows[0]) : setBilling(true)}
     disabled={picked.size > 1 && !!combineBlocker}

@@ -173,6 +173,15 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
   const [assumed, setAssumed] = useState<Set<string>>(new Set())
   const [serverMissing, setServerMissing] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  // Set when the database asks whether this project type really belongs on one invoice.
+  const [combineAsk, setCombineAsk] = useState('')
+  const combineAnyway = async () => {
+    setSaving(true)
+    const roll = await rollUpOpportunities([deal.id, ...alsoBilling.map(d => d.id)], deal.id, true)
+    setSaving(false)
+    if (!roll.ok) { setCombineAsk(''); setError(roll.error || 'Could not attach the other jobs'); return }
+    onConfirmed()
+  }
   const [error, setError] = useState('')
 
   useEffect(() => { opportunityMissingFields(deal.id).then(setServerMissing) }, [deal.id])
@@ -299,6 +308,11 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
         const roll = await rollUpOpportunities(ids, deal.id)
         if (!roll.ok) {
           setSaving(false)
+          // A project type nobody has billed together before is a QUESTION, not a
+          // refusal: the rule started as "ad-hoc only" and the people doing the work
+          // know better than the rule does. Answering yes once is what teaches it —
+          // after that the database stops asking for that type.
+          if (roll.needsOverride) { setCombineAsk(roll.error || ''); return }
           setError(`The invoice is confirmed, but the other ${alsoBilling.length} job${alsoBilling.length === 1 ? '' : 's'} could not be attached to it: ${roll.error}. They are still open — bill them again or leave them.`)
           return
         }
@@ -521,6 +535,29 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
                 onChange={e => setSalesPerson(e.target.value)} />
             </F>
           </Section>
+
+          {/* Asked once, ever, per project type. The deal itself is already confirmed and
+              booked at this point — only the attaching is waiting on the answer, so
+              "Leave them separate" is a real option and not a dead end. */}
+          {combineAsk && (
+            <div className="mt-4 rounded-lg border border-mav-yellow/40 bg-mav-yellow/10 px-3 py-2.5 text-xs">
+              <div className="text-mav-fg/90">{combineAsk}</div>
+              <div className="mt-1 text-mav-fg/60">
+                This one is confirmed and booked either way. Saying yes records it, and nothing of this
+                type will be questioned again.
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button onClick={combineAnyway} disabled={saving}
+                  className="text-xs px-3 py-1.5 rounded-md bg-mav-yellow text-black font-medium hover:brightness-110 disabled:opacity-50">
+                  {saving ? 'Attaching…' : `Yes — bill ${alsoBilling.length + 1} as one`}
+                </button>
+                <button onClick={onConfirmed} disabled={saving}
+                  className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/25 text-mav-fg/70 hover:text-mav-fg">
+                  Leave them separate
+                </button>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-xs text-red-300">
