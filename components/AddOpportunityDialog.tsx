@@ -6,6 +6,7 @@ import {
   getTechnologyOptions, getClientTopTechnology, clientKey,
   type DuplicateHit, type FxRate, type ClientDefaults,
 } from '@/lib/supabase'
+import { isNbdOwner } from '@/lib/nbd'
 import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, CHANNELS } from '@/lib/deal-fields'
 import { currentEmail } from '@/lib/access'
 
@@ -278,7 +279,8 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
           </F>
           <F label="Client contact"><input className={inputCls} value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="name@client.com" /></F>
 
-          <F label="Account manager"><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>
+          {/* Reads "New business owner (NBD)" the moment an NBD name is typed — see lib/nbd.ts. */}
+          <F label={isNbdOwner(salesPerson) ? 'New business owner (NBD)' : 'Account manager'}><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>
           <F label="PM owner" hint="Whoever is named here can confirm the deal later."><input className={inputCls} value={pmOwner} onChange={e => setPmOwner(e.target.value)} /></F>
 
           <div className="sm:col-span-2"><F label="Note"><textarea className={inputCls} rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="Anything worth knowing about this deal" /></F></div>

@@ -445,7 +445,7 @@ export default function Reports() {
             <Breakdown title="By engagement model" note="The raw sheet values behind the Dedicated / P2P split above." rows={byModel} total={total} />
             <Breakdown title="Agency or direct" note="Who we contract with, not who the end client is." rows={byClientType} total={total} />
             <Breakdown title="By project manager" note="Revenue on lines they own. Everyone with revenue in this view." rows={byPm} total={total} />
-            <Breakdown title="By account manager" note="Revenue on accounts they hold. Everyone with revenue in this view." rows={byAm} total={total} />
+            <Breakdown title="By account owner" note="Revenue on accounts they hold — account managers and the NBD team together. Everyone with revenue in this view." rows={byAm} total={total} />
           </div>
 
           <div className="bg-mav-panel border border-mav-line rounded-xl p-5">

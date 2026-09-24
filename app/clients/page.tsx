@@ -10,6 +10,7 @@ import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import Link from 'next/link'
 import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory , getClientOwners, clientKey } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
+import { isNbdOwner } from '@/lib/nbd'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { useAuth } from '@/components/AuthProvider'
@@ -990,7 +991,7 @@ export default function Clients() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[980px]">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-              {['Client', 'Industry', 'AI stance', 'BU', 'GEO', 'Account manager', 'Head', 'Type', 'Technology'].map((h, i) => (
+              {['Client', 'Industry', 'AI stance', 'BU', 'GEO', 'Owner', 'Head', 'Type', 'Technology'].map((h, i) => (
                 <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr></thead>
@@ -1017,7 +1018,13 @@ export default function Clients() {
                   </td>
                   <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.bu || '—'}</td>
                   <td className="px-4 py-3 text-mav-muted">{d.geo || '—'}</td>
-                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.am_name || '—'}</td>
+                  {/* One header cannot be right for both, so it reads "Owner" and the row
+                      says which kind. NBD open the account; AMs work one we already have. */}
+                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">
+                    {d.am_name
+                      ? <>{d.am_name}{isNbdOwner(d.am_name) && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 align-middle" title="New business development — opened this account">NBD</span>}</>
+                      : '—'}
+                  </td>
                   <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.head || '—'}</td>
                   <td className="px-4 py-3 text-mav-muted">{d.direct_agency || '—'}</td>
                   <td className="px-4 py-3 text-mav-muted text-xs max-w-[16rem] truncate" title={d.technology || ''}>{d.technology || '—'}</td>

@@ -11,6 +11,12 @@ import {
   SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL,
   VOCAB_FALLBACK, OPEN_ENDED_TYPES, normBusinessType,
 } from '@/lib/deal-fields'
+import { isNbdOwner } from '@/lib/nbd'
+
+// The same person is not an account manager and a new-business owner, and this field
+// holds both. The LABEL follows the name typed into it; the missing-field key behind it
+// stays 'Account manager' so the checklist and the database gate keep one name for it.
+const ownerLabel = (who: string) => isNbdOwner(who) ? 'New business owner (NBD)' : 'Account manager'
 
 // Confirming a deal — the moment it becomes revenue.
 //
@@ -530,7 +536,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
               <input className={`${ctl} ${border(missing.includes('PM owner'))}`} value={pmOwner}
                 onChange={e => setPmOwner(e.target.value)} />
             </F>
-            <F label="Account manager" need={missing.includes('Account manager')} auto={has('salesPerson')} from={deal.company_name}>
+            <F label={ownerLabel(salesPerson)} need={missing.includes('Account manager')} auto={has('salesPerson')} from={deal.company_name}>
               <input className={`${ctl} ${border(missing.includes('Account manager'))}`} value={salesPerson}
                 onChange={e => setSalesPerson(e.target.value)} />
             </F>
