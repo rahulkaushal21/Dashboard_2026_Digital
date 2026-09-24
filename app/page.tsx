@@ -4,7 +4,7 @@ import ClientLink from '@/components/ClientLink'
 import GreetingBar from '@/components/GreetingBar'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, requestScan, getLatestScanRequest, type RevenueRow, type Client, type Opportunity, type BookingRow } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { buildInsights, type Tone } from '@/lib/insights'
@@ -140,39 +140,20 @@ export default function Dashboard() {
   const [nowMs, setNowMs] = useState(Date.now())
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<string | null>(null)
-  // On-demand AI sense-check (classifies newly-captured email into opps/escalations/delights).
-  const [scanState, setScanState] = useState<'idle' | 'queued' | 'running' | 'done'>('idle')
-  const [scanMsg, setScanMsg] = useState<string | null>(null)
+  // How far behind the mailbox is. Reading it is a person's job, so this is a fact to
+  // report, not a job to trigger.
+  const [mail, setMail] = useState<EmailReviewState | null>(null)
   useEffect(() => { const id = setInterval(() => setNowMs(Date.now()), 30000); return () => clearInterval(id) }, [])
-  // Kick off the serverless sense-check, then poll its status until it finishes and reload.
-  const runScan = async () => {
-    setScanState('queued'); setScanMsg('Requested — the runner is picking it up…')
-    const req = await requestScan(currentEmail() || undefined)
-    if (!req) { setScanState('idle'); setScanMsg('Could not queue a scan — please try again.'); return }
-    const startId = req.id
-    let ticks = 0
-    const poll = async () => {
-      ticks++
-      const latest = await getLatestScanRequest()
-      if (latest && latest.id === startId && latest.status === 'done') {
-        setScanState('done'); setScanMsg(latest.note || 'Sense-check complete.')
-        await load(); return
-      }
-      if (latest && latest.status === 'running') { setScanState('running'); setScanMsg('Reading new email and classifying…') }
-      if (ticks < 60) setTimeout(poll, 12000)           // up to ~12 min
-      else { setScanState('idle'); setScanMsg('Still running in the background — data will refresh shortly.') }
-    }
-    setTimeout(poll, 8000)
-  }
   const load = async () => {
     setRefreshing(true)
     try {
-      const [r, c, o, b, cs, srA, srB, so] = await Promise.all([
+      const [r, c, o, b, cs, srA, srB, so, mr] = await Promise.all([
         getRevenue(), getClients(), getOpportunities(), getBookingsFull(), getQuoteCloseSpeed(),
         getLastSync('web-revenue-appscript'), getLastSync('web-revenue-sync'), getLastSyncStatus('email-opportunities-scan'),
+        getEmailReviewState(),
       ])
       setRev(r); setClients(c); setOpps(o); setBookingRows(b); setCloseSpeed(cs); setSyncRev(later(srA, srB))
-      setSyncOpp(so?.ran_at ?? null); setSyncOppFailed(so ? !so.ok : false)
+      setSyncOpp(so?.ran_at ?? null); setSyncOppFailed(so ? !so.ok : false); setMail(mr)
       setLastRefreshed(new Date()); setNowMs(Date.now())
     } finally { setRefreshing(false) }
   }
@@ -291,6 +272,16 @@ export default function Dashboard() {
   // What the date filter currently covers, in words. Panels that follow the filter say
   // this out loud: "Top clients" sits beside a chart fixed to the last six months, and
   // without a label the two read as one period and quietly disagree.
+  // Hours, not minutes: a review done by a person is not late at 45 minutes. Green for
+  // this session's work, amber for today's, red once a working day has gone by unread.
+  const mailDot = (() => {
+    if (syncOppFailed) return 'bg-red-500'
+    const t = parseTs(mail?.last_reviewed ?? syncOpp)
+    if (isNaN(t)) return 'bg-mav-line'
+    const h = (nowMs - t) / 3600000
+    return h < 4 ? 'bg-green-400' : h < 24 ? 'bg-amber-400' : 'bg-red-500'
+  })()
+
   const rangeLabel = useMemo(() => {
     if (!from || !to) return ''
     const d = (x: string) => new Date(x + 'T00:00:00')
@@ -403,18 +394,24 @@ export default function Dashboard() {
           <span className={`w-2 h-2 rounded-full ${freshWithin(syncRev, 45, nowMs) ? 'bg-green-400' : syncRev ? 'bg-amber-400' : 'bg-mav-line'}`} />
           <span className="text-mav-muted">Web revenue</span><span className="font-medium">{ago(syncRev, nowMs)}</span>
         </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className={`w-2 h-2 rounded-full ${syncOppFailed ? 'bg-red-500' : freshWithin(syncOpp, 45, nowMs) ? 'bg-green-400' : syncOpp ? 'bg-amber-400' : 'bg-mav-line'}`} />
-          <span className="text-mav-muted">Opportunities scan</span><span className="font-medium">{ago(syncOpp, nowMs)}</span>
+        {/* Email review is a PERSON reading the mailbox — there is no cron behind it, and
+            the page used to imply there was ("auto hourly + on-demand", beside a button
+            that queued work nothing ever claimed). So it states the fact instead: when
+            the mail was last read, and how much has landed since. The count is what
+            makes it honest — "2h ago" sounds fine until you know 54 mails came in after
+            it. */}
+        <span className="inline-flex items-center gap-1.5"
+          title="The revenue and quote syncs are automatic. Reading the mailbox for deals that never reach the Quotes tab is not — it happens when someone runs a review.">
+          <span className={`w-2 h-2 rounded-full ${mailDot}`} />
+          <span className="text-mav-muted">Email reviewed</span>
+          <span className="font-medium">{ago(mail?.last_reviewed ?? syncOpp, nowMs)}</span>
           {syncOppFailed
-            ? <span className="text-red-400 font-medium">· ⚠ last scan failed — capture may be stalled</span>
-            : <span className="text-mav-muted">· auto hourly + on-demand</span>}
+            ? <span className="text-red-400 font-medium">· ⚠ the last review failed — capture may be stalled</span>
+            : <span className="text-mav-muted">
+                · by hand{mail && mail.arrived_since > 0 ? ` · ${mail.arrived_since.toLocaleString('en-US')} arrived since` : ''}
+              </span>}
         </span>
-        <span className="ml-auto text-mav-muted">{scanMsg ? scanMsg : syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
-        <button onClick={runScan} disabled={scanState === 'queued' || scanState === 'running'} title="Run the AI sense-check now — reads newly-captured email and updates opportunities, escalations and delights"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-yellow/60 text-mav-yellow hover:bg-mav-yellow/10 disabled:opacity-50">
-          <Sparkles size={13} className={(scanState === 'queued' || scanState === 'running') ? 'animate-pulse' : ''} /> {scanState === 'queued' ? 'Queued…' : scanState === 'running' ? 'Scanning…' : 'Run scan'}
-        </button>
+        <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
         <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg hover:border-mav-yellow disabled:opacity-50">
           <RefreshCw size={13} className={(syncing || refreshing) ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}

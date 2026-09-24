@@ -283,22 +283,35 @@ const { data } = await supabase.from('sync_runs').select('ran_at, ok, message').
 return data && data.length ? (data[0] as SyncStatus) : null
 }
 
-// ---- On-demand sense-check trigger (dashboard button) ----
-// Queues a scan request; the serverless hourly runner claims and processes it
-// (and it also runs every hour on its own). Rapid repeats coalesce server-side.
-export interface ScanRequest { id: number; status: string; requested_at?: string; finished_at?: string; note?: string }
-export async function requestScan(by?: string): Promise<ScanRequest | null> {
-  if (!supabase) return null
-  const { data, error } = await supabase.rpc('request_scan', { p_by: by ?? null })
-  if (error) return null
-  const row = Array.isArray(data) ? data[0] : data
-  return (row as ScanRequest) || null
+// ---- How far behind the mailbox is --------------------------------------
+//
+// Reading the mail and turning it into opportunities is a PERSON's job, not a cron.
+// There was a "Run scan" button here that queued a request for a runner to claim;
+// request #1 on 10 Jul 2026 was the only one ever claimed, and three people pressed it
+// over the following two months for nothing. It was removed on 24 Sep 2026 — the day
+// two real deals were missed, one of them simply because no review had run since it
+// arrived — and replaced by this: say when the mail was last read, and how much has
+// landed since.
+//
+// Counts, never content. web_email_review_state is the one definer view in the schema
+// because email_inbox is closed to everyone but the service role, and clients' own
+// words stay that way.
+export interface EmailReviewState {
+  last_reviewed: string | null
+  unread: number
+  arrived_since: number
+  oldest_unread: string | null
 }
-export async function getLatestScanRequest(): Promise<ScanRequest | null> {
+export async function getEmailReviewState(): Promise<EmailReviewState | null> {
   if (!supabase) return null
-  const { data } = await supabase.rpc('latest_scan_request')
-  const row = Array.isArray(data) ? data[0] : data
-  return (row as ScanRequest) || null
+  const { data } = await supabase.from('web_email_review_state').select('*').maybeSingle()
+  if (!data) return null
+  return {
+    last_reviewed: data.last_reviewed ?? null,
+    unread: Number(data.unread ?? 0),
+    arrived_since: Number(data.arrived_since ?? 0),
+    oldest_unread: data.oldest_unread ?? null,
+  }
 }
 
 const isOpenQuote = (s?: string) => {
