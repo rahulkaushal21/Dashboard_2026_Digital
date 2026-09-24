@@ -1,0 +1,28 @@
+-- 1,098 meeting reports were in the mailbox, and every one was discarded as noise.
+--
+-- Read AI, Fireflies, Fathom, Otter and tl;dv mail a report after every recorded call.
+-- They have been arriving since February 2026 — 798 from Read AI alone — and the triage
+-- rules classed them with newsletters and calendar invites. All 1,098 sit in email_inbox
+-- marked processed, which is to say: looked at, and thrown away.
+--
+-- What is in them:
+--   * the AI's own summary of the call, in a paragraph
+--   * on Read AI, a `map[action_items:[…]]` block naming WHO agreed to WHAT —
+--     "Gagandeep Singh will share the hosting packages for Pressable…",
+--     "Christie Iacangelo will continue discussions with Rebellion…"
+--   * on Fireflies, a "Meeting Overview" of bullets
+--
+-- That is the closest thing this system has to minutes, and for any call nobody wrote
+-- up afterwards it is the ONLY record it will ever have. Three of the seven QBRs on
+-- record say in their own text that only the email preview was captured and the rest
+-- "needs completing" — the recording those write-ups refer to has been mailed in all
+-- along.
+--
+-- 725 reports parse cleanly; 168 carry named action items; 50 distinct meetings match a
+-- client by name (the rest are internal — "Automation Catchup", "SMP: DEV/Jay Check-in" —
+-- and correctly match nobody).
+--
+-- SECURITY: definer, like web_email_review_state, because email_inbox has RLS on and no
+-- policy. These views expose the summary and the action items the notetaker itself wrote.
+-- Never the transcript, never the thread.
+-- web_meeting_reports, web_client_meetings, and two points appended to web_qbr_brief.

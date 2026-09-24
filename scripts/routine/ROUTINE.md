@@ -127,7 +127,19 @@ TRIAGE + DEEP-READ: triage cheaply ONLY to discard pure machine noise —
 newsletters, promos, calendar invites/accepts, OOO auto-replies, monitoring/deploy/
 error alerts (Kinsta, Wordfence, Render…), HR/billing/system mail,
 notifications@uplers.com invoice mails, Basecamp/Slack/Docs notifications, and
-Drive share notices. EXCEPTION — notifications@uplers.com "Quote ( QUT… ) Request"
+Drive share notices.
+NOTETAKER REPORTS ARE NOT NOISE — READ THEM. Read AI (e.read.ai), Fireflies,
+Fathom, Otter and tl;dv mail a report after every recorded call, and 1,098 of them
+were discarded as notifications between Feb and Sep 2026 before anyone noticed. They
+carry the AI's own summary and, on Read AI, a `map[action_items:[…]]` block naming
+who agreed to do what — "Gagandeep Singh will share the hosting packages…". That is
+the closest thing this system has to minutes, and it is the ONLY record of a call
+that never got written up. Parsed into `web_meeting_reports` and surfaced per client
+in `web_client_meetings`; they feed the QBR brief. Read them for escalations
+(a security incident discussed on a call before it reaches email), for opportunities
+(a price named out loud), and for feedback (a client saying they are happy).
+Their MARKETING mail — "you have 1 free report remaining", plan upgrades — is still
+noise; the tell is the subject carrying a meeting name and a date. EXCEPTION — notifications@uplers.com "Quote ( QUT… ) Request"
 mails are NOT discardable: read each one for Project Name, Client Name, Currency and
 Budget and apply the value to the matching opportunity (see step 0). For EVERYTHING ELSE — any thread with a genuine external human
 (client / prospect / partner) — deep-read the full stored `body`, even if the last
