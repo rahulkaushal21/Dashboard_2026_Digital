@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { submitManualFeedback, getFeedbackApprovers, type FeedbackApprover } from '@/lib/supabase'
+import { submitManualFeedback, getFeedbackApprovers, getClients, getDirectoryMember, type FeedbackApprover } from '@/lib/supabase'
+import { currentEmail } from '@/lib/access'
 import { SERVICE_DEPTS } from '@/lib/deal-fields'
 
 // Feedback that arrived on Slack, a call, or across a table.
@@ -41,7 +42,24 @@ export default function AddFeedbackDialog({ onClose, onAdded }: { onClose: () =>
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // Every client we have ever booked, so the name typed here is the name the rest of the
+  // dashboard already uses. A feedback row filed under "zulu" instead of "ZULU 8" is
+  // invisible on that client's page, which is the one place anybody would look for it.
+  const [clientNames, setClientNames] = useState<string[]>([])
+  useEffect(() => {
+    getClients().then(cs => setClientNames(
+      Array.from(new Set(cs.map(c => (c.company_name || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+    )).catch(() => {})
+  }, [])
+
   useEffect(() => { getFeedbackApprovers().then(setApprovers).catch(() => {}) }, [])
+
+  // The PM defaults to whoever is filling this in. Praise usually reaches the person it
+  // is about, and retyping your own name is the kind of small friction that ends with
+  // the field left blank. Still editable — you can log praise for somebody else.
+  useEffect(() => {
+    getDirectoryMember(currentEmail()).then(m => { if (m?.name) setPm(prev => prev || m.name) }).catch(() => {})
+  }, [])
 
   // Named before it is sent, not after. Knowing who has to agree changes how people write.
   const approver = approvers.find(a => a.dept_pattern.toUpperCase() === dept.toUpperCase())
@@ -75,9 +93,13 @@ export default function AddFeedbackDialog({ onClose, onAdded }: { onClose: () =>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="sm:col-span-2">
-            <F label="Client *">
+            <F label="Client *" hint={company.trim() && !clientNames.some(n => n.toLowerCase() === company.trim().toLowerCase())
+              ? 'Not a client we have booked — check the spelling, or carry on if they are new.' : undefined}>
               <input className={ctl} value={company} onChange={e => setCompany(e.target.value)} autoFocus
-                placeholder="Who said it" />
+                list="feedback-clients" placeholder="Start typing — we will find them" autoComplete="off" />
+              <datalist id="feedback-clients">
+                {clientNames.map(n => <option key={n} value={n} />)}
+              </datalist>
             </F>
           </div>
 
@@ -104,7 +126,9 @@ export default function AddFeedbackDialog({ onClose, onAdded }: { onClose: () =>
               {SERVICE_DEPTS.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </F>
-          <F label="PM it is about"><input className={ctl} value={pm} onChange={e => setPm(e.target.value)} placeholder="Who did the work" /></F>
+          <F label="PM it is about" hint="Defaults to you — change it if the praise is about somebody else.">
+            <input className={ctl} value={pm} onChange={e => setPm(e.target.value)} placeholder="Who did the work" />
+          </F>
 
           <F label="Project"><input className={ctl} value={project} onChange={e => setProject(e.target.value)} placeholder="Optional" /></F>
           <F label="Their email"><input className={ctl} value={email} onChange={e => setEmail(e.target.value)} placeholder="Optional" /></F>

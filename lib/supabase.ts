@@ -307,6 +307,26 @@ export interface EmailReviewState {
   /** Everything unread including machines, for the tooltip. Never the headline. */
   unread_total: number
 }
+/**
+ * Which mailbox is actually feeding the dashboard, read back from what capture reported.
+ *
+ * Settings used to carry an editable "Inbox to scan" box that nothing had read since
+ * 4 Aug 2026. Capture is an Apps Script living inside the mailbox — GmailApp only reads
+ * its own owner's mail — so the mailbox is decided by where that script is installed, and
+ * no field here could ever move it. Every gmail-ingest run names its own mailbox, so this
+ * is the one answer that cannot be stale or wishful.
+ */
+export async function getCaptureMailbox(): Promise<{ mailbox: string; at: string } | null> {
+  if (!supabase) return null
+  const { data } = await supabase.from('sync_runs')
+    .select('ran_at, message').eq('source', 'gmail-ingest').eq('ok', true)
+    .order('ran_at', { ascending: false }).limit(1).maybeSingle()
+  if (!data) return null
+  // "reviewweb@uplers.com: pulled 21 msgs, 16 new, …"
+  const m = /^([^\s:]+@[^\s:]+)/.exec(String(data.message || ''))
+  return { mailbox: m ? m[1] : 'unknown mailbox', at: data.ran_at }
+}
+
 export async function getEmailReviewState(): Promise<EmailReviewState | null> {
   if (!supabase) return null
   const { data } = await supabase.from('web_email_review_state').select('*').maybeSingle()

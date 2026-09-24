@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Header from '@/components/Header'
 import { getSettings, saveSettings } from '@/lib/config'
+import { getCaptureMailbox } from '@/lib/supabase'
 import ThemePanel from '@/components/ThemePanel'
 import { Trash2 } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
@@ -18,9 +19,12 @@ function SettingsForm({ canEdit }: { canEdit: boolean }) {
   const [updated, setUpdated] = useState('')
   const [status, setStatus] = useState('')
   useEffect(() => { getSettings().then(s => { setSheet(s.business_sheet_url || ''); setGmail(s.scan_gmail_address || ''); setUpdated(s.updated_at || '') }) }, [])
+  // Where mail is ACTUALLY coming from: every gmail-ingest run names its own mailbox.
+  const [capture, setCapture] = useState<{ mailbox: string; at: string } | null | undefined>(undefined)
+  useEffect(() => { getCaptureMailbox().then(setCapture).catch(() => setCapture(null)) }, [])
   const save = async () => {
     setStatus('Saving…')
-    try { await saveSettings({ business_sheet_url: sheet, scan_gmail_address: gmail }); setStatus('Saved — the next routine run will use these.') }
+    try { await saveSettings({ business_sheet_url: sheet, scan_gmail_address: gmail }); setStatus('Saved — the next routine run will use this.') }
     catch (e: any) { setStatus('Error: ' + e.message) }
   }
   // Read-only rendering for non-admins. The database refuses the write anyway
@@ -42,11 +46,29 @@ function SettingsForm({ canEdit }: { canEdit: boolean }) {
         <input value={sheet} onChange={e => setSheet(e.target.value)} readOnly={!canEdit} disabled={!canEdit}
           placeholder="https://docs.google.com/spreadsheets/d/…" className={box} />
       </div>
+      {/* THE INBOX FIELD IS GONE, and this is why.
+          It said the routine scanned whatever address was typed here, and nothing has
+          read it since 4 Aug 2026. Capture is a Google Apps Script running inside one
+          mailbox — GmailApp only ever reads its own owner's mail — and that script
+          refuses to run at all if it finds itself in a different account, deliberately,
+          so it can never attribute one person's mail to another. Changing a box here
+          could not have moved it, and the box said otherwise for seven weeks.
+          What replaces it is the truth, read back from what capture actually reported. */}
       <div>
-        <label className="block text-sm font-medium mb-1">Inbox to scan (Gmail address)</label>
-        <p className="text-xs text-mav-muted mb-2">Use your own Gmail to test, then switch to the live central inbox. If the live inbox is a different Google account, also re-point the routine's Gmail connector to it.</p>
-        <input value={gmail} onChange={e => setGmail(e.target.value)} readOnly={!canEdit} disabled={!canEdit}
-          placeholder="central-inbox@company.com" className={box} />
+        <label className="block text-sm font-medium mb-1">Mail capture</label>
+        <p className="text-xs text-mav-muted mb-2">
+          Not a setting. Mail is captured by an Apps Script living inside the mailbox itself, so the
+          mailbox is chosen by where that script is installed — not here. To add one, install a copy
+          under that account.
+        </p>
+        <div className="bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm">
+          {capture === null
+            ? <span className="text-mav-muted">Checking…</span>
+            : capture
+              ? <><span className="text-mav-fg">{capture.mailbox}</span>
+                  <span className="text-mav-muted"> · last pull {new Date(capture.at).toLocaleString()}</span></>
+              : <span className="text-amber-300">No capture run recorded — mail is not arriving.</span>}
+        </div>
       </div>
       {canEdit && (
         <div className="flex items-center gap-4">
