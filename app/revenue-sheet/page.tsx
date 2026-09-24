@@ -21,6 +21,9 @@ import { getStoredProfile, currentEmail } from '@/lib/access'
 
 const money = (n?: number | null) => n == null ? '—' : `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 0 })}`
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+// Where the revenue sheet begins. Nothing is booked before it, so the month list stops
+// here rather than scrolling into empty years.
+const SHEET_START = '2025-04'
 const nextMonth = () => { const d = new Date(); return monthKey(new Date(d.getFullYear(), d.getMonth() + 1, 1)) }
 const ym = (s?: string) => (s || '').slice(0, 7)
 const uniq = (xs: (string | undefined)[]) => Array.from(new Set(xs.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -240,11 +243,31 @@ export default function ProjectLedger() {
   // One page per booking month. A fixed hundred rows split September across two pages and
   // put the tail of August on the first — the unit of work here is a month, so that is
   // the unit the pager moves in.
+  // Every month from this one back to April 2025, where the sheet starts — not only the
+  // months the current filters happen to leave behind. Picking a quiet month and being
+  // told it is empty is an answer; not being offered it at all is not.
+  //
+  // "Now" is read after mount. Worked out during render, the static export's prerendered
+  // HTML would disagree with the browser about which month is first.
+  const [thisMonth, setThisMonth] = useState('')
+  useEffect(() => { setThisMonth(monthKey(new Date())) }, [])
+
   const monthPages = useMemo(() => {
+    const inData = new Set(shown.map(r => rowMonth(r) || '—'))
     const out: string[] = []
-    for (const r of shown) { const m = rowMonth(r) || '—'; if (out[out.length - 1] !== m) if (!out.includes(m)) out.push(m) }
+    if (thisMonth) {
+      let [y, m] = thisMonth.split('-').map(Number)
+      while (`${y}-${String(m).padStart(2, '0')}` >= SHEET_START) {
+        out.push(`${y}-${String(m).padStart(2, '0')}`)
+        m--; if (m < 1) { m = 12; y-- }
+      }
+    }
+    // Anything outside that window the data still holds: an older import, or a booking
+    // already filed forward into next year.
+    for (const k of [...inData].filter(k => k !== '—' && !out.includes(k)).sort().reverse()) out.push(k)
+    if (inData.has('—')) out.push('—')
     return out
-  }, [shown])
+  }, [shown, thisMonth])
 
   const handleSort = (key: string) => {
     if (sortKey !== key) { setSortKey(key); setSortAsc(false); return }
@@ -365,6 +388,12 @@ export default function ProjectLedger() {
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-56`} />
+        {/* The month sits with the filters, not under the table. It is the control people
+            reach for most, and it was the one you had to scroll past everything to find. */}
+        <select value={pageMonth} onChange={e => setPage(monthPages.indexOf(e.target.value))}
+          className={`${sel} max-h-60`} size={1} aria-label="Month" title="Month — newest first, back to April 2025">
+          {monthPages.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
+        </select>
         <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
         <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
         <MultiSelect label="All GEOs" options={opts.geo} selected={fGeo} onChange={setFGeo} className="w-40" />
@@ -513,7 +542,13 @@ export default function ProjectLedger() {
                 </td>
               </tr>
             ))}
-            {!loading && shown.length === 0 && <tr><td colSpan={cols.length + 3} className="px-3 py-6 text-center text-mav-muted">Nothing matches those filters.</td></tr>}
+            {!loading && pageRows.length === 0 && (
+              <tr><td colSpan={cols.length + 3} className="px-3 py-6 text-center text-mav-muted">
+                {shown.length === 0
+                  ? 'Nothing matches those filters.'
+                  : `Nothing in ${pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)} matches those filters — ${shown.length.toLocaleString()} line${shown.length === 1 ? '' : 's'} in other months do.`}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -526,11 +561,6 @@ export default function ProjectLedger() {
             {' '}&middot; month {Math.min(page, pages - 1) + 1} of {pages} &middot; ticking the header selects all {shown.length.toLocaleString()} filtered lines, not just this month
           </span>
           <div className="flex items-center gap-2">
-            {/* A month picker as well as the arrows: stepping back to March one month at
-                a time is eleven clicks. */}
-            <select value={pageMonth} onChange={e => setPage(monthPages.indexOf(e.target.value))} className={sel}>
-              {monthPages.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
-            </select>
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
               className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 transition-colors">Newer month</button>
             <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}

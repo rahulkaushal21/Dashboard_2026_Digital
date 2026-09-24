@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Sparkles } from 'lucide-react'
 import {
-  confirmOpportunityFull, opportunityMissingFields, getFxRates, toUsd,
+  confirmOpportunityFull, opportunityMissingFields, getFxRates, toUsd, rollUpOpportunities,
   getSheetVocab, getSheetClientDefaults, sheetDefaultsFor, geoCodeFromSheet,
   getPickList, getContractors, CONTRACTOR, type Contractor,
   type FxRate, type Opportunity, type SheetVocab, type SheetClientDefaults,
@@ -101,8 +101,11 @@ function Pick({ value, onChange, options, bad }: {
   )
 }
 
-export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
+export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBilling = [] }: {
   deal: Opportunity; onClose: () => void; onConfirmed: () => void
+  /** Other ad-hoc jobs going on the same invoice. They are attached to this deal once it
+   *  confirms — they stay won and keep their own record, and book nothing of their own. */
+  alsoBilling?: Opportunity[]
 }) {
   // ---- identifiers.
   //
@@ -286,8 +289,24 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
       outsource_price: outsourcePrice === '' ? null : Number(outsourcePrice),
       outsource_currency: outsourceCur,
     })
+    if (res.ok) {
+      // The rest of the invoice. Done after the line that books, never before: attaching
+      // jobs to a deal that turned out not to confirm would hide them from the figures
+      // altogether. If THIS fails, the invoice is still booked in full and the others are
+      // simply still open — visible and fixable, rather than quietly counted twice.
+      if (alsoBilling.length) {
+        const ids = [deal.id, ...alsoBilling.map(d => d.id)]
+        const roll = await rollUpOpportunities(ids, deal.id)
+        if (!roll.ok) {
+          setSaving(false)
+          setError(`The invoice is confirmed, but the other ${alsoBilling.length} job${alsoBilling.length === 1 ? '' : 's'} could not be attached to it: ${roll.error}. They are still open — bill them again or leave them.`)
+          return
+        }
+      }
+      setSaving(false)
+      onConfirmed(); return
+    }
     setSaving(false)
-    if (res.ok) { onConfirmed(); return }
     setError(res.error || 'Could not confirm')
     if (res.missing) setServerMissing(res.missing)
   }
@@ -309,6 +328,12 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed }: {
               <p className="text-xs text-mav-fg/60 mt-0.5">
                 This books the deal as revenue and writes its row into the sheet.
               </p>
+              {alsoBilling.length > 0 && (
+                <p className="text-xs text-mav-yellow mt-1">
+                  Carrying the invoice for {alsoBilling.length + 1} ad-hoc jobs. The other {alsoBilling.length} are
+                  marked won and attached to this one, so the month books it once.
+                </p>
+              )}
             </div>
             <button onClick={onClose} className="text-mav-fg/60 hover:text-mav-fg text-xl leading-none">&times;</button>
           </div>

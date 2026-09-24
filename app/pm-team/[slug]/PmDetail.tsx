@@ -6,7 +6,7 @@ import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
 import { useAuth } from '@/components/AuthProvider'
 import { OWNER_EMAIL } from '@/lib/access'
-import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
+import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, getClientOwners, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
 import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost, quoteConfirmDate, oppConfirmDate } from '@/lib/pm-metrics'
 import { pmBySlug, pmByEmail, fqOf, qLabel, totalPct, attainment, TARGETS, WEIGHTS, type FQ } from '@/lib/pm-team'
 
@@ -32,14 +32,17 @@ export default function PmDetail({ slug }: { slug: string }) {
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [fb, setFb] = useState<PmFeedbackRow[]>([])
   const [sigs, setSigs] = useState<EmailSignal[]>([])
+  // Who owns each client. Feedback is credited to the client's owner rather than to
+  // whoever typed the row up, so a shared account lands on the right scorecard.
+  const [owners, setOwners] = useState<Map<string, string[]>>(new Map())
   const [qi, setQi] = useState(QUARTERS.length - 1)
 
   useEffect(() => {
-    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals()])
-      .then(([b, o, qs, f, sg]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg) })
+    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals(), getClientOwners()])
+      .then(([b, o, qs, f, sg, ow]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg); setOwners(ow) })
   }, [])
 
-  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb, sigs), [bookings, opps, quotes, fb, sigs])
+  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb, sigs, undefined, owners), [bookings, opps, quotes, fb, sigs, owners])
   const s = pm ? stats.get(pm.slug) : undefined
   const fq = QUARTERS[qi]
 

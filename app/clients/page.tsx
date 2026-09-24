@@ -8,7 +8,7 @@ import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import Link from 'next/link'
-import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory } from '@/lib/supabase'
+import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory , getClientOwners, clientKey } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -319,6 +319,11 @@ export default function Clients() {
   // Both of these open CLOSED. They are reference sections, not the reason anybody comes
   // to this page — the client table is — and between them they pushed the table most of
   // a screen down on every visit.
+  // Every owner of each client, not the one name on the record. A client split by
+  // service belongs to both the people delivering it, and both should find it here.
+  const [ownerMap, setOwnerMap] = useState<Map<string, string[]>>(new Map())
+  useEffect(() => { getClientOwners().then(setOwnerMap).catch(() => {}) }, [])
+  const ownersOf = (name?: string) => ownerMap.get(clientKey(name)) || []
   const [showInd, setShowInd] = useState(false)
   // The chip on the shut industry panel. One industry is worth naming; four are not
   // worth truncating into nonsense.
@@ -580,7 +585,9 @@ export default function Clients() {
   // shows green; else the recorded sentiment.
   const statusOf = (c: Client) => { const r = riskOf(c); if (r.level) return r.level; if (r.recovered || (r.posFb.length && !r.negSigs.length)) return 'Positive'; return sentBucket(c.sentiment) }
 
-  const owners = uniq(clients.map(c => c.pc_sme))
+  // Filter options come from the owner sets, so picking a PM finds the clients they
+  // share as well as the ones the record hands them outright.
+  const owners = useMemo(() => uniq([...ownerMap.values()].flat()), [ownerMap])
   const geos = uniq(clients.map(c => c.geo))
   const industries = uniq(clients.map(c => c.industry))
   const aiCount = clients.filter(c => c.ai_focus).length
@@ -750,7 +757,7 @@ export default function Clients() {
       .filter(c => !stat || statusOf(c) === stat)
       .filter(c => !aiOnly || c.ai_focus)
       .filter(c => !dipOnly || dipByClient.has(norm(c.company_name)))
-      .filter(c => keeps(owner, c.pc_sme))
+      .filter(c => owner.length === 0 || ownersOf(c.company_name).some(p => owner.includes(p)) || keeps(owner, c.pc_sme))
       .filter(c => keeps(geo, c.geo))
       .filter(c => {
         if (!lo && !hi) return true
@@ -945,7 +952,15 @@ export default function Clients() {
                     <td className="px-4 py-3">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="Someone looked at this client's escalation and it is still broken">⚑ Unresolved</span>}{r.dip && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-semibold whitespace-nowrap" title={`${fmtUsd(r.dip.prior)} → ${fmtUsd(r.dip.last)} (${dipWindow})`}>📉 {r.dip.stopped ? 'Billing stopped' : `Revenue −${r.dip.dropPct}%`}</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
-                    <td className="px-4 py-3 text-mav-muted">{c.pc_sme}</td>
+                    <td className="px-4 py-3 text-mav-muted">
+                      {(() => {
+                        const os = ownersOf(c.company_name)
+                        if (!os.length) return c.pc_sme || '—'
+                        // The one with the most revenue leads; the rest are named in the
+                        // tooltip rather than wrapped over three lines in a table cell.
+                        return <span title={os.join(', ')}>{os[0]}{os.length > 1 && <span className="text-mav-yellow/80"> +{os.length - 1}</span>}</span>
+                      })()}
+                    </td>
                     <td className="px-4 py-3"><button onClick={e => { e.stopPropagation(); setStat(b => b === st ? '' : st) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${tone(st)}`}>{st || '—'}</button></td>
                     <td className="px-4 py-3 whitespace-nowrap">{act.last
                       ? <span className="inline-flex items-center gap-1.5"><span className={isRecent ? 'text-mav-fg' : 'text-mav-muted'}>{act.last}</span><span className="text-[11px] tracking-tight">{act.convo ? '💬' : ''}{act.esc ? '⚠' : ''}{act.quote ? '💰' : ''}</span>{isRecent && <span className="inline-block w-1.5 h-1.5 rounded-full bg-mav-yellow" title="active in the last 14 days" />}</span>
@@ -1199,7 +1214,10 @@ export default function Clients() {
                 <div><div className="text-xs text-mav-muted">Industry</div>{selC.industry || '—'}</div>
                 <div><div className="text-xs text-mav-muted">Type</div>{selC.client_type || '—'}</div>
                 <div><div className="text-xs text-mav-muted">GEO</div>{selC.geo || '—'}</div>
-                <div><div className="text-xs text-mav-muted">Owner</div>{selC.pc_sme || selC.sales_person || '—'}</div>
+                <div>
+                  <div className="text-xs text-mav-muted">{ownersOf(selC.company_name).length > 1 ? 'Owners' : 'Owner'}</div>
+                  {ownersOf(selC.company_name).join(', ') || selC.pc_sme || selC.sales_person || '—'}
+                </div>
                 <div><div className="text-xs text-mav-muted" title={`Sum of every booking recorded for this client${ltvWindow ? `, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)}` : ''}`}>Lifetime value{ltvWindow ? <span className="ml-1 opacity-60">({ltvWindow.months}mo)</span> : null}</div>{selC.ltv_usd ? fmtUsd(selC.ltv_usd) : '—'}</div>
                 <div><div className="text-xs text-mav-muted">Last booking</div>{ym(selC.last_booking_month) || '—'}</div>
                 {selC.email && <div className="col-span-2"><div className="text-xs text-mav-muted">Email</div>{selC.email}</div>}

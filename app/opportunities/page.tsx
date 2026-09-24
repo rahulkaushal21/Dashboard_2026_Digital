@@ -9,6 +9,7 @@ import KPICard from '@/components/KPICard'
 import { getOpportunities, getOpportunityDepts, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
+import BillTogetherDialog from '@/components/BillTogetherDialog'
 import MultiSelect from '@/components/MultiSelect'
 import { currentEmail, getStoredProfile } from '@/lib/access'
 import { NBD_TEAM } from '@/lib/nbd'
@@ -292,6 +293,25 @@ const [me, setMe] = useState<DirectoryMember | null>(null)
 const [iAmAdmin, setIAmAdmin] = useState(false)
 const [showAdd, setShowAdd] = useState(false)
 const [confirming, setConfirming] = useState<Opportunity | null>(null)
+// Ad-hoc jobs picked to go on one invoice. Ids, not rows, so a reload does not strand
+// the selection on stale copies.
+const [grouped, setGrouped] = useState<Set<number>>(new Set())
+const [billing, setBilling] = useState(false)
+// The other jobs riding on the confirmation that is open.
+const [alsoBilling, setAlsoBilling] = useState<Opportunity[]>([])
+
+// Which deals can go on one invoice: ad-hoc, not yet won, and this person's to confirm.
+// The database enforces all three again — this only decides what is offered.
+const isAdhoc = (x: Opportunity) => /ad[ -]?hoc/i.test(x.project_type || '')
+const canGroup = (x: Opportunity) =>
+  isAdhoc(x) && !x.won && !x.email_won && canConfirmLocally(x, me, iAmAdmin)
+const groupedRows = useMemo(() => all.filter(x => grouped.has(x.id)), [all, grouped])
+const groupedClients = useMemo(
+  () => Array.from(new Set(groupedRows.map(x => (x.company_name || '').trim()).filter(Boolean))),
+  [groupedRows])
+const toggleGroup = (id: number) => setGrouped(prev => {
+  const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+})
 useEffect(() => {
 setIAmAdmin(!!getStoredProfile()?.is_admin)
 getDirectoryMember(currentEmail()).then(m => {
@@ -663,7 +683,21 @@ className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-y
 </div>
 )}
 {showAdd && <AddOpportunityDialog onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); reload() }} />}
-{confirming && <ConfirmDealDialog deal={confirming} onClose={() => setConfirming(null)} onConfirmed={() => { setConfirming(null); reload() }} />}
+{billing && groupedRows.length > 1 && (
+  <BillTogetherDialog deals={groupedRows} onClose={() => setBilling(false)}
+    onChosen={(primary, total) => {
+      setBilling(false)
+      setAlsoBilling(groupedRows.filter(d => d.id !== primary.id))
+      // The combined figure goes in as the deal's own value, so the confirm dialog opens
+      // on the invoice rather than on one job's share of it.
+      setConfirming({ ...primary, value: total, local_value: total, est_value: total })
+    }} />
+)}
+{confirming && (
+  <ConfirmDealDialog deal={confirming} alsoBilling={alsoBilling}
+    onClose={() => { setConfirming(null); setAlsoBilling([]) }}
+    onConfirmed={() => { setConfirming(null); setAlsoBilling([]); setGrouped(new Set()); reload() }} />
+)}
 
 {/* Sheet-mismatch alert: a Won/Lost call made here that the Quotes sheet hasn't caught
     up with. Sits above everything — it's the one thing on this page needing action
@@ -804,10 +838,28 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 </span>
 </div>
 
+{/* Shown only once something is ticked. Two is the minimum that means anything —
+    one job billed on its own is just a confirmation. */}
+{grouped.size > 0 && (
+<div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-mav-yellow/40 bg-mav-yellow/10 px-4 py-2.5 text-sm">
+  <span className="font-medium">{grouped.size} ad-hoc job{grouped.size === 1 ? '' : 's'} picked</span>
+  <span className="text-mav-muted">{money(groupedRows.reduce((t, x) => t + (x.value || 0), 0))} together</span>
+  {groupedClients.length > 1 && (
+    <span className="text-amber-300">Different clients ({groupedClients.join(', ')}) — one invoice covers one client.</span>
+  )}
+  <button onClick={() => setBilling(true)} disabled={grouped.size < 2 || groupedClients.length > 1}
+    className="ml-auto text-xs px-3 py-1.5 rounded-md bg-mav-yellow text-black font-medium hover:bg-mav-yellow/90 disabled:opacity-40">
+    Bill as one revenue entry
+  </button>
+  <button onClick={() => setGrouped(new Set())} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>
+</div>
+)}
+
 <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
 <div className="overflow-x-auto">
 <table className="w-full text-sm min-w-[1180px]">
 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
+<th className="px-3 py-3 w-9" title="Pick ad-hoc jobs that go on one invoice"></th>
 <th className="px-3 py-3 w-9" title="Mark a deal confirmed without opening it"></th>
 {COLS.map(c => (
 <th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-mav-fg">
@@ -826,6 +878,18 @@ return (
     Already-won deals show a filled tick that does nothing; deals somebody else
     owns show an empty one, because the confirm rule is enforced in the database
     and a button that always fails is worse than a button that is not offered. */}
+{/* One invoice, several jobs. Only offered on ad-hoc deals this person could
+    confirm anyway: a retainer is billed on its own terms, and a dedicated month
+    is already one line. */}
+<td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+{canGroup(x) ? (
+  <input type="checkbox" checked={grouped.has(x.id)} onChange={() => toggleGroup(x.id)}
+    title="Bill this with other ad-hoc jobs for the same client"
+    className="w-4 h-4 accent-mav-yellow align-middle" />
+) : x.rolled_into ? (
+  <span className="text-[10px] text-mav-muted" title={`Billed as part of deal #${x.rolled_into}`}>⇢</span>
+) : null}
+</td>
 <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
 {x.won || x.email_won ? (
   <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-500/60 bg-green-500/25 text-green-300 text-xs" title="Already confirmed">✓</span>

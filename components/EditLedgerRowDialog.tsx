@@ -21,6 +21,25 @@ import { CURRENCIES } from '@/lib/deal-fields'
 
 const STATUSES = ['Under Development', 'Delivered', 'On Hold', 'Cancelled', 'Under Review', 'Awaiting Information']
 
+// Out here, not inside the component: declared inside, each render made a new component
+// type and React rebuilt every field from scratch on every keystroke — losing focus and
+// the cursor position mid-word. Same bug as the Add dialog had.
+const F = ({ label, hint, wide, children }: { label: string; hint?: string; wide?: boolean; children: React.ReactNode }) => (
+  <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
+    <span className="text-xs font-medium text-mav-fg/85">{label}</span>
+    {children}
+    {hint && <span className="mt-1 block text-[11px] text-mav-fg/50">{hint}</span>}
+  </label>
+)
+
+const Group = ({ title, blurb, children }: { title: string; blurb: string; children: React.ReactNode }) => (
+  <section className="border-t border-mav-line pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
+    <h3 className="text-sm font-semibold">{title}</h3>
+    <p className="text-[11px] text-mav-fg/55 mt-0.5 mb-3">{blurb}</p>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{children}</div>
+  </section>
+)
+
 export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   row: LedgerRow; onClose: () => void; onSaved: () => void
 }) {
@@ -78,20 +97,6 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
 
   const ctl = `mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg
     placeholder:text-mav-fg/35 focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors`
-  const F = ({ label, hint, wide, children }: { label: string; hint?: string; wide?: boolean; children: React.ReactNode }) => (
-    <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
-      <span className="text-xs font-medium text-mav-fg/85">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-[11px] text-mav-fg/50">{hint}</span>}
-    </label>
-  )
-  const Group = ({ title, blurb, children }: { title: string; blurb: string; children: React.ReactNode }) => (
-    <section className="border-t border-mav-line pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <p className="text-[11px] text-mav-fg/55 mt-0.5 mb-3">{blurb}</p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{children}</div>
-    </section>
-  )
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:p-8" onClick={onClose}>

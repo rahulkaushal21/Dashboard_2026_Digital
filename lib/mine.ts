@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { getClients, getDirectoryMember, ownerMatches, type DirectoryMember } from './supabase'
+import { getClientOwners, getDirectoryMember, ownerMatches, clientKey, type DirectoryMember } from './supabase'
 import { currentEmail, getStoredProfile } from './access'
 
 // "Mine" — which rows belong to the person looking.
@@ -11,7 +11,10 @@ import { currentEmail, getStoredProfile } from './access'
 // TWO WAYS A ROW CAN BE YOURS, because the tables disagree about what they record:
 //   • a deal names its PM directly (pm_owner)
 //   • an escalation, a delight or a client names only the COMPANY, so ownership comes
-//     from the client record's PC/SME
+//     from who owns that client — ALL of them. It used to be the client record's single
+//     PC/SME cell, and on a client split across two people by service that hid one of
+//     them from their own work: ZULU 8 reads as Nitin's on the record while most of its
+//     revenue is Maitri's, so her own bookings were missing from her own dashboard.
 // A name cell can hold several people ("Malav Modi / Kalgi Shah"), which is why matching
 // goes through ownerMatches and the directory's alias list rather than string equality —
 // 'Rahul Kaushal' must never match Rahul Jain.
@@ -30,7 +33,9 @@ export interface Mine {
   ownsClient: (companyName?: string) => boolean
 }
 
-const key = (s?: string) => (s || '').trim().toLowerCase()
+// The view's own key, so a name written 'ZULU 8' one place and 'Zulu8' another
+// still lands on one client.
+const key = (s?: string) => clientKey(s)
 
 export function useMine(): Mine {
   const [me, setMe] = useState<DirectoryMember | null>(null)
@@ -43,8 +48,12 @@ export function useMine(): Mine {
     getDirectoryMember(currentEmail()).then(async m => {
       setMe(m)
       if (m) {
-        const clients = await getClients()
-        setMyClients(new Set(clients.filter(c => ownerMatches(c.pc_sme, m.aliases)).map(c => key(c.company_name))))
+        const owners = await getClientOwners()
+        const mineNow = new Set<string>()
+        for (const [ck, people] of owners) {
+          if (people.some(p => ownerMatches(p, m.aliases))) mineNow.add(ck)
+        }
+        setMyClients(mineNow)
       }
       setReady(true)
     }).catch(() => setReady(true))

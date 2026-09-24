@@ -500,7 +500,9 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
 
   const { data: opps, error: oe } = await sb.from("opportunities")
     .select("id, quote_key, project_id, quote_id, company_name, source_subject, client_name, contact_email, client_type, service_dept, service_type, delivery_type, delivery_status, project_type, technology, geo, pm_owner, sales_person, business_type, currency, quote_price, local_value, est_value, start_date, delivery_date, confirmed_at, source_date, origin, expert, internal_delivery, internal_hrs, actual_hrs, integration, outsource_price, outsource_currency, contractor_name, invoice_no, invoice_currency, invoice_amount, feedback_status")
-    .eq("won", true).not("confirmed_by", "is", null);
+    // rolled_into: several ad-hoc jobs billed on one invoice. The deal carrying the
+    // invoice writes one line for the lot; the others are won, and book nothing.
+    .eq("won", true).not("confirmed_by", "is", null).is("rolled_into", null);
   if (oe) throw new Error("opportunities: " + oe.message);
 
   for (const o of opps || []) {

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   addOpportunity, findPossibleDuplicates, getFxRates, toUsd,
   getClientDefaults, searchClients, getDirectoryMember,
+  getTechnologyOptions, getClientTopTechnology, clientKey,
   type DuplicateHit, type FxRate, type ClientDefaults,
 } from '@/lib/supabase'
 import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, CHANNELS } from '@/lib/deal-fields'
@@ -24,6 +25,22 @@ import { currentEmail } from '@/lib/access'
 
 const money = (n?: number) => n == null ? '—' : `$${Math.round(n).toLocaleString('en-US')}`
 
+// DEFINED OUT HERE ON PURPOSE. These were declared inside the component, which meant a
+// new component type on every render — so React threw away every field and built it
+// again on each keystroke. The visible symptom was the cursor jumping to the Client box
+// while you were halfway through typing a PM's name, because `autoFocus` fires on mount
+// and every render was a mount.
+const inputCls = 'mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 \
+    focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors'
+
+const F = ({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) => (
+  <label className="block">
+    <span className="text-xs font-medium text-mav-fg/85">{label}</span>
+    {children}
+    {hint && <span className="block text-[11px] text-mav-fg/50 mt-0.5">{hint}</span>}
+  </label>
+)
+
 export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (id: number) => void }) {
   const [company, setCompany] = useState('')
   const [value, setValue] = useState('')
@@ -32,6 +49,10 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   const [serviceDept, setServiceDept] = useState('')
   const [projectType, setProjectType] = useState('')
   const [technology, setTechnology] = useState('')
+  // The list to choose from, commonest first, and what each client is mostly built on.
+  const [techOptions, setTechOptions] = useState<string[]>([])
+  const [topTech, setTopTech] = useState<Map<string, string>>(new Map())
+  const [techOther, setTechOther] = useState(false)
   const [salesPerson, setSalesPerson] = useState('')
   const [pmOwner, setPmOwner] = useState('')
   const [geo, setGeo] = useState('')
@@ -58,6 +79,8 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
 
   useEffect(() => {
     getFxRates().then(setRates)
+    getTechnologyOptions().then(setTechOptions).catch(() => {})
+    getClientTopTechnology().then(setTopTech).catch(() => {})
     getClientDefaults().then(setClients)
     // Default the PM to whoever is filling the form, when they are a PM. They are the
     // likeliest owner, and an owner is what decides who can confirm it later — a deal
@@ -104,7 +127,10 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
     apply('geo', c.geo, geo, setGeo)
     apply('salesPerson', c.sales_person, salesPerson, setSalesPerson)
     apply('pmOwner', c.pm_owner, pmOwner, setPmOwner)
-    apply('technology', c.technology, technology, setTechnology)
+    // The client's MAIN technology by revenue, not whatever the last line happened to
+    // say — one small ad-hoc job should not redefine an account that has been WordPress
+    // for three years. Falls back to the client record when there is no booked revenue.
+    apply('technology', topTech.get(clientKey(c.company_name)) || c.technology, technology, setTechnology)
     apply('serviceDept', c.service_dept, serviceDept, setServiceDept)
     apply('projectType', c.project_type, projectType, setProjectType)
     apply('contactEmail', c.contact_email, contactEmail, setContactEmail)
@@ -146,16 +172,6 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
     }
     if (res.id) onAdded(res.id)
   }
-
-  const inputCls = 'mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 \
-    focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors'
-  const F = ({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) => (
-    <label className="block">
-      <span className="text-xs font-medium text-mav-fg/85">{label}</span>
-      {children}
-      {hint && <span className="block text-[11px] text-mav-fg/50 mt-0.5">{hint}</span>}
-    </label>
-  )
 
   const usd = toUsd(valueN, currency, rates)
   const converted = currency.toUpperCase() !== 'USD' && usd != null && !Number.isNaN(valueN as number)
@@ -241,7 +257,25 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
             </select>
           </F>
 
-          <F label="Technology"><input className={inputCls} value={technology} onChange={e => setTechnology(e.target.value)} placeholder="Shopify, WordPress…" /></F>
+          <F label="Technology">
+            {/* A list, so one stack stops being spelled three ways and reports can group
+                it. Anything already on the deal stays selectable even if it is not on the
+                list, and "Something else" is there for a stack we have not built on yet. */}
+            <select className={inputCls} value={techOther ? '__other' : technology}
+              onChange={e => {
+                if (e.target.value === '__other') { setTechOther(true); setTechnology('') }
+                else { setTechOther(false); setTechnology(e.target.value) }
+              }}>
+              <option value="">—</option>
+              {techOptions.map(t => <option key={t} value={t}>{t}</option>)}
+              {technology && !techOptions.includes(technology) && <option value={technology}>{technology} (existing)</option>}
+              <option value="__other">Something else…</option>
+            </select>
+            {techOther && (
+              <input className={inputCls} value={technology} autoFocus
+                onChange={e => setTechnology(e.target.value)} placeholder="Name the technology" />
+            )}
+          </F>
           <F label="Client contact"><input className={inputCls} value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="name@client.com" /></F>
 
           <F label="Account manager"><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>

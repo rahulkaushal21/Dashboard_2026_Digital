@@ -66,6 +66,9 @@ delivery_status?: string
 // The figure as QUOTED, in `currency`. est_value is always USD — every total, forecast
 // and scorecard adds est_value up without asking what currency it was.
 local_value?: number
+// Billed as part of another deal: several ad-hoc jobs, one invoice. This one is won and
+// books nothing of its own — the deal it points at carries the combined amount.
+rolled_into?: number | null
 // "Might not come" — a human call that this open quote probably won't convert.
 // The deal stays Open (it isn't Lost), but it's discounted from the realistic view.
 unlikely?: boolean; unlikely_reason?: string; unlikely_at?: string; unlikely_by?: string
@@ -1523,6 +1526,64 @@ export async function getLedgerDeletions(): Promise<LedgerDeletion[]> {
 export async function restoreLedgerRow(rowKey: string): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase not configured' }
   const { error } = await supabase.rpc('restore_ledger_row', { p_row_key: rowKey })
+  return error ? { ok: false, error: error.message } : { ok: true }
+}
+
+/**
+ * Who owns a client — all of them, not one.
+ *
+ * ZULU 8's client record names Nitin Mishra; $16,194 of its last two quarters were
+ * delivered by Maitri Shah. Asking one column "is this mine" hid her own revenue from her
+ * own dashboard and sent the client's feedback to his scorecard. web_client_owners reads
+ * the revenue lines, the open deals and the client record together, so a client shared
+ * across two people belongs to both.
+ *
+ * Keyed the way the view keys: lower-cased, letters and digits only.
+ */
+export const clientKey = (name?: string) => (name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+export interface ClientOwnerRow { client_key: string; person: string; usd?: number | null; lines?: number | null; on_record?: boolean; on_deal?: boolean; is_primary?: boolean }
+export async function getClientOwners(): Promise<Map<string, string[]>> {
+  const rows = (await read<ClientOwnerRow>('web_client_owners', 'client_key, person, usd, is_primary', 'client_key')) || []
+  const out = new Map<string, string[]>()
+  // Primary first, then biggest share: the order the pages print them in.
+  for (const r of rows.sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || (b.usd || 0) - (a.usd || 0))) {
+    const list = out.get(r.client_key) || []
+    if (r.person && !list.includes(r.person)) list.push(r.person)
+    out.set(r.client_key, list)
+  }
+  return out
+}
+
+/** The technologies worth offering in a picker, commonest first. */
+export async function getTechnologyOptions(): Promise<string[]> {
+  const rows = (await read<{ technology: string; lines: number }>('web_technology_options', 'technology, lines')) || []
+  return rows.sort((a, b) => (b.lines || 0) - (a.lines || 0)).map(r => r.technology).filter(Boolean)
+}
+
+/** What each client is mostly built on, by revenue — the default for a new deal. */
+export async function getClientTopTechnology(): Promise<Map<string, string>> {
+  const rows = (await read<{ client_key: string; technology: string }>('web_client_top_technology', 'client_key, technology', 'client_key')) || []
+  return new Map(rows.map(r => [r.client_key, r.technology]))
+}
+
+/**
+ * Attach the other ad-hoc jobs to the deal that carries the invoice.
+ *
+ * Called straight after that deal is confirmed through the ordinary dialog, so every
+ * rule and every required field is checked once, in one place. The others become won and
+ * book nothing of their own — `rolled_into` is the only thing that decides it, so the
+ * month shows the invoice once instead of once per job.
+ */
+export async function rollUpOpportunities(ids: number[], primary: number): Promise<{ ok: boolean; n?: number; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('roll_up_opportunities', { p_ids: ids, p_primary: primary })
+  return error ? { ok: false, error: error.message } : { ok: true, n: data as number }
+}
+
+/** Split a deal back out of the invoice it was billed under. */
+export async function unrollOpportunity(id: number): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { error } = await supabase.rpc('unroll_opportunity', { p_id: id })
   return error ? { ok: false, error: error.message } : { ok: true }
 }
 

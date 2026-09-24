@@ -8,6 +8,9 @@ import { PM_TEAM, pmOf, qRange, qStartMonth, qCalYear, baselineFor, PM_REASSIGN,
 export const monthKey = (d?: string) => (d || '').slice(0, 7)
 const inQ = (k: string, f: FQ) => { const [a, b] = qRange(f); return !!k && k >= a && k <= b }
 const norm = (s?: string) => (s || '').trim().toLowerCase()
+// The key web_client_owners uses: letters and digits only, so 'ZULU 8' and 'Zulu8' are
+// one client.
+const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
 // ---------------------------------------------------------------------------
 // Deal outcome, for the open-opportunity list. `status` is overwritten by the
@@ -168,6 +171,10 @@ export function buildPmStats(
   feedback: PmFeedbackRow[],
   signals: EmailSignal[] = [],
   today = NOW_DEFAULT,
+  // Who owns each client, from web_client_owners — every owner, primary first. Optional
+  // so a caller with nothing to pass still gets the old behaviour rather than an empty
+  // scorecard.
+  clientOwners?: Map<string, string[]>,
 ): Map<string, PmStats> {
   const out = new Map<string, PmStats>()
   for (const pm of PM_TEAM) {
@@ -198,7 +205,19 @@ export function buildPmStats(
   }
   for (const o of opps) { const pm = pmOf(o.pm_owner); if (pm) out.get(pm.slug)!.opps.push(o) }
   for (const q of quotes) { const pm = pmOf(q.pc_sme); if (pm) out.get(pm.slug)!.quotes.push(q) }
-  for (const f of feedback) { const pm = pmOf(f.pc_sme); if (pm) out.get(pm.slug)!.feedback.push(f) }
+  // Feedback follows the client, not the cell.
+  //
+  // The feedback sheet's PC/SME column is whoever typed the row up, and on a shared
+  // client that is regularly not the person who owns it: ZULU 8's feedback was landing on
+  // Nitin Mishra's scorecard while most of ZULU 8 is Maitri Shah's work. So the client's
+  // primary owner takes it — the one with the most revenue against that client — and the
+  // cell is the fallback for a client nobody owns. One credit either way; counting it for
+  // both co-owners would inflate the measure it feeds.
+  for (const f of feedback) {
+    const owners = clientOwners?.get(ckey(f.agency)) || []
+    const pm = pmOf(owners[0]) || pmOf(f.pc_sme)
+    if (pm) out.get(pm.slug)!.feedback.push(f)
+  }
 
   // Email-origin deals that read as New Development, so Q2C stops depending on
   // somebody remembering to raise a Quotes line.
