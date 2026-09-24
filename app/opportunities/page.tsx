@@ -327,33 +327,50 @@ const [confirming, setConfirming] = useState<Opportunity | null>(null)
 // the selection on stale copies.
 const [ownerMap, setOwnerMap] = useState<Map<string, string[]>>(new Map())
 useEffect(() => { getClientOwners().then(setOwnerMap).catch(() => {}) }, [])
-const [grouped, setGrouped] = useState<Set<number>>(new Set())
+// Deals ticked in the table. Ids, not rows, so a reload does not strand the
+// selection on stale copies.
+const [picked, setPicked] = useState<Set<number>>(new Set())
 const [billing, setBilling] = useState(false)
 // The other jobs riding on the confirmation that is open.
 const [alsoBilling, setAlsoBilling] = useState<Opportunity[]>([])
 
-// Which deals can go on one invoice: ad-hoc, not yet won, and this person's to confirm.
-// The database enforces all three again — this only decides what is offered.
+// ONE checkbox, on every deal this person could confirm. There were two — pick-to-bill
+// and confirm-in-place — sitting side by side in unlabelled columns, each appearing on a
+// different subset of rows, so the table showed a tick here, a tick there, and two on
+// some. Nobody could tell what either meant. The action now lives above the table where
+// it can be named, and what it says depends on how many are ticked: one is a
+// confirmation, several is one invoice.
 //
-// BLANK COUNTS. project_type is empty on 411 of the 952 deals, 163 of them still open,
-// because the Quotes tab has never carried it — so requiring the words "Ad-hoc" offered
-// the checkbox on ten deals in the whole table, no two of them the same client, and the
-// feature could not be used at all. roll_up_opportunities() has always read it this way:
-// being explicitly something else is a refusal, being unclassified is not, and it writes
-// 'Ad-hoc' onto the blanks as it goes. This is that same rule, not a second one.
+// BLANK project_type COUNTS as ad-hoc. It is empty on 411 of the 952 deals, 163 of them
+// still open, because the Quotes tab has never carried it. roll_up_opportunities() reads
+// it the same way — being explicitly something else is a refusal, being unclassified is
+// not, and it writes 'Ad-hoc' onto the blanks as it goes.
 const isAdhoc = (x: Opportunity) => {
   const t = (x.project_type || '').trim()
   return t === '' || /ad[ -]?hoc/i.test(t)
 }
-const canGroup = (x: Opportunity) =>
-  isAdhoc(x) && !x.won && !x.email_won && canConfirmLocally(x, me, iAmAdmin)
-const groupedRows = useMemo(() => all.filter(x => grouped.has(x.id)), [all, grouped])
-const groupedClients = useMemo(
-  () => Array.from(new Set(groupedRows.map(x => (x.company_name || '').trim()).filter(Boolean))),
-  [groupedRows])
-const toggleGroup = (id: number) => setGrouped(prev => {
+const canPick = (x: Opportunity) =>
+  !x.won && !x.email_won && !x.rolled_into && canConfirmLocally(x, me, iAmAdmin)
+const pickedRows = useMemo(() => all.filter(x => picked.has(x.id)), [all, picked])
+const pickedClients = useMemo(
+  () => Array.from(new Set(pickedRows.map(x => (x.company_name || '').trim()).filter(Boolean))),
+  [pickedRows])
+const togglePick = (id: number) => setPicked(prev => {
   const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
 })
+
+// Why several deals cannot go on one invoice, in the same order the database refuses
+// them — so the bar explains it here rather than letting the confirm bounce.
+const combineBlocker = useMemo((): string | null => {
+  if (pickedRows.length < 2) return null
+  if (pickedClients.length > 1) return `Different clients (${pickedClients.join(', ')}) — one invoice covers one client.`
+  const notAdhoc = Array.from(new Set(pickedRows.filter(x => !isAdhoc(x)).map(x => x.project_type!.trim())))
+  if (notAdhoc.length) return `Only ad-hoc jobs go on one invoice — ${notAdhoc.join(', ')} ${notAdhoc.length === 1 ? 'is' : 'are'} billed on their own terms.`
+  const curs = Array.from(new Set(pickedRows.map(x => (x.currency || 'USD').trim().toUpperCase())))
+  if (curs.length > 1) return `Those deals are in different currencies (${curs.join(', ')}) — bill them separately.`
+  return null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [pickedRows, pickedClients])
 useEffect(() => {
 setIAmAdmin(!!getStoredProfile()?.is_admin)
 getDirectoryMember(currentEmail()).then(m => {
@@ -750,11 +767,11 @@ className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-y
 </div>
 )}
 {showAdd && <AddOpportunityDialog onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); reload() }} />}
-{billing && groupedRows.length > 1 && (
-  <BillTogetherDialog deals={groupedRows} onClose={() => setBilling(false)}
+{billing && pickedRows.length > 1 && (
+  <BillTogetherDialog deals={pickedRows} onClose={() => setBilling(false)}
     onChosen={(primary, total) => {
       setBilling(false)
-      setAlsoBilling(groupedRows.filter(d => d.id !== primary.id))
+      setAlsoBilling(pickedRows.filter(d => d.id !== primary.id))
       // The combined figure goes in as the deal's own value, so the confirm dialog opens
       // on the invoice rather than on one job's share of it.
       setConfirming({ ...primary, value: total, local_value: total, est_value: total })
@@ -763,7 +780,7 @@ className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-y
 {confirming && (
   <ConfirmDealDialog deal={confirming} alsoBilling={alsoBilling}
     onClose={() => { setConfirming(null); setAlsoBilling([]) }}
-    onConfirmed={() => { setConfirming(null); setAlsoBilling([]); setGrouped(new Set()); reload() }} />
+    onConfirmed={() => { setConfirming(null); setAlsoBilling([]); setPicked(new Set()); reload() }} />
 )}
 
 {/* Sheet-mismatch alert: a Won/Lost call made here that the Quotes sheet hasn't caught
@@ -905,20 +922,28 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 </span>
 </div>
 
-{/* Shown only once something is ticked. Two is the minimum that means anything —
-    one job billed on its own is just a confirmation. */}
-{grouped.size > 0 && (
+{/* The action for whatever is ticked, named. One deal is a confirmation; several for
+    the same client are one invoice. Same button position either way, so the bar reads
+    as one thing that changes rather than two that appear and vanish. */}
+{picked.size > 0 && (
 <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-mav-yellow/40 bg-mav-yellow/10 px-4 py-2.5 text-sm">
-  <span className="font-medium">{grouped.size} ad-hoc job{grouped.size === 1 ? '' : 's'} picked</span>
-  <span className="text-mav-muted">{money(groupedRows.reduce((t, x) => t + (x.value || 0), 0))} together</span>
-  {groupedClients.length > 1 && (
-    <span className="text-amber-300">Different clients ({groupedClients.join(', ')}) — one invoice covers one client.</span>
-  )}
-  <button onClick={() => setBilling(true)} disabled={grouped.size < 2 || groupedClients.length > 1}
+  <span className="font-medium">
+    {picked.size === 1
+      ? `${pickedRows[0]?.company_name || 'One deal'} selected`
+      : `${picked.size} deals selected${pickedClients.length === 1 ? ` · ${pickedClients[0]}` : ''}`}
+  </span>
+  <span className="text-mav-muted">{money(pickedRows.reduce((t, x) => t + (x.value || 0), 0))}{picked.size > 1 ? ' together' : ''}</span>
+  {combineBlocker && <span className="text-amber-300">{combineBlocker}</span>}
+  <button
+    onClick={() => picked.size === 1 ? setConfirming(pickedRows[0]) : setBilling(true)}
+    disabled={picked.size > 1 && !!combineBlocker}
+    title={picked.size === 1
+      ? 'Fill in the revenue-sheet details and book it'
+      : 'Pick which deal carries the invoice, then confirm it once for the lot'}
     className="ml-auto text-xs px-3 py-1.5 rounded-md bg-mav-yellow text-black font-medium hover:bg-mav-yellow/90 disabled:opacity-40">
-    Bill as one revenue entry
+    {picked.size === 1 ? 'Confirm' : `Combine & confirm (${picked.size})`}
   </button>
-  <button onClick={() => setGrouped(new Set())} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>
+  <button onClick={() => setPicked(new Set())} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>
 </div>
 )}
 
@@ -926,8 +951,8 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 <div className="overflow-x-auto">
 <table className="w-full text-sm min-w-[1180px]">
 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-<th className="px-3 py-3 w-9" title="Pick ad-hoc jobs that go on one invoice"></th>
-<th className="px-3 py-3 w-9" title="Mark a deal confirmed without opening it"></th>
+<th className="px-3 py-3 w-10 font-medium text-[11px] uppercase tracking-wide"
+  title="Tick one deal to confirm it, or several ad-hoc jobs for the same client to put them on one invoice.">Pick</th>
 {COLS.map(c => (
 <th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-mav-fg">
 {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
@@ -937,35 +962,23 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 const st = oppStatus(x)
 return (
 <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.unlikely ? 'bg-orange-500/[0.07]' : x.flag ? 'bg-amber-500/5' : ''}`}>
-{/* Confirm, without opening the deal first.
-    Opens the same dialog the drawer's "Mark Confirmed" button does — a deal
-    still needs its six fields checked before it books as revenue, so this is a
-    shortcut to the dialog, never a silent write. stopPropagation because the
-    row itself opens the drawer.
-    Already-won deals show a filled tick that does nothing; deals somebody else
-    owns show an empty one, because the confirm rule is enforced in the database
-    and a button that always fails is worse than a button that is not offered. */}
-{/* One invoice, several jobs. Only offered on ad-hoc deals this person could
-    confirm anyway: a retainer is billed on its own terms, and a dedicated month
-    is already one line. */}
-<td className="px-3 py-3" onClick={e => e.stopPropagation()}>
-{canGroup(x) ? (
-  <input type="checkbox" checked={grouped.has(x.id)} onChange={() => toggleGroup(x.id)}
-    title="Bill this with other ad-hoc jobs for the same client"
-    className="w-4 h-4 accent-mav-yellow align-middle" />
-) : x.rolled_into ? (
-  <span className="text-[10px] text-mav-muted" title={`Billed as part of deal #${x.rolled_into}`}>⇢</span>
-) : null}
-</td>
+{/* One cell, four states, none of them ambiguous: tick it (yours to confirm),
+    a green ✓ (already booked), an arrow (billed under another deal), or nothing
+    at all (somebody else's). A box that always bounces is worse than no box —
+    the confirm rule is enforced in the database and this only mirrors it.
+    stopPropagation because the row itself opens the drawer. */}
 <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
 {x.won || x.email_won ? (
   <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-500/60 bg-green-500/25 text-green-300 text-xs" title="Already confirmed">✓</span>
-) : canConfirmLocally(x, me, iAmAdmin) ? (
-  <button onClick={() => setConfirming(x)} aria-label={`Mark ${x.company_name || 'this deal'} confirmed`}
-    title={`Mark ${x.company_name || 'this deal'} confirmed`}
-    className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-500/50 text-transparent hover:text-green-300 hover:bg-green-500/20 transition-colors text-xs">✓</button>
+) : x.rolled_into ? (
+  <span className="text-[11px] text-mav-muted" title={`Billed as part of deal #${x.rolled_into}`}>⇢</span>
+) : canPick(x) ? (
+  <input type="checkbox" checked={picked.has(x.id)} onChange={() => togglePick(x.id)}
+    aria-label={`Select ${x.company_name || 'this deal'}`}
+    title={`Select ${x.company_name || 'this deal'} — confirm it, or tick more ad-hoc jobs for this client to bill them as one`}
+    className="w-4 h-4 accent-mav-yellow align-middle" />
 ) : (
-  <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-mav-line" title={`${x.pm_owner || 'Nobody'} owns this deal`} />
+  <span className="inline-block w-4 h-4 align-middle" title={`${x.pm_owner || 'Nobody'} owns this deal`} />
 )}
 </td>
 <td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.email_won && <span className="mr-1.5 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>✓</span>}<ClientLink name={x.company_name} />{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
