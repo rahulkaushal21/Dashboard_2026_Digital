@@ -753,28 +753,24 @@ export interface Delight {
   items: DelightItem[]; date?: string; client_email?: string
   sheet_count?: number; email_count?: number
 }
-// Real appreciation as it reads in a client's own email. The bar is deliberately
-// narrow: a client saying "looks good", "thanks!" or "approved" is doing their job,
-// not paying a compliment, and letting those in is what buried the sheet testimonials
-// the first time. Every word here is one a client only writes when they mean it.
-// "outstanding" is NOT on the list — in this inbox it means an unpaid invoice far more
-// often than praise (YLP Legal, 29 Jul).
-const PRAISE_RE = /(brilliant|impressed|amazing|fantastic|excellent|superb|exceptional|delighted|great (work|job|service)|thank you so much|really appreciate|appreciate (your|the) (help|effort|support|work|quick)|above and beyond|best (agency|partner|team)|pleasure to work|top[- ]notch|nailed it|love (it|the))/i
-// Clients this board never features, however warm a single line reads. Matched on a
-// token so every spelling of the name is covered ("Sprung", "Made by Sprung").
-// Sprung — the "Excellent!" was an acknowledgement inside the thread where staging sat
-//   exposed, the sync queue ran to 61M rows and the disk went critical. A fix confirmed
-//   mid-incident is not a testimonial.
-// ScholarStack — "looking forward to working with you again" is a client restarting,
-//   which is good news but not praise. ("working with you again" is also off PRAISE_RE
-//   now, so no other account can qualify on that line alone.)
+// The praise regex that used to decide this lives in the database now, as
+// feedback_quality() — see migration 070. It was a list of hopeful words, which is how
+// "Amazing, thank you!" and "Video loop delivered perfectly." got onto a board of
+// testimonials. Scoring what the text DOES, in one place both this page and the PM
+// scorecard can read, is the replacement.
+
 const NOT_DELIGHTS = ['sprung', 'scholarstack']
 const isNotDelight = (name?: string) => { const k = ckey(name); return !!k && NOT_DELIGHTS.some(n => k.includes(n)) }
 export async function getDelights(): Promise<Delight[]> {
   if (!supabase) return []
-  const [fbRes, sigRes, clients] = await Promise.all([
-    supabase.from('feedback').select('agency, nature, feedback_type, geo, comments, evidence, project_names, client_email, added_date').ilike('nature', 'positive'),
-    supabase.from('email_signals').select('company_name, client_email, signal_type, summary, source_subject, source_date').eq('sentiment', 'Positive'),
+  // ONE BAR, IN THE DATABASE. What counts as feedback used to be decided here, in a
+  // regex, while the PM scorecard counted feedback rows a different way — two answers to
+  // "did this client praise us". web_real_feedback is now the only answer, scored by
+  // feedback_quality(): see migration 070 for what the score rewards and punishes, and
+  // why length alone could never be the rule.
+  const [rowsRes, clients] = await Promise.all([
+    supabase.from('web_real_feedback')
+      .select('source, id, company_name, client_email, quote, evidence, project, at, feedback_type, geo, score'),
     getClients(),
   ])
   const geoBy = new Map<string, string>()
@@ -785,46 +781,40 @@ export async function getDelights(): Promise<Delight[]> {
     for (const [gk, g] of geoBy) { if (k && gk.length >= 4 && (gk.startsWith(k) || k.startsWith(gk))) return g }
     return fallback || ''
   }
-  // Quality bar — only genuinely great appreciation. A row qualifies when it carries the
-  // client's actual words (a real comment) OR a real screenshot of their praise (an http
-  // evidence link — a Text-Feedback/Clutch capture like Cohort, Nibbleedge, Poloko).
-  // Excluded: the auto-logged placeholder "Client appreciation received — positive feedback
-  // logged" whose only "evidence" is a "Ref: MEM…" string — that's an internal log line, not
-  // the client's words (ZULU 8, Carlotta + Gee, 24/8, Freela, Studio Nash…), i.e. the noise.
-  const isGeneric = (c?: string) => /appreciation received|positive feedback logged|feedback logged/i.test(c || '')
+
+  type Row = {
+    source: 'sheet' | 'email'; company_name?: string; client_email?: string; quote?: string
+    evidence?: string; project?: string; at?: string; feedback_type?: string; geo?: string; score?: number
+  }
   const groups = new Map<string, Delight>()
-  for (const f of (fbRes.data as { agency?: string; feedback_type?: string; geo?: string; comments?: string; evidence?: string; project_names?: string; client_email?: string; added_date?: string }[]) || []) {
-    const key = ckey(f.agency); if (!key || isNotDelight(f.agency)) continue
-    const comment = (f.comments || '').trim()
-    const realQuote = comment && !isGeneric(comment) ? comment : ''
-    const realEvidence = /^https?:\/\//i.test((f.evidence || '').trim()) ? (f.evidence || '').trim() : ''
-    if (!realQuote && !realEvidence) continue   // drop generic auto-logged rows (Ref: MEM…)
-    const item: DelightItem = { quote: realQuote || undefined, project: f.project_names || undefined, evidence: realEvidence || undefined, date: (f.added_date || '').slice(0, 10), type: f.feedback_type }
+  for (const r of (rowsRes.data as Row[]) || []) {
+    const key = ckey(r.company_name); if (!key || isNotDelight(r.company_name)) continue
+    const item: DelightItem = {
+      quote: r.quote || undefined,
+      project: r.project || undefined,
+      evidence: r.evidence || undefined,
+      date: (r.at || '').slice(0, 10),
+      type: r.feedback_type,
+      source: r.source,
+      subject: r.source === 'email' ? (r.project || undefined) : undefined,
+    }
     const g = groups.get(key)
-    if (!g) groups.set(key, { company_name: f.agency || '', geo: geoFor(f.agency, f.geo), count: 1, items: [item], date: item.date, client_email: f.client_email || undefined })
-    else { g.count++; g.items.push(item); if (!g.geo) g.geo = geoFor(f.agency, f.geo); if (!g.client_email && f.client_email) g.client_email = f.client_email; if ((item.date || '') > (g.date || '')) g.date = item.date }
+    if (!g) {
+      groups.set(key, {
+        company_name: r.company_name || '', geo: geoFor(r.company_name, r.geo), count: 1,
+        items: [item], date: item.date, client_email: r.client_email || undefined,
+      })
+    } else {
+      g.count++; g.items.push(item)
+      if (!g.geo) g.geo = geoFor(r.company_name, r.geo)
+      if (!g.client_email && r.client_email) g.client_email = r.client_email
+      if ((item.date || '') > (g.date || '')) g.date = item.date
+    }
   }
-  const bySheet = new Map([...groups].map(([k, g]) => [k, g.items.length]))
-  // Praise read out of the email review — the same appreciation, just never typed into
-  // the feedback sheet. Merged into the client's existing card so one company is still
-  // one card; the item carries source:'email' and the subject line it came from, so a
-  // testimonial can always be traced back to the thread.
-  for (const g of (sigRes.data as { company_name?: string; client_email?: string; signal_type?: string; summary?: string; source_subject?: string; source_date?: string }[]) || []) {
-    const key = ckey(g.company_name); if (!key || isNotDelight(g.company_name)) continue
-    const summary = (g.summary || '').trim()
-    if (!PRAISE_RE.test(summary)) continue
-    const item: DelightItem = { quote: summary, project: g.source_subject || undefined, date: (g.source_date || '').slice(0, 10), type: g.signal_type, source: 'email', subject: g.source_subject || undefined }
-    const ex = groups.get(key)
-    if (!ex) groups.set(key, { company_name: g.company_name || '', geo: geoFor(g.company_name), count: 1, items: [item], date: item.date, client_email: g.client_email || undefined })
-    else { ex.count++; ex.items.push(item); if (!ex.client_email && g.client_email) ex.client_email = g.client_email; if ((item.date || '') > (ex.date || '')) ex.date = item.date }
-  }
-  // headline = the strongest testimonial (longest quote); fall back to a screenshot one
-  for (const [k, g] of groups) {
-    g.items.forEach(i => { if (!i.source) i.source = 'sheet' })
-    g.sheet_count = bySheet.get(k) || 0
-    g.email_count = g.items.length - g.sheet_count
-  }
+
   for (const g of groups.values()) {
+    g.sheet_count = g.items.filter(i => i.source !== 'email').length
+    g.email_count = g.items.length - g.sheet_count
     // A curated sheet testimonial always outranks an email summary for the headline —
     // it's the client's polished words, whereas an email item is our own write-up of
     // the thread. Email only carries the headline when the sheet has nothing.
