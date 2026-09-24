@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from '@/components/Header'
 import Link from 'next/link'
-import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow } from '@/lib/supabase'
+import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, ledgerFingerprint } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile, currentEmail } from '@/lib/access'
 
@@ -150,12 +150,28 @@ export default function ProjectLedger() {
   // too many for ticking retainers, which is the other thing this page is for.
   const [sheetView, setSheetView] = useState(true)
   const [editing, setEditing] = useState<LedgerRow | null>(null)
+
   const [target, setTarget] = useState(nextMonth)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [errors, setErrors] = useState<string[]>([])
 
   const load = () => getProjectLedger().then(setRows).finally(() => setLoading(false))
+  const [removing, setRemoving] = useState<string | null>(null)
+
+  // Admin only, gated again in the database. Two prompts on purpose: a confirm that names
+  // the line and its value, then a reason. Removing money from the figures should be
+  // slightly annoying and should leave a record of who and why.
+  const removeRow = async (r: LedgerRow) => {
+    const what = `${r.company_name || '(no client)'} — ${r.project_name || '(no project)'} · ${money(r.amount_usd || 0)}`
+    if (!window.confirm(`Remove this line from the ledger?\n\n${what}\n\nIt stops counting everywhere — Dashboard, Business Numbers, KB report. The spreadsheet row is untouched and an admin can put it back.`)) return
+    const reason = window.prompt('Why is it being removed? (optional, but it is the only record)') ?? undefined
+    setRemoving(r.row_key)
+    const res = await deleteLedgerRow(r.row_key, ledgerFingerprint(r), reason)
+    setRemoving(null)
+    if (!res.ok) { window.alert(`Could not remove it: ${res.error}`); return }
+    load()
+  }
   useEffect(() => {
     setIsAdmin(!!getStoredProfile()?.is_admin)
     getDirectoryMember(currentEmail()).then(m => {
@@ -430,9 +446,21 @@ export default function ProjectLedger() {
                   {/* Every row is editable now, sheet lines included — their answers go
                       into an overlay beside the sheet rather than into it. Offered only
                       to the row's own PC/SME, which is the rule both RPCs enforce. */}
-                  {canEditLedgerRow(r, me, isAdmin)
-                    ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
-                    : <span className="text-xs text-mav-fg/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
+                  <span className="inline-flex items-center gap-2">
+                    {canEditLedgerRow(r, me, isAdmin)
+                      ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
+                      : <span className="text-xs text-mav-fg/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
+                    {/* Admins only, and gated again in the database. A PM may edit the
+                        fields on their own row; taking a line out of the revenue figures
+                        is a different kind of act. */}
+                    {isAdmin && (
+                      <button onClick={() => removeRow(r)} disabled={removing === r.row_key}
+                        title="Remove this line from the ledger (admin)"
+                        className="text-xs text-mav-fg/30 hover:text-red-400 disabled:opacity-40 transition-colors">
+                        {removing === r.row_key ? '…' : '✕'}
+                      </button>
+                    )}
+                  </span>
                 </td>
                 {cols.map(c => {
                   const v = c.get(r)

@@ -6,9 +6,10 @@ import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, getClientContext, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type ClientContext, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
+import MultiSelect from '@/components/MultiSelect'
 import { currentEmail, getStoredProfile } from '@/lib/access'
 import { NBD_TEAM } from '@/lib/nbd'
 
@@ -230,10 +231,15 @@ const [all, setAll] = useState<Opportunity[]>([])
 // Counted from the data on every load, so the sentence under the intent score can
 // never drift from the population it is describing.
 const cohort = useMemo(() => decidedCohort(all), [all])
-const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState('')
+const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState<string[]>([])
 // Rows the Quotes sheet tags "New" under an owner who isn't on the NBD team.
 const [misTagOnly, setMisTagOnly] = useState(false)
-const [fAM, setFAM] = useState(''); const [fPM, setFPM] = useState(''); const pmTouched = useRef(false); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState(''); const [fTech, setFTech] = useState('')
+const [fAM, setFAM] = useState<string[]>([]); const [fPM, setFPM] = useState<string[]>([]); const pmTouched = useRef(false); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState<string[]>([]); const [fTech, setFTech] = useState<string[]>([])
+// Service Department is not on an opportunity — the column is blank on all 951 of them.
+// It is resolved from the client's own revenue history, the same fallback Business
+// Numbers uses, so "WEB-UK's pipeline" means the same thing on both pages.
+const [fDept, setFDept] = useState<string[]>([])
+const [ctx, setCtx] = useState<ClientContext[]>([])
 const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
 // Quote-value band. Held as strings so "empty" is distinguishable from 0: an
 // empty box means the bound is not set, while a typed 0 still switches the band
@@ -293,13 +299,16 @@ getDirectoryMember(currentEmail()).then(m => {
   // everybody's. Only on first load, and only if nobody has touched the filter — a deep
   // link that names a PM, or a filter already changed, is left exactly as it is.
   // Admins are not defaulted: they come here to see the whole board.
-  if (m?.name) setFPM(prev => (prev === '' && !pmTouched.current) ? m.name : prev)
+  if (m?.name) setFPM(prev => (prev.length === 0 && !pmTouched.current) ? [m.name] : prev)
 })
 }, [])
 const canEnter = iAmAdmin || !!me
 const reload = () => getOpportunities().then(setAll)
 // Default the "To" date to today (set on the client to avoid a hydration mismatch).
 useEffect(() => { const d = new Date().toISOString().slice(0, 10); setTo(d); setToday(d) }, [])
+// Only for the Service Department filter, so a failure here costs that filter and
+// nothing else on the page.
+useEffect(() => { getClientContext().then(setCtx).catch(() => { /* filter falls back to geo */ }) }, [])
 
 // Undated rows always show; otherwise honour the From/To range.
 const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return true; if (from && v < from) return false; if (to && v > to) return false; return true }
@@ -321,16 +330,40 @@ return true
 }
 const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' || k === 'value' ? -1 : 1 })
 
+// The client's dominant service department, then their geo, then Other — the same
+// fallback chain business_quotes() uses in the database. Without it this filter would
+// put all 951 deals in one bucket, because the column they carry is empty.
+const deptByClient = useMemo(() => {
+  const m = new Map<string, string>()
+  for (const c of ctx) if (c.client_key && c.service_dept) m.set(c.client_key, c.service_dept)
+  return m
+}, [ctx])
+const GEO_DEPT: Record<string, string> = {
+  'US/CANADA': 'WEB-US', 'US': 'WEB-US', 'UK/EU': 'WEB-UK', 'UK': 'WEB-UK', 'AU/NZ': 'WEB-AU', 'AU': 'WEB-AU',
+}
+const deptOfOpp = (x: Opportunity): string => {
+  const raw = (x.service_dept || '').trim()
+  if (raw) return raw
+  const k = (x.company_name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (k) {
+    if (deptByClient.has(k)) return deptByClient.get(k) as string
+    // Prefix match, as everywhere else: "Layer 8 Training" against "Layer 8 Training, Inc."
+    for (const [ck, d] of deptByClient) if (ck.length >= 4 && (ck.startsWith(k) || k.startsWith(ck))) return d
+  }
+  return GEO_DEPT[(x.geo || '').trim().toUpperCase()] || 'Other'
+}
+
 const o = useMemo(() => {
 const rows = all
 .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
 .filter(x => !fType || typeLabel(x).includes(fType))
-.filter(x => !fGeo || (x.geo || '') === fGeo)
-.filter(x => !fAM || splitNames(x.sales_person).includes(fAM))
-.filter(x => !fPM || splitNames(x.pm_owner).includes(fPM))
+.filter(x => !fGeo.length || fGeo.includes(x.geo || ''))
+.filter(x => !fAM.length || splitNames(x.sales_person).some(n => fAM.includes(n)))
+.filter(x => !fPM.length || splitNames(x.pm_owner).some(n => fPM.includes(n)))
 .filter(x => !fStatus || oppStatus(x) === fStatus)
-.filter(x => !fSvc || svcOf(x) === fSvc)
-.filter(x => !fTech || (x.technology || '') === fTech)
+.filter(x => !fSvc.length || fSvc.includes(svcOf(x)))
+.filter(x => !fTech.length || fTech.includes(x.technology || ''))
+.filter(x => !fDept.length || fDept.includes(deptOfOpp(x)))
 .filter(x => !flagOnly || x.flag)
 .filter(x => !unlikelyOnly || x.unlikely)
 .filter(x => !lagOnly || sheetLag(x))
@@ -346,7 +379,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -371,7 +404,7 @@ return all
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => !x.value).length
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
+}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -446,10 +479,10 @@ window.alert('Could not save that — please try again.')
 }
 }
 
-const reset = () => { setSearch(''); setFType(''); setFGeo(''); setFAM(''); setFPM(''); setFStatus(''); setFSvc(''); setFTech(''); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setCommittedOnly(false); setMisTagOnly(false); setFAge(''); setVMin(''); setVMax('') }
+const reset = () => { setSearch(''); setFType(''); setFGeo([]); setFAM([]); setFPM([]); setFStatus(''); setFSvc([]); setFTech([]); setFDept([]); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setCommittedOnly(false); setMisTagOnly(false); setFAge(''); setVMin(''); setVMax('') }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort, perPage])
+useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
@@ -737,11 +770,12 @@ return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</opti
 })}
 </select>
 <select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option><option value="New">New (NBD)</option><option value="Repeat">Repeat</option></select>
-<select value={fGeo} onChange={e => setFGeo(e.target.value)} className={selCls}><option value="">All GEO</option>{uniq(all.map(x => x.geo)).map(g => <option key={g} value={g}>{g}</option>)}</select>
-<select value={fSvc} onChange={e => setFSvc(e.target.value)} className={selCls}><option value="">All services</option>{uniq(all.map(svcOf)).map(s => <option key={s} value={s}>{s}</option>)}</select>
-<select value={fTech} onChange={e => setFTech(e.target.value)} className={selCls}><option value="">All tech</option>{uniq(all.map(x => x.technology)).map(t => <option key={t} value={t}>{t}</option>)}</select>
-<select value={fAM} onChange={e => setFAM(e.target.value)} className={selCls}><option value="">All AMs</option>{uniqNames(all.map(x => x.sales_person)).map(ow => <option key={ow} value={ow}>{ow}</option>)}</select>
-<select value={fPM} onChange={e => { pmTouched.current = true; setFPM(e.target.value) }} className={selCls}><option value="">All PMs</option>{uniqNames(all.map(x => x.pm_owner)).map(pm => <option key={pm} value={pm}>{pm}</option>)}</select>
+<MultiSelect label="All departments" className="w-44" options={uniq(all.map(deptOfOpp))} selected={fDept} onChange={setFDept} />
+<MultiSelect label="All GEO" className="w-36" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} />
+<MultiSelect label="All services" className="w-44" options={uniq(all.map(svcOf))} selected={fSvc} onChange={setFSvc} />
+<MultiSelect label="All tech" className="w-40" options={uniq(all.map(x => x.technology))} selected={fTech} onChange={setFTech} />
+<MultiSelect label="All AMs" className="w-40" options={uniqNames(all.map(x => x.sales_person))} selected={fAM} onChange={setFAM} />
+<MultiSelect label="All PMs" className="w-40" options={uniqNames(all.map(x => x.pm_owner))} selected={fPM} onChange={v => { pmTouched.current = true; setFPM(v) }} />
 <button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
 <button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
 {misTagged.length > 0 && (

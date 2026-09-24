@@ -272,10 +272,26 @@ export default function Reports() {
     }
   }, [opps, from, to, fAm, fPm, fGeo, fAgency, fDept])
 
+  // The two named ranges, so the button can show as chosen and so "is this the default"
+  // has one definition instead of being re-derived in three places.
+  const ranges = useMemo(() => {
+    const n = new Date()
+    const lm = new Date(n.getFullYear(), n.getMonth() - 1, 1)
+    return {
+      thisMonth: { from: ymd(monthStart(n)), to: ymd(monthEnd(n)) },
+      lastSameDay: {
+        from: ymd(monthStart(lm)),
+        // Clamped, so the 31st does not run off the end of a 30-day month.
+        to: ymd(new Date(lm.getFullYear(), lm.getMonth(), Math.min(n.getDate(), monthEnd(lm).getDate()))),
+      },
+    }
+  }, [])
+  const lastSameDayOn = from === ranges.lastSameDay.from && to === ranges.lastSameDay.to
+  const datesChanged = !(from === ranges.thisMonth.from && to === ranges.thisMonth.to)
+
   const anyFilter = !!(fAm || fPm || fEng || fTech || fGeo || fAgency || fDept)
   const reset = () => {
-    const n = new Date()
-    setFrom(ymd(monthStart(n))); setTo(ymd(monthEnd(n)))
+    setFrom(ranges.thisMonth.from); setTo(ranges.thisMonth.to)
     setFAm(''); setFPm(''); setFEng(''); setFTech(''); setFGeo(''); setFAgency(''); setFDept('')
   }
 
@@ -329,17 +345,24 @@ export default function Reports() {
         </select>
 
         {/* The range people ask for most after "this month": the month before, stopped on
-            today's date, so the two are the same number of days. */}
+            today's date, so the two are the same number of days. It toggles — clicking it
+            again goes back to this month, so it is never a one-way door. */}
         <button onClick={() => {
-          const n = new Date()
-          const m = new Date(n.getFullYear(), n.getMonth() - 1, 1)
-          setFrom(ymd(monthStart(m)))
-          setTo(ymd(new Date(m.getFullYear(), m.getMonth(), Math.min(n.getDate(), monthEnd(m).getDate()))))
-        }} className="text-xs px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">
+          const r = lastSameDayOn ? ranges.thisMonth : ranges.lastSameDay
+          setFrom(r.from); setTo(r.to)
+        }} className={`text-xs px-3 py-2 rounded-md border transition-colors ${lastSameDayOn
+          ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium'
+          : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
           Last month, same day
         </button>
 
-        {anyFilter && <button onClick={reset} className="text-xs px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">Reset</button>}
+        {/* Shown whenever ANYTHING is off default, dates included. It used to appear only
+            for the dropdowns, so picking a range left no way back but a page reload. */}
+        {(anyFilter || datesChanged) && (
+          <button onClick={reset} className="text-xs px-3 py-2 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
+            ✕ Clear filters
+          </button>
+        )}
       </div>
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p> : (

@@ -1469,6 +1469,34 @@ export async function updateProjectFields(id: number, f: ProjectFieldEdits): Pro
   return error ? { ok: false, error: error.message } : { ok: true }
 }
 
+/**
+ * Hide a line from the ledger. Admins only, enforced in the database.
+ *
+ * Nothing is destroyed: a sheet line still exists in the spreadsheet and a dashboard line
+ * is still a won opportunity. This stops it counting, and restoreLedgerRow puts it back.
+ *
+ * The fingerprint travels with it because row_key for a sheet line is 'raw:<row number>',
+ * and inserting rows above it in the sheet makes that number point at a different
+ * project. If the line under a deletion changes, the deletion stops applying and the
+ * line reappears — visible and wrong beats hidden and wrong when the thing being hidden
+ * is revenue.
+ */
+export function ledgerFingerprint(r: { company_name?: string; project_name?: string; booking_month?: string }): string {
+  return `${(r.company_name || '').toLowerCase()}|${(r.project_name || '').toLowerCase()}|${(r.booking_month || '').slice(0, 10)}`
+}
+export async function deleteLedgerRow(rowKey: string, fingerprint: string, reason?: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { error } = await supabase.rpc('delete_ledger_row', {
+    p_row_key: rowKey, p_fingerprint: fingerprint, p_reason: reason || null,
+  })
+  return error ? { ok: false, error: error.message } : { ok: true }
+}
+export async function restoreLedgerRow(rowKey: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { error } = await supabase.rpc('restore_ledger_row', { p_row_key: rowKey })
+  return error ? { ok: false, error: error.message } : { ok: true }
+}
+
 export async function getProjectLedger(): Promise<LedgerRow[]> {
   return (await read<LedgerRow>('web_project_ledger', '*', 'row_key')) || []
 }
