@@ -327,7 +327,17 @@ const [alsoBilling, setAlsoBilling] = useState<Opportunity[]>([])
 
 // Which deals can go on one invoice: ad-hoc, not yet won, and this person's to confirm.
 // The database enforces all three again — this only decides what is offered.
-const isAdhoc = (x: Opportunity) => /ad[ -]?hoc/i.test(x.project_type || '')
+//
+// BLANK COUNTS. project_type is empty on 411 of the 952 deals, 163 of them still open,
+// because the Quotes tab has never carried it — so requiring the words "Ad-hoc" offered
+// the checkbox on ten deals in the whole table, no two of them the same client, and the
+// feature could not be used at all. roll_up_opportunities() has always read it this way:
+// being explicitly something else is a refusal, being unclassified is not, and it writes
+// 'Ad-hoc' onto the blanks as it goes. This is that same rule, not a second one.
+const isAdhoc = (x: Opportunity) => {
+  const t = (x.project_type || '').trim()
+  return t === '' || /ad[ -]?hoc/i.test(t)
+}
 const canGroup = (x: Opportunity) =>
   isAdhoc(x) && !x.won && !x.email_won && canConfirmLocally(x, me, iAmAdmin)
 const groupedRows = useMemo(() => all.filter(x => grouped.has(x.id)), [all, grouped])
