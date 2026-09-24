@@ -1590,6 +1590,28 @@ export async function unrollOpportunity(id: number): Promise<{ ok: boolean; erro
   return error ? { ok: false, error: error.message } : { ok: true }
 }
 
+/**
+ * Jobs that look booked twice — once confirmed here, once typed into the revenue sheet.
+ *
+ * From 1 October a line can be born in either place and the ledger unions the two, with
+ * nothing in that union checking for the same job on both sides. People will keep typing
+ * into the sheet out of habit for a few weeks, and a month overstated by a real amount
+ * with nothing saying so is the worst thing this system could do.
+ *
+ * Empty is the expected state. It is shown, not hidden, because two genuinely similar
+ * jobs in one month for one client does happen — the decision belongs to a person.
+ */
+export interface DoubleCount {
+  dashboard_row: string; sheet_row: string; company_name?: string
+  dashboard_project?: string; sheet_project?: string
+  dashboard_usd?: number; sheet_usd?: number
+  dashboard_month?: string; sheet_month?: string
+  confirmed_by?: string; confirmed_at?: string
+}
+export async function getPossibleDoubleCounts(): Promise<DoubleCount[]> {
+  return (await read<DoubleCount>('web_possible_double_count', '*', 'dashboard_row')) || []
+}
+
 export async function getProjectLedger(): Promise<LedgerRow[]> {
   return (await read<LedgerRow>('web_project_ledger', '*', 'row_key')) || []
 }

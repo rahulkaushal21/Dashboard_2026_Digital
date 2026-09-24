@@ -186,9 +186,10 @@ export function buildPmStats(
   }
 
   for (const b of bookings) {
-    // A known-wrong SME cell is corrected here before attribution, so the booking
-    // lands on the PM who actually owns the account.
-    const owner = PM_REASSIGN[norm(b.company_name)] || b.sme
+    // The name on the LINE, and nothing else — the same rule the business number and the
+    // revenue sheet's pivot use. There was a per-client override here; it moved whole
+    // clients onto one PM and took genuine lines off another, which is why it is gone.
+    const owner = b.sme
     const pm = pmOf(owner); if (!pm) continue
     const s = out.get(pm.slug)!
     s.bookings.push(b)
@@ -196,9 +197,10 @@ export function buildPmStats(
     if (k) s.byMonth.set(k, (s.byMonth.get(k) || 0) + (b.booking_amount || 0))
   }
 
-  // Apr–Jun 2026 is settled: the revenue sheet's pivot is the agreed final figure
-  // for the quarter, including adjustments made at source after our last sync.
-  // Overwrite rather than add, so a stale feed cannot inflate a closed quarter.
+  // Apr–Jun 2026 used to be overwritten here with figures typed in from the revenue
+  // sheet's pivot, because the feed disagreed with it. It agrees now, within the export's
+  // rounding, so the override is gone and this reads the data like every other month.
+  // Q1_FY2026_ACTUALS is empty and kept only for the note on it.
   for (const [slug, m] of Object.entries(Q1_FY2026_ACTUALS)) {
     const s = out.get(slug); if (!s) continue
     for (const [k, v] of Object.entries(m)) s.byMonth.set(k, v)
@@ -284,7 +286,7 @@ function clientOwnerMap(quotes: Quote[], bookings: BookingRow[]): Map<string, st
     m.set(w, (m.get(w) || 0) + 1)
   }
   for (const q of quotes) add(q.agency, q.pc_sme)
-  for (const b of bookings) add(b.company_name, PM_REASSIGN[norm(b.company_name)] || b.sme)
+  for (const b of bookings) add(b.company_name, b.sme)
   const out = new Map<string, string>()
   for (const [co, m] of tally) {
     let best = '', n = 0

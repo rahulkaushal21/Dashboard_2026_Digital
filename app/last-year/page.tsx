@@ -5,13 +5,12 @@ import Header from '@/components/Header'
 import MultiSelect from '@/components/MultiSelect'
 import KPICard from '@/components/KPICard'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
-import { PM_REASSIGN } from '@/lib/pm-team'
 
 // Who a booking belongs to, with the same known-wrong SME cells corrected as on
 // the PM pages — otherwise the two screens name a different owner for the same
 // client, and whichever one you looked at last wins the argument.
 const pmOfBooking = (r: BookingRow) =>
-  (PM_REASSIGN[(r.company_name || '').trim().toLowerCase()] || r.sme || '').trim()
+  (r.sme || '').trim()
 
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
 const pad = (n: number) => String(n).padStart(2, '0')

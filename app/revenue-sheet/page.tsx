@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from '@/components/Header'
 import MultiSelect from '@/components/MultiSelect'
 import Link from 'next/link'
-import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
+import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile, currentEmail } from '@/lib/access'
 
@@ -171,6 +171,11 @@ export default function ProjectLedger() {
   // Admins only, because only they can have put it there or take it back.
   const [gone, setGone] = useState<LedgerDeletion[]>([])
   const loadGone = () => { getLedgerDeletions().then(setGone).catch(() => {}) }
+
+  // Booked twice — once here, once in the sheet. Everyone sees this one, not just admins:
+  // the person who can tell two similar jobs apart is the PM who did them.
+  const [dupes, setDupes] = useState<DoubleCount[]>([])
+  useEffect(() => { getPossibleDoubleCounts().then(setDupes).catch(() => {}) }, [])
 
   // Admin only, gated again in the database. Two prompts on purpose: a confirm that names
   // the line and its value, then a reason. Removing money from the figures should be
@@ -385,6 +390,30 @@ export default function ProjectLedger() {
   return (
     <div>
       <Header title="Web, Hub & LP" subtitle="Every booked line, plus everything confirmed in the dashboard. Filter, tick, and move to the next month." />
+
+      {dupes.length > 0 && (
+        <div className="mb-4 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3">
+          <div className="text-sm font-semibold text-red-300">
+            ⚠ {dupes.length} job{dupes.length > 1 ? 's' : ''} may be booked twice — confirmed here AND typed into the sheet
+          </div>
+          <p className="text-xs text-mav-muted mt-0.5 mb-2">
+            Same client, same amount, same month, one from each side. If it is one job, remove whichever line is the
+            duplicate; if they are genuinely two jobs, leave them and this will keep showing until the amounts differ.
+          </p>
+          <ul className="space-y-1">
+            {dupes.slice(0, 8).map(d => (
+              <li key={d.dashboard_row} className="text-xs flex flex-wrap items-baseline gap-x-2">
+                <span className="text-mav-fg">{d.company_name || '—'}</span>
+                <span className="text-mav-muted">{money(d.dashboard_usd || 0)}</span>
+                <span className="text-mav-muted">· {(d.dashboard_month || '').slice(0, 7)}</span>
+                <span className="text-mav-muted">· confirmed here by {d.confirmed_by || 'somebody'}</span>
+                <span className="text-mav-muted">· also {d.sheet_row}</span>
+              </li>
+            ))}
+            {dupes.length > 8 && <li className="text-xs text-mav-muted">+{dupes.length - 8} more</li>}
+          </ul>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-56`} />

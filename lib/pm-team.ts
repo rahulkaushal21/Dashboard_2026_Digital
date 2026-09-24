@@ -54,48 +54,36 @@ export const PM_TEAM: PmMember[] = [
 ]
 
 /**
- * Clients whose revenue-sheet `sme` column is wrong, and who they actually belong to.
+ * RETIRED, 24 Sep 2026 — and kept empty rather than deleted, so the next person who
+ * thinks of re-adding one reads why it went.
  *
- * ZULU 8 is Maitri's account — it is booked to her in 24 of its 33 monthly rows.
- * The strays (Rahul Jain $3,793 in May 2026, Nitin Mishra in May/Jun/Jul 2026,
- * plus older Harshvardhan and Manmohan rows) are mis-keyed, and the May one alone
- * moved $3,793 off Maitri and onto Rahul Jain — enough to swing both their growth
- * figures by 19 and 8 points against the revenue sheet's own pivot.
+ * This held clients whose revenue-sheet `sme` column was thought wrong: 'zulu 8' was
+ * moved wholesale to Maitri Shah because most of it is hers. But "most of it" is not
+ * "all of it". ZULU 8 carries genuine Nitin Mishra lines ($643 in July, $674 in
+ * September, $936 in May and June) and a Manmohan Jangra one, and this moved every one
+ * of them onto Maitri — inflating her and understating him, in the one figure both of
+ * them are measured on.
  *
- * Applied in the app rather than patched into the database, because web_revenue is
- * FULL REPLACE on every sync and a hand-edit there is gone within 30 minutes. The
- * real fix is the SME column in the revenue sheet; until then this keeps the
- * scorecard honest. Keys are lower-cased company names.
+ * It also put the scorecard at odds with the business number, which counts the lines
+ * carrying a person's name and nothing else. Two answers to "what did Maitri book" is
+ * worse than either answer being slightly off.
+ *
+ * If an sme cell is genuinely wrong, the fix is the cell.
  */
-export const PM_REASSIGN: Record<string, string> = {
-  'zulu 8': 'Maitri Shah',
-}
+export const PM_REASSIGN: Record<string, string> = {}
 
 /**
- * Q1 FY2026 (Apr–Jun 2026) per-month bookings, taken verbatim from the revenue
- * sheet's own pivot table, which is the agreed final figure for the quarter.
+ * RETIRED, 24 Sep 2026 — the feed now agrees with the pivot it was pinned from.
  *
- * Some members were adjusted at source after our feed last read them, so these
- * override whatever web_revenue aggregates for these three months. They total
- * $144,069 / $196,677 / $217,251 against the pivot's $144,070 / $196,676 /
- * $217,250 — a $1 rounding difference per month, because the revenue export
- * rounds to whole dollars before we ever see it.
+ * These were Apr–Jun 2026 per-month bookings typed in from the revenue sheet's own pivot,
+ * because our feed disagreed with it at the time. Re-checked against live data: every PM
+ * now matches within $1–2, which is the export's rounding and not a disagreement.
  *
- * Keyed by PM slug. Delete a row here once the feed agrees with the sheet again.
+ * A hard-coded override that agrees with the data is not harmless — it is a second source
+ * of truth that will go on being right until the day the sheet is corrected and it
+ * silently is not.
  */
-export const Q1_FY2026_ACTUALS: Record<string, Record<string, number>> = {
-  'afzal-multani':        { '2026-04': 21250, '2026-05': 22290, '2026-06': 40011 },
-  'bonny-chhatbar':       { '2026-04': 11119, '2026-05': 29264, '2026-06': 24687 },
-  'gagandeep-singh':      { '2026-04': 23036, '2026-05': 21385, '2026-06': 20322 },
-  'gaurav-pardeshi':      { '2026-04': 18199, '2026-05': 5126, '2026-06': 19613 },
-  'madhav-maheshwari':    { '2026-04': 1469, '2026-05': 1258, '2026-06': 5109 },
-  'maitri-shah':          { '2026-04': 7679, '2026-05': 13672, '2026-06': 17360 },
-  'malay-shrivastava':    { '2026-04': 6608, '2026-05': 22743, '2026-06': 17723 },
-  'nitin-mishra':         { '2026-04': 17230, '2026-05': 27682, '2026-06': 25006 },
-  'paryusha-jain':        { '2026-04': 17971, '2026-05': 21200, '2026-06': 14950 },
-  'rahul-jain':           { '2026-04': 5008, '2026-05': 6610, '2026-06': 7473 },
-  'sankalp-waman-bhoyar': { '2026-04': 14500, '2026-05': 25447, '2026-06': 24997 },
-}
+export const Q1_FY2026_ACTUALS: Record<string, Record<string, number>> = {}
 
 const BY_ALIAS = new Map<string, PmMember>()
 for (const m of PM_TEAM) for (const a of m.aliases) BY_ALIAS.set(a, m)
