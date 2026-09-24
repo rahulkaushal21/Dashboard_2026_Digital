@@ -407,9 +407,18 @@ export default function Dashboard() {
           <span className="font-medium">{ago(mail?.last_reviewed ?? syncOpp, nowMs)}</span>
           {syncOppFailed
             ? <span className="text-red-400 font-medium">· ⚠ the last review failed — capture may be stalled</span>
-            : <span className="text-mav-muted">
-                · by hand{mail && mail.arrived_since > 0 ? ` · ${mail.arrived_since.toLocaleString('en-US')} arrived since` : ''}
-              </span>}
+            : <span className="text-mav-muted">· by hand</span>}
+          {/* CONVERSATIONS, not messages. "618 unread" is true and useless — it is mostly
+              alerts and calendar invites, and a number nobody can act on gets ignored,
+              which is how it ends up meaning nothing at all. This counts threads with a
+              person outside the company on them. */}
+          {mail && mail.waiting_threads > 0 && (
+            <span className={mail.arrived_since > 0 ? 'text-amber-300' : 'text-mav-muted'}
+              title={`${mail.waiting_msgs.toLocaleString('en-US')} messages across ${mail.waiting_threads} conversations with someone outside the company. ${mail.unread_total.toLocaleString('en-US')} unread in total — the rest is alerts, calendar invites and automatic replies.`}>
+              · {mail.waiting_threads} client conversation{mail.waiting_threads === 1 ? '' : 's'} waiting
+              {mail.arrived_since > 0 ? ` (${mail.arrived_since} since)` : ''}
+            </span>
+          )}
         </span>
         <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
         <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"

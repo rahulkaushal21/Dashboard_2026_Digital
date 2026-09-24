@@ -298,9 +298,14 @@ return data && data.length ? (data[0] as SyncStatus) : null
 // words stay that way.
 export interface EmailReviewState {
   last_reviewed: string | null
-  unread: number
+  /** Conversations with someone outside the company waiting to be read. */
+  waiting_threads: number
+  waiting_msgs: number
+  /** Of those, how many landed since the last review — the part nobody has seen. */
   arrived_since: number
-  oldest_unread: string | null
+  oldest_waiting: string | null
+  /** Everything unread including machines, for the tooltip. Never the headline. */
+  unread_total: number
 }
 export async function getEmailReviewState(): Promise<EmailReviewState | null> {
   if (!supabase) return null
@@ -308,9 +313,11 @@ export async function getEmailReviewState(): Promise<EmailReviewState | null> {
   if (!data) return null
   return {
     last_reviewed: data.last_reviewed ?? null,
-    unread: Number(data.unread ?? 0),
+    waiting_threads: Number(data.waiting_threads ?? 0),
+    waiting_msgs: Number(data.waiting_msgs ?? 0),
     arrived_since: Number(data.arrived_since ?? 0),
-    oldest_unread: data.oldest_unread ?? null,
+    oldest_waiting: data.oldest_waiting ?? null,
+    unread_total: Number(data.unread_total ?? 0),
   }
 }
 
