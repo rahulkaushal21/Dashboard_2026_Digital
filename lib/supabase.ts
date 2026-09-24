@@ -739,6 +739,50 @@ export async function dismissEscalation(threadIds: string[], opts?: { actor?: st
   return !error
 }
 
+// ---- Feedback that arrived somewhere we cannot see ------------------------
+//
+// Slack, a phone call, a meeting. Somebody types it in; the department's approver signs
+// it off; only then does it reach the board. Approval IS the quality bar for these —
+// everything else here is scored, because nobody vouched for it.
+export interface ManualFeedback {
+  id: number; company_name: string; client_email?: string; quote: string; channel: string
+  happened_on: string; service_dept?: string; pm_owner?: string; project?: string
+  submitted_by: string; submitted_at: string
+  status: 'pending' | 'approved' | 'rejected'
+  decided_by?: string; decided_at?: string; decide_note?: string
+}
+export interface FeedbackApprover { dept_pattern: string; email: string; name: string; note?: string }
+
+export async function getFeedbackApprovers(): Promise<FeedbackApprover[]> {
+  return (await read<FeedbackApprover>('feedback_approvers', '*', 'dept_pattern')) || []
+}
+
+/** Everything waiting, plus what has been decided lately, newest first. */
+export async function getManualFeedback(): Promise<ManualFeedback[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('manual_feedback').select('*').order('submitted_at', { ascending: false }).limit(200)
+  return (data as ManualFeedback[]) || []
+}
+
+export async function submitManualFeedback(f: {
+  company: string; quote: string; channel?: string; happened_on?: string
+  client_email?: string; service_dept?: string; pm_owner?: string; project?: string
+}): Promise<{ ok: boolean; id?: number; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('submit_manual_feedback', {
+    p_company: f.company, p_quote: f.quote, p_channel: f.channel || 'Slack',
+    p_happened_on: f.happened_on || null, p_client_email: f.client_email || null,
+    p_service_dept: f.service_dept || null, p_pm_owner: f.pm_owner || null, p_project: f.project || null,
+  })
+  return error ? { ok: false, error: error.message } : { ok: true, id: data as number }
+}
+
+export async function decideManualFeedback(id: number, approve: boolean, note?: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { error } = await supabase.rpc('decide_manual_feedback', { p_id: id, p_approve: approve, p_note: note || null })
+  return error ? { ok: false, error: error.message } : { ok: true }
+}
+
 // ---- Delights (clients who shared genuinely great appreciation) ----
 // Sourced ONLY from the business/web-revenue sheet's feedback tab (feedback.nature =
 // 'Positive'): the curated, substantive testimonials — Tanium, Cohort, Poloko, HexaGroup…

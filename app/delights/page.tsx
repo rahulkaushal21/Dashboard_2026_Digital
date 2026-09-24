@@ -4,7 +4,10 @@ import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
-import { getDelights, type Delight } from '@/lib/supabase'
+import { getDelights, getManualFeedback, decideManualFeedback, getFeedbackApprovers,
+  type Delight, type ManualFeedback, type FeedbackApprover } from '@/lib/supabase'
+import AddFeedbackDialog from '@/components/AddFeedbackDialog'
+import { currentEmail, getStoredProfile } from '@/lib/access'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 
@@ -21,6 +24,27 @@ export default function Delights() {
   const [q, setQ] = useState(''); const [geo, setGeo] = useState<string[]>([]); const [src, setSrc] = useState<'' | 'sheet' | 'email'>('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
   const [sel_, setSel] = useState<Delight | null>(null)
+
+  // Manually entered praise, and whether this person is the one who signs it off.
+  const [manual, setManual] = useState<ManualFeedback[]>([])
+  const [approvers, setApprovers] = useState<FeedbackApprover[]>([])
+  const [adding, setAdding] = useState(false)
+  const [me, setMe] = useState('')
+  const [iAmAdmin, setIAmAdmin] = useState(false)
+  const loadManual = () => { getManualFeedback().then(setManual).catch(() => {}) }
+  useEffect(() => {
+    setMe(currentEmail() || '')
+    setIAmAdmin(!!getStoredProfile()?.is_admin)
+    getFeedbackApprovers().then(setApprovers).catch(() => {})
+    loadManual()
+  }, [])
+  const approverFor = (dept?: string) =>
+    approvers.find(a => a.dept_pattern.toUpperCase() === (dept || '').toUpperCase())
+  // Waiting on THIS person. Admins see everything waiting, because chasing it is theirs.
+  const pending = useMemo(() => manual.filter(m => m.status === 'pending'), [manual])
+  const minePending = useMemo(
+    () => pending.filter(m => iAmAdmin || approverFor(m.service_dept)?.email === me),
+    [pending, iAmAdmin, me, approvers])
   // Starts on this person's own clients. A PM opens Delights to see their own accounts
   // being praised; everybody's is a nice read and not the job. One click shows the lot.
   const mine = useMine()
@@ -54,10 +78,53 @@ export default function Delights() {
 
   return (
     <div>
+      {adding && <AddFeedbackDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); loadManual() }} />}
       <Header title="Delights" subtitle="Clients who shared genuinely great appreciation — the standout testimonials from the feedback sheet, worth celebrating and reusing." />
 
+      {/* Waiting on somebody. Above the board on purpose: an approval queue nobody sees
+          is an approval queue nobody clears, and the feedback sits invisible meanwhile. */}
+      {minePending.length > 0 && (
+        <div className="mb-4 rounded-lg border border-mav-yellow/50 bg-mav-yellow/10 px-4 py-3">
+          <div className="text-sm font-semibold text-mav-yellow mb-2">
+            {minePending.length} piece{minePending.length > 1 ? 's' : ''} of feedback waiting for you
+          </div>
+          <ul className="space-y-2">
+            {minePending.map(m => (
+              <li key={m.id} className="text-sm border-t border-mav-yellow/20 pt-2 first:border-0 first:pt-0">
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-mav-fg font-medium">{m.company_name}</span>
+                  <span className="text-xs text-mav-muted">{m.channel} · {(m.happened_on || '').slice(0, 10)}</span>
+                  {m.pm_owner && <span className="text-xs text-mav-muted">· about {m.pm_owner}</span>}
+                  <span className="text-xs text-mav-muted">· from {m.submitted_by}</span>
+                </div>
+                <p className="text-sm text-mav-fg/80 mt-1 italic">&ldquo;{m.quote}&rdquo;</p>
+                <div className="flex items-center gap-3 mt-1.5">
+                  <button onClick={async () => {
+                    const res = await decideManualFeedback(m.id, true)
+                    if (!res.ok) { window.alert(res.error); return }
+                    loadManual(); getDelights().then(setRows)
+                  }} className="text-xs px-3 py-1 rounded-md bg-green-500/20 text-green-300 border border-green-500/40 hover:bg-green-500/30">
+                    ✓ Approve
+                  </button>
+                  <button onClick={async () => {
+                    const why = window.prompt('Why is it not going on the board? (optional)') ?? undefined
+                    const res = await decideManualFeedback(m.id, false, why)
+                    if (!res.ok) { window.alert(res.error); return }
+                    loadManual()
+                  }} className="text-xs text-mav-muted hover:text-mav-fg">Not this one</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="mb-4 rounded-lg border border-green-500/30 bg-green-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-green-300 font-semibold">✨ Real appreciation only:</span> two sources — curated testimonials from the feedback sheet (Tanium, Cohort, Poloko), and praise picked up in the email review and marked <span className="text-sky-300">✉ email</span>. Email counts only when the client actually paid a compliment (&ldquo;brilliant service&rdquo;, &ldquo;particularly impressed&rdquo;, &ldquo;looking forward to working with you again&rdquo;); everyday &ldquo;thanks / looks good / approved&rdquo; replies stay out. One card per client — a ready source for testimonials, case studies and cross-sell.
+        <span className="text-green-300 font-semibold">✨ Real appreciation only:</span> three sources — testimonials
+        from the feedback sheet, praise found in the email review (<span className="text-sky-300">✉ email</span>), and
+        anything said on Slack or a call that somebody typed in and an approver signed off. The first two are scored on
+        what the text does: unprompted, praising the work, the people or the effect it had. A thanks that stops inside a
+        line, a delivery note and a pricing thread with a compliment in it all stay out, however warm they read.
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4 items-center">
@@ -66,6 +133,10 @@ export default function Delights() {
             hidden={rows.filter(r => !mine.ownsClient(r.company_name)).length} />
         )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or quote…" className={`${sel} min-w-[220px] flex-1`} />
+        <button onClick={() => setAdding(true)}
+          className="text-sm px-3 py-2 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors whitespace-nowrap">
+          + Add feedback
+        </button>
         <MultiSelect label="All GEOs" options={geos} selected={geo} onChange={setGeo} className="w-36" />
         {(['sheet', 'email'] as const).map(k => (
           <button key={k} onClick={() => setSrc(v => v === k ? '' : k)} className={`text-xs px-2.5 py-2 rounded-md border transition-colors ${src === k ? (k === 'email' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-green-500/20 text-green-300 border-green-500/50') : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{k === 'email' ? '✉ From email' : '📋 From sheet'} ({srcCounts[k]})</button>
