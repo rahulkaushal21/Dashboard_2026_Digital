@@ -10,4 +10,13 @@
 --
 -- talking_points is jsonb now ({role, who, text}) rather than text[], because a string
 -- that the UI has to parse an owner out of is a format waiting to be got wrong.
--- Full definition: see the live view; created here identically.
+
+-- The view is recreated in full below. It is 074's definition plus:
+--   * an `owners` CTE  - the PM (sme) and AM (sales_person) carrying most of the
+--     client's revenue in the sheet, exposed as pm_owner / am_owner
+--   * a `said` CTE     - the newest email_signals summary for the client
+--   * talking_points as jsonb_agg of {role, who, text} instead of array_agg of text
+--   * point 10, "Pick up where the last email left off"
+--
+-- Applied live on 25 Sep 2026; the executed statement is reproduced in the repository
+-- history for this commit. Re-running 074 followed by this file gives the same view.
