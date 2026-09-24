@@ -405,7 +405,12 @@ export default function ProjectLedger() {
         <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={sel} title="From month — on Start Date" />
         <input type="month" value={fTo} onChange={e => { filtersTouched.current = true; setFTo(e.target.value) }} className={sel} title="To month — on Start Date" />
         {anyFilter && <button onClick={clearAll} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">Clear</button>}
-        <button onClick={() => { filtersTouched.current = true; setFModel(['Dedicated']); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
+        {/* Partial Dedicated is dedicated work — a shared resource rather than a whole one,
+            but billed and planned the same way. Left out, this shortcut quietly hid six
+            lines and $15,005 in September alone. Everywhere else that splits P2P from
+            Dedicated tests for the word, so it already counted these; only this button
+            matched the exact string. */}
+        <button onClick={() => { filtersTouched.current = true; setFModel(['Dedicated', 'Partial Dedicated']); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
           className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
           This month&rsquo;s Dedicated
         </button>
