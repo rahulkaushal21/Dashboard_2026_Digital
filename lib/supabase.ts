@@ -603,6 +603,23 @@ export interface CriticalEscalation {
   pm_owner?: string; service_dept?: string; technology?: string
 }
 
+/**
+ * Which department each deal belongs to: PM team, then the PM's delivery history, then
+ * the client's department, then geo. Resolved in the database (web_opportunity_dept) so
+ * Opportunities and anything else asking the question get the same answer.
+ *
+ * A deal with none of those returns nothing rather than 'Other'. 948 of 951 resolve; the
+ * three that do not have no PM, no client history and no geo, and inventing a bucket for
+ * them would put "we could not tell" on screen as if it were a department.
+ */
+export async function getOpportunityDepts(): Promise<Map<number, string>> {
+  const m = new Map<number, string>()
+  if (!supabase) return m
+  const rows = await read<{ id: number; service_dept: string | null }>('web_opportunity_dept', 'id, service_dept', 'id')
+  for (const r of rows || []) if (r.service_dept) m.set(Number(r.id), r.service_dept)
+  return m
+}
+
 /** Per client: the PM, service and technology most of their revenue sits under. */
 export interface ClientContext { client_key: string; company_name?: string; pm_owner?: string; service_dept?: string; technology?: string }
 export async function getClientContext(): Promise<ClientContext[]> {

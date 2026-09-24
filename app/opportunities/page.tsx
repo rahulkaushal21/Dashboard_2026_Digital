@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
-import { getOpportunities, getClientContext, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type ClientContext, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, getOpportunityDepts, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import MultiSelect from '@/components/MultiSelect'
@@ -236,10 +236,11 @@ const [search, setSearch] = useState(''); const [fType, setFType] = useState('')
 const [misTagOnly, setMisTagOnly] = useState(false)
 const [fAM, setFAM] = useState<string[]>([]); const [fPM, setFPM] = useState<string[]>([]); const pmTouched = useRef(false); const [fStatus, setFStatus] = useState('Open'); const [fSvc, setFSvc] = useState<string[]>([]); const [fTech, setFTech] = useState<string[]>([])
 // Service Department is not on an opportunity — the column is blank on all 951 of them.
-// It is resolved from the client's own revenue history, the same fallback Business
-// Numbers uses, so "WEB-UK's pipeline" means the same thing on both pages.
+// PMs are assigned to departments, so the PM answers it; web_opportunity_dept resolves
+// the chain (PM team, the PM's delivery history, the client's department, geo) in the
+// database so this page and anything else asking get the same answer.
 const [fDept, setFDept] = useState<string[]>([])
-const [ctx, setCtx] = useState<ClientContext[]>([])
+const [deptById, setDeptById] = useState<Map<number, string>>(new Map())
 const [from, setFrom] = useState('2026-04-01'); const [to, setTo] = useState('')
 // Quote-value band. Held as strings so "empty" is distinguishable from 0: an
 // empty box means the bound is not set, while a typed 0 still switches the band
@@ -308,7 +309,7 @@ const reload = () => getOpportunities().then(setAll)
 useEffect(() => { const d = new Date().toISOString().slice(0, 10); setTo(d); setToday(d) }, [])
 // Only for the Service Department filter, so a failure here costs that filter and
 // nothing else on the page.
-useEffect(() => { getClientContext().then(setCtx).catch(() => { /* filter falls back to geo */ }) }, [])
+useEffect(() => { getOpportunityDepts().then(setDeptById).catch(() => { /* filter just lists nothing */ }) }, [])
 
 // Undated rows always show; otherwise honour the From/To range.
 const inRange = (d?: string) => { const v = (d || '').slice(0, 10); if (!v) return true; if (from && v < from) return false; if (to && v > to) return false; return true }
@@ -330,28 +331,10 @@ return true
 }
 const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' || k === 'value' ? -1 : 1 })
 
-// The client's dominant service department, then their geo, then Other — the same
-// fallback chain business_quotes() uses in the database. Without it this filter would
-// put all 951 deals in one bucket, because the column they carry is empty.
-const deptByClient = useMemo(() => {
-  const m = new Map<string, string>()
-  for (const c of ctx) if (c.client_key && c.service_dept) m.set(c.client_key, c.service_dept)
-  return m
-}, [ctx])
-const GEO_DEPT: Record<string, string> = {
-  'US/CANADA': 'WEB-US', 'US': 'WEB-US', 'UK/EU': 'WEB-UK', 'UK': 'WEB-UK', 'AU/NZ': 'WEB-AU', 'AU': 'WEB-AU',
-}
-const deptOfOpp = (x: Opportunity): string => {
-  const raw = (x.service_dept || '').trim()
-  if (raw) return raw
-  const k = (x.company_name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-  if (k) {
-    if (deptByClient.has(k)) return deptByClient.get(k) as string
-    // Prefix match, as everywhere else: "Layer 8 Training" against "Layer 8 Training, Inc."
-    for (const [ck, d] of deptByClient) if (ck.length >= 4 && (ck.startsWith(k) || k.startsWith(ck))) return d
-  }
-  return GEO_DEPT[(x.geo || '').trim().toUpperCase()] || 'Other'
-}
+// Straight from web_opportunity_dept. No 'Other': a deal that cannot be placed returns
+// nothing and is simply not matched by a department filter, rather than being filed under
+// a bucket that means "we could not tell".
+const deptOfOpp = (x: Opportunity): string => deptById.get(Number(x.id)) || ''
 
 const o = useMemo(() => {
 const rows = all
@@ -379,7 +362,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
+}, [all, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -404,7 +387,7 @@ return all
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => !x.value).length
-}, [all, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
+}, [all, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
