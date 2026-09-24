@@ -288,6 +288,20 @@ export default function Dashboard() {
 
   // True while the range is the current month, which is the default view.
   const isMtd = from === ymd(monthStart(now)) && to === ymd(monthEnd(now))
+  // What the date filter currently covers, in words. Panels that follow the filter say
+  // this out loud: "Top clients" sits beside a chart fixed to the last six months, and
+  // without a label the two read as one period and quietly disagree.
+  const rangeLabel = useMemo(() => {
+    if (!from || !to) return ''
+    const d = (x: string) => new Date(x + 'T00:00:00')
+    const f = d(from), t = d(to)
+    const sameMonth = f.getFullYear() === t.getFullYear() && f.getMonth() === t.getMonth()
+    if (sameMonth && from === ymd(monthStart(f)) && to === ymd(monthEnd(f))) {
+      return f.toLocaleDateString('en', { month: 'long', year: 'numeric' })
+    }
+    const short = (x: Date) => x.toLocaleDateString('en', { day: 'numeric', month: 'short' })
+    return `${short(f)} – ${short(t)} ${t.getFullYear()}`
+  }, [from, to])
   const daysGone = now.getDate()
   const daysInMonth = monthEnd(now).getDate()
 
@@ -558,7 +572,14 @@ export default function Dashboard() {
         <div className="lg:col-span-2"><RevenueChart data={trendSeries} title={scoped ? 'Your revenue — last 6 months' : 'Revenue — last 6 months'}
           note="The last bar is the month still running, so it is part of a month against five whole ones." /></div>
         <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-          <div className="text-sm font-medium mb-4">Top clients</div>
+          <div className="mb-4">
+            <div className="text-sm font-medium">Top clients</div>
+            {/* The period, because this panel follows the date filter while the chart
+                next to it is fixed to six months. Two panels side by side on different
+                periods, with only one of them saying so, is how a number gets quoted in
+                a meeting as the wrong thing. */}
+            <div className="text-xs text-mav-muted mt-0.5">{rangeLabel}{isMtd ? ' · so far' : ''}</div>
+          </div>
           {monthSeries.length === 0 ? (
             <p className="text-sm text-mav-muted">No revenue in the selected range.</p>
           ) : (
