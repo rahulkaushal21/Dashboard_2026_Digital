@@ -284,16 +284,21 @@ export default function ProjectLedger() {
   // quote, not money. The lines STAY in the table, because somebody still has to chase
   // the missing information; they are only kept out of the money total, and the total
   // says so rather than quietly being short.
-  const awaiting = shown.filter(r => /awaiting/i.test(r.delivery_status || ''))
-  const counted = shown.filter(r => !/awaiting/i.test(r.delivery_status || ''))
-  const total = counted.reduce((s, r) => s + (r.amount_usd || 0), 0)
-  const awaitingTotal = awaiting.reduce((s, r) => s + (r.amount_usd || 0), 0)
-  const clients = new Set(counted.map(r => (r.company_name || '').toLowerCase())).size
-  const notInSheet = shown.filter(r => !r.in_sheet)
   const pages = Math.max(1, monthPages.length)
   const pageMonth = monthPages[Math.min(page, monthPages.length - 1)] || ''
   const pageRows = useMemo(() => shown.filter(r => (rowMonth(r) || '—') === pageMonth), [shown, pageMonth])
-  const pageTotal = pageRows.reduce((s, r) => s + (r.amount_usd || 0), 0)
+
+  // THE HEADLINE IS THE MONTH ON SCREEN. It used to count every month the filters left
+  // standing, which read as a contradiction: the picker said September and the total said
+  // $455,090 "in all months" over a table showing September. Two true numbers arguing
+  // with each other is worse than either alone, and the one anybody wants is the month
+  // they just chose. The pager below still says which month of how many.
+  const mAwaiting = pageRows.filter(r => /awaiting/i.test(r.delivery_status || ''))
+  const mCounted = pageRows.filter(r => !/awaiting/i.test(r.delivery_status || ''))
+  const pageTotal = mCounted.reduce((s, r) => s + (r.amount_usd || 0), 0)
+  const pageAwaitingTotal = mAwaiting.reduce((s, r) => s + (r.amount_usd || 0), 0)
+  const pageClients = new Set(mCounted.map(r => (r.company_name || '').toLowerCase())).size
+  const notInSheet = pageRows.filter(r => !r.in_sheet)
 
   const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFSource(''); setFFrom(''); setFTo('') }
   const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || [fDept, fModel, fGeo, fPm, fAm].some(x => x.length > 0)
@@ -302,8 +307,11 @@ export default function ProjectLedger() {
   // Selects the whole FILTERED set, not just this page — the point of filtering to
   // Dedicated is to act on all of it, and a tick box that silently meant "these hundred"
   // would quietly drop the rest.
-  const allPicked = shown.length > 0 && shown.every(r => picked.has(r.row_key))
-  const toggleAll = () => setPicked(allPicked ? new Set() : new Set(shown.map(r => r.row_key)))
+  // Select-all takes THE MONTH ON SCREEN, not every month the filters leave standing.
+  // It used to take all of them, which is a surprising thing to discover after pressing
+  // "move to next month" on what looked like forty rows.
+  const allPicked = pageRows.length > 0 && pageRows.every(r => picked.has(r.row_key))
+  const toggleAll = () => setPicked(allPicked ? new Set() : new Set(pageRows.map(r => r.row_key)))
 
   const pickedRows = useMemo(() => shown.filter(r => picked.has(r.row_key)), [shown, picked])
   const pickedTotal = pickedRows.reduce((s, r) => s + (r.amount_usd || 0), 0)
@@ -447,10 +455,10 @@ export default function ProjectLedger() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="text-sm text-mav-muted">
-          {loading ? 'Loading…' : <>{shown.length.toLocaleString()} line{shown.length === 1 ? '' : 's'} · {clients} client{clients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(total)}</span>
-            <span className="ml-1 text-mav-muted/80">in {fFrom && fFrom === fTo ? monLabel(fFrom) : fFrom || fTo ? 'the chosen months' : 'all months'}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</span>
+          {loading ? 'Loading…' : <>{pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} · {pageClients} client{pageClients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(pageTotal)}</span>
+            <span className="ml-1 text-mav-muted/80">in {pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</span>
             {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}
-            {awaiting.length > 0 && <span className="ml-2 text-amber-300">· {money(awaitingTotal)} awaiting information, not counted</span>}</>}
+            {mAwaiting.length > 0 && <span className="ml-2 text-amber-300">· {money(pageAwaitingTotal)} awaiting information, not counted</span>}</>}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setSheetView(v => !v)}
@@ -590,9 +598,9 @@ export default function ProjectLedger() {
       {monthPages.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
           <span className="text-mav-muted text-xs">
-            Showing <span className="text-mav-fg">{pageMonth === '—' ? 'lines with no month' : monLabel(pageMonth)}</span>
-            {' '}&middot; {pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} &middot; {money(pageTotal)}
-            {' '}&middot; month {Math.min(page, pages - 1) + 1} of {pages} &middot; ticking the header selects all {shown.length.toLocaleString()} filtered lines, not just this month
+            Month {Math.min(page, pages - 1) + 1} of {pages}
+            {shown.length > pageRows.length && <> &middot; {(shown.length - pageRows.length).toLocaleString()} more line{shown.length - pageRows.length === 1 ? '' : 's'} match these filters in other months</>}
+            {' '}&middot; ticking the header selects the {pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} on screen
           </span>
           <div className="flex items-center gap-2">
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
