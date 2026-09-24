@@ -24,7 +24,14 @@ const monthLabel = (key: string) =>
 const now = new Date()
 function presetRange(key: string): { from: string; to: string } {
   const to = ymd(monthEnd(now))
-  if (key === 'ytd') return { from: `${now.getFullYear()}-01-01`, to }
+  // YTD is the FINANCIAL year, which starts on 1 April — the year this business is run,
+  // reported and targeted on, and the one the revenue sheet's own quarters follow. In
+  // January to March that means April of the PREVIOUS calendar year, which is exactly
+  // when a calendar-year YTD is most wrong: on 2 January it would have shown two days.
+  if (key === 'ytd') {
+    const fyStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
+    return { from: `${fyStart}-04-01`, to }
+  }
   const back = key === 'm3' ? 2 : key === 'm6' ? 5 : key === 'm12' ? 11 : 0 // 'mtd' -> 0
   return { from: ymd(monthStart(new Date(now.getFullYear(), now.getMonth() - back, 1))), to }
 }
@@ -34,7 +41,7 @@ const PRESETS: { key: string; label: string }[] = [
   { key: 'm3', label: 'Last 3 mo' },
   { key: 'm6', label: 'Last 6 mo' },
   { key: 'm12', label: 'Last 12 mo' },
-  { key: 'ytd', label: 'YTD' },
+  { key: 'ytd', label: 'YTD' },   // financial year, from 1 April
 ]
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 

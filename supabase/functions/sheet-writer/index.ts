@@ -166,15 +166,117 @@ async function ensureTabs(tok: string, id: string, names: string[]) {
   }
 }
 
-async function writeTab(tok: string, id: string, tab: string, grid: string[][]) {
+// ---- Writing: change what changed, and nothing else ------------------------
+//
+// This used to clear the whole tab and PUT it back. That is fine for a machine and wrong
+// for a spreadsheet people work in: for a moment the tab is empty, and anything typed
+// into an invoice cell between the read and the write is gone with no trace. Rare,
+// silent, and exactly the kind of thing that teaches a team not to trust the system.
+//
+// So the writer now reads what is there, works out the difference, and touches only the
+// rows that actually differ. A quiet hour writes nothing at all.
+//
+// MATCHED BY POSITION, NOT BY KEY. Every tab here is regenerated in a deterministic
+// order, so row 812 is the same line each run; the Quotes and Feedback tabs have no id
+// column to key on anyway. The cost is that inserting a row in the MIDDLE of the source
+// shifts everything below it and each shifted row counts as changed — an update rather
+// than a clear, and rows are appended at the bottom in practice.
+
+type TabDiff = { unchanged: number; updated: number; added: number; removed: number };
+
+async function readGrid(tok: string, id: string, tab: string): Promise<string[][]> {
   const range = encodeURIComponent(`'${tab}'`);
-  await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}:clear`, { method: "POST", body: "{}" });
-  // RAW, not USER_ENTERED: a project name beginning with '=' or '+' would otherwise be
-  // parsed as a formula, and a leading-zero reference would lose its zero.
-  await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}?valueInputOption=RAW`, {
-    method: "PUT", body: JSON.stringify({ values: grid }),
-  });
-  return grid.length - 1;
+  try {
+    const j = await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}`);
+    return ((j.values || []) as unknown[][]).map((r) => (r || []).map((c) => (c ?? "").toString()));
+  } catch {
+    return [];   // tab does not exist yet
+  }
+}
+
+async function gidOf(tok: string, id: string, tab: string): Promise<number | null> {
+  const meta = await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=sheets.properties`);
+  const hit = (meta.sheets || []).find((x: any) => x.properties?.title === tab);
+  return hit ? (hit.properties.sheetId as number) : null;
+}
+
+// Trailing empties are not a difference: a row written as 40 cells and read back as 38
+// because the last two were blank is the same row.
+function rowsEqual(a: string[], b: string[]): boolean {
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    if ((a[i] ?? "").toString() !== (b[i] ?? "").toString()) return false;
+  }
+  return true;
+}
+
+/** What WOULD change, without changing anything. The dry run reports this. */
+function planTab(existing: string[][], grid: string[][]): TabDiff & { updates: { row: number; values: string[] }[]; appendFrom: number } {
+  const updates: { row: number; values: string[] }[] = [];
+  let unchanged = 0;
+  const common = Math.min(existing.length, grid.length);
+  for (let i = 0; i < common; i++) {
+    if (rowsEqual(existing[i], grid[i])) unchanged++;
+    else updates.push({ row: i + 1, values: grid[i] });   // 1-based for A1 notation
+  }
+  const added = Math.max(0, grid.length - existing.length);
+  const removed = Math.max(0, existing.length - grid.length);
+  return { unchanged, updated: updates.length, added, removed, updates, appendFrom: common };
+}
+
+async function syncTab(tok: string, id: string, tab: string, grid: string[][]): Promise<TabDiff> {
+  const existing = await readGrid(tok, id, tab);
+  const plan = planTab(existing, grid);
+
+  // Rows that already exist and now read differently. RAW, not USER_ENTERED: a project
+  // name beginning with '=' or '+' would otherwise be parsed as a formula, and a
+  // leading-zero reference would lose its zero.
+  //
+  // Chunked, because one request carrying several thousand ranges is one the API will
+  // refuse, and a refusal here would leave the tab half-updated.
+  for (let i = 0; i < plan.updates.length; i += 400) {
+    const chunk = plan.updates.slice(i, i + 400);
+    await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}/values:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({
+        valueInputOption: "RAW",
+        data: chunk.map((u) => ({ range: `'${tab}'!A${u.row}`, values: [u.values] })),
+      }),
+    });
+  }
+
+  // New rows go on the end. append rather than batchUpdate, because a range past the
+  // sheet's current size is refused outright ("exceeds grid limits") and appending grows
+  // it for us.
+  if (plan.added > 0) {
+    const rows = grid.slice(plan.appendFrom);
+    for (let i = 0; i < rows.length; i += 500) {
+      await api(tok,
+        `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(`'${tab}'`)}:append`
+          + `?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+        { method: "POST", body: JSON.stringify({ values: rows.slice(i, i + 500) }) });
+    }
+  }
+
+  // Rows the data no longer has. Deleted outright rather than blanked, so nobody is left
+  // reading an empty row and wondering whether it means something.
+  if (plan.removed > 0) {
+    const gid = await gidOf(tok, id, tab);
+    if (gid != null) {
+      await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, {
+        method: "POST",
+        body: JSON.stringify({
+          requests: [{
+            deleteDimension: {
+              range: { sheetId: gid, dimension: "ROWS", startIndex: grid.length, endIndex: existing.length },
+            },
+          }],
+        }),
+      });
+    }
+  }
+
+  return { unchanged: plan.unchanged, updated: plan.updated, added: plan.added, removed: plan.removed };
 }
 
 // ---- Tab builders ---------------------------------------------------------
@@ -502,7 +604,10 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
     .select("id, quote_key, project_id, quote_id, company_name, source_subject, client_name, contact_email, client_type, service_dept, service_type, delivery_type, delivery_status, project_type, technology, geo, pm_owner, sales_person, business_type, currency, quote_price, local_value, est_value, start_date, delivery_date, confirmed_at, source_date, origin, expert, internal_delivery, internal_hrs, actual_hrs, integration, outsource_price, outsource_currency, contractor_name, invoice_no, invoice_currency, invoice_amount, feedback_status")
     // rolled_into: several ad-hoc jobs billed on one invoice. The deal carrying the
     // invoice writes one line for the lot; the others are won, and book nothing.
-    .eq("won", true).not("confirmed_by", "is", null).is("rolled_into", null);
+    .eq("won", true).not("confirmed_by", "is", null).is("rolled_into", null)
+    // ORDER MATTERS NOW. The writer matches rows by position, so an unordered read would
+    // shuffle this block every run and rewrite every row of it for no reason.
+    .order("id", { ascending: true });
   if (oe) throw new Error("opportunities: " + oe.message);
 
   for (const o of opps || []) {
@@ -739,18 +844,35 @@ Deno.serve(async (req) => {
     };
     const counts = Object.fromEntries(Object.entries(tabs).map(([k, v]) => [k, v.length - 1]));
 
-    if (dry) return json({ ok: true, dry_run: true, service_account: sa.client_email, rows: counts });
+    // A dry run now says exactly what WOULD be touched, tab by tab, which is the whole
+    // point of a writer that no longer rewrites everything: "0 updated, 0 added" is a
+    // promise that this run would leave the spreadsheet alone.
+    if (dry) {
+      const plan: Record<string, TabDiff> = {};
+      for (const [name, grid] of Object.entries(tabs)) {
+        const existing = await readGrid(tok, sheetId, name);
+        const p = planTab(existing, grid);
+        plan[name] = { unchanged: p.unchanged, updated: p.updated, added: p.added, removed: p.removed };
+      }
+      return json({ ok: true, dry_run: true, service_account: sa.client_email, rows: counts, would_change: plan });
+    }
 
     await ensureTabs(tok, sheetId, Object.keys(tabs));
-    const written: Record<string, number> = {};
-    for (const [name, grid] of Object.entries(tabs)) written[name] = await writeTab(tok, sheetId, name, grid);
+    const changes: Record<string, TabDiff> = {};
+    for (const [name, grid] of Object.entries(tabs)) changes[name] = await syncTab(tok, sheetId, name, grid);
 
+    const touched = Object.values(changes).reduce((a, c) => a + c.updated + c.added + c.removed, 0);
     await sb.from("sync_runs").insert({
       source: "sheet-writer", ok: true,
-      rows_upserted: Object.values(written).reduce((a, b) => a + b, 0),
-      message: Object.entries(written).map(([k, v]) => `${k}:${v}`).join(" · "),
+      rows_upserted: touched,
+      message: touched === 0
+        ? "nothing changed — the spreadsheet was left alone"
+        : Object.entries(changes)
+            .filter(([, c]) => c.updated + c.added + c.removed > 0)
+            .map(([k, c]) => `${k}: ${c.updated} updated, ${c.added} added, ${c.removed} removed`)
+            .join(" · "),
     });
-    return json({ ok: true, sheet: sheetId, written });
+    return json({ ok: true, sheet: sheetId, changes });
   } catch (e) {
     await sb.from("sync_runs").insert({ source: "sheet-writer", ok: false, message: String(e) });
     return json({ ok: false, error: String(e) }, 500);
