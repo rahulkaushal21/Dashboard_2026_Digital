@@ -186,19 +186,26 @@ if (hit && Date.now() - hit.at < READ_TTL_MS) return copy(hit.rows)
 // request — and while the revenue sync is writing, that drops or duplicates boundary
 // rows, making totals slightly off and flaky.
 const PAGE = 1000
-const page = (from: number, exact = false) => {
-  let q = supabase!.from(table).select(cols, exact ? { count: 'exact' } : undefined).range(from, from + PAGE - 1)
+const page = (from: number) => {
+  let q = supabase!.from(table).select(cols).range(from, from + PAGE - 1)
   if (orderBy) q = q.order(orderBy, { ascending: true })
   return q
 }
+// head:true asks PostgREST for the count and NO rows — the body is empty. Counting
+// by re-selecting the first page again would send those 1,000 rows twice.
+const countOnly = () => supabase!.from(table).select(cols, { count: 'exact', head: true })
 
 const run = (async (): Promise<T[] | null> => {
-  const first = await page(0, true)
+  // NO exact count on the first request. count=exact makes Postgres run the whole
+  // query a second time just to say how many rows there are, and all but three of
+  // the tables here fit in one page — so it was paid on every read and used on
+  // almost none. A short first page IS the answer: there is no second page.
+  const first = await page(0)
   if (first.error) return null
   const head = (first.data || []) as T[]
-  const total = first.count ?? head.length
   if (head.length === 0) return null
-  if (head.length >= PAGE && total > head.length) {
+  if (head.length >= PAGE) {
+    const total = await countOnly().then(r => r.count ?? head.length)
     const starts: number[] = []
     for (let from = PAGE; from < total; from += PAGE) starts.push(from)
     const rest = await Promise.all(starts.map(from => page(from)))
@@ -413,15 +420,25 @@ export async function getOpportunities(): Promise<Opportunity[]> {
 //    refreshed every 30 min. Brief + %/next-step get enriched from reviewweb@uplers.com email.
 //  • origin='email' — opportunities found in email that are NOT in the Quotes sheet.
 // No live re-derivation or per-company collapsing — each quote stands as its own deal.
-const rows = (await read<any>('opportunities')) || []
+// ALL FOUR AT ONCE. None of them depends on another, and awaiting them one after
+// the next made the page wait four network round trips end to end for work the
+// database does in under a tenth of a second. The wait was almost entirely the
+// waiting, which is why the page took seconds to show anything.
+const [rows, intentRows, sheetRowRows, booked] = await Promise.all([
+  read<any>('opportunities').then(r => r || []),
+  read<any>('web_quote_intent').then(r => r || []),
+  read<any>('web_quote_sheet_row').then(r => r || []),
+  read<{ company_name: string; booking_amount: number; booking_month: string }>(
+    'web_revenue', 'company_name, booking_amount, booking_month', 'id').then(r => r || []),
+])
 const norm = (s?: string) => (s || '').trim().toLowerCase()
 // Buying-intent scores, open deals only. Keyed by opportunity id so a miss just
 // leaves the badge off rather than breaking the row.
 const intent = new Map<number, any>()
-for (const r of (await read<any>('web_quote_intent')) || []) intent.set(r.id, r)
+for (const r of intentRows) intent.set(r.id, r)
 // Quotes-tab row number per opportunity, so "fix the sheet" flags can name the row.
 const sheetRow = new Map<number, number>()
-for (const r of (await read<any>('web_quote_sheet_row')) || []) sheetRow.set(r.id, r.sheet_row)
+for (const r of sheetRowRows) sheetRow.set(r.id, r.sheet_row)
 // collapse GEO into 3 buckets: US (incl. Canada/N.America), AU (incl. APAC/NZ), UK (rest)
 const geo3 = (g?: string) => {
 const v = (g || '').toLowerCase()
@@ -430,8 +447,7 @@ if (/\bau\b|au\/|nz|apac|australia|new zealand|asia[\s-]?pac/.test(v)) return 'A
 if (/\bus\b|us\/|usa|u\.s|united states|canada|north america/.test(v)) return 'US'
 return 'UK'
 }
-// companies anywhere in the revenue sheet = existing/repeat clients
-const booked = (await read<{ company_name: string; booking_amount: number; booking_month: string }>('web_revenue', 'company_name, booking_amount, booking_month', 'id')) || []
+// companies anywhere in the revenue sheet = existing/repeat clients (read above)
 const revenueSet = new Set(booked.map(b => norm(b.company_name)).filter(Boolean))
 const bookedMatch = matchBookedQuotes(rows, booked)
 const out: Opportunity[] = rows.map((o: any) => {
@@ -531,9 +547,13 @@ return out.length ? out : (await import('./mockData')).mockOpportunities
 export async function getRevenue(): Promise<RevenueRow[]> {
 // web_revenue_lines: the same rows as the old web_revenue aggregate, un-merged into the
 // ledger's real line items, and carrying the start date alongside the month.
-const live = await read<{ company_name: string; booking_month: string; booking_date: string; booking_amount: number; sme: string }>('web_revenue_lines',
-'company_name, booking_month, booking_date, booking_amount, sme', 'id')
-if (live && live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date, sme: b.sme }))
+//
+// It asks for the same rows getBookingsFull() does, through the SAME call, rather than
+// selecting five of its columns separately. Two column lists meant two cache entries and
+// two full reads of a 3,200-row view that is rebuilt from the raw sheet on every page —
+// the home page loads both, so it was paying for the whole thing twice.
+const live = await getBookingsFull()
+if (live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date, sme: b.sme }))
 return (await import('./mockData')).mockRevenue
 }
 // Same switch, for everything that reads whole booking rows — the PM scorecards, Client

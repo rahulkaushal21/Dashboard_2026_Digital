@@ -19,6 +19,24 @@ const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x
 // individual AM/PM is its own selectable dropdown option and filters by "contains".
 const splitNames = (s?: string) => (s || '').split(/[,/&]/).map(x => x.trim()).filter(Boolean)
 const uniqNames = (arr: (string | undefined)[]) => Array.from(new Set(arr.flatMap(splitNames))).sort((a, b) => a.localeCompare(b))
+
+// Search looks at the WHOLE deal, not just the client name.
+//
+// It used to match company_name alone, so a perfectly good search — a quote number, the
+// person you spoke to, "shopify", an invoice ref — returned nothing, and the honest
+// reading of nothing is "we do not have it". That is the worst answer a search can give,
+// because it is indistinguishable from the truth.
+//
+// Every word has to match SOMEWHERE in the row (not necessarily the same field), so
+// "maitri shopify" narrows rather than widens, and pasting an email address still works.
+const haystack = (x: Opportunity) => [
+  x.company_name, x.client_name, x.contact_email, x.source_subject, x.gist, x.summary,
+  x.next_step, x.pm_owner, x.sales_person, x.technology, x.service_dept, x.project_type,
+  x.geo, x.status, x.channel, x.business_type, x.expert, x.quote_ref, x.quote_id,
+  x.project_id, x.invoice_no, x.win_reason, x.company_note,
+  x.value != null ? String(x.value) : '',
+].join(' \u0001 ').toLowerCase()
+const searchTerms = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean)
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 
 // Quote-size bands, kept as strings because that is what the number inputs hold —
@@ -363,9 +381,20 @@ const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.
 // a bucket that means "we could not tell".
 const deptOfOpp = (x: Opportunity): string => deptById.get(Number(x.id)) || ''
 
+// One haystack per row, built when the rows arrive rather than on every keystroke:
+// 950 rows across 20-odd fields is real work at typing speed.
+const hay = useMemo(() => {
+  const m = new Map<number, string>()
+  for (const x of all) m.set(x.id, haystack(x))
+  return m
+}, [all])
+const terms = useMemo(() => searchTerms(search), [search])
+const matches = useCallback((x: Opportunity) =>
+  !terms.length || terms.every(t => (hay.get(x.id) || '').includes(t)), [hay, terms])
+
 const o = useMemo(() => {
 const rows = all
-.filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
+.filter(x => matches(x))
 .filter(x => !fType || typeLabel(x).includes(fType))
 .filter(x => !fGeo.length || fGeo.includes(x.geo || ''))
 .filter(x => !fAM.length || splitNames(x.sales_person).some(n => fAM.includes(n)))
@@ -389,7 +418,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
+}, [all, matches, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -397,7 +426,7 @@ return 0
 const hiddenNoValue = useMemo(() => {
 if (!bandOn) return 0
 return all
-.filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
+.filter(x => matches(x))
 .filter(x => !fType || typeLabel(x).includes(fType))
 .filter(x => !fGeo.length || fGeo.includes(x.geo || ''))
 .filter(x => !fAM.length || splitNames(x.sales_person).some(n => fAM.includes(n)))
@@ -414,7 +443,7 @@ return all
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => !x.value).length
-}, [all, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
+}, [all, matches, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -799,7 +828,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 </>)}
 
 <div className="flex flex-wrap items-center gap-2 mb-4">
-<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client…" className={`${selCls} w-44`} />
+<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search anything…" title="Client, contact, subject, quote or invoice number, PM, AM, technology, value" className={`${selCls} w-52`} />
 <select value={fStatus} onChange={e => setFStatus(e.target.value)} className={selCls}><option value="">All status</option><option value="Open">Open</option><option value="On Hold">On Hold</option><option value="Won">Won</option><option value="Lost">Lost</option></select>
 <select value={fAge} onChange={e => setFAge(e.target.value)} className={selCls} title="How long ago the quote was raised. Use it to work the backlog down — pick a band, then mark each row Confirmed or Cancelled.">
 <option value="">Any age</option>
