@@ -96,7 +96,7 @@ export default function Delights() {
   return (
     <div>
       {adding && <AddFeedbackDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); loadManual() }} />}
-      <Header title="Delights" subtitle="Clients who shared genuinely great appreciation — the standout testimonials from the feedback sheet, worth celebrating and reusing." />
+      <Header title="Feedback" subtitle="What clients actually said — the standout praise from the feedback sheet, plus anything logged by hand once its approver signs it off." />
       <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
 
       {/* Waiting on somebody. Above the board on purpose: an approval queue nobody sees

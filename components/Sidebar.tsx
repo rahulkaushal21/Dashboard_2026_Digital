@@ -2,16 +2,16 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, Cog, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
 import { hueFor } from '@/lib/section-hue'
 import { NAV_EVENT } from '@/lib/use-close-on-nav'
 
-// A nav entry is either a link or a group of links. Groups exist so Operations can
-// hold several sub-pages without crowding the top level; access is still granted
-// per sub-page, never per group.
+// A nav entry is either a link or a group of links. Groups exist so the reporting pages
+// can sit together without crowding the seven the business is run from; access is still
+// granted per sub-page, never per group.
 //
 // ADDING A PAGE MEANS EDITING TWO LISTS. This one draws the sidebar; PAGES in
 // lib/access.ts is what canSee() and the route guard read. A page added to PAGES alone
@@ -23,33 +23,45 @@ type Entry = Leaf | Group
 const isGroup = (e: Entry): e is Group => 'children' in e
 
 const nav: Entry[] = [
+  // ── The seven pages the business is run from day to day ──────────────────────
+  // Everything that is read to DECIDE something sits at this level. Everything that is
+  // read to EXPLAIN something afterwards went into the group below. Thirteen top-level
+  // items meant scanning the whole rail to find the two or three anybody opens daily.
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  // Business Numbers sits second: it is the "how is the month going" answer, and the
-  // pages under it are where you go once it raises a question.
-  { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
-  // Needs Input is deliberately NOT here. The page still exists and still works at
-  // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
-  // it just is not offered in the nav. Put the entry back here to restore it.
-  { href: '/revenue-sheet', label: 'Project sheet Web, Hub & LP', icon: Table2 },
-  { href: '/clients', label: 'Client 360', icon: Users },
-  { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
+  { href: '/revenue-sheet', label: 'Project sheet', icon: Table2 },
+  // The page has always held the feedback sheet plus manually added praise; 'Delights'
+  // described the best of it rather than the thing itself. The URL stays /delights so
+  // existing links and bookmarks still resolve.
+  { href: '/delights', label: 'Feedback', icon: Sparkles },
+  // Critical Escalations only. Major Process Gap is the standing log, which is read to
+  // find patterns rather than to act today, so it sits with the reports.
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
-  { href: '/delights', label: 'Delights', icon: Sparkles },
-  { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
-  // Forecast used to sit here. It is a tab inside Business Trend now — the two answered
-  // the same question from opposite ends, and reading one without the other was how the
-  // same month got two different explanations.
-  { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
-  { href: '/last-year', label: 'Quarter over Quarter', icon: History },
-  { href: '/kb-report', label: 'KB report', icon: PieChart },
   { href: '/pm-team', label: 'PM Team', icon: UserCog },
+  { href: '/kb-report', label: 'KB report', icon: PieChart },
+
+  // ── Everything read to explain the numbers, not to act on them ───────────────
+  // Access is still granted per sub-page, never per group: an empty group is dropped
+  // rather than shown, so nobody sees a header that opens onto nothing.
   {
-    label: 'Operations', icon: Cog, children: [
-      { href: '/operations/lnd', label: 'L&D Program', icon: GraduationCap },
+    label: 'Business analysis reports', icon: BarChart3, children: [
+      { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
+      { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
+      { href: '/last-year', label: 'Quarter over Quarter', icon: History },
+      { href: '/clients', label: 'Client 360', icon: Users },
+      { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
+      { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
       { href: '/operations/revenue-history', label: 'Revenue History', icon: Archive },
+      { href: '/operations/lnd', label: 'L&D Program', icon: GraduationCap },
     ],
   },
+  // Needs Input is deliberately NOT here. The page still exists and still works at
+  // /needs-input — it is kept in PAGES in lib/access.ts so the route guard covers it —
+  // it just is not offered in the nav. Put an entry back here to restore it.
+  //
+  // Forecast is likewise absent: it is a tab inside Business Trend now, because the two
+  // answered the same question from opposite ends and reading one without the other was
+  // how the same month got two different explanations.
   { href: '/admin', label: 'Settings', icon: Settings },
 ]
 
