@@ -10,7 +10,7 @@ import { hueFor } from '@/lib/section-hue'
 import { NAV_EVENT } from '@/lib/use-close-on-nav'
 
 // A nav entry is either a link or a group of links. Groups exist so the reporting pages
-// can sit together without crowding the seven the business is run from; access is still
+// can sit together without crowding the eight the business is run from; access is still
 // granted per sub-page, never per group.
 //
 // ADDING A PAGE MEANS EDITING TWO LISTS. This one draws the sidebar; PAGES in
@@ -23,7 +23,7 @@ type Entry = Leaf | Group
 const isGroup = (e: Entry): e is Group => 'children' in e
 
 const nav: Entry[] = [
-  // ── The seven pages the business is run from day to day ──────────────────────
+  // ── The eight pages the business is run from day to day ──────────────────────
   // Everything that is read to DECIDE something sits at this level. Everything that is
   // read to EXPLAIN something afterwards went into the group below. Thirteen top-level
   // items meant scanning the whole rail to find the two or three anybody opens daily.
@@ -37,6 +37,7 @@ const nav: Entry[] = [
   // Critical Escalations only. Major Process Gap is the standing log, which is read to
   // find patterns rather than to act today, so it sits with the reports.
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
+  { href: '/clients', label: 'Client 360', icon: Users },
   { href: '/pm-team', label: 'PM Team', icon: UserCog },
   { href: '/kb-report', label: 'KB report', icon: PieChart },
 
@@ -48,7 +49,6 @@ const nav: Entry[] = [
       { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
       { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
       { href: '/last-year', label: 'Quarter over Quarter', icon: History },
-      { href: '/clients', label: 'Client 360', icon: Users },
       { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
       { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
       { href: '/operations/revenue-history', label: 'Revenue History', icon: Archive },
