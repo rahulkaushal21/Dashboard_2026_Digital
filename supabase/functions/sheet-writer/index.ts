@@ -49,6 +49,49 @@ function sheetMonth(iso?: string | null): string {
   if (isNaN(+d)) return "";
   return `${MONS[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
 }
+// ---- Dates go in as DATES, not as text --------------------------------------
+//
+// Everything here is written RAW (see syncTab), and RAW stores a string as a string: a
+// Confirmation Date arrived in the sheet as the text "1-Apr-2025" — Sheets shows it as
+// '1-Apr-2025 — so it would not sort as a date, filter by date range, or feed a pivot by
+// month, which is what the reports built on this sheet need.
+//
+// So the date and month columns are sent as spreadsheet serial numbers, which RAW keeps
+// as numbers, and the column is given a date format that prints them exactly as before.
+// Only those columns: switching the whole write to USER_ENTERED would bring back the
+// formula and leading-zero problems RAW is there to prevent.
+const DATE_HEADERS = new Set(["confirmation date", "start date", "delivery date", "internal delivery", "added date"]);
+// A blank header is the revenue tab's unnamed last column, which repeats Month-Year.
+const MONTH_HEADERS = new Set(["month-year", "month year", ""]);
+type DateCols = Map<number, "date" | "month">;
+
+function dateColumnsOf(headers: string[]): DateCols {
+  const out: DateCols = new Map();
+  headers.forEach((h, i) => {
+    const k = (h || "").trim().toLowerCase();
+    if (DATE_HEADERS.has(k)) out.set(i, "date");
+    else if (MONTH_HEADERS.has(k)) out.set(i, "month");
+  });
+  return out;
+}
+
+const MON_INDEX: Record<string, number> = Object.fromEntries(MONS.map((m, i) => [m.toLowerCase(), i]));
+// "1-Apr-2025" or "Apr-2025" (the 1st) -> days since 30 Dec 1899, the Sheets epoch.
+// Anything else — a blank, "#REF!", a typo — returns null and is written as the text it
+// is, rather than guessed into a date nobody can see is wrong.
+function toSerial(v: string): number | null {
+  const t = (v || "").trim();
+  let d = 1, mo: number | undefined, y: number;
+  let m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(t);
+  if (m) { d = +m[1]; mo = MON_INDEX[m[2].toLowerCase()]; y = +m[3]; }
+  else if ((m = /^([A-Za-z]{3})-(\d{4})$/.exec(t))) { mo = MON_INDEX[m[1].toLowerCase()]; y = +m[2]; }
+  else return null;
+  if (mo === undefined) return null;
+  const ms = Date.UTC(y, mo, d);
+  if (new Date(ms).getUTCDate() !== d) return null;   // 31-Feb and the like
+  return Math.round((ms - Date.UTC(1899, 11, 30)) / 86400000);
+}
+
 // "Sep 2026 Week 3". Read off the sheet's own rows rather than assumed: the week runs
 // from the START DATE, not the confirmation date, and the boundaries are days 1-7, 8-14,
 // 15-21, 22-end — a plain ceil(day/7), not ISO week numbering, which would disagree with
@@ -194,6 +237,43 @@ async function readGrid(tok: string, id: string, tab: string): Promise<string[][
   }
 }
 
+// The same cells unformatted: a real date comes back as its serial NUMBER, a date stored
+// as text comes back as a string. That difference is invisible in the formatted read, and
+// it is the only way to tell a row still holding text dates from one already fixed.
+async function readRawGrid(tok: string, id: string, tab: string): Promise<unknown[][]> {
+  const range = encodeURIComponent(`'${tab}'`);
+  try {
+    const j = await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}`
+      + `?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
+    return (j.values || []) as unknown[][];
+  } catch {
+    return [];
+  }
+}
+
+// What goes over the wire: date cells as numbers where they parse, everything else as is.
+const toCells = (row: string[], dates: DateCols): (string | number)[] =>
+  row.map((v, i) => (dates.has(i) ? (toSerial(v) ?? v) : v));
+
+async function formatDateColumns(tok: string, id: string, tab: string, dates: DateCols) {
+  if (!dates.size) return;
+  const gid = await gidOf(tok, id, tab);
+  if (gid == null) return;
+  await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      requests: [...dates].map(([c, kind]) => ({
+        repeatCell: {
+          // From row 2 down: the header stays text.
+          range: { sheetId: gid, startRowIndex: 1, startColumnIndex: c, endColumnIndex: c + 1 },
+          cell: { userEnteredFormat: { numberFormat: { type: "DATE", pattern: kind === "month" ? "mmm-yyyy" : "d-mmm-yyyy" } } },
+          fields: "userEnteredFormat.numberFormat",
+        },
+      })),
+    }),
+  });
+}
+
 async function gidOf(tok: string, id: string, tab: string): Promise<number | null> {
   const meta = await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=sheets.properties`);
   const hit = (meta.sheets || []).find((x: any) => x.properties?.title === tab);
@@ -202,21 +282,32 @@ async function gidOf(tok: string, id: string, tab: string): Promise<number | nul
 
 // Trailing empties are not a difference: a row written as 40 cells and read back as 38
 // because the last two were blank is the same row.
-function rowsEqual(a: string[], b: string[]): boolean {
+//
+// A date cell is equal only if the sheet holds the right date AS A NUMBER. Comparing the
+// printed text would call "1-Apr-2025" (text) and 1-Apr-2025 (a date) the same, and the
+// text dates already in the sheet would never be converted.
+function rowsEqual(a: string[], b: string[], rawA: unknown[] = [], dates: DateCols = new Map()): boolean {
   const n = Math.max(a.length, b.length);
   for (let i = 0; i < n; i++) {
+    if (dates.has(i)) {
+      const want = toSerial(b[i] ?? "");
+      if (want !== null) {
+        if (rawA[i] !== want) return false;
+        continue;
+      }
+    }
     if ((a[i] ?? "").toString() !== (b[i] ?? "").toString()) return false;
   }
   return true;
 }
 
 /** What WOULD change, without changing anything. The dry run reports this. */
-function planTab(existing: string[][], grid: string[][]): TabDiff & { updates: { row: number; values: string[] }[]; appendFrom: number } {
+function planTab(existing: string[][], grid: string[][], rawExisting: unknown[][] = [], dates: DateCols = new Map()): TabDiff & { updates: { row: number; values: string[] }[]; appendFrom: number } {
   const updates: { row: number; values: string[] }[] = [];
   let unchanged = 0;
   const common = Math.min(existing.length, grid.length);
   for (let i = 0; i < common; i++) {
-    if (rowsEqual(existing[i], grid[i])) unchanged++;
+    if (rowsEqual(existing[i], grid[i], rawExisting[i] || [], dates)) unchanged++;
     else updates.push({ row: i + 1, values: grid[i] });   // 1-based for A1 notation
   }
   const added = Math.max(0, grid.length - existing.length);
@@ -226,7 +317,8 @@ function planTab(existing: string[][], grid: string[][]): TabDiff & { updates: {
 
 async function syncTab(tok: string, id: string, tab: string, grid: string[][]): Promise<TabDiff> {
   const existing = await readGrid(tok, id, tab);
-  const plan = planTab(existing, grid);
+  const dates = dateColumnsOf(grid[0] || []);
+  const plan = planTab(existing, grid, dates.size ? await readRawGrid(tok, id, tab) : [], dates);
 
   // Rows that already exist and now read differently. RAW, not USER_ENTERED: a project
   // name beginning with '=' or '+' would otherwise be parsed as a formula, and a
@@ -240,7 +332,7 @@ async function syncTab(tok: string, id: string, tab: string, grid: string[][]): 
       method: "POST",
       body: JSON.stringify({
         valueInputOption: "RAW",
-        data: chunk.map((u) => ({ range: `'${tab}'!A${u.row}`, values: [u.values] })),
+        data: chunk.map((u) => ({ range: `'${tab}'!A${u.row}`, values: [toCells(u.values, dates)] })),
       }),
     });
   }
@@ -254,9 +346,13 @@ async function syncTab(tok: string, id: string, tab: string, grid: string[][]): 
       await api(tok,
         `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(`'${tab}'`)}:append`
           + `?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
-        { method: "POST", body: JSON.stringify({ values: rows.slice(i, i + 500) }) });
+        { method: "POST", body: JSON.stringify({ values: rows.slice(i, i + 500).map((r) => toCells(r, dates)) }) });
     }
   }
+
+  // Whenever rows were written, re-stamp the date format on those columns, so appended
+  // rows show 1-Apr-2025 rather than the bare serial 45748. A quiet hour skips it.
+  if (plan.updated + plan.added > 0) await formatDateColumns(tok, id, tab, dates);
 
   // Rows the data no longer has. Deleted outright rather than blanked, so nobody is left
   // reading an empty row and wondering whether it means something.
@@ -851,7 +947,8 @@ Deno.serve(async (req) => {
       const plan: Record<string, TabDiff> = {};
       for (const [name, grid] of Object.entries(tabs)) {
         const existing = await readGrid(tok, sheetId, name);
-        const p = planTab(existing, grid);
+        const dates = dateColumnsOf(grid[0] || []);
+        const p = planTab(existing, grid, dates.size ? await readRawGrid(tok, sheetId, name) : [], dates);
         plan[name] = { unchanged: p.unchanged, updated: p.updated, added: p.added, removed: p.removed };
       }
       return json({ ok: true, dry_run: true, service_account: sa.client_email, rows: counts, would_change: plan });

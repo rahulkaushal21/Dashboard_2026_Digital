@@ -74,8 +74,15 @@ place to the left.
 **Money is written to two decimals.** The current export rounds to whole dollars, which is
 why dashboard monthly totals sit a dollar or two under the sheet's own figures.
 
-**Dates match the sheet's format** — `21-Sep-2026`, and `Sep-2026` for months. A column
-that mixes formats stops sorting and stops matching on lookup.
+**Dates are real dates, not text.** RAW stores a string as a string, so until 25 Sep 2026
+every date landed as the text `'1-Apr-2025` — it would not sort, filter by range or pivot
+by month. The date columns (Confirmation Date, Start Date, Delivery Date, Internal
+Delivery, Added Date) and month columns (Month-Year, the unnamed column after it, Month
+year) are now sent as spreadsheet serial numbers and formatted `d-mmm-yyyy` /
+`mmm-yyyy`, so they still read `1-Apr-2025` and `Apr-2025`. A value that does not parse
+(a blank, `#REF!`) is written as the text it is. Columns are found by header name, so a
+new date column needs adding to `DATE_HEADERS` / `MONTH_HEADERS` in `index.ts`.
+`Week Start` ("Sep 2026 Week 3") is a label, not a date, and stays text.
 
 **Recurring entries use `source_date`, not `confirmed_at`.** A retainer is added in one
 month FOR another; using the confirmation date would file October's retainers under
