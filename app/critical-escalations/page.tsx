@@ -2,11 +2,15 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { UnplacedNote } from '@/components/UnitToggle'
+import { inUnit, unitOf } from '@/lib/business-unit'
+
 import MultiSelect from '@/components/MultiSelect'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
-import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation } from '@/lib/supabase'
+import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation, getClientDepts, clientKey } from '@/lib/supabase'
 import { askReason } from '@/lib/ask'
 import { currentEmail } from '@/lib/access'
 
@@ -31,7 +35,19 @@ const kindLabel = (t?: string) => { const v = (t || '').toLowerCase(); if (/comp
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 
 export default function CriticalEscalations() {
-  const [rows, setRows] = useState<CriticalEscalation[]>([])
+  const [rowsAll, setRows] = useState<CriticalEscalation[]>([])
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // These rows are about a CLIENT, not a booking, so they carry no department of their
+  // own. The client's booked history is the only honest answer; 399 of 401 resolve, and
+  // the rest are counted rather than dropped.
+  const [clientDepts, setClientDepts] = useState<Map<string, string>>(new Map())
+  const { unit } = useUnit()
+  useEffect(() => { getClientDepts().then(setClientDepts).catch(() => {}) }, [])
+  const rows = useMemo(
+    () => rowsAll.filter(r => inUnit(clientDepts.get(clientKey(r.company_name)), unit)), [rowsAll, clientDepts, unit])
+  const unplaced = useMemo(
+    () => unit === 'all' ? 0 : rowsAll.filter(r => unitOf(clientDepts.get(clientKey(r.company_name))) === null).length,
+    [rowsAll, clientDepts, unit])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState(''); const [geo, setGeo] = useState<string[]>([]); const [status, setStatus] = useState<'all' | 'open' | 'unresolved' | 'resolved'>('all')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
@@ -102,6 +118,7 @@ export default function CriticalEscalations() {
   return (
     <div>
       <Header title="Critical Escalations" subtitle="Major negative feedback raised by clients over email — one row per client. Escalations stay here even after they're resolved; mark them Fixed or Positive yourself." />
+      <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
 
       <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-mav-muted">
         <span className="text-red-300 font-semibold">How this works:</span> one entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="text-mav-fg">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-300">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-300">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="text-mav-muted">Remove</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.

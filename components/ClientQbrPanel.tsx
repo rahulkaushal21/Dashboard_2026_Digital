@@ -52,7 +52,10 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
   useEffect(() => {
     setBrief(null); setBriefError('')
     getQbrBrief(company)
-      .then(res => res.ok ? setBrief(res.brief) : setBriefError(res.error))
+      // `'error' in res` rather than `res.ok`: this project compiles with strict off, and
+      // without strictNullChecks TypeScript will not narrow a union on a boolean
+      // discriminant — so `res.error` was an error the build was configured to ignore.
+      .then(res => { if ('error' in res) setBriefError(res.error); else setBrief(res.brief) })
       .catch(e => setBriefError(String(e?.message || e)))
   }, [company])
   const [busy, setBusy] = useState(false)

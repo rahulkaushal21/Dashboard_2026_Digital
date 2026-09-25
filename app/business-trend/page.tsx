@@ -2,11 +2,14 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit } from '@/lib/business-unit'
+
 import ForecastPanel from '@/components/ForecastPanel'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getQuotes, getConversions, getBookingsFull, getOpportunities, type RevenueRow, type Quote, type QuoteConversion, type BookingRow, type Opportunity } from '@/lib/supabase'
+import { getRevenue, getQuotes, getConversions, getBookingsFull, getOpportunities, getOpportunityDepts, type RevenueRow, type Quote, type QuoteConversion, type BookingRow, type Opportunity } from '@/lib/supabase'
 import { FY_TARGET, FY_TARGET_LABEL } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
 
@@ -85,11 +88,23 @@ export default function BusinessTrendPage() {
   const [tab, setTab] = useState<'trend' | 'forecast'>('trend')
   const [fromMonth, setFromMonth] = useState('')
   const [toMonth, setToMonth] = useState('')
-  const [revenue, setRevenue] = useState<RevenueRow[]>([])
-  const [opportunitiesRaw, setOpportunitiesRaw] = useState<Opportunity[]>([])
+  const [revenueAll, setRevenue] = useState<RevenueRow[]>([])
+  const [opportunitiesRawAll, setOpportunitiesRaw] = useState<Opportunity[]>([])
+  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
   // Line-level revenue rows: the monthly series aggregates these and loses the service
   // department, SME and owner, which is exactly what you need before ringing a client.
-  const [bookings, setBookings] = useState<BookingRow[]>([])
+  const [bookingsAll, setBookings] = useState<BookingRow[]>([])
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped at the source, so every count, total and chart below follows the switch.
+  // Opportunities carry no usable department of their own, so they are placed by
+  // opportunity_dept_mv — the PM's pod, then the client's history, then geo.
+  const { unit } = useUnit()
+  const revenue = useMemo(() => revenueAll.filter(r => inUnit(r.service_name, unit)), [revenueAll, unit])
+  const bookings = useMemo(() => bookingsAll.filter(b => inUnit(b.service_name, unit)), [bookingsAll, unit])
+  const opportunitiesRaw = useMemo(
+    () => opportunitiesRawAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [opportunitiesRawAll, oppDepts, unit])
+
   const [pushSel, setPushSel] = useState<string | null>(null)
   // Using the sidebar closes this drawer — including a click on the section you are
   // already on, which is not a route change and so re-renders nothing by itself.
@@ -101,14 +116,16 @@ export default function BusinessTrendPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [rev, opp, bk] = await Promise.all([
+        const [rev, opp, bk, od] = await Promise.all([
           getRevenue(),
           getOpportunities(),
           getBookingsFull(),
+          getOpportunityDepts(),
         ])
         setRevenue(rev || [])
         setOpportunitiesRaw(opp || [])
         setBookings(bk || [])
+        setOppDepts(od)
         setLoading(false)
       } catch (e) {
         console.error('Error loading business trend data:', e)

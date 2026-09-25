@@ -2,13 +2,16 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useThemeInk } from '@/lib/use-theme-ink'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { UnplacedNote } from '@/components/UnitToggle'
+import { inUnit, unitOf } from '@/lib/business-unit'
 import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import Link from 'next/link'
-import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory , getClientOwners, clientKey } from '@/lib/supabase'
+import { getClient360, type Client360, getClientProjects, getClientQuotes, getClientQbrs, getDirectoryMember, type ClientProject, type ClientQuote, type ClientQbr, getClients, getEmailSignals, getEscalations, getBookingsFull, getOpportunities, getFeedback, getClientDirectory, getEscalationVerdicts, type Mix, type Client, type EmailSignal, type Escalation, type BookingRow, type Opportunity, type Feedback, type ClientDirectory , getClientOwners, clientKey, getClientDepts } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 import { isNbdOwner } from '@/lib/nbd'
 import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from '@/lib/automation-plays'
@@ -253,7 +256,22 @@ const monthsSince = (v?: string | null) => {
 
 export default function Clients() {
   const ink = useThemeInk()
-  const [clients, setClients] = useState<Client[]>([])
+  const [clientsAll, setClients] = useState<Client[]>([])
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // A client carries no department of its own, so it is placed by the department most of
+  // its revenue is booked under. 399 of 401 resolve. A client who genuinely spans both
+  // units sits under the one holding the bulk of their work — the split is on the
+  // client's own page, which is the right place for that detail.
+  const [clientDepts, setClientDepts] = useState<Map<string, string>>(new Map())
+  const { unit } = useUnit()
+  useEffect(() => { getClientDepts().then(setClientDepts).catch(() => {}) }, [])
+  const clients = useMemo(
+    () => clientsAll.filter(c => inUnit(clientDepts.get(clientKey(c.company_name)), unit)),
+    [clientsAll, clientDepts, unit])
+  const unplaced = useMemo(
+    () => unit === 'all' ? 0 : clientsAll.filter(c => unitOf(clientDepts.get(clientKey(c.company_name))) === null).length,
+    [clientsAll, clientDepts, unit])
   const [c360, setC360] = useState<Record<string, Client360>>({})
   // Per-client detail, loaded only when a drawer opens. Delivery history alone is 3,218
   // rows across every client; pulling all of it to show one account's twelve projects is
@@ -844,6 +862,7 @@ export default function Clients() {
   return (
     <div>
       <Header title="Client 360" subtitle="Booked clients, sorted by latest action. Click a client for its live discussions — escalations, open quotes & email conversations." />
+      <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {mine.canScope && (

@@ -2,9 +2,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit } from '@/lib/business-unit'
+
 import { useAuth } from '@/components/AuthProvider'
 import { OWNER_EMAIL } from '@/lib/access'
-import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, getClientOwners, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
+import { getBookingsFull, getOpportunities, getOpportunityDepts, getQuotes, getPmFeedback, getEmailSignals, getClientOwners, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
 import { buildPmStats, growthPct, type PmQuarter } from '@/lib/pm-metrics'
 import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, type FQ, type PmMember } from '@/lib/pm-team'
 
@@ -43,8 +46,15 @@ export default function PmTeam() {
   // whole grid computation.
   const roster = useMemo(() => (isAdmin ? PM_TEAM : me ? [me] : []), [isAdmin, me])
 
-  const [bookings, setBookings] = useState<BookingRow[]>([])
-  const [opps, setOpps] = useState<Opportunity[]>([])
+  const [bookingsAll, setBookings] = useState<BookingRow[]>([])
+  const [oppsAll, setOpps] = useState<Opportunity[]>([])
+  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped at the source, so every scorecard figure follows the switch.
+  const { unit } = useUnit()
+  const bookings = useMemo(() => bookingsAll.filter(b => inUnit(b.service_name, unit)), [bookingsAll, unit])
+  const opps = useMemo(() => oppsAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [oppsAll, oppDepts, unit])
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [fb, setFb] = useState<PmFeedbackRow[]>([])
   const [sigs, setSigs] = useState<EmailSignal[]>([])
@@ -54,8 +64,8 @@ export default function PmTeam() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals(), getClientOwners()])
-      .then(([b, o, qs, f, sg, ow]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg); setOwners(ow) })
+    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals(), getClientOwners(), getOpportunityDepts()])
+      .then(([b, o, qs, f, sg, ow, od]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg); setOwners(ow); setOppDepts(od) })
       .finally(() => setLoading(false))
   }, [])
 

@@ -1,7 +1,10 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
-import { getNeedsInput, getOpportunities, canConfirmLocally, getDirectoryMember, type DirectoryMember, type NeedsInputRow, type NeedsReason, type Opportunity } from '@/lib/supabase'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { UnplacedNote } from '@/components/UnitToggle'
+import { inUnit, unitOf } from '@/lib/business-unit'
+import { getNeedsInput, getOpportunityDepts, getOpportunities, canConfirmLocally, getDirectoryMember, type DirectoryMember, type NeedsInputRow, type NeedsReason, type Opportunity } from '@/lib/supabase'
 import { currentEmail, getStoredProfile } from '@/lib/access'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 
@@ -24,8 +27,18 @@ const REASONS: { key: NeedsReason; label: string; tone: string }[] = [
 const money = (n?: number) => n == null || n === 0 ? '—' : `$${Math.round(n).toLocaleString('en-US')}`
 
 export default function NeedsInput() {
-  const [rows, setRows] = useState<NeedsInputRow[]>([])
-  const [deals, setDeals] = useState<Opportunity[]>([])
+  const [rowsAll, setRows] = useState<NeedsInputRow[]>([])
+  const [dealsAll, setDeals] = useState<Opportunity[]>([])
+  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Both lists are opportunities by id, so both are placed by opportunity_dept_mv.
+  const { unit } = useUnit()
+  const rows = useMemo(() => rowsAll.filter(r => inUnit(oppDepts.get(Number(r.id)), unit)), [rowsAll, oppDepts, unit])
+  const deals = useMemo(() => dealsAll.filter(d => inUnit(oppDepts.get(Number(d.id)), unit)), [dealsAll, oppDepts, unit])
+  const unplaced = useMemo(
+    () => unit === 'all' ? 0 : rowsAll.filter(r => unitOf(oppDepts.get(Number(r.id))) === null).length,
+    [rowsAll, oppDepts, unit])
   const [me, setMe] = useState<DirectoryMember | null>(null)
   const [iAmAdmin, setIAmAdmin] = useState(false)
   const [mineOnly, setMineOnly] = useState(true)
@@ -33,8 +46,8 @@ export default function NeedsInput() {
   const [confirming, setConfirming] = useState<Opportunity | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = () => Promise.all([getNeedsInput(), getOpportunities()])
-    .then(([n, d]) => { setRows(n); setDeals(d) })
+  const load = () => Promise.all([getNeedsInput(), getOpportunities(), getOpportunityDepts()])
+    .then(([n, d, od]) => { setRows(n); setDeals(d); setOppDepts(od) })
     .finally(() => setLoading(false))
 
   useEffect(() => {
@@ -60,6 +73,7 @@ export default function NeedsInput() {
   return (
     <div>
       <Header title="Needs input" subtitle="The only two things the system cannot work out for itself — a value nobody has written down, and a decision nobody has made." />
+      <UnplacedNote n={unplaced} noun="deals" className="-mt-3 mb-4" />
 
       <div className="flex flex-wrap items-center gap-2 mb-5">
         <button onClick={() => setMineOnly(true)}

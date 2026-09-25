@@ -1,5 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit } from '@/lib/business-unit'
 import Header from '@/components/Header'
 import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
@@ -122,7 +124,13 @@ const rowDate = (r: LedgerRow) =>
 const rowMonth = (r: LedgerRow) => rowDate(r).slice(0, 7)
 
 export default function ProjectLedger() {
-  const [rows, setRows] = useState<LedgerRow[]>([])
+  const [rowsAll, setRows] = useState<LedgerRow[]>([])
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped at the source: every count, total and chart below reads the filtered rows,
+  // so the headline can never disagree with the table under it.
+  const { unit } = useUnit()
+  const rows = useMemo(() => rowsAll.filter(r => inUnit(r.service_dept, unit)), [rowsAll, unit])
+
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
 

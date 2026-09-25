@@ -1,8 +1,11 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit } from '@/lib/business-unit'
+
 import Link from 'next/link'
-import { getBusinessNumbers, getBigOpenDeals, getMonthDateMismatches, BIZ_ORDER, type BizRow, type MonthDateMismatch, type Opportunity } from '@/lib/supabase'
+import { getBusinessNumbers, getBigOpenDeals, getOpportunityDepts, getMonthDateMismatches, BIZ_ORDER, type BizRow, type MonthDateMismatch, type Opportunity } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Business Numbers — the month, by service, for somebody who runs the business.
@@ -80,8 +83,17 @@ const Bars = ({ now, before, max }: { now: number; before: number; max: number }
 )
 
 export default function BusinessNumbers() {
-  const [rows, setRows] = useState<BizRow[]>([])
-  const [deals, setDeals] = useState<Opportunity[]>([])
+  const [rowsAll, setRows] = useState<BizRow[]>([])
+  const [dealsAll, setDeals] = useState<Opportunity[]>([])
+  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped at the source, so every figure follows the switch.
+  // BizRow.bucket is already the department rolled up the way this page reports it
+  // ('LP/HUB', 'WEB-US'…), which is the same vocabulary the switch speaks.
+  const { unit } = useUnit()
+  const rows = useMemo(() => rowsAll.filter(r => inUnit(r.bucket, unit)), [rowsAll, unit])
+  const deals = useMemo(() => dealsAll.filter(d => inUnit(oppDepts.get(Number(d.id)), unit)), [dealsAll, oppDepts, unit])
   const [unpriced, setUnpriced] = useState(0)
   const [loading, setLoading] = useState(true)
   // Normally empty, and then this renders nothing at all.
@@ -107,6 +119,7 @@ export default function BusinessNumbers() {
 
   useEffect(() => {
     getBigOpenDeals(25).then(d => { setDeals(d.rows); setUnpriced(d.unpriced) })
+    getOpportunityDepts().then(setOppDepts)
     getMonthDateMismatches().then(setMismatch)
   }, [])
 

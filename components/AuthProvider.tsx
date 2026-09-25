@@ -5,6 +5,7 @@ import { checkAccess, getStoredProfile, saveSession, clearSession, canSee, Profi
   signInWithGoogle, verifiedEmail, signOutGoogle, ALLOWED_DOMAINS,
   sessionEpochStale, applySessionEpoch, hasGoogleSession, onSessionLost } from '@/lib/access'
 import Sidebar from './Sidebar'
+import BusinessUnitProvider from './BusinessUnitProvider'
 import { MavlersLogo, MavlersMark } from './MavlersLogo'
 
 interface AuthState { profile: Profile | null; email: string | null; signOut: () => void }
@@ -104,6 +105,9 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   return (
     <AuthCtx.Provider value={{ profile, email: profile.email, signOut }}>
+      {/* Inside the auth context, because who you are decides whether the business-unit
+          switch is offered at all and which saved choice is yours. */}
+      <BusinessUnitProvider>
       <div className="flex h-screen overflow-hidden">
         <Sidebar />
         {/* pt-20 on mobile clears the fixed top bar; padding tightens on small screens
@@ -114,6 +118,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
           <RouteGuard>{children}</RouteGuard>
         </main>
       </div>
+      </BusinessUnitProvider>
     </AuthCtx.Provider>
   )
 }

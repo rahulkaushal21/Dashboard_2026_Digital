@@ -143,7 +143,7 @@ return { prob: 45, read: 'Open quote — outcome not yet clear from the sheet.' 
 // `sme` is the PC/SME cell — the PM whose number this line counts towards. A PM's
 // business figure is the lines with THEIR NAME on them, not the lines belonging to
 // clients they own; on a shared account those are different sums.
-export interface RevenueRow { client_name: string; month: string; amount_usd: number; date?: string; sme?: string }
+export interface RevenueRow { client_name: string; month: string; amount_usd: number; date?: string; sme?: string; service_name?: string }
 export interface BookingRow { id: number; company_name?: string; booking_month?: string; booking_date?: string; booking_amount?: number; service_name?: string; technology?: string; engagement_model?: string; geo?: string; sme?: string; sales_person?: string; contact_email?: string }
 export interface Feedback { id: number; agency?: string; nature?: string; comments?: string; added_date?: string; project_names?: string; geo?: string; feedback_type?: string }
 export interface EmailSignal { id: number; thread_id?: string; company_name?: string; client_email?: string; signal_type?: string; sentiment?: string; summary?: string; source_subject?: string; source_date?: string }
@@ -593,7 +593,7 @@ export async function getRevenue(): Promise<RevenueRow[]> {
 // two full reads of a 3,200-row view that is rebuilt from the raw sheet on every page —
 // the home page loads both, so it was paying for the whole thing twice.
 const live = await getBookingsFull()
-if (live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date, sme: b.sme }))
+if (live.length) return live.map(b => ({ client_name: b.company_name, month: b.booking_month, amount_usd: b.booking_amount, date: b.booking_date, sme: b.sme, service_name: b.service_name }))
 return (await import('./mockData')).mockRevenue
 }
 // Same switch, for everything that reads whole booking rows — the PM scorecards, Client
@@ -681,7 +681,27 @@ export interface CriticalEscalation {
 export async function getOpportunityDepts(): Promise<Map<number, string>> {
   const m = new Map<number, string>()
   if (!supabase) return m
-  const rows = await read<{ id: number; service_dept: string | null }>('web_opportunity_dept', 'id, service_dept', 'id')
+  const rows = await read<{ id: number; service_dept: string | null }>('opportunity_dept_mv', 'id, service_dept', 'id')
+  for (const r of rows || []) if (r.service_dept) m.set(Number(r.id), r.service_dept)
+  return m
+}
+
+/**
+ * Which business unit each escalation belongs to, by id.
+ *
+ * The escalations table has no department and no PM — `service_type` says 'Managed' on
+ * 782 of 844 rows, and `raised_by` is the process person who logged it, not the owner.
+ * web_escalation_dept places 703 of 844 from the client, or from the region that sits in
+ * the company_name column on 461 of them. The rest come back absent, and the page says
+ * so rather than dropping them into whichever unit is on screen.
+ *
+ * Reads the materialised copy: the view behind it walks web_client_context, which
+ * rebuilds the ledger.
+ */
+export async function getEscalationDepts(): Promise<Map<number, string>> {
+  const m = new Map<number, string>()
+  if (!supabase) return m
+  const rows = await read<{ id: number; service_dept: string | null }>('escalation_dept_mv', 'id, service_dept', 'id')
   for (const r of rows || []) if (r.service_dept) m.set(Number(r.id), r.service_dept)
   return m
 }
@@ -693,6 +713,21 @@ export async function getClientContext(): Promise<ClientContext[]> {
   const { data } = await supabase.from('web_client_context').select('*')
   return (data as ClientContext[]) || []
 }
+/**
+ * client_key -> the business unit that client's work is booked under.
+ *
+ * For the pages whose rows are about a CLIENT rather than a booking — Client 360,
+ * Delights, Critical Escalations. Those carry no department of their own, and the
+ * client's own booked history is the only honest answer. 399 of 401 clients resolve.
+ */
+export async function getClientDepts(): Promise<Map<string, string>> {
+  const m = new Map<string, string>()
+  for (const c of await getClientContext()) {
+    if (c.client_key && c.service_dept) m.set(c.client_key, c.service_dept)
+  }
+  return m
+}
+
 const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 // The table stores 'open' | 'unresolved' | 'fixed' | 'positive'; the board shows the last
 // two as one settled state. RANK orders them worst-first for the roll-up and the sort.

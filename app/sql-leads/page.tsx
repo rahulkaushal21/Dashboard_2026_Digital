@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
+import { NotSplitNote } from '@/components/UnitToggle'
 import MultiSelect from '@/components/MultiSelect'
 import KPICard from '@/components/KPICard'
 import { getSqlLeads, type SqlLead } from '@/lib/supabase'
@@ -38,6 +39,10 @@ export default function SqlLeads() {
   return (
     <div>
       <Header title="SQL / Leads" subtitle="Sales-qualified leads — filter by venture, region, owner and date" />
+      {/* Not filtered by business unit, and says so. Every one of the 99 rows carries the
+          same services_bifurcation value ('Web'), so there is nothing here to split —
+          and a filter that silently returned everything would be worse than none. */}
+      <NotSplitNote what="Leads" reason="are not split by business unit" className="-mt-3 mb-4" />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company…" className={`${selCls} w-44`} />
         <MultiSelect label="All ventures" options={uniq(all.map(x => x.venture))} selected={fVenture} onChange={setFVenture} className="w-40" />

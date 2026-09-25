@@ -1,5 +1,6 @@
 'use client'
 import { isLive } from '@/lib/supabase'
+import UnitToggle from './UnitToggle'
 export default function Header({ title, subtitle }: { title: string; subtitle?: string }) {
   // Wraps on narrow screens so a long title and the Live-data pill stop fighting
   // each other for one row.
@@ -12,9 +13,15 @@ export default function Header({ title, subtitle }: { title: string; subtitle?: 
         <div className="h-1 w-12 rounded-full mt-2" style={{ background: 'var(--section)' }} />
         {subtitle && <p className="text-sm text-mav-muted mt-2">{subtitle}</p>}
       </div>
-      <span className={`shrink-0 text-xs px-2 py-1 rounded-full border ${isLive ? 'border-green-500/40 text-green-400' : 'border-mav-line text-mav-muted'}`}>
-        {isLive ? 'Live data' : 'Sample data'}
-      </span>
+      {/* The business-unit switch sits with the page title rather than in the sidebar,
+          because it changes what every number below it means — it belongs where the eye
+          already is when reading the heading. Renders nothing for non-admins. */}
+      <div className="shrink-0 flex items-center gap-2">
+        <UnitToggle />
+        <span className={`text-xs px-2 py-1 rounded-full border ${isLive ? 'border-green-500/40 text-green-400' : 'border-mav-line text-mav-muted'}`}>
+          {isLive ? 'Live data' : 'Sample data'}
+        </span>
+      </div>
     </header>
   )
 }

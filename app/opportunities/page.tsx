@@ -2,6 +2,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { UnplacedNote } from '@/components/UnitToggle'
+import { inUnit, unitOf } from '@/lib/business-unit'
+
 import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
@@ -432,6 +436,13 @@ const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.
 // nothing and is simply not matched by a department filter, rather than being filed under
 // a bucket that means "we could not tell".
 const deptOfOpp = (x: Opportunity): string => deptById.get(Number(x.id)) || ''
+// The business-unit switch, applied first and ahead of every other filter — the
+// department dropdown beside it stays, for picking a single pod out of the unit.
+const { unit } = useUnit()
+// Deals nobody could place. Three, at the time of writing: no PM, no client history and
+// no geo. Counted out loud under the table rather than disappearing with the filter.
+const unplacedDeals = useMemo(
+  () => unit === 'all' ? 0 : all.filter(x => unitOf(deptOfOpp(x)) === null).length, [all, deptById, unit])
 
 // One haystack per row, built when the rows arrive rather than on every keystroke:
 // 950 rows across 20-odd fields is real work at typing speed.
@@ -446,6 +457,7 @@ const matches = useCallback((x: Opportunity) =>
 
 const o = useMemo(() => {
 const rows = all
+.filter(x => inUnit(deptOfOpp(x), unit))
 .filter(x => matches(x))
 .filter(x => !fType || typeLabel(x).includes(fType))
 .filter(x => !fGeo.length || fGeo.includes(x.geo || ''))
@@ -470,7 +482,7 @@ if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, matches, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
+}, [all, matches, deptById, unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -495,7 +507,7 @@ return all
 .filter(x => !misTagOnly || x.mis_tagged_new)
 .filter(x => inRange(x.source_date || x.first_date))
 .filter(x => !x.value).length
-}, [all, matches, deptById, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
+}, [all, matches, deptById, unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
 
 // Toggle "might not come" on a deal. Optimistic: patch local state, then persist.
 const toggleUnlikely = async (x: Opportunity) => {
@@ -573,7 +585,7 @@ window.alert('Could not save that — please try again.')
 const reset = () => { setSearch(''); setFType(''); setFGeo([]); setFAM([]); setFPM([]); setFStatus(''); setFSvc([]); setFTech([]); setFDept([]); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setCommittedOnly(false); setMisTagOnly(false); setFAge(''); setVMin(''); setVMax('') }
 
 // Pagination — reset to first page whenever the filtered/sorted set changes.
-useEffect(() => { setPage(0) }, [search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort, perPage])
+useEffect(() => { setPage(0) }, [unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
 const curPage = Math.min(page, pageCount - 1)
 const pageRows = o.slice(curPage * perPage, curPage * perPage + perPage)
@@ -772,6 +784,7 @@ className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-m
 return (
 <div>
 <Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence." />
+<UnplacedNote n={unplacedDeals} noun="deals" className="-mt-3 mb-4" />
 
 {/* Entering a deal the email scan did not catch. Hidden for anyone who is neither a
     registered PM nor an admin: the RPC refuses them, so offering the button would only

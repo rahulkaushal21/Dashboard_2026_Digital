@@ -2,9 +2,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import ClientLink from '@/components/ClientLink'
 import GreetingBar from '@/components/GreetingBar'
+import UnitToggle from '@/components/UnitToggle'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit } from '@/lib/business-unit'
 import KPICard from '@/components/KPICard'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
+import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, getOpportunityDepts, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { buildInsights, type Tone } from '@/lib/insights'
@@ -111,9 +114,9 @@ const BIZ_ORDER = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation']
 const bizOf = (s?: string) => { const v = segOf(s); return v === 'LP' || v === 'HUB' ? 'LP/HUB' : v }
 
 export default function Dashboard() {
-  const [rev, setRev] = useState<RevenueRow[]>([])
+  const [revAll, setRev] = useState<RevenueRow[]>([])
   const [clients, setClients] = useState<Client[]>([])
-  const [opps, setOpps] = useState<Opportunity[]>([])
+  const [oppsAll, setOpps] = useState<Opportunity[]>([])
   // The dashboard opens on this person's own accounts: their revenue, their clients,
   // their open deals, and insights read from their numbers rather than the company's.
   // Somebody not in the PM directory sees everything, because none of it is theirs.
@@ -121,8 +124,23 @@ export default function Dashboard() {
   const [justMine, setJustMine] = useState(true)
   useEffect(() => { if (mine.ready && !mine.canScope) setJustMine(false) }, [mine.ready, mine.canScope])
   const scoped = justMine && mine.canScope
-  const [bookingRows, setBookingRows] = useState<BookingRow[]>([])
+  const [bookingRowsAll, setBookingRows] = useState<BookingRow[]>([])
   // 90th-percentile days-to-confirm, so the stale-pipeline insight argues from evidence.
+  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped HERE, at the source, so the revenue total, the month-on-month change, the
+  // segment matrix, the client count and the pipeline all follow the switch. Filtering
+  // in each panel instead is how a headline ends up disagreeing with the table under it.
+  //
+  // Opportunities carry no usable department of their own (4 of 960), so they are placed
+  // by the derivation in opportunity_dept_mv — PM's pod, then the client's history, then
+  // geo — which reaches 957.
+  const { unit } = useUnit()
+  const rev = useMemo(() => revAll.filter(r => inUnit(r.service_name, unit)), [revAll, unit])
+  const bookingRows = useMemo(() => bookingRowsAll.filter(b => inUnit(b.service_name, unit)), [bookingRowsAll, unit])
+  const opps = useMemo(() => oppsAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [oppsAll, oppDepts, unit])
+
   const [closeSpeed, setCloseSpeed] = useState<{ median: number; p90: number; n: number } | null>(null)
   const [insightsOpen, setInsightsOpen] = useState<string | null>(null)
 
@@ -147,13 +165,13 @@ export default function Dashboard() {
   const load = async () => {
     setRefreshing(true)
     try {
-      const [r, c, o, b, cs, srA, srB, so, mr] = await Promise.all([
+      const [r, c, o, b, cs, srA, srB, so, mr, od] = await Promise.all([
         getRevenue(), getClients(), getOpportunities(), getBookingsFull(), getQuoteCloseSpeed(),
         getLastSync('web-revenue-appscript'), getLastSync('web-revenue-sync'), getLastSyncStatus('email-opportunities-scan'),
-        getEmailReviewState(),
+        getEmailReviewState(), getOpportunityDepts(),
       ])
       setRev(r); setClients(c); setOpps(o); setBookingRows(b); setCloseSpeed(cs); setSyncRev(later(srA, srB))
-      setSyncOpp(so?.ran_at ?? null); setSyncOppFailed(so ? !so.ok : false); setMail(mr)
+      setSyncOpp(so?.ran_at ?? null); setSyncOppFailed(so ? !so.ok : false); setMail(mr); setOppDepts(od)
       setLastRefreshed(new Date()); setNowMs(Date.now())
     } finally { setRefreshing(false) }
   }
@@ -386,7 +404,10 @@ export default function Dashboard() {
       {/* The greeting replaces the page header here: "Dashboard / Revenue, clients and
           pipeline at a glance" told a returning user nothing they did not know. The name
           and their client region's holidays do. */}
-      <GreetingBar />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <GreetingBar />
+        <UnitToggle className="mt-1" />
+      </div>
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5 text-xs">
         <span className="uppercase tracking-wide text-mav-muted">Last sync</span>

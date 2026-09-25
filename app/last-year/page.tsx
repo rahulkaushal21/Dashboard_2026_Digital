@@ -5,6 +5,8 @@ import Header from '@/components/Header'
 import MultiSelect from '@/components/MultiSelect'
 import KPICard from '@/components/KPICard'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit } from '@/lib/business-unit'
 
 // Who a booking belongs to, with the same known-wrong SME cells corrected as on
 // the PM pages — otherwise the two screens name a different owner for the same
@@ -63,7 +65,13 @@ type Row = {
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 
 export default function LastYearReview() {
-  const [rows, setRows] = useState<BookingRow[]>([])
+  const [rowsAll, setRows] = useState<BookingRow[]>([])
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped at the source: every count, total and chart below reads the filtered rows,
+  // so the headline can never disagree with the table under it.
+  const { unit } = useUnit()
+  const rows = useMemo(() => rowsAll.filter(r => inUnit(r.service_name, unit)), [rowsAll, unit])
+
   const [q, setQ] = useState('')
   const [mv, setMv] = useState('')      // quarter movement filter
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')   // 'YYYY-MM' month range

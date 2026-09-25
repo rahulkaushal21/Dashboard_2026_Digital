@@ -2,11 +2,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { UnplacedNote } from '@/components/UnitToggle'
+import { inUnit, unitOf } from '@/lib/business-unit'
+
 import MultiSelect from '@/components/MultiSelect'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import KPICard from '@/components/KPICard'
-import { getEscalations, type Escalation } from '@/lib/supabase'
+import { getEscalations, getEscalationDepts, type Escalation } from '@/lib/supabase'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
@@ -19,6 +23,21 @@ const keeps = (picked: string[], v?: string | null) => picked.length === 0 || pi
 
 export default function Escalations() {
   const [all, setAll] = useState<Escalation[]>([])
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Escalations carry no department and no PM: service_type says 'Managed' on 782 of
+  // 844 rows, and raised_by is the process person who logged it, not the owner.
+  // escalation_dept_mv places 703 of them — from the client where the company is a real
+  // client, and from the region that sits in the company_name column on 461 others.
+  //
+  // The rest come back absent and are COUNTED, not hidden. An escalation nobody can
+  // place must not read as an escalation that did not happen.
+  const [escDepts, setEscDepts] = useState<Map<number, string>>(new Map())
+  const { unit } = useUnit()
+  useEffect(() => { getEscalationDepts().then(setEscDepts).catch(() => {}) }, [])
+  const unplaced = useMemo(
+    () => unit === 'all' ? 0 : all.filter(x => unitOf(escDepts.get(Number(x.id))) === null).length,
+    [all, escDepts, unit])
+
   const [search, setSearch] = useState('')
   const [fType, setFType] = useState<string[]>([])
   const [fGeo, setFGeo] = useState<string[]>([])
@@ -43,6 +62,7 @@ export default function Escalations() {
   
   const e = useMemo(() => {
     let result = all
+      .filter(x => inUnit(escDepts.get(Number(x.id)), unit))
       .filter(x => !justMine || mine.ownsClient(x.company_name))
       .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
       .filter(x => keeps(fType, x.escalation_type))
@@ -77,7 +97,7 @@ export default function Escalations() {
     })
     
     return result
-  }, [all, search, fType, fGeo, from, to, sortBy, sortAsc, justMine, mine])
+  }, [all, escDepts, unit, search, fType, fGeo, from, to, sortBy, sortAsc, justMine, mine])
   
   const handleSort = (field: SortField) => {
     if (sortBy === field) {
@@ -98,6 +118,7 @@ export default function Escalations() {
   return (
     <div>
       <Header title="Major Process Gap" subtitle="Client escalations & experience triggers — filter by type, GEO and date, click headers to sort" />
+      <UnplacedNote n={unplaced} noun="escalations" className="-mt-3 mb-4" />
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"

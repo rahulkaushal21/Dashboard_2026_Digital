@@ -2,11 +2,15 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { UnplacedNote } from '@/components/UnitToggle'
+import { inUnit, unitOf } from '@/lib/business-unit'
+
 import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getDelights, getManualFeedback, decideManualFeedback, getFeedbackApprovers,
-  type Delight, type ManualFeedback, type FeedbackApprover } from '@/lib/supabase'
+  type Delight, type ManualFeedback, type FeedbackApprover, getClientDepts, clientKey } from '@/lib/supabase'
 import AddFeedbackDialog from '@/components/AddFeedbackDialog'
 import { currentEmail, getStoredProfile } from '@/lib/access'
 import { useMine } from '@/lib/mine'
@@ -20,7 +24,19 @@ const day = (s?: string) => (s || '').slice(0, 10)
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 
 export default function Delights() {
-  const [rows, setRows] = useState<Delight[]>([])
+  const [rowsAll, setRows] = useState<Delight[]>([])
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // These rows are about a CLIENT, not a booking, so they carry no department of their
+  // own. The client's booked history is the only honest answer; 399 of 401 resolve, and
+  // the rest are counted rather than dropped.
+  const [clientDepts, setClientDepts] = useState<Map<string, string>>(new Map())
+  const { unit } = useUnit()
+  useEffect(() => { getClientDepts().then(setClientDepts).catch(() => {}) }, [])
+  const rows = useMemo(
+    () => rowsAll.filter(r => inUnit(clientDepts.get(clientKey(r.company_name)), unit)), [rowsAll, clientDepts, unit])
+  const unplaced = useMemo(
+    () => unit === 'all' ? 0 : rowsAll.filter(r => unitOf(clientDepts.get(clientKey(r.company_name))) === null).length,
+    [rowsAll, clientDepts, unit])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState(''); const [geo, setGeo] = useState<string[]>([]); const [src, setSrc] = useState<'' | 'sheet' | 'email'>('')
   const [from, setFrom] = useState(''); const [to, setTo] = useState('')
@@ -81,6 +97,7 @@ export default function Delights() {
     <div>
       {adding && <AddFeedbackDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); loadManual() }} />}
       <Header title="Delights" subtitle="Clients who shared genuinely great appreciation — the standout testimonials from the feedback sheet, worth celebrating and reusing." />
+      <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
 
       {/* Waiting on somebody. Above the board on purpose: an approval queue nobody sees
           is an approval queue nobody clears, and the feedback sits invisible meanwhile. */}

@@ -1,9 +1,12 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit } from '@/lib/business-unit'
+
 import ClientLink from '@/components/ClientLink'
 import MultiSelect from '@/components/MultiSelect'
-import { getProjectLedger, getOpportunities, type LedgerRow, type Opportunity } from '@/lib/supabase'
+import { getProjectLedger, getOpportunities, getOpportunityDepts, type LedgerRow, type Opportunity } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Reports — the ledger, pivoted, for somebody who runs the business.
@@ -91,9 +94,19 @@ const Breakdown = ({ title, note, rows, total, empty = 'Nothing matches those fi
 }
 
 export default function Reports() {
-  const [rows, setRows] = useState<LedgerRow[]>([])
-  const [opps, setOpps] = useState<Opportunity[]>([])
+  const [rowsAll, setRows] = useState<LedgerRow[]>([])
+  const [oppsAll, setOpps] = useState<Opportunity[]>([])
+  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
   const [loading, setLoading] = useState(true)
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped at the source, so every count, total and chart below follows the switch.
+  // Opportunities carry no usable department of their own (4 of 960), so they are
+  // placed by opportunity_dept_mv — the PM's pod, then the client's booked history,
+  // then geo. 957 of 960 resolve.
+  const { unit } = useUnit()
+  const rows = useMemo(() => rowsAll.filter(r => inUnit(r.service_dept, unit)), [rowsAll, unit])
+  const opps = useMemo(() => oppsAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [oppsAll, oppDepts, unit])
 
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -109,8 +122,8 @@ export default function Reports() {
   const [fDept, setFDept] = useState<string[]>([])
 
   useEffect(() => {
-    Promise.all([getProjectLedger(), getOpportunities()])
-      .then(([l, o]) => { setRows(l); setOpps(o) })
+    Promise.all([getProjectLedger(), getOpportunities(), getOpportunityDepts()])
+      .then(([l, o, od]) => { setRows(l); setOpps(o); setOppDepts(od) })
       .finally(() => setLoading(false))
   }, [])
   // Opens on the current month. Set after mount, because working out "now" during render
