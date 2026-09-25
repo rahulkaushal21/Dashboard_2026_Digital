@@ -44,7 +44,7 @@ const nav: Entry[] = [
   // Access is still granted per sub-page, never per group: an empty group is dropped
   // rather than shown, so nobody sees a header that opens onto nothing.
   {
-    label: 'Business analysis reports', icon: BarChart3, children: [
+    label: 'Business Reports', icon: BarChart3, children: [
       { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
       { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
       { href: '/last-year', label: 'Quarter over Quarter', icon: History },
