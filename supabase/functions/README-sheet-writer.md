@@ -80,9 +80,22 @@ by month. The date columns (Confirmation Date, Start Date, Delivery Date, Intern
 Delivery, Added Date) and month columns (Month-Year, the unnamed column after it, Month
 year) are now sent as spreadsheet serial numbers and formatted `d-mmm-yyyy` /
 `mmm-yyyy`, so they still read `1-Apr-2025` and `Apr-2025`. A value that does not parse
-(a blank, `#REF!`) is written as the text it is. Columns are found by header name, so a
-new date column needs adding to `DATE_HEADERS` / `MONTH_HEADERS` in `index.ts`.
-`Week Start` ("Sep 2026 Week 3") is a label, not a date, and stays text.
+(a blank, `#REF!`) is written as the text it is.
+
+**Numbers are real numbers too**, for the same reason (a text `$1,000` does not SUM):
+Quote Price, Confirmed Price, Invoice Amount and Estimated Cost as `#,##0.00` (the
+currency is in the row's own currency column); USD Conversion and Outsource Price (USD)
+as `$#,##0.00`; Internal hrs, Actual hrs and Confirmed in Days as plain numbers;
+Optimization as a percentage. Hand-typed Invoice Amounts that are not a single figure
+(`1000 + 825`, `Rs.103,168.58`, `CAD`) stay exactly as typed.
+
+**Outsource Price stays text** on purpose: it is in the contractor's currency (₹ in the
+source) and the tab has no column saying so — a bare number would lose that. Add up
+Outsource Price (USD) instead.
+
+Columns are found by header name through `COLUMN_KINDS` in `index.ts`; a new date or
+number column needs a line there. `Week Start` ("Sep 2026 Week 3") is a label, not a
+date, and stays text.
 
 **Recurring entries use `source_date`, not `confirmed_at`.** A retainer is added in one
 month FOR another; using the confirmation date would file October's retainers under
