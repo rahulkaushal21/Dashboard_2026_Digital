@@ -5,6 +5,7 @@ import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote } from '@/components/UnitToggle'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, SectionTitle, Panel } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import { inUnit, unitOf } from '@/lib/business-unit'
@@ -106,6 +107,41 @@ export default function Delights() {
     email: rows.filter(r => (r.email_count || 0) > 0).length,
   }), [rows])
 
+  // ── Card drill-downs ──────────────────────────────────────────────────────────
+  // The cards count the department's board before the filters, so the panels list the
+  // same clients: all of them, those with sheet praise, those with email praise. A row
+  // opens the client's drawer.
+  const srcRows = useMemo(() => ({
+    sheet: rows.filter(r => (r.sheet_count || 0) > 0),
+    email: rows.filter(r => (r.email_count || 0) > 0),
+  }), [rows])
+  const delightCols: DetailCol<Delight>[] = [
+    { key: 'client', label: 'Client', value: r => r.company_name, wide: true, sort: r => (r.company_name || '').toLowerCase() },
+    { key: 'quote', label: 'Feedback', value: r => r.headline || '—', wide: true },
+    { key: 'count', label: 'Testimonials', value: r => r.count, align: 'right', sort: r => r.count, total: rs => rs.reduce((s, r) => s + r.count, 0) },
+    { key: 'date', label: 'Date', value: r => fmtDay(r.date), sort: r => r.date || '' },
+    { key: 'age', label: 'Days since', value: r => daysSince(r.date) ?? '—', align: 'right', sort: r => daysSince(r.date) ?? -1 },
+  ]
+  const delightDetails = (list: Delight[], subtitle: string): CardDetails<Delight> => ({
+    subtitle, rows: list, columns: delightCols, defaultSort: 'date',
+    groupBy: r => (r.geo || '').trim() || 'No GEO',
+    rowKey: r => r.company_name, onRowClick: r => setSel(r),
+  })
+  // The approval queue: manual feedback waiting on this person, in this department.
+  // Approving stays in the queue panel below the cards; the drill-down is for reading.
+  const pendingDetails: CardDetails<ManualFeedback> = {
+    subtitle: 'Manual feedback waiting for your sign-off — days counted from when it was submitted',
+    rows: minePending, defaultSort: 'age', rowKey: m => m.id,
+    groupBy: m => m.service_dept || 'No department',
+    columns: [
+      { key: 'client', label: 'Client', value: m => m.company_name, wide: true, sort: m => (m.company_name || '').toLowerCase() },
+      { key: 'quote', label: 'Feedback', value: m => m.quote, wide: true },
+      { key: 'channel', label: 'Channel', value: m => m.channel || '—', sort: m => m.channel || '' },
+      { key: 'from', label: 'From', value: m => m.submitted_by, wide: true, sort: m => m.submitted_by || '' },
+      { key: 'age', label: 'Days waiting', value: m => daysSince(m.submitted_at) ?? '—', align: 'right', sort: m => daysSince(m.submitted_at) ?? -1 },
+    ],
+  }
+
   // Every filter except the source. The source tabs count against this, so each tab
   // says how many clients it would show under the other filters as they stand.
   const scoped = useMemo(() => rows.filter(r => {
@@ -147,10 +183,14 @@ export default function Delights() {
       {/* Department totals, before the filters below. A client can be praised on both the
           sheet and email, so the two source cards overlap and need not add up. */}
       <KPIRow cols={4}>
-        <KPICard tone="accent" label="Happy clients" value={String(rows.length)} sub="one row per client" />
-        <KPICard tone="green" label="From sheet" value={String(srcCounts.sheet)} sub="feedback sheet" />
-        <KPICard tone="blue" label="From email" value={String(srcCounts.email)} sub="email review" />
-        <KPICard tone={minePending.length ? 'amber' : 'default'} label="Waiting for you" value={String(minePending.length)} sub="manual feedback to approve" />
+        <KPICard tone="accent" label="Happy clients" value={String(rows.length)} sub="one row per client"
+          details={delightDetails(rows, 'Every praised client in this department')} />
+        <KPICard tone="green" label="From sheet" value={String(srcCounts.sheet)} sub="feedback sheet"
+          details={delightDetails(srcRows.sheet, 'Clients with praise on the feedback sheet')} />
+        <KPICard tone="blue" label="From email" value={String(srcCounts.email)} sub="email review"
+          details={delightDetails(srcRows.email, 'Clients with praise found in the email review')} />
+        <KPICard tone={minePending.length ? 'amber' : 'default'} label="Waiting for you" value={String(minePending.length)} sub="manual feedback to approve"
+          details={pendingDetails} />
       </KPIRow>
 
       {/* Waiting on somebody. Above the board on purpose: an approval queue nobody sees

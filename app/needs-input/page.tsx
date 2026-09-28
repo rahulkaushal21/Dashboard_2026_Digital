@@ -9,6 +9,7 @@ import { currentEmail, getStoredProfile } from '@/lib/access'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import KPICard, { type KPITone } from '@/components/KPICard'
 import InfoTip from '@/components/InfoTip'
+import { fmtDay, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, Panel } from '@/components/PageParts'
 
 // The work list. If this page is empty there is nothing for you to do, and that is the
@@ -74,6 +75,35 @@ export default function NeedsInput() {
   const unassigned = rows.filter(r => !r.owner_email).length
   const dealOf = (id: number) => deals.find(d => d.id === id)
 
+  // What sits behind each card: the queue rows it counts, split by the deal's GEO (the
+  // Web pods). The queue row has no GEO of its own, so it is read off the matching deal.
+  const geoById = useMemo(() => new Map(deals.map(d => [d.id, d.geo || ''])), [deals])
+  const needDetails = (list: NeedsInputRow[], subtitle: string, withReason: boolean): CardDetails<NeedsInputRow> => {
+    const sum = (rs: NeedsInputRow[]) => money(rs.reduce((t, x) => t + (x.est_value || 0), 0))
+    return {
+      subtitle, rows: list,
+      groupBy: x => geoById.get(Number(x.id)) || 'No GEO',
+      groupTotal: sum,
+      rowKey: x => x.id,
+      defaultSort: 'age',
+      columns: [
+        { key: 'client', label: 'Client / agency', value: x => x.company_name || '—', wide: true, sort: x => (x.company_name || '').toLowerCase() },
+        ...(withReason ? [{ key: 'reason', label: 'What it needs', value: (x: NeedsInputRow) => REASONS.find(r => r.key === x.reason)?.label || x.reason, sort: (x: NeedsInputRow) => x.reason }] : []),
+        { key: 'amount', label: 'Value', value: x => money(x.est_value), align: 'right', sort: x => x.est_value || 0, total: sum },
+        { key: 'date', label: 'Deal date', value: x => fmtDay(x.deal_date), sort: x => x.deal_date || '' },
+        { key: 'age', label: 'Days waiting', value: x => x.days_waiting, align: 'right', sort: x => x.days_waiting },
+        { key: 'owner', label: 'Owner', value: x => x.pm_owner || x.sales_person || 'unassigned', sort: x => (x.pm_owner || x.sales_person || '').toLowerCase() },
+      ],
+    }
+  }
+  const waitingDetails = useMemo(() => needDetails(rows, 'Every deal in the queue, all reasons, everyone', true),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, geoById])
+  const reasonDetails = useMemo(() => new Map(REASONS.map(r =>
+    [r.key, needDetails(rows.filter(x => x.reason === r.key), `${r.label} — all owners`, false)])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, geoById])
+
   return (
     <div>
       <Header title="Needs input" subtitle="The only two things the system cannot work out for itself — a value nobody has written down, and a decision nobody has made." />
@@ -82,9 +112,9 @@ export default function NeedsInput() {
       {/* One card per reason. Counts are across everyone, as they always were. The reason
           filter itself is the second row of pills below — the cards are display-only. */}
       <KPIRow cols={4}>
-        <KPICard tone="accent" label="Waiting" value={String(rows.length)} sub="all reasons" />
+        <KPICard tone="accent" label="Waiting" value={String(rows.length)} sub="all reasons" details={waitingDetails} />
         {REASONS.map(r => (
-          <KPICard key={r.key} tone={r.card} label={r.label} value={String(rows.filter(x => x.reason === r.key).length)} />
+          <KPICard key={r.key} tone={r.card} label={r.label} value={String(rows.filter(x => x.reason === r.key).length)} details={reasonDetails.get(r.key)} />
         ))}
       </KPIRow>
 

@@ -4,6 +4,7 @@ import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import InfoTip from '@/components/InfoTip'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { NotSplitNote } from '@/components/UnitToggle'
@@ -364,12 +365,12 @@ export default function ProjectLedger() {
   // quote, not money. The lines STAY in the table, because somebody still has to chase
   // the missing information; they are only kept out of the money total, and the total
   // says so rather than quietly being short.
-  const mAwaiting = pageRows.filter(r => /awaiting/i.test(r.delivery_status || ''))
-  const mCounted = pageRows.filter(r => !/awaiting/i.test(r.delivery_status || ''))
+  const mAwaiting = useMemo(() => pageRows.filter(r => /awaiting/i.test(r.delivery_status || '')), [pageRows])
+  const mCounted = useMemo(() => pageRows.filter(r => !/awaiting/i.test(r.delivery_status || '')), [pageRows])
   const pageTotal = mCounted.reduce((s, r) => s + (r.amount_usd || 0), 0)
   const pageAwaitingTotal = mAwaiting.reduce((s, r) => s + (r.amount_usd || 0), 0)
   const pageClients = new Set(mCounted.map(r => (r.company_name || '').toLowerCase())).size
-  const notInSheet = pageRows.filter(r => !r.in_sheet)
+  const notInSheet = useMemo(() => pageRows.filter(r => !r.in_sheet), [pageRows])
   // Tab counts: the month on screen, under every filter but the source split.
   const pageAllSources = pageMonth === RANGE ? preSource : preSource.filter(r => (rowMonth(r) || '—') === pageMonth)
   const sourceCounts = {
@@ -506,6 +507,39 @@ export default function ProjectLedger() {
       the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
     </>
   )
+  // ── What sits behind each headline card ─────────────────────────────────────────
+  // Each card hands the panel exactly the lines it counts — the month on screen, under
+  // the filters set — so the panel's total is the card's figure. Split by GEO, which on
+  // Web is the pods. No row click: the only dialog here is Edit, and most lines are not
+  // the viewer's to edit.
+  const usdSum = (rs: LedgerRow[]) => money(rs.reduce((s, r) => s + (r.amount_usd || 0), 0))
+  const ledgerDetails = (subtitle: string, rs: LedgerRow[], ageBy?: { label: string; of: (r: LedgerRow) => string | undefined }): CardDetails<LedgerRow> => {
+    const columns: DetailCol<LedgerRow>[] = [
+      { key: 'agency', label: 'Agency', wide: true, value: r => r.company_name || '—', sort: r => r.company_name || '' },
+      { key: 'project', label: 'Project', wide: true, value: r => r.project_name || '—', sort: r => r.project_name || '' },
+      { key: 'usd', label: 'USD', align: 'right', value: r => money(r.amount_usd || 0), sort: r => r.amount_usd || 0, total: usdSum },
+      { key: 'start', label: 'Start date', value: r => fmtDay(rowDate(r)), sort: r => rowDate(r) },
+      ageBy
+        ? { key: 'age', label: ageBy.label, align: 'right', value: r => daysSince(ageBy.of(r)) ?? '—', sort: r => daysSince(ageBy.of(r)) ?? -1 }
+        : { key: 'status', label: 'Status', value: r => r.delivery_status || '—', sort: r => r.delivery_status || '' },
+      { key: 'pm', label: 'PC/SME', value: r => r.pm_owner || '—', sort: r => r.pm_owner || '' },
+    ]
+    return {
+      subtitle, rows: rs, columns, defaultSort: 'usd',
+      groupBy: r => r.geo || 'No GEO', groupTotal: usdSum, rowKey: r => r.row_key,
+    }
+  }
+  const revenueDetails = useMemo(() => ledgerDetails(`Lines counted as revenue in ${periodLabel}, Awaiting Information left out`, mCounted),
+    [mCounted, periodLabel])
+  const linesDetails = useMemo(() => ledgerDetails(`Every line in ${periodLabel}, under the filters set`, pageRows),
+    [pageRows, periodLabel])
+  const notInSheetDetails = useMemo(() => ledgerDetails(`Confirmed in the dashboard in ${periodLabel}, not yet in the sheet`, notInSheet,
+    { label: 'Days pending', of: r => r.confirmed_at }),
+    [notInSheet, periodLabel])
+  const awaitingDetails = useMemo(() => ledgerDetails(`Awaiting Information in ${periodLabel} — a quote, not counted as revenue`, mAwaiting,
+    { label: 'Days waiting', of: r => (r.confirmed_at || r.start_date) }),
+    [mAwaiting, periodLabel])
+
   const secBtn = 'rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs transition-colors'
   const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
 
@@ -543,14 +577,18 @@ export default function ProjectLedger() {
       <KPIRow cols={4}>
         <KPICard tone="accent" label="Revenue" value={loading ? '…' : money(pageTotal)}
           sub={<>in {periodLabel}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</>}
+          details={loading ? undefined : revenueDetails}
           info="USD Conversion of every line in the month on screen, under the filters set. Awaiting Information lines are not revenue yet and are left out — they stay in the table so somebody chases them." />
         <KPICard label="Lines" value={loading ? '…' : pageRows.length.toLocaleString()}
-          sub={`${pageClients} client${pageClients === 1 ? '' : 's'}`} />
+          sub={`${pageClients} client${pageClients === 1 ? '' : 's'}`}
+          details={loading ? undefined : linesDetails} />
         <KPICard tone="amber" label="Not in the sheet yet" value={loading ? '…' : String(notInSheet.length)}
           sub="confirmed here, pending"
+          details={loading ? undefined : notInSheetDetails}
           info="Confirmed in the dashboard and not yet carried into the sheet by the hourly writer. The 'Confirmed here only' tab shows only these." />
         <KPICard tone="yellow" label="Awaiting information" value={loading ? '…' : money(pageAwaitingTotal)}
           sub={`${mAwaiting.length} line${mAwaiting.length === 1 ? '' : 's'} · not counted`}
+          details={loading ? undefined : awaitingDetails}
           info="The work is not agreed yet, so the figure is a quote, not money. Kept out of Revenue; still listed below." />
       </KPIRow>
 

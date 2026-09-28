@@ -5,6 +5,7 @@ import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote, NotSplitNote } from '@/components/UnitToggle'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtDay, fmtMonth, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import InfoTip from '@/components/InfoTip'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import { inUnit, unitOf } from '@/lib/business-unit'
@@ -660,7 +661,11 @@ export default function Clients() {
   const geos = uniq(clients.map(c => c.geo))
   const industries = uniq(clients.map(c => c.industry))
   const aiCount = clients.filter(c => c.ai_focus).length
-  const statCount = (b: string) => allClients.filter(c => statusOf(c) === b).length
+  // One pass over the clients per render, grouped by status: the cards, the Health
+  // dropdown and the card drill-downs all read it, so they can never disagree.
+  const byStatus = new Map<string, Client[]>()
+  for (const c of allClients) { const b = statusOf(c); (byStatus.get(b) || byStatus.set(b, []).get(b)!).push(c) }
+  const statCount = (b: string) => (byStatus.get(b) || []).length
   // recent-activity cutoff (last 14 days) for the quick "🔥 Active discussions" toggle
   const recentCutoff = useMemo(() => { const d = new Date(now); d.setDate(d.getDate() - 14); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }, [])
   // client count per industry (drives the clickable breakdown chart)
@@ -813,8 +818,69 @@ export default function Clients() {
     const byClient: Record<string, number> = {}
     rows.forEach(b => { const k = displayName(b.company_name) || '—'; byClient[k] = (byClient[k] || 0) + (Number(b.booking_amount) || 0) })
     const top = Object.entries(byClient).sort((a, b) => b[1] - a[1])[0]
-    return { total, count: rows.length, topName: top?.[0] || '', topShare: total > 0 && top ? Math.round((top[1] / total) * 100) : 0 }
+    return { rows, total, count: rows.length, topName: top?.[0] || '', topShare: total > 0 && top ? Math.round((top[1] / total) * 100) : 0 }
   }, [bookings, unit])
+
+  // ── Card drill-downs ──────────────────────────────────────────────────────────
+  // Each card opens the rows it counts. The health cards list the same clients their
+  // count is taken from (every client in this department, before the table filters),
+  // tabbed by GEO; a row opens the client drawer. The automation cards list the
+  // directory companies, demand hits and bookings behind each figure.
+  const ownerText = (c: Client) => { const os = ownersOf(c.company_name); return os.length ? os.join(', ') : (c.pc_sme || '—') }
+  const healthCols: DetailCol<Client>[] = [
+    { key: 'client', label: 'Client', value: c => displayName(c.company_name), wide: true, sort: c => displayName(c.company_name).toLowerCase() },
+    { key: 'owner', label: 'Owner', value: ownerText, wide: true, sort: ownerText },
+    { key: 'why', label: 'Why', value: c => riskOf(c).reasons.join('; ') || riskOf(c).recoveryNote || c.sentiment || '—', wide: true },
+    { key: 'activity', label: 'Last activity', value: c => fmtDay(lastActivity(c)), sort: c => lastActivity(c) },
+    { key: 'age', label: 'Days since', value: c => daysSince(lastActivity(c)) ?? '—', align: 'right', sort: c => daysSince(lastActivity(c)) ?? -1 },
+    { key: 'ltv', label: 'LTV', value: c => fmtUsd(Number(c.ltv_usd) || 0), align: 'right', sort: c => Number(c.ltv_usd) || 0,
+      total: rs => fmtUsd(rs.reduce((s, c) => s + (Number(c.ltv_usd) || 0), 0)) },
+  ]
+  const clientDetails = (list: Client[], subtitle: string, columns = healthCols, defaultSort = 'activity'): CardDetails<Client> => ({
+    subtitle, rows: list, columns, defaultSort,
+    groupBy: c => (c.geo || '').trim() || 'No GEO',
+    groupTotal: rs => fmtUsd(rs.reduce((s, c) => s + (Number(c.ltv_usd) || 0), 0)),
+    rowKey: c => c.company_name, onRowClick: c => setSelC(c),
+  })
+  const dipClients = useMemo(() => clients.filter(c => dipByClient.has(norm(c.company_name))), [clients, dipByClient])
+  const dipOf = (c: Client) => dipByClient.get(norm(c.company_name))
+  const dipCols: DetailCol<Client>[] = [
+    healthCols[0], healthCols[1],
+    { key: 'prior', label: 'Before', value: c => fmtUsd(dipOf(c)?.prior || 0), align: 'right', sort: c => dipOf(c)?.prior || 0,
+      total: rs => fmtUsd(rs.reduce((s, c) => s + (dipOf(c)?.prior || 0), 0)) },
+    { key: 'last', label: 'Last two months', value: c => fmtUsd(dipOf(c)?.last || 0), align: 'right', sort: c => dipOf(c)?.last || 0,
+      total: rs => fmtUsd(rs.reduce((s, c) => s + (dipOf(c)?.last || 0), 0)) },
+    { key: 'drop', label: 'Drop', value: c => dipOf(c)?.stopped ? 'Stopped' : `−${dipOf(c)?.dropPct ?? 0}%`, align: 'right', sort: c => dipOf(c)?.dropPct ?? 0 },
+    { key: 'lastBooking', label: 'Last booking', value: c => fmtMonth(c.last_booking_month), sort: c => c.last_booking_month || '' },
+  ]
+
+  // Automation cards. "Addressable" and "Warm" are the directory companies in the
+  // industries that have a playbook — the same rows autoRows counts.
+  const autoDir = useMemo(() => dir.filter(d => AUTOMATION_PLAYS[d.industry || 'Other / Unclassified']), [dir])
+  const autoWarm = useMemo(() => autoDir.filter(d => d.is_revenue_client), [autoDir])
+  const dirDetailCols: DetailCol<ClientDirectory>[] = [
+    { key: 'client', label: 'Company', value: d => d.company_name, wide: true, sort: d => d.company_name.toLowerCase() },
+    { key: 'industry', label: 'Industry', value: d => d.industry || 'Other / Unclassified', wide: true, sort: d => d.industry || '' },
+    { key: 'owner', label: 'Owner', value: d => d.am_name || '—', sort: d => d.am_name || '' },
+    { key: 'bu', label: 'BU', value: d => d.bu || '—', sort: d => d.bu || '' },
+    { key: 'booked', label: 'Buying from us', value: d => d.is_revenue_client ? 'Yes' : 'No', sort: d => d.is_revenue_client ? 1 : 0 },
+  ]
+  const dirDetails = (list: ClientDirectory[], subtitle: string, columns = dirDetailCols, groupBy?: (d: ClientDirectory) => string): CardDetails<ClientDirectory> => ({
+    subtitle, rows: list, columns, defaultSort: 'client', rowKey: d => d.id,
+    groupBy: groupBy || (d => (d.geo || '').trim() || 'No GEO'),
+  })
+  const dirAiRows = useMemo(() => dir.filter(d => d.ai_stance === 'native' || d.ai_stance === 'adjacent'), [dir])
+  // "Demand already heard" sums each industry's demand list, so the rows are those
+  // entries, carrying the industry they were matched to.
+  const demandRows = useMemo(() => autoRows.flatMap(r => r.demand.map(d => ({ ...d, industry: r.name }))), [autoRows])
+  const aiBookCols: DetailCol<BookingRow>[] = [
+    { key: 'client', label: 'Client', value: b => displayName(b.company_name) || '—', wide: true, sort: b => displayName(b.company_name).toLowerCase() },
+    { key: 'amount', label: 'Amount', value: b => fmtUsd(Number(b.booking_amount) || 0), align: 'right', sort: b => Number(b.booking_amount) || 0,
+      total: rs => fmtUsd(rs.reduce((s, b) => s + (Number(b.booking_amount) || 0), 0)) },
+    { key: 'month', label: 'Month', value: b => fmtMonth(b.booking_month), sort: b => b.booking_month || '' },
+    { key: 'service', label: 'Service', value: b => b.service_name || '—', wide: true },
+    { key: 'pm', label: 'PM', value: b => b.sme || '—', sort: b => b.sme || '' },
+  ]
 
   const rows = useMemo(() => {
     // date-range filter runs on each client's last-activity date; a client with no
@@ -941,14 +1007,18 @@ export default function Clients() {
         <KPICard tone="accent" label="Revenue clients" value={clients.length.toLocaleString()}
           sub={`${dir.length.toLocaleString()} in the full directory`}
           info="The client list comes only from booking data. The full directory is every company on the Client-Backup sheet, booked or not — a directory row that matches a booked client is flagged, never counted twice."
-          />
+          details={clientDetails(clients, 'Every booked client in this department, by GEO', healthCols.filter(c => c.key !== 'why'), 'ltv')} />
         <KPICard tone="red" label="At risk" value={statCount('At risk').toLocaleString()} sub="live, worked out here"
-          info=">2 escalations in a month or a major escalation in the last 2 months. A client whose latest sentiment event is positive feedback after their last escalation counts as recovered instead." />
+          info=">2 escalations in a month or a major escalation in the last 2 months. A client whose latest sentiment event is positive feedback after their last escalation counts as recovered instead."
+          details={clientDetails(byStatus.get('At risk') || [], 'Clients worked out as At risk, with the reasons')} />
         <KPICard tone="amber" label="Watch" value={statCount('Watch').toLocaleString()} sub="live, worked out here"
-          info="Email-sensed frustration, an older escalation, a contract winding down (no recent booking), an escalation marked Unresolved, or a revenue dip." />
-        <KPICard tone="green" label="Positive" value={statCount('Positive').toLocaleString()} sub="recovered or praised" />
+          info="Email-sensed frustration, an older escalation, a contract winding down (no recent booking), an escalation marked Unresolved, or a revenue dip."
+          details={clientDetails(byStatus.get('Watch') || [], 'Clients worked out as Watch, with the reasons')} />
+        <KPICard tone="green" label="Positive" value={statCount('Positive').toLocaleString()} sub="recovered or praised"
+          details={clientDetails(byStatus.get('Positive') || [], 'Clients who recovered or were praised')} />
         <KPICard tone="yellow" label="Revenue dip" value={dipCount.toLocaleString()} sub={dipWindow}
-          info={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} />
+          info={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`}
+          details={clientDetails(dipClients, `Billing across ${dipWindow}`, dipCols, 'prior')} />
       </KPIRow>
 
       {/* Opens CLOSED: a reference chart, not the reason anybody comes to this page. */}
@@ -1197,17 +1267,40 @@ export default function Clients() {
             magnitude. The last card is what the service line has actually billed. */}
         <KPIRow cols={aiBook.count > 0 ? 5 : 4}>
           <KPICard tone="accent" label="Addressable" value={autoTotals.companies.toLocaleString()} sub="companies in the directory"
-            info="Companies in the directory, all with an industry playbook below." />
+            info="Companies in the directory, all with an industry playbook below."
+            details={dirDetails(autoDir, 'Directory companies in an industry with a playbook')} />
           <KPICard tone="yellow" label="Warm" value={autoTotals.booked.toLocaleString()} sub="already buying from us"
-            info="Already buying from us — we hold the relationship and built the site." />
+            info="Already buying from us — we hold the relationship and built the site."
+            details={dirDetails(autoWarm, 'Of those, the ones already buying from us')} />
           <KPICard tone="green" label="Demand already heard" value={autoTotals.demand.toLocaleString()} sub="asked for this kind of work"
-            info="Have asked us for automation, integration or dashboard work in a quote or a conversation." />
+            info="Have asked us for automation, integration or dashboard work in a quote or a conversation."
+            details={{
+              subtitle: 'Companies whose quotes or conversations asked for automation-shaped work, with the line that matched',
+              rows: demandRows, rowKey: d => d.company, defaultSort: 'hits',
+              groupBy: d => d.industry,
+              columns: [
+                { key: 'client', label: 'Company', value: d => d.company, wide: true, sort: d => d.company.toLowerCase() },
+                { key: 'industry', label: 'Industry', value: d => d.industry, wide: true, sort: d => d.industry },
+                { key: 'hits', label: 'Mentions', value: d => d.evidence.length, align: 'right', sort: d => d.evidence.length,
+                  total: rs => rs.reduce((s, d) => s + d.evidence.length, 0) },
+                { key: 'line', label: 'What they asked', value: d => d.evidence[0] || '—', wide: true },
+              ],
+            }} />
           <KPICard tone="blue" label="AI-native / AI-positioned" value={`${dirAi.native} + ${dirAi.adjacent}`} sub={`${dirAi.unknown} unknown, not no`}
-            info={`Across the whole directory, read from each company's own site text — ${dirAi.unknown} more have no site text and are unknown, not no.`} />
+            info={`Across the whole directory, read from each company's own site text — ${dirAi.unknown} more have no site text and are unknown, not no.`}
+            details={dirDetails(dirAiRows, 'Directory companies whose own site reads AI-native or AI-positioned',
+              [dirDetailCols[0], dirDetailCols[1], { key: 'geo', label: 'GEO', value: d => d.geo || '—', sort: d => d.geo || '' }, dirDetailCols[2], dirDetailCols[4]],
+              d => d.ai_stance === 'native' ? 'AI-native' : 'AI-positioned')} />
           {aiBook.count > 0 && (
             <KPICard label="AI & Automation billed" value={fmtUsd(aiBook.total)}
               sub={`${aiBook.count} booking${aiBook.count === 1 ? '' : 's'}${aiBook.topName ? ` · ${aiBook.topShare}% one client` : ''}`}
-              info={aiBook.topName ? `${aiBook.topShare}% of it is ${aiBook.topName}.` : undefined} />
+              info={aiBook.topName ? `${aiBook.topShare}% of it is ${aiBook.topName}.` : undefined}
+              details={{
+                subtitle: 'Every booking under the AI & Automation service line',
+                rows: aiBook.rows, columns: aiBookCols, defaultSort: 'month', rowKey: b => b.id,
+                groupBy: b => (b.geo || '').trim() || 'No GEO',
+                groupTotal: rs => fmtUsd(rs.reduce((s, b) => s + (Number(b.booking_amount) || 0), 0)),
+              }} />
           )}
         </KPIRow>
 

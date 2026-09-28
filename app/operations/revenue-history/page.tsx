@@ -5,6 +5,7 @@ import { RefreshCw } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtMonth, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import InfoTip from '@/components/InfoTip'
 import { KPIRow, Panel, SectionTitle, Segments } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
@@ -284,6 +285,77 @@ export default function RevenueHistory() {
     }
   }, [all, selFy, d.fys])
 
+  // ── What sits behind each headline card ─────────────────────────────────────────
+  // Every card reads `all` — the department-filtered rows — so each panel adds up to its
+  // card. Total billed and Rows list the billing lines themselves (by GEO, and by
+  // spreadsheet vs live, which is what the Rows card's sub-line splits); Clients rolls
+  // them up per agency under exactly the name the count uses; Period lists the months.
+  const cardDetails = useMemo(() => {
+    const usd = (rs: { amount: number }[]) => fmtUsd(rs.reduce((s, r) => s + r.amount, 0))
+    const eraName = (e: Row['era']) => e === 'history' ? 'Spreadsheet' : 'Live table'
+    const lineCols: DetailCol<Row>[] = [
+      { key: 'client', label: 'Client / agency', wide: true, value: r => r.client, sort: r => r.client },
+      { key: 'amount', label: 'Amount', align: 'right', value: r => fmtUsd(r.amount), sort: r => r.amount, total: usd },
+      { key: 'month', label: 'Month', value: r => fmtMonth(r.month), sort: r => r.month },
+      { key: 'model', label: 'Engagement', value: r => r.model, sort: r => r.model },
+      { key: 'dept', label: 'Service', value: r => r.dept, sort: r => r.dept },
+      { key: 'era', label: 'Source', value: r => eraName(r.era), sort: r => r.era },
+    ]
+    const total: CardDetails<Row> = {
+      subtitle: `Every billing line, ${d.months.length ? `${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}` : ''}`,
+      rows: all, columns: lineCols, defaultSort: 'amount',
+      groupBy: r => r.geo || 'Unspecified', groupTotal: usd,
+    }
+    const lines: CardDetails<Row> = {
+      subtitle: 'Every billing line, split by where it was read from',
+      rows: all, columns: lineCols, defaultSort: 'month',
+      groupBy: r => eraName(r.era), groupTotal: usd,
+    }
+
+    type Client = { name: string; amount: number; lines: number; first: string; last: string; geo: string }
+    const byClient = new Map<string, Client>()
+    for (const r of all) {
+      const c = byClient.get(r.client) || { name: r.client, amount: 0, lines: 0, first: r.month, last: r.month, geo: r.geo }
+      c.amount += r.amount; c.lines++
+      if (r.month < c.first) c.first = r.month
+      if (r.month > c.last) { c.last = r.month; c.geo = r.geo }
+      byClient.set(r.client, c)
+    }
+    const clients: CardDetails<Client> = {
+      subtitle: 'Each agency, everything billed to it over the period',
+      rows: [...byClient.values()], defaultSort: 'amount', rowKey: c => c.name,
+      columns: [
+        { key: 'client', label: 'Client / agency', wide: true, value: c => c.name, sort: c => c.name },
+        { key: 'amount', label: 'Billed', align: 'right', value: c => fmtUsd(c.amount), sort: c => c.amount, total: usd },
+        { key: 'lines', label: 'Lines', align: 'right', value: c => c.lines, sort: c => c.lines },
+        { key: 'first', label: 'First month', value: c => fmtMonth(c.first), sort: c => c.first },
+        { key: 'last', label: 'Last month', value: c => fmtMonth(c.last), sort: c => c.last },
+        { key: 'since', label: 'Days since', align: 'right', value: c => daysSince(`${c.last}-01`) ?? '—', sort: c => daysSince(`${c.last}-01`) ?? -1 },
+      ],
+    }
+
+    // Summed here unrounded, rather than read off the chart series (rounded per month),
+    // so the footer is the Total billed figure to the dollar.
+    type Mon = { key: string; fy: number; era: Row['era']; amount: number }
+    const byMonth = new Map<string, Mon>()
+    for (const r of all) {
+      const m = byMonth.get(r.month) || { key: r.month, fy: fyOf(r.month), era: r.era, amount: 0 }
+      m.amount += r.amount; m.era = r.era
+      byMonth.set(r.month, m)
+    }
+    const period: CardDetails<Mon> = {
+      subtitle: 'Billed per month, by financial year',
+      rows: [...byMonth.values()], defaultSort: 'month', rowKey: m => m.key,
+      groupBy: m => fyLabel(m.fy), groupTotal: usd,
+      columns: [
+        { key: 'month', label: 'Month', value: m => fmtMonth(m.key), sort: m => m.key },
+        { key: 'amount', label: 'Billed', align: 'right', value: m => fmtUsd(m.amount), sort: m => m.amount, total: usd },
+        { key: 'era', label: 'Source', value: m => eraName(m.era), sort: m => m.era },
+      ],
+    }
+    return { total, lines, clients, period }
+  }, [all, d.months])
+
   const src = sources[0]
   const histN = all.filter(r => r.era === 'history').length
   const fyChoices = ya.years.filter(y => ya.years.includes(y - 1))
@@ -309,10 +381,10 @@ export default function RevenueHistory() {
       ) : (
         <div className="space-y-5">
           <KPIRow cols={4}>
-            <KPICard tone="accent" label="Total billed" value={fmtUsd(d.total)} sub={`${d.months.length} months`} />
-            <KPICard label="Period" value={`${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}`} sub="by confirmation month" />
-            <KPICard label="Clients" value={String(d.clientCount)} sub="distinct agencies" />
-            <KPICard label="Rows" value={all.length.toLocaleString()} sub={`${histN.toLocaleString()} sheet · ${(all.length - histN).toLocaleString()} live`} />
+            <KPICard tone="accent" label="Total billed" value={fmtUsd(d.total)} sub={`${d.months.length} months`} details={cardDetails.total} />
+            <KPICard label="Period" value={`${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}`} sub="by confirmation month" details={cardDetails.period} />
+            <KPICard label="Clients" value={String(d.clientCount)} sub="distinct agencies" details={cardDetails.clients} />
+            <KPICard label="Rows" value={all.length.toLocaleString()} sub={`${histN.toLocaleString()} sheet · ${(all.length - histN).toLocaleString()} live`} details={cardDetails.lines} />
           </KPIRow>
 
           <Panel title="Monthly billing"

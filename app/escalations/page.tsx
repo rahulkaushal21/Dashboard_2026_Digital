@@ -11,6 +11,7 @@ import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import { KPIRow, FilterBar, Panel } from '@/components/PageParts'
 import { getEscalations, getEscalationDepts, type Escalation } from '@/lib/supabase'
 
@@ -130,6 +131,50 @@ export default function Escalations() {
     return sortAsc ? ' ↑' : ' ↓'
   }
   
+  // ── Card drill-downs ──────────────────────────────────────────────────────────
+  // Each card opens the rows it counts: the escalations themselves for the first two,
+  // and one row per company / per type (built from the same filtered list) for the
+  // distinct counts, so the panel's row count is the card's figure.
+  const escDate = (x: Escalation) => x.tracking_date || x.month || ''
+  const major = useMemo(() => e.filter(isMajor), [e])
+  const escCols: DetailCol<Escalation>[] = [
+    { key: 'company', label: 'Company', value: x => x.company_name || '—', wide: true, sort: x => (x.company_name || '').toLowerCase() },
+    { key: 'type', label: 'Type', value: x => x.escalation_type || '—', sort: x => (x.escalation_type || '').toLowerCase() },
+    { key: 'impact', label: 'Impact', value: x => x.business_impact || '—', wide: true },
+    { key: 'date', label: 'Date', value: x => fmtDay(escDate(x)), sort: escDate },
+    { key: 'age', label: 'Days since', value: x => daysSince(escDate(x)) ?? '—', align: 'right', sort: x => daysSince(escDate(x)) ?? -1 },
+  ]
+  const escDetails = (rows: Escalation[], subtitle: string): CardDetails<Escalation> => ({
+    subtitle, rows, columns: escCols, defaultSort: 'date',
+    groupBy: x => (x.geo || '').trim() || 'No GEO',
+    rowKey: x => x.id, onRowClick: x => setSel(x),
+  })
+  type Agg = { key: string; n: number; major: number; last: string; geos: string[] }
+  const aggBy = (rows: Escalation[], k: (x: Escalation) => string | undefined): Agg[] => {
+    const m = new Map<string, Agg>()
+    for (const x of rows) {
+      const key = (k(x) || '').trim(); if (!key) continue
+      const a = m.get(key) || m.set(key, { key, n: 0, major: 0, last: '', geos: [] }).get(key)!
+      a.n++; if (isMajor(x)) a.major++
+      if (escDate(x) > a.last) a.last = escDate(x)
+      const g = (x.geo || '').trim(); if (g && !a.geos.includes(g)) a.geos.push(g)
+    }
+    return Array.from(m.values())
+  }
+  const byCompany = useMemo(() => aggBy(e, x => x.company_name), [e]) // eslint-disable-line react-hooks/exhaustive-deps
+  const byType = useMemo(() => aggBy(e, x => x.escalation_type), [e]) // eslint-disable-line react-hooks/exhaustive-deps
+  const aggDetails = (rows: Agg[], label: string, subtitle: string): CardDetails<Agg> => ({
+    subtitle, rows, rowKey: a => a.key, defaultSort: 'n',
+    columns: [
+      { key: 'name', label, value: a => a.key, wide: true, sort: a => a.key.toLowerCase() },
+      { key: 'n', label: 'Escalations', value: a => a.n, align: 'right', sort: a => a.n, total: rs => rs.reduce((s, a) => s + a.n, 0) },
+      { key: 'major', label: 'Major', value: a => a.major, align: 'right', sort: a => a.major, total: rs => rs.reduce((s, a) => s + a.major, 0) },
+      { key: 'last', label: 'Latest', value: a => fmtDay(a.last), sort: a => a.last },
+      { key: 'age', label: 'Days since', value: a => daysSince(a.last) ?? '—', align: 'right', sort: a => daysSince(a.last) ?? -1 },
+      { key: 'geo', label: 'GEO', value: a => a.geos.join(', ') || '—', wide: true },
+    ],
+  })
+
   const reset = () => { setSearch(''); setFType([]); setFGeo([]); setFrom(''); setTo('') }
 
   return (
@@ -139,10 +184,14 @@ export default function Escalations() {
 
       {/* The cards read the filtered list, so they always describe the table below. */}
       <KPIRow cols={4}>
-        <KPICard tone="accent" label="Major process gaps" value={String(e.length)} />
-        <KPICard tone="red" label="Major impact" value={String(e.filter(isMajor).length)} />
-        <KPICard label="Companies" value={String(uniq(e.map(x => x.company_name)).length)} />
-        <KPICard label="Types" value={String(uniq(e.map(x => x.escalation_type)).length)} />
+        <KPICard tone="accent" label="Major process gaps" value={String(e.length)}
+          details={escDetails(e, 'Every escalation matching the filters, by GEO')} />
+        <KPICard tone="red" label="Major impact" value={String(major.length)}
+          details={escDetails(major, 'Escalations whose impact or type says major')} />
+        <KPICard label="Companies" value={String(uniq(e.map(x => x.company_name)).length)}
+          details={aggDetails(byCompany, 'Company', 'One row per company in the filtered list')} />
+        <KPICard label="Types" value={String(uniq(e.map(x => x.escalation_type)).length)}
+          details={aggDetails(byType, 'Type', 'One row per escalation type in the filtered list')} />
       </KPIRow>
 
       <FilterBar right={

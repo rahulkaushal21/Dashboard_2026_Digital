@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
+import type { CardDetails, DetailCol } from '@/components/CardDetail'
 import InfoTip from '@/components/InfoTip'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { NotSplitNote } from '@/components/UnitToggle'
@@ -156,6 +157,38 @@ export default function BusinessNumbers() {
 
   const activeRange = ranges.find(r => r.from === from && r.to === to)?.key || ''
 
+  // ── What sits behind each headline card ─────────────────────────────────────────
+  // The figures arrive from the database already summed per service, so the rows behind
+  // a card are the services themselves — the same rows the "By service" total adds up,
+  // so the panel's footer is the card's figure. Per-deal rows are not fetched for these
+  // windows, and the 25 biggest open deals below do not add up to the pipeline, so they
+  // are not offered as its breakdown.
+  const cardDetails = useMemo(() => {
+    const svc: DetailCol<BizRow> = { key: 'svc', label: 'Service', value: r => r.bucket, sort: r => r.bucket, wide: true }
+    const pair = (key: string, label: string, get: (r: BizRow) => number, before: (r: BizRow) => number, show: (n: number) => string): DetailCol<BizRow>[] => [
+      { key, label, align: 'right', value: r => show(get(r)), sort: get, total: rs => show(rs.reduce((a, r) => a + get(r), 0)) },
+      { key: `${key}_prev`, label: `Last (${prevLabel})`, align: 'right', value: r => show(before(r)), sort: before, total: rs => show(rs.reduce((a, r) => a + before(r), 0)) },
+      { key: `${key}_delta`, label: 'Change', align: 'right', value: r => <Delta now={get(r)} before={before(r)} />, sort: r => pct(get(r), before(r)) ?? -1e9 },
+    ]
+    const base = { rows: shown, rowKey: (r: BizRow) => r.bucket }
+    const out: Record<string, CardDetails<BizRow>> = {
+      'Revenue': { ...base, subtitle: `Revenue by service, ${thisLabel} against ${prevLabel}`, defaultSort: 'rev',
+        columns: [svc, ...pair('rev', 'Revenue', r => r.this_revenue, r => r.prev_revenue, fmtUsd),
+          { key: 'clients', label: 'Clients', align: 'right', value: r => r.this_clients, sort: r => r.this_clients }] },
+      'Projects started': { ...base, subtitle: `Projects started by service, ${thisLabel} against ${prevLabel}`, defaultSort: 'deals',
+        columns: [svc, ...pair('deals', 'Projects', r => r.this_deals, r => r.prev_deals, n => String(n)),
+          { key: 'rev', label: 'Revenue', align: 'right', value: r => fmtUsd(r.this_revenue), sort: r => r.this_revenue, total: rs => fmtUsd(rs.reduce((a, r) => a + r.this_revenue, 0)) }] },
+      'Quotes raised': { ...base, subtitle: `Quotes raised by service, ${thisLabel} against ${prevLabel}`, defaultSort: 'q',
+        columns: [svc, ...pair('q', 'Quotes', r => r.this_quotes, r => r.prev_quotes, n => String(n)),
+          { key: 'qusd', label: 'Quoted', align: 'right', value: r => fmtUsd(r.this_quotes_usd), sort: r => r.this_quotes_usd, total: rs => fmtUsd(rs.reduce((a, r) => a + r.this_quotes_usd, 0)) }] },
+      'Open pipeline': { ...base, subtitle: 'Quotes still in play by service, all time', defaultSort: 'open',
+        columns: [svc,
+          { key: 'open', label: 'Open pipeline', align: 'right', value: r => fmtUsd(r.open_quotes_usd), sort: r => r.open_quotes_usd, total: rs => fmtUsd(rs.reduce((a, r) => a + r.open_quotes_usd, 0)) },
+          { key: 'n', label: 'Quotes', align: 'right', value: r => r.open_quotes, sort: r => r.open_quotes, total: rs => String(rs.reduce((a, r) => a + r.open_quotes, 0)) }] },
+    }
+    return out
+  }, [shown, thisLabel, prevLabel])
+
   const td = 'px-3 py-3 whitespace-nowrap'
   const th = 'px-3 py-2 font-medium whitespace-nowrap'
   const dateBox = 'bg-mav-dark border border-mav-line rounded-md px-2 py-1.5 text-sm text-mav-fg [color-scheme:dark]'
@@ -217,6 +250,7 @@ export default function BusinessNumbers() {
           { label: 'Open pipeline', value: fmtUsd(t.open_quotes_usd), now: 0, before: 0, sub: `${t.open_quotes} quotes still in play, all time`, tone: 'amber' as const },
         ].map(c => (
           <KPICard key={c.label} tone={c.tone} label={c.label} value={dash ?? c.value}
+            details={loading ? undefined : cardDetails[c.label]}
             sub={loading ? undefined : <>
               {(c.now || c.before) ? <><Delta now={c.now} before={c.before} /><br /></> : null}
               <span className="text-[11px]">{c.sub}</span>

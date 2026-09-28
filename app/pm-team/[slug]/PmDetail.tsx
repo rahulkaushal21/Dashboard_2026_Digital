@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
+import { fmtDay, fmtMonth, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, Panel } from '@/components/PageParts'
 import { UnplacedNote } from '@/components/UnitToggle'
 import { useAuth } from '@/components/AuthProvider'
@@ -93,6 +94,8 @@ export default function PmDetail({ slug }: { slug: string }) {
         key: `q${x.id}`, date: (x.added_date || '').slice(0, 10), confirmed: quoteConfirmDate(x),
         carried: !inThisQ(x.added_date), client: x.agency,
         project: x.subject_project, value: x.usd_value, status: x.status, source: 'sheet' as const,
+        // How the row scores for THIS quarter, the way quarterOf tallies it.
+        result: inThisQ(quoteConfirmDate(x)) ? 'Confirmed' : (x.status || '').toLowerCase().includes('cancel') ? 'Cancelled' : 'Unconverted',
       })),
     ...(s?.emailNewDevOpps || [])
       .filter(o => inThisQ(oppDate(o)) || inThisQ(oppConfirmDate(o)))
@@ -102,10 +105,62 @@ export default function PmDetail({ slug }: { slug: string }) {
         project: o.source_subject, value: o.est_value,
         status: isWon(o) ? 'Confirmed' : isLost(o) ? 'Cancelled' : (o.status || 'Open'),
         source: 'email' as const,
+        result: inThisQ(oppConfirmDate(o)) ? 'Confirmed' : isLost(o) ? 'Cancelled' : 'Unconverted',
       })),
   ].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
   const fromEmail = pending.rows.filter(o => o.origin === 'email').length
+
+  // ---- What sits behind the cards -----------------------------------------------
+  // Growth: the booking lines that make the quarter's total (byMonth is built from
+  // exactly these lines). Q2C: the cohort above. Feedback: sheet rows plus praise found
+  // in email, both dated inside the quarter the way quarterOf counts them.
+  const qLines = (s?.bookings || []).filter(b => inThisQ(b.booking_month))
+  const sumLines = (rs: typeof qLines) => money(rs.reduce((t, b) => t + (b.booking_amount || 0), 0))
+  const growthDetails: CardDetails<(typeof qLines)[number]> | undefined = q ? {
+    subtitle: `${money(q.booked)} booked in ${qLabel(fq)} over ${q.monthsElapsed} month(s) = ${money(q.avg)}/mo, against a ${money(base)} base`,
+    rows: qLines, rowKey: b => b.id, groupBy: b => b.geo || 'No GEO', groupTotal: sumLines, defaultSort: 'amt',
+    columns: [
+      { key: 'client', label: 'Client / agency', value: b => <ClientLink name={b.company_name} />, wide: true, sort: b => b.company_name || '' },
+      { key: 'amt', label: 'Amount', value: b => money(b.booking_amount || 0), align: 'right', sort: b => b.booking_amount || 0, total: sumLines },
+      { key: 'month', label: 'Month', value: b => fmtMonth(b.booking_month), sort: b => b.booking_month || '' },
+      { key: 'dept', label: 'Department', value: b => b.service_name || '—', sort: b => b.service_name || '' },
+      { key: 'tech', label: 'Technology', value: b => b.technology || '—' },
+    ],
+  } : undefined
+  type Q2C = (typeof q2cRows)[number]
+  const sumQ2c = (rs: Q2C[]) => money(rs.reduce((t, x) => t + (x.value || 0), 0))
+  const q2cDetails: CardDetails<Q2C> = {
+    subtitle: `New-development quotes raised in ${qLabel(fq)}, or raised earlier and confirmed in it — sheet and email`,
+    rows: q2cRows, rowKey: x => x.key, groupBy: x => x.result, groupTotal: sumQ2c, defaultSort: 'date',
+    columns: [
+      { key: 'client', label: 'Client / agency', value: x => <ClientLink name={x.client} />, wide: true, sort: x => x.client || '' },
+      { key: 'value', label: 'Value', value: x => (x.value ? money(x.value) : '—'), align: 'right', sort: x => x.value || 0, total: sumQ2c },
+      { key: 'date', label: 'Raised', value: x => fmtDay(x.date), sort: x => x.date || '' },
+      { key: 'conf', label: 'Confirmed', value: x => (x.confirmed ? fmtDay(x.confirmed) : '—'), sort: x => x.confirmed || '' },
+      { key: 'src', label: 'Found in', value: x => <SourcePill s={x.source} />, sort: x => x.source },
+      { key: 'status', label: 'Status', value: x => <StatusPill s={x.status} />, sort: x => x.status || '' },
+    ],
+  }
+  type Fb = { key: string; client?: string; date: string; source: 'sheet' | 'email'; kind?: string; text?: string }
+  const fbRows: Fb[] = [
+    ...(s?.feedback || []).filter(x => inThisQ(x.month_year || x.added_date)).map(x => ({
+      key: `f${x.id}`, client: x.agency, date: x.added_date || x.month_year || '', source: 'sheet' as const,
+      kind: x.feedback_type || x.nature, text: x.comments })),
+    ...(s?.praise || []).filter(x => inThisQ(x.source_date)).map(x => ({
+      key: `p${x.id}`, client: x.company_name, date: x.source_date || '', source: 'email' as const,
+      kind: x.signal_type, text: x.summary || x.source_subject })),
+  ]
+  const fbDetails: CardDetails<Fb> = {
+    subtitle: `Client feedback credited to ${pm.name} in ${qLabel(fq)} — the feedback sheet and praise found in email`,
+    rows: fbRows, rowKey: x => x.key, groupBy: x => (x.source === 'sheet' ? 'Feedback sheet' : 'Email'), defaultSort: 'date',
+    columns: [
+      { key: 'client', label: 'Client / agency', value: x => <ClientLink name={x.client} />, sort: x => x.client || '' },
+      { key: 'date', label: 'Date', value: x => fmtDay(x.date), sort: x => x.date },
+      { key: 'kind', label: 'Type', value: x => x.kind || '—', sort: x => x.kind || '' },
+      { key: 'text', label: 'Comment', value: x => x.text || '—', wide: true },
+    ],
+  }
   const inProgress = fq.q === CUR_FQ.q
 
   return (
@@ -131,9 +186,9 @@ export default function PmDetail({ slug }: { slug: string }) {
           sub={inProgress ? `in progress — ${q?.monthsElapsed ?? 0} of 3 months` : 'weighted attainment'}
           info="Each measure scored on how far it got towards full marks, then weighted." />
         <KPICard label="Growth" tone={growth == null ? 'default' : growth >= 0 ? 'green' : 'red'}
-          value={growth == null ? '—' : `${growth.toFixed(1)}%`} sub={`${money(q?.avg || 0)}/mo vs ${money(base)} base`} />
-        <KPICard label="Q2C" value={q?.q2c == null ? '—' : `${q.q2c.toFixed(0)}%`} sub={`${q?.won ?? 0} of ${q?.shared ?? 0} confirmed`} />
-        <KPICard label="Feedback" value={String(q?.feedback ?? 0)} sub={`${q?.feedbackFromSheet ?? 0} sheet · ${q?.feedbackFromEmail ?? 0} email`} />
+          value={growth == null ? '—' : `${growth.toFixed(1)}%`} sub={`${money(q?.avg || 0)}/mo vs ${money(base)} base`} details={growthDetails} />
+        <KPICard label="Q2C" value={q?.q2c == null ? '—' : `${q.q2c.toFixed(0)}%`} sub={`${q?.won ?? 0} of ${q?.shared ?? 0} confirmed`} details={q2cDetails} />
+        <KPICard label="Feedback" value={String(q?.feedback ?? 0)} sub={`${q?.feedbackFromSheet ?? 0} sheet · ${q?.feedbackFromEmail ?? 0} email`} details={fbDetails} />
         <KPICard label="Base / month" tone={raised ? 'yellow' : 'default'} value={money(base)} sub={raised ? `raised from ${money(pm.lastYearAvg)}` : 'last-year average'}
           info="The last-year monthly average is one hand-typed figure per PM, so it is not split by department." />
       </KPIRow>

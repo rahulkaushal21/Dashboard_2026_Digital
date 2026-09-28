@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard, { type KPITone } from '@/components/KPICard'
+import { daysSince, fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import { KPIRow, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
@@ -255,7 +256,7 @@ export default function Reports() {
     const actual = withBoth.reduce((s, r) => s + (r.actual_hrs || 0), 0)
     const rev = withBoth.reduce((s, r) => s + (r.amount_usd || 0), 0)
     const over = withBoth.filter(r => (r.actual_hrs || 0) > (r.internal_hrs || 0)).length
-    return { n: withBoth.length, planned, actual, rev, over, coverage: shown.length ? withBoth.length / shown.length : 0 }
+    return { rows: withBoth, n: withBoth.length, planned, actual, rev, over, coverage: shown.length ? withBoth.length / shown.length : 0 }
   }, [shown])
 
   // Concentration: how much of this rests on the largest few clients. A CEO risk figure,
@@ -284,6 +285,7 @@ export default function Reports() {
       return true
     })
     return {
+      rows: open,
       usd: open.reduce((s, o) => s + (o.est_value || 0), 0),
       n: open.length,
       unpriced: open.filter(o => !o.est_value).length,
@@ -329,6 +331,125 @@ export default function Reports() {
   const monthValue = months.includes((from || '').slice(0, 7)) && from.slice(8) === '01'
     && to === ymd(monthEnd(new Date(from + 'T00:00:00'))) ? from.slice(0, 7) : ''
 
+  // ── Card drill-downs ─────────────────────────────────────────────────────────
+  // Every card opens the ledger lines (or deals) its figure is made of, under the same
+  // filters, so the panel's total is the card. Lines carry a GEO, so they tab by it —
+  // for Web that is the AU / UK / US pods — except where the card is itself a split
+  // (Dedicated, New business, a department box), which tabs by that split instead.
+  const sumLines = (rs: LedgerRow[]) => fmtUsd(rs.reduce((s, r) => s + (r.amount_usd || 0), 0))
+  const lineCols: DetailCol<LedgerRow>[] = [
+    { key: 'agency', label: 'Agency', value: r => r.company_name || '—', wide: true, sort: r => r.company_name || '' },
+    { key: 'project', label: 'Project', value: r => r.project_name || '—', wide: true, sort: r => r.project_name || '' },
+    { key: 'amount', label: 'Amount', value: r => fmtUsd(r.amount_usd || 0), align: 'right', sort: r => r.amount_usd || 0, total: sumLines },
+    { key: 'date', label: 'Start date', value: r => fmtDay(rowDate(r)), sort: r => rowDate(r) },
+    { key: 'dept', label: 'Service', value: r => deptOf(r.service_dept), sort: r => deptOf(r.service_dept) },
+    { key: 'pm', label: 'PM', value: r => r.pm_owner || '—', sort: r => r.pm_owner || '' },
+  ]
+  const engCol: DetailCol<LedgerRow> = { key: 'eng', label: 'Engagement', value: r => r.engagement_model || engOf(r), sort: r => r.engagement_model || '' }
+  const typeCol: DetailCol<LedgerRow> = { key: 'type', label: 'Business type', value: r => r.business_type || '—', sort: r => r.business_type || '' }
+  // Swaps the Service column for the one the card is about, keeping it at six columns.
+  const withCol = (c: DetailCol<LedgerRow>) => lineCols.map(x => x.key === 'dept' ? c : x)
+  const inView = rangeChip ? ` · ${rangeChip}` : ''
+  const linesDetails = (over: Partial<CardDetails<LedgerRow>> = {}): CardDetails<LedgerRow> => ({
+    subtitle: `Revenue lines under the current filters${inView}`,
+    rows: shown,
+    groupBy: r => (r.geo || '').trim() || 'No GEO',
+    groupTotal: sumLines,
+    rowKey: r => r.row_key,
+    columns: lineCols,
+    defaultSort: 'amount',
+    ...over,
+  })
+
+  // One row per client, so the Clients count and the Top 5 share have something to list.
+  type ClientAgg = { name: string; usd: number; lines: number; dept: string; geo: string }
+  const clientRows = useMemo(() => {
+    const m = new Map<string, { name: string; usd: number; lines: number; byDept: Record<string, number>; geo: string }>()
+    shown.forEach(r => {
+      const name = (r.company_name || '').trim()
+      const k = name.toLowerCase()
+      if (!k) return
+      const a = m.get(k) || { name, usd: 0, lines: 0, byDept: {}, geo: '' }
+      a.usd += r.amount_usd || 0; a.lines++
+      const d = deptOf(r.service_dept); a.byDept[d] = (a.byDept[d] || 0) + (r.amount_usd || 0)
+      if (!a.geo && r.geo) a.geo = r.geo.trim()
+      m.set(k, a)
+    })
+    return Array.from(m.values()).map((a): ClientAgg => ({
+      name: a.name, usd: a.usd, lines: a.lines, geo: a.geo || 'No GEO',
+      dept: Object.entries(a.byDept).sort((x, y) => y[1] - x[1])[0]?.[0] || 'Other',
+    }))
+  }, [shown])
+  const sumClients = (rs: ClientAgg[]) => fmtUsd(rs.reduce((s, c) => s + c.usd, 0))
+  const clientCols: DetailCol<ClientAgg>[] = [
+    { key: 'agency', label: 'Agency', value: c => c.name, wide: true, sort: c => c.name },
+    { key: 'amount', label: 'Revenue', value: c => fmtUsd(c.usd), align: 'right', sort: c => c.usd, total: sumClients },
+    { key: 'share', label: 'Share', value: c => `${pctOf(c.usd)}%`, align: 'right', sort: c => c.usd },
+    { key: 'lines', label: 'Lines', value: c => c.lines, align: 'right', sort: c => c.lines },
+    { key: 'dept', label: 'Main service', value: c => c.dept, sort: c => c.dept },
+    { key: 'geo', label: 'GEO', value: c => c.geo, sort: c => c.geo },
+  ]
+  const clientsDetails: CardDetails<ClientAgg> = {
+    subtitle: `Agencies with lines under the current filters${inView}`,
+    rows: clientRows, groupBy: c => c.geo, groupTotal: sumClients, rowKey: c => c.name,
+    columns: clientCols, defaultSort: 'amount',
+  }
+  // The same five names the Top agencies panel starts with.
+  const top5Rows = useMemo(() => {
+    const names = new Set(topAgencies.slice(0, 5).map(a => a.name.trim().toLowerCase()))
+    return clientRows.filter(c => names.has(c.name.toLowerCase()))
+  }, [topAgencies, clientRows])
+  const top5Details: CardDetails<ClientAgg> = {
+    subtitle: `The five largest agencies, of ${fmtUsd(total)} in this view${inView}`,
+    rows: top5Rows, rowKey: c => c.name, columns: clientCols, defaultSort: 'amount',
+  }
+
+  const sumOpps = (rs: Opportunity[]) => fmtUsd(rs.reduce((s, o) => s + (o.est_value || 0), 0))
+  const oppDate = (o: Opportunity) => (o.source_date || o.confirmed_at || '').slice(0, 10)
+  const pipelineDetails: CardDetails<Opportunity> = {
+    subtitle: `Deals raised${inView} and still open`,
+    rows: pipeline.rows,
+    groupBy: o => (o.geo || '').trim() || 'No GEO',
+    groupTotal: sumOpps,
+    rowKey: o => o.id,
+    columns: [
+      { key: 'agency', label: 'Agency', value: o => o.company_name || '—', wide: true, sort: o => o.company_name || '' },
+      { key: 'amount', label: 'Value', value: o => o.est_value ? fmtUsd(o.est_value) : 'unpriced', align: 'right', sort: o => o.est_value || 0, total: sumOpps },
+      { key: 'date', label: 'Raised', value: o => fmtDay(oppDate(o)), sort: o => oppDate(o) },
+      { key: 'age', label: 'Days so far', value: o => daysSince(oppDate(o)) ?? '—', align: 'right', sort: o => daysSince(oppDate(o)) ?? -1 },
+      { key: 'pm', label: 'PM', value: o => o.pm_owner || '—', sort: o => o.pm_owner || '' },
+      { key: 'am', label: 'Account owner', value: o => o.sales_person || '—', sort: o => o.sales_person || '' },
+    ],
+    defaultSort: 'amount',
+  }
+
+  const hrs = (n: number) => Math.round(n).toLocaleString()
+  const hoursDetails: CardDetails<LedgerRow> = {
+    subtitle: `Lines carrying both a planned and an actual figure${inView}`,
+    rows: hours.rows,
+    groupBy: r => (r.actual_hrs || 0) > (r.internal_hrs || 0) ? 'Ran over' : 'Within hours',
+    rowKey: r => r.row_key,
+    columns: [
+      { key: 'agency', label: 'Agency', value: r => r.company_name || '—', wide: true, sort: r => r.company_name || '' },
+      { key: 'project', label: 'Project', value: r => r.project_name || '—', wide: true, sort: r => r.project_name || '' },
+      { key: 'planned', label: 'Planned', value: r => hrs(r.internal_hrs || 0), align: 'right', sort: r => r.internal_hrs || 0,
+        total: rs => hrs(rs.reduce((s, r) => s + (r.internal_hrs || 0), 0)) },
+      { key: 'actual', label: 'Actual', value: r => hrs(r.actual_hrs || 0), align: 'right', sort: r => r.actual_hrs || 0,
+        total: rs => hrs(rs.reduce((s, r) => s + (r.actual_hrs || 0), 0)) },
+      { key: 'over', label: 'Over / under', align: 'right',
+        value: r => { const p = r.internal_hrs ? Math.round(((r.actual_hrs || 0) / r.internal_hrs - 1) * 100) : 0; return `${p > 0 ? '+' : ''}${p}%` },
+        sort: r => r.internal_hrs ? (r.actual_hrs || 0) / r.internal_hrs : 0 },
+      { key: 'pm', label: 'PM', value: r => r.pm_owner || '—', sort: r => r.pm_owner || '' },
+    ],
+    defaultSort: 'over',
+  }
+
+  const deptRows = useMemo(() => {
+    const m: Record<string, LedgerRow[]> = {}
+    shown.forEach(r => { const k = deptOf(r.service_dept); (m[k] = m[k] || []).push(r) })
+    return m
+  }, [shown])
+
   const hoursPct = hours.planned ? Math.round((hours.actual / hours.planned - 1) * 100) : 0
   const label = 'font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted'
 
@@ -352,22 +473,30 @@ export default function Reports() {
             sub={prev.from
               ? `${shown.length.toLocaleString()} lines · ${fmtUsd(prev.usd)} in ${dayLabel(prev.from)}–${dayLabel(prev.to)}${momPct === null ? '' : ` (${momPct > 0 ? '+' : ''}${momPct}%)`}`
               : `${shown.length.toLocaleString()} project lines`}
-            info="The comparison is the same range one month back, stopped on today's date last month, under every filter except the dates." />
-          <KPICard label="Clients" value={String(clients)} sub={clients ? `${fmtUsd(Math.round(total / clients))} average each` : undefined} />
+            info="The comparison is the same range one month back, stopped on today's date last month, under every filter except the dates."
+            details={linesDetails()} />
+          <KPICard label="Clients" value={String(clients)} sub={clients ? `${fmtUsd(Math.round(total / clients))} average each` : undefined}
+            details={clientsDetails} />
           <KPICard label="Average project" value={shown.length ? fmtUsd(Math.round(total / shown.length)) : '—'}
-            sub={`largest ${topAgencies.length ? fmtUsd(Math.max(...shown.map(r => r.amount_usd || 0))) : '—'}`} />
-          <KPICard label="Dedicated" value={`${pctOf(dedicated)}%`} sub={`${fmtUsd(dedicated)} committed · ${fmtUsd(total - dedicated)} won project by project`} />
-          <KPICard label="New business" value={`${pctOf(newBiz)}%`} sub={`${fmtUsd(newBiz)} new · ${fmtUsd(total - newBiz)} repeat`} />
+            sub={`largest ${topAgencies.length ? fmtUsd(Math.max(...shown.map(r => r.amount_usd || 0))) : '—'}`}
+            details={linesDetails({ subtitle: `The ${shown.length.toLocaleString()} lines the average is taken over${inView}` })} />
+          <KPICard label="Dedicated" value={`${pctOf(dedicated)}%`} sub={`${fmtUsd(dedicated)} committed · ${fmtUsd(total - dedicated)} won project by project`}
+            details={linesDetails({ subtitle: `Every line, split Dedicated against P2P${inView}`, groupBy: engOf, columns: withCol(engCol) })} />
+          <KPICard label="New business" value={`${pctOf(newBiz)}%`} sub={`${fmtUsd(newBiz)} new · ${fmtUsd(total - newBiz)} repeat`}
+            details={linesDetails({ subtitle: `Every line, split new against repeat${inView}`, groupBy: r => isNew(r) ? 'New' : 'Repeat', columns: withCol(typeCol) })} />
           <KPICard tone="yellow" label="Top 5 clients" value={`${top5Share}%`} sub="of revenue in this view"
-            info="Concentration risk: how much of this view rests on the five largest clients. 60% in three names is a different business from 60% in thirty." />
+            info="Concentration risk: how much of this view rests on the five largest clients. 60% in three names is a different business from 60% in thirty."
+            details={top5Details} />
           <KPICard tone="amber" label="Open pipeline" value={fmtUsd(pipeline.usd)}
             sub={`${pipeline.n} deal${pipeline.n === 1 ? '' : 's'} raised in this window, still open${pipeline.unpriced ? ` · ${pipeline.unpriced} unpriced` : ''}`}
-            info="Technology and engagement filters do not apply: an open deal has neither recorded." />
+            info="Technology and engagement filters do not apply: an open deal has neither recorded."
+            details={pipelineDetails} />
           <KPICard label="Hours delivered"
             tone={hours.planned && hours.actual > hours.planned ? 'red' : hours.planned ? 'green' : 'default'}
             value={hours.planned ? `${hoursPct > 0 ? '+' : ''}${hoursPct}%` : '—'}
             sub={hours.planned ? `${Math.round(hours.actual).toLocaleString()} actual vs ${Math.round(hours.planned).toLocaleString()} planned` : 'no hours recorded'}
-            info="Only lines carrying BOTH a planned and an actual figure count, or a row missing one would read as a 100% over-run." />
+            info="Only lines carrying BOTH a planned and an actual figure count, or a row missing one would read as a 100% over-run."
+            details={hours.n ? hoursDetails : undefined} />
         </KPIRow>
       )}
 
@@ -454,7 +583,11 @@ export default function Reports() {
                       <span><span className="inline-block w-2 h-2 rounded-sm bg-mav-yellow mr-1" />{fmtUsd(v.ded)}</span>
                       <span><span className="inline-block w-2 h-2 rounded-sm bg-mav-fg/25 mr-1" />{fmtUsd(v.p2p)}</span>
                     </span>
-                  </>} />
+                  </>}
+                  details={linesDetails({
+                    subtitle: `${d} lines under the current filters${inView}`,
+                    rows: deptRows[d] || [], groupBy: engOf, columns: withCol(engCol),
+                  })} />
               )
             })}
           </div>

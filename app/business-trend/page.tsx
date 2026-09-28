@@ -9,6 +9,7 @@ import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/P
 import ForecastPanel from '@/components/ForecastPanel'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtDay, fmtMonth, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getQuotes, getConversions, getBookingsFull, getOpportunities, getOpportunityDepts, type RevenueRow, type Quote, type QuoteConversion, type BookingRow, type Opportunity } from '@/lib/supabase'
 import { FY_TARGET, FY_TARGET_LABEL } from '@/lib/config'
@@ -368,8 +369,10 @@ export default function BusinessTrendPage() {
       const oppDate = ymd(opp.source_date)
       return oppDate && oppDate >= (sixMonthsAgo + '-01') && oppDate <= (lastMonthStr + '-31')
     })
-    const confirmed = relevant.filter(isWon).length
+    const wonRows = relevant.filter(isWon)
+    const confirmed = wonRows.length
     return {
+      rows: relevant, wonRows,
       total: relevant.length,
       confirmed,
       rate: relevant.length > 0 ? Math.round((confirmed / relevant.length) * 100) : 0,
@@ -388,6 +391,123 @@ export default function BusinessTrendPage() {
       rate: monthQuotes.length > 0 ? Math.round((confirmed / monthQuotes.length) * 100) : 0,
     }
   }
+
+  // ---- What sits behind each card ------------------------------------------------
+  // Every panel's total is built the same way as the card it opens from: monthly sums
+  // rounded per month (as revenueByMonthYear does), so the footer can never be a few
+  // dollars off the headline.
+  const cardDetails = useMemo(() => {
+    type Mon = { month: string; monthLabel: string; revenue: number }
+    const sumRev = (rs: Mon[]) => rs.reduce((s, r) => s + r.revenue, 0)
+    const monthCol: DetailCol<Mon> = { key: 'month', label: 'Month', value: r => r.monthLabel, sort: r => ym(r.month) }
+    const revCol: DetailCol<Mon> = { key: 'rev', label: 'Revenue', value: r => fmtUsd(r.revenue), align: 'right', sort: r => r.revenue,
+      total: rs => fmtUsd(sumRev(rs)) }
+    const fyMonths = getFY26Months()
+    const have = new Set(fy26Analysis.data.map(r => ym(r.month)))
+
+    const avg: CardDetails<Mon> = {
+      subtitle: `${fmtUsd(fy26Analysis.totalRevenue)} over ${fy26Analysis.completedMonths} FY 2026-27 months with revenue, divided by ${fy26Analysis.completedMonths}`,
+      rows: fy26Analysis.data, rowKey: r => r.month, defaultSort: 'month',
+      columns: [monthCol, revCol,
+        { key: 'vs', label: 'Vs average', align: 'right', sort: r => r.revenue - fy26Analysis.avgMonthly,
+          value: r => { const d = Math.round(r.revenue - fy26Analysis.avgMonthly); return `${d >= 0 ? '+' : '-'}${fmtUsd(Math.abs(d))}` } }],
+    }
+
+    // The projection is twelve months: the ones with revenue at their actual, the rest
+    // at the current average — exactly the sum the card shows.
+    type Proj = { month: string; amount: number; basis: 'Actual' | 'At average' }
+    const projRows: Proj[] = fyMonths.map(m => {
+      const got = fy26Analysis.data.find(r => ym(r.month) === m)
+      return got ? { month: m, amount: got.revenue, basis: 'Actual' } : { month: m, amount: fy26Analysis.avgMonthly, basis: 'At average' }
+    })
+    const projected: CardDetails<Proj> = {
+      subtitle: `Actual revenue for ${fy26Analysis.completedMonths} months plus ${fmtUsd(Math.round(fy26Analysis.avgMonthly))} for each of the ${fy26Analysis.monthsRemaining} still to come`,
+      rows: projRows, rowKey: r => r.month, groupBy: r => r.basis, defaultSort: 'month',
+      groupTotal: rs => fmtUsd(rs.reduce((s, r) => s + r.amount, 0)),
+      columns: [
+        { key: 'month', label: 'Month', value: r => fmtMonth(r.month), sort: r => r.month },
+        { key: 'basis', label: 'Basis', value: r => r.basis },
+        { key: 'amt', label: 'Amount', value: r => fmtUsd(r.amount), align: 'right', sort: r => r.amount,
+          total: rs => fmtUsd(rs.reduce((s, r) => s + r.amount, 0)) },
+      ],
+    }
+
+    type Left = { month: string }
+    const remaining: CardDetails<Left> = {
+      subtitle: 'FY 2026-27 months with no revenue booked yet',
+      rows: fyMonths.filter(m => !have.has(m)).map(month => ({ month })), rowKey: r => r.month, defaultSort: 'month',
+      columns: [
+        { key: 'month', label: 'Month', value: r => fmtMonth(r.month), sort: r => r.month },
+        { key: 'avg', label: 'Projected at average', value: () => fmtUsd(Math.round(fy26Analysis.avgMonthly)), align: 'right',
+          total: rs => fmtUsd(fy26Analysis.avgMonthly * rs.length) },
+      ],
+    }
+
+    // Booked so far, line by line — the client, department and SME behind the total.
+    const fyLines = revenue.filter(r => isInFY26(ym(r.month)))
+    const lineTotal = (rs: RevenueRow[]) => {
+      const by = new Map<string, number>()
+      rs.forEach(r => by.set(ym(r.month), (by.get(ym(r.month)) || 0) + (r.amount_usd || 0)))
+      return fmtUsd([...by.values()].reduce((s, v) => s + Math.round(v), 0))
+    }
+    const booked: CardDetails<RevenueRow> = {
+      subtitle: `Every FY 2026-27 revenue line, ${fy26Analysis.completedMonths} months`,
+      rows: fyLines, groupBy: r => r.service_name || 'No department', groupTotal: lineTotal, defaultSort: 'amt',
+      columns: [
+        { key: 'client', label: 'Client / agency', value: r => r.client_name || '—', wide: true, sort: r => r.client_name || '' },
+        { key: 'amt', label: 'Amount', value: r => fmtUsd(r.amount_usd || 0), align: 'right', sort: r => r.amount_usd || 0, total: lineTotal },
+        { key: 'month', label: 'Month', value: r => fmtMonth(r.month), sort: r => ym(r.month) },
+        { key: 'dept', label: 'Department', value: r => r.service_name || '—', sort: r => r.service_name || '' },
+        { key: 'sme', label: 'SME', value: r => r.sme || '—' },
+      ],
+    }
+
+    const complete = fy26Analysis.data.filter(r => ym(r.month) !== thisMonth)
+    const runRate: CardDetails<Mon> = {
+      subtitle: `The ${complete.length} completed months, averaged; ${plan.partialMonth || 'the month in progress'} is left out`,
+      rows: complete, rowKey: r => r.month, defaultSort: 'month', columns: [monthCol, revCol],
+    }
+
+    // The months still to bill (the one in progress counts as winnable), each at the
+    // pace the target needs.
+    const done = new Set(complete.map(r => ym(r.month)))
+    type Need = { month: string; billed: number; inProgress: boolean }
+    const needRows: Need[] = fyMonths.filter(m => !done.has(m)).map(m => ({
+      month: m, inProgress: m === thisMonth, billed: fy26Analysis.data.find(r => ym(r.month) === m)?.revenue || 0 }))
+    const needed: CardDetails<Need> = {
+      subtitle: `${fmtUsd(plan.gap)} still to book to reach ${FY_TARGET_LABEL}, spread over ${plan.monthsLeft} months`,
+      rows: needRows, rowKey: r => r.month, defaultSort: 'month',
+      columns: [
+        { key: 'month', label: 'Month', value: r => fmtMonth(r.month), sort: r => r.month },
+        { key: 'state', label: 'Status', value: r => (r.inProgress ? 'In progress' : 'To come') },
+        { key: 'billed', label: 'Billed so far', value: r => (r.billed ? fmtUsd(r.billed) : '—'), align: 'right', sort: r => r.billed },
+        { key: 'need', label: 'Needed', value: () => fmtUsd(plan.needPerMonth), align: 'right',
+          total: rs => fmtUsd(plan.needPerMonth * rs.length) },
+      ],
+    }
+
+    // Quotes: the deduplicated opportunities dated in the six-month window.
+    type Opp = Opportunity
+    const oppCols = (withResult: boolean): DetailCol<Opp>[] => [
+      { key: 'client', label: 'Client / agency', value: o => o.company_name || '—', wide: true, sort: o => o.company_name || '' },
+      { key: 'value', label: 'Value', value: o => (o.value ? fmtUsd(o.value) : '—'), align: 'right', sort: o => o.value || 0,
+        total: rs => fmtUsd(rs.reduce((s, o) => s + (o.value || 0), 0)) },
+      { key: 'date', label: 'Date', value: o => fmtDay(o.source_date), sort: o => o.source_date || '' },
+      withResult
+        ? { key: 'res', label: 'Result', value: o => (isWon(o) ? 'Confirmed' : o.status || 'Not confirmed'), sort: o => (isWon(o) ? 1 : 0) }
+        : { key: 'age', label: 'Days so far', value: o => daysSince(o.source_date) ?? '—', align: 'right', sort: o => daysSince(o.source_date) ?? -1 },
+      { key: 'owner', label: 'Owner', value: o => o.sales_person || '—', sort: o => o.sales_person || '' },
+    ]
+    const qSub = 'Quotes dated in the last six months of revenue, one per client'
+    const byGeo = (o: Opp) => o.geo || 'No GEO'
+    const quotes: CardDetails<Opp> = { subtitle: qSub, rows: quotesAnalysis.rows, rowKey: o => o.id, groupBy: byGeo, defaultSort: 'date', columns: oppCols(true) }
+    const confirmed: CardDetails<Opp> = { subtitle: `${qSub}, confirmed`, rows: quotesAnalysis.wonRows, rowKey: o => o.id, groupBy: byGeo, defaultSort: 'date', columns: oppCols(true) }
+    const rate: CardDetails<Opp> = {
+      subtitle: `${quotesAnalysis.confirmed} of ${quotesAnalysis.total} quotes confirmed`,
+      rows: quotesAnalysis.rows, rowKey: o => o.id, groupBy: o => (isWon(o) ? 'Confirmed' : 'Not confirmed'), defaultSort: 'date', columns: oppCols(true),
+    }
+    return { avg, projected, remaining, booked, runRate, needed, quotes, confirmed, rate }
+  }, [fy26Analysis, revenue, thisMonth, plan, quotesAnalysis])
 
   if (loading) return <div className="p-6 text-mav-muted">Loading business trend data...</div>
 
@@ -411,14 +531,14 @@ export default function BusinessTrendPage() {
           carry inside it. */}
       <KPIRow cols={4}>
         <KPICard tone="accent" label="Avg monthly revenue" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))}
-          sub={`${fy26Analysis.completedMonths} months completed`}
+          sub={`${fy26Analysis.completedMonths} months completed`} details={cardDetails.avg}
           info="Based on completed months in FY 2026-27 (April 2026 to March 2027)." />
         <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="Projected total (12 mo)" value={fmtUsd(fy26Analysis.projected)}
-          sub={`${fy26Analysis.projectedPercent}% of ${FY_TARGET_LABEL}`}
+          sub={`${fy26Analysis.projectedPercent}% of ${FY_TARGET_LABEL}`} details={cardDetails.projected}
           info="(Actual revenue to date) + (Average monthly × remaining months)." />
         <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="FY status" value={fy26Analysis.onTrack ? 'On Track' : 'Off Track'}
           sub={`Target ${FY_TARGET_LABEL}`} />
-        <KPICard tone="amber" label="Remaining months" value={fy26Analysis.monthsRemaining.toString()} />
+        <KPICard tone="amber" label="Remaining months" value={fy26Analysis.monthsRemaining.toString()} details={cardDetails.remaining} />
       </KPIRow>
 
       {/* The From/To pickers only narrow the chart; everything else below reads the
@@ -545,10 +665,10 @@ export default function BusinessTrendPage() {
         How we get to {FY_TARGET_LABEL}
       </SectionTitle>
       <KPIRow cols={4}>
-        <KPICard tone="accent" label="Booked so far" value={fmtUsd(plan.booked)} />
-        <KPICard label="Run-rate / month" value={fmtUsd(plan.runRate)}
+        <KPICard tone="accent" label="Booked so far" value={fmtUsd(plan.booked)} details={cardDetails.booked} />
+        <KPICard label="Run-rate / month" value={fmtUsd(plan.runRate)} details={cardDetails.runRate}
           info={`Average of the ${plan.completeMonths} completed months. ${plan.partialMonth || 'The month in progress'} is excluded — a half-billed month would understate it.`} />
-        <KPICard tone="amber" label="Needed / month" value={fmtUsd(plan.needPerMonth)} />
+        <KPICard tone="amber" label="Needed / month" value={fmtUsd(plan.needPerMonth)} details={cardDetails.needed} />
         <KPICard tone="red" label="Uplift required" value={`+${fmtUsd(plan.upliftPerMonth)}`} />
       </KPIRow>
 
@@ -641,9 +761,9 @@ export default function BusinessTrendPage() {
 
       <SectionTitle>Quotes &amp; confirmations (last 6 months)</SectionTitle>
       <KPIRow cols={3}>
-        <KPICard tone="accent" label="Total quotes" value={String(quotesAnalysis.total)} />
-        <KPICard tone="green" label="Confirmed" value={String(quotesAnalysis.confirmed)} />
-        <KPICard tone="yellow" label="Confirm rate" value={`${quotesAnalysis.rate}%`} />
+        <KPICard tone="accent" label="Total quotes" value={String(quotesAnalysis.total)} details={cardDetails.quotes} />
+        <KPICard tone="green" label="Confirmed" value={String(quotesAnalysis.confirmed)} details={cardDetails.confirmed} />
+        <KPICard tone="yellow" label="Confirm rate" value={`${quotesAnalysis.rate}%`} details={cardDetails.rate} />
       </KPIRow>
       <Panel flush title="Monthly details">
         <div className="overflow-x-auto">

@@ -5,6 +5,7 @@ import GreetingBar from '@/components/GreetingBar'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtDay, fmtMonth, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, getOpportunityDepts, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
@@ -329,17 +330,19 @@ export default function Dashboard() {
     // Clamped, so the 31st does not run off the end of a 30-day month.
     const prevTo = ymd(new Date(pm.getFullYear(), pm.getMonth(), Math.min(daysGone, monthEnd(pm).getDate())))
     const m: Record<string, { now: number; prev: number }> = {}
+    // The bookings behind each card's "now" figure, for its drill-down panel.
+    const lines: Record<string, BookingRow[]> = {}
     bookingRows.forEach(b => {
       const k = bizOf(b.service_name)
       m[k] = m[k] || { now: 0, prev: 0 }
-      if ((b.booking_month || '').slice(0, 7) === curKey) m[k].now += b.booking_amount || 0
+      if ((b.booking_month || '').slice(0, 7) === curKey) { m[k].now += b.booking_amount || 0; (lines[k] = lines[k] || []).push(b) }
       const d = (b.booking_date || '').slice(0, 10)
       if (d >= prevFrom && d <= prevTo) m[k].prev += b.booking_amount || 0
     })
     // Same rule as the segment table: a bucket outside the selected unit is not shown as $0.
     const rows = BIZ_ORDER.filter(seg => inUnit(seg, unit))
     if (m['Other'] && (m['Other'].now || m['Other'].prev)) rows.push('Other')
-    return { rows, m }
+    return { rows, m, lines }
   }, [bookingRows, daysGone, unit])
 
   // The comparison stops at today's DATE last month rather than running to the end of it.
@@ -393,6 +396,7 @@ export default function Dashboard() {
   const openPipeline = useMemo(() => {
     const rows = myOpps.filter(o => /^open$/i.test((o.status || '').trim()) && inDayRange(o.source_date))
     return {
+      rows,
       usd: rows.reduce((s, o) => s + (o.est_value || 0), 0),
       n: rows.length,
       // A deal with no figure is not a small deal, it is an unpriced one. Saying how many
@@ -401,6 +405,103 @@ export default function Dashboard() {
     }
   }, [myOpps, from, to])
   const bookings = rangeRev.length
+
+  // ── Card drill-downs ─────────────────────────────────────────────────────────
+  // Each card's panel lists exactly the rows its figure is made of, so the panel's
+  // total is the card. Revenue lines carry no GEO, so they split by service
+  // department — for Web that is the WEB-US / UK / AU pods anyway.
+  const sumUsd = (rs: RevenueRow[]) => fmtUsd(rs.reduce((s, r) => s + (r.amount_usd || 0), 0))
+  const revCols: CardDetails<RevenueRow>['columns'] = [
+    { key: 'client', label: 'Client / agency', value: r => r.client_name || '—', wide: true, sort: r => r.client_name || '' },
+    { key: 'amount', label: 'Amount', value: r => fmtUsd(r.amount_usd || 0), align: 'right', sort: r => r.amount_usd || 0, total: sumUsd },
+    { key: 'month', label: 'Month', value: r => fmtMonth(r.month), sort: r => r.month || '' },
+    { key: 'date', label: 'Start date', value: r => fmtDay(r.date), sort: r => r.date || '' },
+    { key: 'service', label: 'Service', value: r => r.service_name || '—', sort: r => r.service_name || '' },
+    { key: 'sme', label: 'PC / SME', value: r => r.sme || '—', sort: r => r.sme || '' },
+  ]
+  const revenueDetails: CardDetails<RevenueRow> = {
+    subtitle: `Revenue lines by the sheet's Month column, ${rangeLabel}${scoped ? ' · your accounts' : ''}`,
+    rows: rangeRev,
+    groupBy: r => segOf(r.service_name),
+    groupTotal: sumUsd,
+    columns: revCols,
+    defaultSort: 'amount',
+  }
+  const bookingsDetails: CardDetails<RevenueRow> = {
+    ...revenueDetails,
+    subtitle: `Every revenue line in ${rangeLabel}${scoped ? ' · your accounts' : ''}`,
+    defaultSort: 'date',
+  }
+  // One row per client with money in the period — the count on the card. A client that
+  // spans services is filed under the service with most of its money.
+  type ClientAgg = { name: string; usd: number; lines: number; last: string; seg: string }
+  const activeClientRows = useMemo(() => {
+    const m = new Map<string, { usd: number; lines: number; last: string; bySeg: Record<string, number> }>()
+    rangeRev.forEach(r => {
+      if ((r.amount_usd || 0) === 0) return
+      const a = m.get(r.client_name) || { usd: 0, lines: 0, last: '', bySeg: {} }
+      a.usd += r.amount_usd || 0; a.lines++
+      const seg = segOf(r.service_name); a.bySeg[seg] = (a.bySeg[seg] || 0) + (r.amount_usd || 0)
+      const d = (r.date || r.month || '').slice(0, 10); if (d > a.last) a.last = d
+      m.set(r.client_name, a)
+    })
+    return Array.from(m.entries()).map(([name, a]): ClientAgg => ({
+      name, usd: a.usd, lines: a.lines, last: a.last,
+      seg: Object.entries(a.bySeg).sort((x, y) => y[1] - x[1])[0]?.[0] || 'Other',
+    }))
+  }, [rangeRev])
+  const sumClients = (rs: ClientAgg[]) => fmtUsd(rs.reduce((s, c) => s + c.usd, 0))
+  const clientDetails: CardDetails<ClientAgg> = {
+    subtitle: `Clients with revenue in ${rangeLabel}${scoped ? ' · your accounts' : ''}`,
+    rows: activeClientRows,
+    groupBy: c => c.seg,
+    groupTotal: sumClients,
+    rowKey: c => c.name,
+    columns: [
+      { key: 'client', label: 'Client / agency', value: c => c.name || '—', wide: true, sort: c => c.name || '' },
+      { key: 'amount', label: 'Revenue', value: c => fmtUsd(c.usd), align: 'right', sort: c => c.usd, total: sumClients },
+      { key: 'lines', label: 'Lines', value: c => c.lines, align: 'right', sort: c => c.lines },
+      { key: 'last', label: 'Latest', value: c => fmtDay(c.last), sort: c => c.last },
+      { key: 'seg', label: 'Main service', value: c => c.seg, sort: c => c.seg },
+    ],
+    defaultSort: 'amount',
+  }
+  const sumOpps = (rs: Opportunity[]) => fmtUsd(rs.reduce((s, o) => s + (o.est_value || 0), 0))
+  const openDetails: CardDetails<Opportunity> = {
+    subtitle: `Open deals raised ${rangeLabel}${scoped ? ' · your accounts' : ''}`,
+    rows: openPipeline.rows,
+    groupBy: o => o.geo || 'No GEO',
+    groupTotal: sumOpps,
+    rowKey: o => o.id,
+    columns: [
+      { key: 'client', label: 'Client / agency', value: o => o.company_name || '—', wide: true, sort: o => o.company_name || '' },
+      { key: 'amount', label: 'Value', value: o => o.est_value ? fmtUsd(o.est_value) : 'no value yet', align: 'right', sort: o => o.est_value || 0, total: sumOpps },
+      { key: 'date', label: 'Raised', value: o => fmtDay(o.source_date), sort: o => o.source_date || '' },
+      { key: 'age', label: 'Days so far', value: o => daysSince(o.source_date) ?? '—', align: 'right', sort: o => daysSince(o.source_date) ?? -1 },
+      { key: 'pm', label: 'PM', value: o => o.pm_owner || '—', sort: o => o.pm_owner || '' },
+      { key: 'next', label: 'Next step', value: o => o.next_step || '—', wide: true },
+    ],
+    defaultSort: 'amount',
+  }
+  const sumBookings = (rs: BookingRow[]) => fmtUsd(rs.reduce((s, b) => s + (b.booking_amount || 0), 0))
+  const serviceDetails = (seg: string): CardDetails<BookingRow> => ({
+    subtitle: `Bookings in ${monthLabel(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`)} by the Month column · ${seg}`,
+    rows: bizNow.lines[seg] || [],
+    // LP/HUB is two services under one team; the Web pods are one service each, so they
+    // split the other natural way — retainer against project work.
+    groupBy: seg === 'LP/HUB' ? (b => segOf(b.service_name)) : (b => engOf(b.engagement_model)),
+    groupTotal: sumBookings,
+    rowKey: b => b.id,
+    columns: [
+      { key: 'client', label: 'Client / agency', value: b => b.company_name || '—', wide: true, sort: b => b.company_name || '' },
+      { key: 'amount', label: 'Amount', value: b => fmtUsd(b.booking_amount || 0), align: 'right', sort: b => b.booking_amount || 0, total: sumBookings },
+      { key: 'date', label: 'Start date', value: b => fmtDay(b.booking_date), sort: b => b.booking_date || '' },
+      { key: 'eng', label: 'Engagement', value: b => b.engagement_model || '—', sort: b => b.engagement_model || '' },
+      { key: 'geo', label: 'GEO', value: b => b.geo || '—', sort: b => b.geo || '' },
+      { key: 'sme', label: 'PC / SME', value: b => b.sme || '—', sort: b => b.sme || '' },
+    ],
+    defaultSort: 'amount',
+  })
 
   // AI Insights read the WHOLE history, not the date filter — a six-month trend
   // cannot be computed from a one-month window, and silently narrowing it to the
@@ -465,14 +566,16 @@ export default function Dashboard() {
       <KPIRow cols={4}>
         <KPICard tone="accent" label={isMtd ? 'Revenue (this month)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom.pct}
           changeLabel={`vs ${fmtUsd(mom.prev)} by this date last month`}
-          note={isMtd && daysGone < daysInMonth ? `${daysGone} of ${daysInMonth} days gone — the month is still filling` : undefined} />
-        <KPICard label="Active clients" value={String(activeClients)} sub={rangeLabel} />
+          note={isMtd && daysGone < daysInMonth ? `${daysGone} of ${daysInMonth} days gone — the month is still filling` : undefined}
+          details={revenueDetails} />
+        <KPICard label="Active clients" value={String(activeClients)} sub={rangeLabel} details={clientDetails} />
         <KPICard tone="amber" label="Open opportunities" value={fmtUsd(openPipeline.usd)}
           sub={openPipeline.n
             ? `${openPipeline.n} open${openPipeline.unpriced ? ` · ${openPipeline.unpriced} with no value yet` : ''}`
             : undefined}
-          info="Open deals raised in the selected period, by their quoted value. A deal with no figure is counted, not priced." />
-        <KPICard label="Bookings (period)" value={String(bookings)} sub="revenue lines in the period" />
+          info="Open deals raised in the selected period, by their quoted value. A deal with no figure is counted, not priced."
+          details={openDetails} />
+        <KPICard label="Bookings (period)" value={String(bookings)} sub="revenue lines in the period" details={bookingsDetails} />
       </KPIRow>
 
       {/* The period is the page's main split, so it is the pills; the scope and the exact
@@ -515,7 +618,8 @@ export default function Dashboard() {
                       {d === null ? (v.now > 0 ? 'new' : '—') : `${d >= 0 ? '+' : ''}${d.toFixed(0)}%`}
                     </span>
                     <span className="tabular-nums"> · {fmtUsd(v.prev)} last</span>
-                  </>} />
+                  </>}
+                  details={serviceDetails(seg)} />
               )
             })}
           </KPIRow>

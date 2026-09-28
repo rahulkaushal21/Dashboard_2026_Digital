@@ -5,6 +5,7 @@ import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote } from '@/components/UnitToggle'
 import KPICard from '@/components/KPICard'
+import { daysSince, fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, SectionTitle, Panel } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import { inUnit, unitOf } from '@/lib/business-unit'
@@ -126,6 +127,35 @@ export default function CriticalEscalations() {
 
   const resolvedCount = rows.filter(r => r.status === 'resolved').length
 
+  // ── Card drill-downs ──────────────────────────────────────────────────────────
+  // Like the cards, these read the whole board in this department (not the filters), so
+  // each panel lists exactly the clients its card counts. A row opens the client's drawer.
+  // "Days since" runs from the first flag while it is still live — how long the client has
+  // been waiting — and from the last flag once it is resolved.
+  const cardRows = useMemo(() => ({
+    open: rows.filter(r => r.status === 'open'),
+    unresolved: rows.filter(r => r.status === 'unresolved'),
+    resolved: rows.filter(r => r.status === 'resolved'),
+  }), [rows])
+  const critDetails = (list: CriticalEscalation[], subtitle: string, resolved = false): CardDetails<CriticalEscalation> => {
+    const since = (r: CriticalEscalation) => resolved ? (r.resolved_at || r.last_flagged_date) : r.first_flagged_date
+    const columns: DetailCol<CriticalEscalation>[] = [
+      { key: 'client', label: 'Client', value: r => r.company_name, wide: true, sort: r => (r.company_name || '').toLowerCase() },
+      { key: 'status', label: 'Status', value: r => <span className={`${badge} ${statusTone(r.status)}`}>{statusLabel(r.status)}</span>, sort: r => r.status },
+      { key: 'pm', label: 'PM', value: r => r.pm_owner || '—', sort: r => r.pm_owner || '' },
+      { key: 'count', label: 'Escalations', value: r => r.count, align: 'right', sort: r => r.count, total: rs => rs.reduce((s, r) => s + r.count, 0) },
+      resolved
+        ? { key: 'date', label: 'Resolved on', value: r => fmtDay(r.resolved_at), sort: r => r.resolved_at || '' }
+        : { key: 'date', label: 'Last flagged', value: r => fmtDay(r.last_flagged_date), sort: r => r.last_flagged_date || '' },
+      { key: 'age', label: resolved ? 'Days since resolved' : 'Days open', value: r => daysSince(since(r)) ?? '—', align: 'right', sort: r => daysSince(since(r)) ?? -1 },
+    ]
+    return {
+      subtitle, rows: list, columns, defaultSort: 'date',
+      groupBy: r => (r.geo || '').trim() || 'No GEO',
+      rowKey: r => key(r), onRowClick: r => setSel(r),
+    }
+  }
+
   // Every filter except status. The status tabs count against this, so each tab says how
   // many rows it would show under the other filters as they stand.
   const scoped = useMemo(() => rows.filter(r => {
@@ -184,11 +214,15 @@ export default function CriticalEscalations() {
       {/* The four states as cards. Counts are the whole board in this department — the
           filters below narrow the list, not these. */}
       <KPIRow cols={4}>
-        <KPICard tone="accent" label="Clients escalated" value={String(rows.length)} sub="one row per client" />
-        <KPICard tone="red" label="Open" value={String(openCount)} sub="nobody has triaged it" />
+        <KPICard tone="accent" label="Clients escalated" value={String(rows.length)} sub="one row per client"
+          details={critDetails(rows, 'Every client on the board in this department, whatever its status')} />
+        <KPICard tone="red" label="Open" value={String(openCount)} sub="nobody has triaged it"
+          details={critDetails(cardRows.open, 'Clients nobody has triaged yet — days counted from the first flag')} />
         <KPICard tone="amber" label="Unresolved" value={String(unresolvedCount)} sub="looked at, still broken"
-          info="Amber, not red and not green: an Unresolved escalation is still live — it stays in the list and keeps counting, here and on the Clients board — but someone has already worked it." />
-        <KPICard tone="green" label="Resolved" value={String(resolvedCount)} sub="marked fixed / positive" />
+          info="Amber, not red and not green: an Unresolved escalation is still live — it stays in the list and keeps counting, here and on the Clients board — but someone has already worked it."
+          details={critDetails(cardRows.unresolved, 'Looked at and still broken — days counted from the first flag')} />
+        <KPICard tone="green" label="Resolved" value={String(resolvedCount)} sub="marked fixed / positive"
+          details={critDetails(cardRows.resolved, 'Marked fixed or positive', true)} />
       </KPIRow>
 
       <SectionTitle info={<>One entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="font-semibold">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-400">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-400">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="font-semibold">Not an issue</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.</>}>

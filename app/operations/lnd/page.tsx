@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { RefreshCw } from 'lucide-react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
+import type { CardDetails, DetailCol } from '@/components/CardDetail'
 import InfoTip from '@/components/InfoTip'
 import { KPIRow, Panel, Segments, FilterBar } from '@/components/PageParts'
 import { NotSplitNote } from '@/components/UnitToggle'
@@ -271,6 +272,82 @@ export default function LndPage() {
     }
   }, [current, prevBy])
 
+  // ── What sits behind each card ────────────────────────────────────────────────
+  // Learner cards list the learners in the latest snapshot that the figure counts;
+  // clicking one opens that learner's own drawer. Tabs split by level.
+  const cardDetails = useMemo(() => {
+    const quiet = (r: LndRow) => daysBetween(r.last_activity, latest)
+    const learner: DetailCol<LndRow> = { key: 'name', label: 'Learner', value: displayName, wide: true, sort: displayName }
+    const cols: DetailCol<LndRow>[] = [
+      learner,
+      { key: 'mgr', label: 'Reporting manager', value: r => r.reporting_manager || '—', sort: r => r.reporting_manager || '' },
+      { key: 'prog', label: 'Progress', value: r => pct(creditedPct(r)), align: 'right', sort: creditedPct },
+      { key: 'mods', label: 'Modules done', value: r => `${r.completed} / ${r.total_modules}`, align: 'right', sort: r => r.completed },
+      { key: 'last', label: 'Last activity', value: r => fmtDate(r.last_activity), sort: r => r.last_activity || '' },
+      { key: 'quiet', label: 'Days quiet', value: r => quiet(r) ?? '—', align: 'right', sort: r => quiet(r) ?? -1 },
+    ]
+    const base = { rowKey: (r: LndRow) => r.id, groupBy: (r: LndRow) => r.level || 'No level', onRowClick: (r: LndRow) => setPicked(r) }
+    const snap = `snapshot ${fmtDate(latest)}`
+    const learners: CardDetails<LndRow> = { ...base, subtitle: `Every learner in the ${snap}`, rows: current, columns: cols, defaultSort: 'prog' }
+    // Cohort progress is the plain average of each learner's credited progress, so the
+    // footer averages the same way.
+    const progress: CardDetails<LndRow> = {
+      ...base, subtitle: `Average of each learner's progress, in-progress modules credited as half — ${snap}`,
+      rows: current, defaultSort: 'prog',
+      columns: cols.map(c => c.key === 'prog'
+        ? { ...c, total: (rs: LndRow[]) => pct(rs.reduce((t, r) => t + creditedPct(r), 0) / (rs.length || 1)) } : c),
+    }
+    const zero: CardDetails<LndRow> = { ...base, subtitle: `No module completed or in progress — ${snap}`, rows: current.filter(zeroStart), columns: cols, defaultSort: 'name' }
+    const stall: CardDetails<LndRow> = { ...base, subtitle: `Started, then nothing for ${STALL_DAYS}+ days before the ${snap}`, rows: current.filter(stalled), columns: cols, defaultSort: 'quiet' }
+    const finished: CardDetails<LndRow> = { ...base, subtitle: `Every assigned module complete — ${snap}`, rows: current.filter(r => strictPct(r) >= 100), columns: cols, defaultSort: 'last' }
+
+    // Courses: one row per learner per assigned course, the entry assessment left out.
+    const rowOf = new Map<string, LndRow>()
+    current.forEach(r => rowOf.set(r.learner_key || displayName(r), r))
+    const modKey = (m: LndModule) => m.learner_key || m.learner_full_name
+    const modState = (m: LndModule) => (isDone(m) ? 'Completed' : isDoing(m) ? 'In progress' : 'Not started')
+    const courses: CardDetails<LndModule> = {
+      subtitle: 'Every assigned course across the cohort, excluding the entry assessment',
+      rows: mods.filter(m => !isGate(m)), rowKey: m => m.id, groupBy: modState, defaultSort: 'done',
+      onRowClick: m => { const r = rowOf.get(modKey(m)); if (r) setPicked(r) },
+      columns: [
+        { key: 'name', label: 'Learner', value: m => m.learner_full_name, wide: true, sort: m => m.learner_full_name },
+        { key: 'course', label: 'Course', value: m => m.course, wide: true, sort: m => m.course },
+        { key: 'track', label: 'Track', value: m => m.track || '—', sort: m => m.track || '' },
+        { key: 'state', label: 'Status', value: modState, sort: modState },
+        { key: 'done', label: 'Completed on', value: m => fmtDate(dayjs(m.completed_on) || null), sort: m => m.completed_on || '' },
+      ],
+    }
+
+    // People whose only completion is the entry gate (or nothing at all) — the same
+    // people courseStats counts, one row each.
+    type Person = { key: string; name: string; level: string; gate: string; courses: number; doing: number }
+    const people = new Map<string, Person>()
+    const doneBy = new Set(mods.filter(m => !isGate(m) && isDone(m)).map(modKey))
+    for (const m of mods) {
+      const k = modKey(m)
+      if (doneBy.has(k)) continue
+      const p = people.get(k) || { key: k, name: m.learner_full_name, level: m.level || '', gate: '—', courses: 0, doing: 0 }
+      if (isGate(m)) p.gate = modState(m)
+      else { p.courses++; if (isDoing(m)) p.doing++ }
+      people.set(k, p)
+    }
+    const gateOnly: CardDetails<Person> = {
+      subtitle: 'Learners with no course completed — the entry assessment does not count',
+      rows: [...people.values()], rowKey: p => p.key, groupBy: p => p.level || 'No level', defaultSort: 'name',
+      onRowClick: p => { const r = rowOf.get(p.key); if (r) setPicked(r) },
+      columns: [
+        { key: 'name', label: 'Learner', value: p => p.name, wide: true, sort: p => p.name },
+        { key: 'gate', label: 'Entry assessment', value: p => p.gate, sort: p => p.gate },
+        { key: 'courses', label: 'Courses assigned', value: p => p.courses, align: 'right', sort: p => p.courses },
+        { key: 'doing', label: 'In progress', value: p => p.doing, align: 'right', sort: p => p.doing },
+      ],
+    }
+    return { learners, progress, zero, stall, finished, courses, gateOnly }
+  // zeroStart/stalled read only `latest`, which is in the list.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, mods, latest])
+
   if (loading) return <div><Header title="Learning & Development" subtitle="Loading…" /><p className="text-sm text-mav-muted">Loading…</p></div>
   if (!rows.length) return (
     <div>
@@ -323,24 +400,24 @@ export default function LndPage() {
 
       <KPIRow cols={4}>
         <KPICard tone="accent" label="Active learners" value={String(k.learners)}
-          sub={`${k.carried} continuing · ${k.fresh} new this snapshot`} />
+          sub={`${k.carried} continuing · ${k.fresh} new this snapshot`} details={cardDetails.learners} />
         <KPICard label="Cohort progress" value={pct(k.credited)}
-          sub={`${pct(k.strict)} counting completed modules only`} />
+          sub={`${pct(k.strict)} counting completed modules only`} details={cardDetails.progress} />
         <KPICard label="Courses completed" value={`${courseStats.done} / ${courseStats.assigned}`}
           tone={courseStats.done === 0 ? 'red' : 'default'}
-          sub={`excl. entry assessment (${courseStats.gateDone}/${courseStats.gateAssigned} passed)`} />
+          sub={`excl. entry assessment (${courseStats.gateDone}/${courseStats.gateAssigned} passed)`} details={cardDetails.courses} />
         <KPICard label="Never started" value={String(k.zero)} tone={k.zero ? 'red' : 'green'}
-          sub={k.zero ? 'no module opened at all' : 'everyone has begun'} />
+          sub={k.zero ? 'no module opened at all' : 'everyone has begun'} details={cardDetails.zero} />
       </KPIRow>
       <KPIRow cols={3}>
         <KPICard label={`Stalled ${STALL_DAYS}+ days`} value={String(k.stalled)} tone={k.stalled ? 'amber' : 'default'}
-          sub="started, then went quiet" />
+          sub="started, then went quiet" details={cardDetails.stall} />
         <KPICard label="Finished the track" value={String(k.complete)} tone={k.complete ? 'green' : 'default'}
-          sub="all assigned modules complete" />
+          sub="all assigned modules complete" details={cardDetails.finished} />
         <KPICard label="Only the entry assessment" value={String(courseStats.peopleWithNoCourse)}
           tone={courseStats.peopleWithNoCourse ? 'red' : 'green'}
           info="Nothing but the entry assessment: passed the gate, finished no course."
-          sub={`of ${courseStats.people} — passed the gate, finished no course`} />
+          sub={`of ${courseStats.people} — passed the gate, finished no course`} details={cardDetails.gateOnly} />
       </KPIRow>
 
       <div className="grid gap-4 lg:grid-cols-2 mb-6">

@@ -53,7 +53,9 @@ export function FilterBar({ children, right, className = '' }: { children: React
     <div className={`filterbar bg-mav-panel border border-mav-line rounded-xl p-3 mb-4 ${className}`}>
       <div className="flex flex-wrap items-center gap-2">
         {children}
-        {right && <div className="ml-auto flex flex-wrap items-center gap-2">{right}</div>}
+        {/* nowrap: the count and Clear all are one unit; wrapping split them onto two
+            lines under each other, which read as two stray labels. */}
+        {right && <div className="ml-auto flex items-center gap-2 whitespace-nowrap">{right}</div>}
       </div>
     </div>
   )

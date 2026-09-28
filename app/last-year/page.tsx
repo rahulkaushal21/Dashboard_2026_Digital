@@ -4,6 +4,7 @@ import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import MultiSelect from '@/components/MultiSelect'
 import KPICard from '@/components/KPICard'
+import type { CardDetails, DetailCol } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
 import { useUnit } from '@/components/BusinessUnitProvider'
@@ -165,6 +166,61 @@ export default function LastYearReview() {
   const newq = data.filter(r => qStatus(r) === 'New').length
   const upcoming = data.reduce((s, r) => s + r.upcoming, 0)
 
+  // ── What sits behind each card ────────────────────────────────────────────────
+  // The rows are the clients each figure adds up, under the same filters. A client's
+  // GEO is the one on its latest booking, so for Web the panel splits into the pods.
+  const geoOf = useMemo(() => {
+    const m = new Map<string, { k: string; geo: string }>()
+    rows.forEach(r => {
+      const c = (r.company_name || '').trim(), g = (r.geo || '').trim(), k = (r.booking_month || '').slice(0, 7)
+      if (!c || !g) return
+      const cur = m.get(c)
+      if (!cur || k >= cur.k) m.set(c, { k, geo: g })
+    })
+    return m
+  }, [rows])
+  const cardDetails = useMemo(() => {
+    const byGeo = (r: Row) => geoOf.get(r.client)?.geo || 'No GEO'
+    const sum = (rs: Row[], f: (r: Row) => number) => rs.reduce((s, r) => s + f(r), 0)
+    const client: DetailCol<Row> = { key: 'client', label: 'Client / agency', value: r => <ClientLink name={r.client} />, wide: true, sort: r => r.client }
+    const amt = (key: string, label: string, f: (r: Row) => number): DetailCol<Row> =>
+      ({ key, label, value: r => money(f(r)), align: 'right', sort: f, total: rs => money(sum(rs, f)) })
+    const pm: DetailCol<Row> = { key: 'pm', label: 'PM', value: r => r.pm || '—', sort: r => r.pm }
+    const move: DetailCol<Row> = { key: 'mv', label: 'Movement', value: r => qStatus(r), sort: r => qStatus(r) }
+    const lq = amt('lq', qLabel(QS[qBase]), r => r.qv[qBase]), tq = amt('tq', qLabel(QS[qCur]), r => r.qv[qCur])
+    const delta: DetailCol<Row> = { key: 'd', label: 'Change', align: 'right', sort: qDelta,
+      value: r => `${qDelta(r) >= 0 ? '+' : '-'}${money(Math.abs(qDelta(r)))}`,
+      total: rs => { const d = sum(rs, qDelta); return `${d >= 0 ? '+' : '-'}${money(Math.abs(d))}` } }
+    const gt = (f: (r: Row) => number) => (rs: Row[]) => money(sum(rs, f))
+    const fyLast: CardDetails<Row> = {
+      subtitle: `Clients with bookings Apr ${lyStart} – Mar ${tyStart}, under the filters and movement tab in use`,
+      rows: view.filter(r => r.fyLast), rowKey: r => r.client, groupBy: byGeo, groupTotal: gt(r => r.fyLast), defaultSort: 'fyLast',
+      columns: [client, amt('fyLast', 'Last FY', r => r.fyLast), amt('fyTd', 'This FY to date', r => r.fyTd), move, pm],
+    }
+    const fyTd: CardDetails<Row> = {
+      subtitle: `Clients with bookings Apr ${tyStart} – ${SHORT[curM]} ${now.getFullYear()}, under the filters and movement tab in use`,
+      rows: view.filter(r => r.fyTd), rowKey: r => r.client, groupBy: byGeo, groupTotal: gt(r => r.fyTd), defaultSort: 'fyTd',
+      columns: [client, amt('fyTd', 'This FY to date', r => r.fyTd), amt('fyLast', 'Last FY', r => r.fyLast), move, pm],
+    }
+    // The percentage is total against total; the rows are every client billed in
+    // either quarter, and the two amount footers are the two totals it divides.
+    const inEither = data.filter(r => r.qv[qCur] || r.qv[qBase])
+    const qoq: CardDetails<Row> = {
+      subtitle: `${money(aggTq)} in ${qLabel(QS[qCur])} against ${money(aggLq)} in ${qLabel(QS[qBase])} — every client billed in either`,
+      rows: inEither, rowKey: r => r.client, groupBy: r => qStatus(r), groupTotal: gt(qDelta), defaultSort: 'd',
+      columns: [client, lq, tq, delta, pm],
+    }
+    const dn: CardDetails<Row> = {
+      subtitle: `Dropped = billed in ${qLabel(QS[qBase])}, nothing in ${qLabel(QS[qCur])}; New = the reverse`,
+      rows: data.filter(r => ['Dropped', 'New'].includes(qStatus(r))), rowKey: r => r.client,
+      groupBy: r => qStatus(r), defaultSort: 'lq',
+      columns: [client, lq, tq, pm, { key: 'geo', label: 'GEO', value: byGeo, sort: byGeo }],
+    }
+    return { fyLast, fyTd, qoq, dn }
+  // qStatus/qDelta read qCur/qBase, which are in the list.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, data, geoOf, qCur, qBase, aggTq, aggLq])
+
   const badge = (s: string) => ({
     Up: 'bg-green-500/15 text-green-400', New: 'bg-green-500/15 text-green-400',
     Down: 'bg-amber-500/15 text-amber-400', Dropped: 'bg-red-500/15 text-red-400',
@@ -178,13 +234,13 @@ export default function LastYearReview() {
         chip={`${qLabel(QS[qCur])} vs ${qLabel(QS[qBase])}`} />
 
       <KPIRow cols={4}>
-        <KPICard tone="accent" label={`FY ${lyStart}-${String(tyStart).slice(2)} (Apr–Mar)`} value={money(tot(r => r.fyLast))} />
-        <KPICard label={`FY ${tyStart}-${String(tyStart + 1).slice(2)} to date`} value={money(tot(r => r.fyTd))}
+        <KPICard tone="accent" label={`FY ${lyStart}-${String(tyStart).slice(2)} (Apr–Mar)`} value={money(tot(r => r.fyLast))} details={cardDetails.fyLast} />
+        <KPICard label={`FY ${tyStart}-${String(tyStart + 1).slice(2)} to date`} value={money(tot(r => r.fyTd))} details={cardDetails.fyTd}
           note={upcoming > 0 ? `Excludes ${money(upcoming)} future-dated` : undefined}
           info={<>&ldquo;To date&rdquo; counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.{upcoming > 0 && <> It excludes {money(upcoming)} in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</>}</>} />
-        <KPICard tone={qoqPct == null ? 'default' : qoqPct >= 0 ? 'green' : 'red'} label={`${qLabel(QS[qBase])} → ${qLabel(QS[qCur])}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct}
+        <KPICard tone={qoqPct == null ? 'default' : qoqPct >= 0 ? 'green' : 'red'} label={`${qLabel(QS[qBase])} → ${qLabel(QS[qCur])}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct} details={cardDetails.qoq}
           info={`Pick any two quarters with the Compare / vs selectors — use two completed quarters (e.g. ${qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete.`} />
-        <KPICard tone={dropped ? 'red' : 'default'} label="Dropped / New" value={`${dropped} / ${newq}`}
+        <KPICard tone={dropped ? 'red' : 'default'} label="Dropped / New" value={`${dropped} / ${newq}`} details={cardDetails.dn}
           info={`Dropped = had revenue in ${qLabel(QS[qBase])} but none in ${qLabel(QS[qCur])}; New = the reverse.`} />
       </KPIRow>
 

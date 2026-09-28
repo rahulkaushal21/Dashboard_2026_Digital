@@ -4,6 +4,7 @@ import Header from '@/components/Header'
 import { NotSplitNote } from '@/components/UnitToggle'
 import MultiSelect from '@/components/MultiSelect'
 import KPICard from '@/components/KPICard'
+import { fmtDay, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, FilterBar, Panel } from '@/components/PageParts'
 import { getSqlLeads, type SqlLead } from '@/lib/supabase'
 
@@ -35,9 +36,36 @@ export default function SqlLeads() {
     const m: Record<string, number> = {}; s.forEach(x => { const k = (x.industry || '').trim(); if (k) m[k] = (m[k] || 0) + 1 })
     return Object.entries(m).sort((a, b) => b[1] - a[1])[0]?.[0] || '—'
   }, [s])
+  const filtered = !!(search || fVenture.length || fRegion.length || fOwner.length || from || to)
+
+  // What sits behind each card: the filtered leads, split the way the card counts them.
+  // Ventures and Regions count distinct values, so their panels list the leads under
+  // each value as tabs (leads with the field blank don't count toward the figure and are
+  // left out); Top industry lists that industry's leads. Leads carry no amount.
+  const leadDetails = useMemo(() => {
+    const mk = (rows: SqlLead[], subtitle: string, groupBy: (x: SqlLead) => string): CardDetails<SqlLead> => ({
+      subtitle, rows, groupBy,
+      rowKey: x => x.id,
+      columns: [
+        { key: 'company', label: 'Company', value: x => x.company_name || '—', wide: true, sort: x => (x.company_name || '').toLowerCase() },
+        { key: 'date', label: 'Date', value: x => x.lead_date ? fmtDay(x.lead_date) : `${x.month || ''} ${x.year || ''}`.trim() || '—', sort: x => x.lead_date || '' },
+        { key: 'industry', label: 'Industry', value: x => x.industry || '—', wide: true, sort: x => (x.industry || '').toLowerCase() },
+        { key: 'venture', label: 'Venture', value: x => x.venture || '—', sort: x => (x.venture || '').toLowerCase() },
+        { key: 'region', label: 'Region', value: x => x.prospect_region || '—', sort: x => (x.prospect_region || '').toLowerCase() },
+        { key: 'owner', label: 'Owner', value: x => x.assigned_to || '—', sort: x => (x.assigned_to || '').toLowerCase() },
+      ],
+      defaultSort: 'date',
+    })
+    const t = (v?: string) => (v || '').trim()
+    return {
+      sqls: mk(s, filtered ? 'Leads matching the filters' : 'All leads', x => t(x.prospect_region) || 'No region'),
+      ventures: mk(s.filter(x => t(x.venture)), 'Leads per venture', x => t(x.venture)),
+      regions: mk(s.filter(x => t(x.prospect_region)), 'Leads per region', x => t(x.prospect_region)),
+      industry: mk(s.filter(x => t(x.industry) === topIndustry), 'Leads in the most common industry', x => t(x.prospect_region) || 'No region'),
+    }
+  }, [s, topIndustry, filtered])
   const reset = () => { setSearch(''); setFVenture([]); setFRegion([]); setFOwner([]); setFrom(''); setTo('') }
 
-  const filtered = !!(search || fVenture.length || fRegion.length || fOwner.length || from || to)
 
   return (
     <div>
@@ -48,10 +76,10 @@ export default function SqlLeads() {
       <NotSplitNote what="Leads" reason="are not split by business unit" className="-mt-3 mb-4" />
 
       <KPIRow cols={4}>
-        <KPICard tone="accent" label="SQLs" value={String(s.length)} sub={filtered ? `of ${all.length}` : undefined} />
-        <KPICard label="Ventures" value={String(uniq(s.map(x => x.venture)).length)} />
-        <KPICard label="Regions" value={String(uniq(s.map(x => x.prospect_region)).length)} />
-        <KPICard label="Top industry" value={topIndustry} />
+        <KPICard tone="accent" label="SQLs" value={String(s.length)} sub={filtered ? `of ${all.length}` : undefined} details={leadDetails.sqls} />
+        <KPICard label="Ventures" value={String(uniq(s.map(x => x.venture)).length)} details={leadDetails.ventures} />
+        <KPICard label="Regions" value={String(uniq(s.map(x => x.prospect_region)).length)} details={leadDetails.regions} />
+        <KPICard label="Top industry" value={topIndustry} details={topIndustry === '—' ? undefined : leadDetails.industry} />
       </KPIRow>
 
       <FilterBar right={

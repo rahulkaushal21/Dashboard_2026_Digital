@@ -482,12 +482,23 @@ table thead th {
 }
 
 /* The action column: pinned to the right edge of a scrolling table so Edit / Confirm is
-   always in reach, however many columns somebody has switched on. */
+   always in reach, however many columns somebody has switched on.
+   Every layer is OPAQUE. The header row is tinted with a translucent fill, and a pinned
+   cell that inherited it let the column scrolling underneath show through — "ACTION"
+   printed over "USD CONVERSION". A solid fill, a yellow left edge that marks it as the
+   place to act, and a shadow so the columns visibly slide under it. */
 .sticky-action {
   position: sticky;
   right: 0;
-  z-index: 1;
-  background: rgb(var(--mav-panel));
-  box-shadow: -8px 0 8px -8px rgb(0 0 0 / 0.12);
+  z-index: 2;
+  background-color: rgb(var(--mav-panel));
+  background-image: linear-gradient(rgb(255 219 45 / 0.07), rgb(255 219 45 / 0.07));
+  border-left: 2px solid rgb(255 219 45 / 0.7);
+  box-shadow: -10px 0 12px -10px rgb(0 0 0 / 0.25);
+  white-space: nowrap;
 }
-thead .sticky-action { background: inherit; }
+thead .sticky-action {
+  z-index: 3;
+  background-color: rgb(var(--mav-panel));
+  background-image: linear-gradient(rgb(255 219 45 / 0.18), rgb(255 219 45 / 0.18));
+}

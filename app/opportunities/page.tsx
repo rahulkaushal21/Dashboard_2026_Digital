@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
+import CardDetail, { daysSince, fmtDay, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import { ChevronDown, ChevronRight } from 'lucide-react'
@@ -326,6 +327,9 @@ const [committedOnly, setCommittedOnly] = useState(false)
 const [fAge, setFAge] = useState('')
 const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 })
 const [sel, setSel] = useState<Opportunity | null>(null)
+// A month-card figure opened in the side panel. The month cards are hand-built, not
+// KPICards, so they carry their own copy of the panel.
+const [monthDetail, setMonthDetail] = useState<{ label: string; value: string; details: CardDetails<Opportunity> } | null>(null)
 // Using the sidebar closes this drawer — including a click on the section you are
 // already on, which is not a route change and so re-renders nothing by itself.
 useCloseOnNav(useCallback(() => setSel(null), []))
@@ -689,6 +693,51 @@ const onHoldValue = onHold.reduce((s, x) => s + (x.value || 0), 0)
 const pendingValue = openValue + onHoldValue
 const won = useMemo(() => dated.filter(x => oppStatus(x) === 'Won'), [dated])
 const wonValue = won.reduce((s, x) => s + (x.value || x.won_amount || 0), 0)
+const undecided = useMemo(() => [...open, ...onHold], [open, onHold])
+
+// What sits behind each card: the same rows the figure adds up, split by GEO (for Web
+// that is the AU/NZ, UK/EU, US pods). `amt` is the card's own per-row figure — Won and
+// the month cards fall back to won_amount, the open-pipeline cards do not — so the
+// panel's total always equals the card.
+const oppDetails = (rows: Opportunity[], subtitle: string, amt: (x: Opportunity) => number, aged: boolean): CardDetails<Opportunity> => {
+  const sum = (rs: Opportunity[]) => money(rs.reduce((s, x) => s + amt(x), 0))
+  const dt = (x: Opportunity) => x.source_date || x.first_date
+  return {
+    subtitle, rows,
+    groupBy: x => x.geo || 'No GEO',
+    groupTotal: sum,
+    rowKey: x => x.id,
+    onRowClick: x => setSel(x),
+    columns: [
+      { key: 'client', label: 'Client / agency', value: x => x.company_name || '—', wide: true, sort: x => (x.company_name || '').toLowerCase() },
+      { key: 'amount', label: 'Amount', value: x => money(amt(x)), align: 'right', sort: amt, total: sum },
+      { key: 'date', label: 'Quoted', value: x => fmtDay(dt(x)), sort: x => dt(x) || '' },
+      aged
+        ? { key: 'age', label: 'Days so far', value: x => daysSince(dt(x)) ?? '—', align: 'right', sort: x => daysSince(dt(x)) ?? -1 }
+        : { key: 'status', label: 'Status', value: x => oppStatus(x) },
+      { key: 'pm', label: 'PM', value: x => x.pm_owner || '—', sort: x => (x.pm_owner || '').toLowerCase() },
+      { key: 'svc', label: 'Service', value: x => svcOf(x) || '—', wide: true },
+    ],
+  }
+}
+const range = `${from || '…'} → ${to || 'today'}`
+const openDetails = useMemo(() => oppDetails(open, `Open deals quoted ${range}, excluding On Hold`, x => x.value || 0, true),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [open, range])
+const holdDetails = useMemo(() => oppDetails(onHold, `On Hold deals quoted ${range}`, x => x.value || 0, true),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [onHold, range])
+const undecidedDetails = useMemo(() => {
+  const d = oppDetails(undecided, `Open + On Hold deals quoted ${range}`, x => x.value || 0, true)
+  // Which of the two each row is — the whole point of this card is that it mixes them.
+  // Takes Service's slot so the panel stays at six columns.
+  d.columns.splice(5, 1, { key: 'status', label: 'Status', value: x => oppStatus(x), sort: x => oppStatus(x) })
+  return d
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [undecided, range])
+const wonDetails = useMemo(() => oppDetails(won, `Won deals quoted ${range}`, x => x.value || x.won_amount || 0, false),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [won, range])
 const byGeo = useMemo(() => breakdown(open, x => x.geo || '—'), [open])
 const bySvc = useMemo(() => breakdown(open, svcOf), [open])
 const byTech = useMemo(() => breakdown(open, x => x.technology || '—'), [open])
@@ -724,6 +773,8 @@ const tierA = bankable.filter(x => x.intent_tier === 'A')
 const tierB = bankable.filter(x => x.intent_tier === 'B')
 return {
 key, label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+// The rows behind each figure, for the side panel a stat opens.
+rowsAll: rows, rowsPend: pendR, rowsWon: wonR, rowsLost: lostR,
 shared: rows.length, sharedValue: sum(rows),
 pending: pendR.length, pendingValue: sum(pendR),
 openOnly: openR.length, openOnlyValue: sum(openR),
@@ -746,13 +797,16 @@ decidedRate: (wonR.length + lostR.length) ? Math.round(wonR.length / (wonR.lengt
 const MonthCard = ({ m }: { m: typeof monthsAgg[number] }) => {
 // Money leads, count supports: the dollar figure is the headline number and the
 // deal count sits under it as context.
-const Stat = ({ label, n, v, tone, title }: { label: string; n: number; v: number; tone: string; title?: string }) => (
-<div className="flex-1 min-w-0" title={title}>
+// Each stat opens its rows in the side panel — the same view a KPI card opens.
+const Stat = ({ label, n, v, tone, title, rows, aged }: { label: string; n: number; v: number; tone: string; title?: string; rows: Opportunity[]; aged?: boolean }) => (
+<button type="button" className="flex-1 min-w-0 text-left rounded-md -m-1 p-1 hover:bg-mav-dark/50 transition-colors" title={title}
+  onClick={() => setMonthDetail({ label: `${m.label} · ${label}`, value: money(v),
+    details: oppDetails(rows, `${label} — quotes dated ${m.label}`, x => x.value || x.won_amount || 0, !!aged) })}>
 <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">{label}</div>
 {/* steps down on narrower cards so four 6-figure sums never wrap or clip */}
 <div className={`text-lg lg:text-xl xl:text-2xl font-bold leading-tight tracking-tight whitespace-nowrap ${tone}`}>{money(v)}</div>
 <div className="text-xs text-mav-muted mt-0.5">{n} {n === 1 ? 'quote' : 'quotes'}</div>
-</div>
+</button>
 )
 const pct = m.shared ? Math.round(m.won / m.shared * 100) : 0
 return (
@@ -764,11 +818,11 @@ return (
 </div>
 </div>
 <div className="flex gap-2 xl:gap-3">
-<Stat label="Quotes shared" n={m.shared} v={m.sharedValue} tone="text-mav-fg" title="Every quote dated in this month. Equals Pending + Won + Lost." />
-<Stat label="Pending" n={m.pending} v={m.pendingValue} tone="text-amber-400"
+<Stat label="Quotes shared" n={m.shared} v={m.sharedValue} rows={m.rowsAll} tone="text-mav-fg" title="Every quote dated in this month. Equals Pending + Won + Lost." />
+<Stat label="Pending" n={m.pending} v={m.pendingValue} rows={m.rowsPend} aged tone="text-amber-400"
   title={`Not yet decided = Open + On Hold. Open ${money(m.openOnlyValue)} (${m.openOnly}) + On Hold ${money(m.holdValue)} (${m.hold}). The "Open pipeline value" KPI below counts Open ONLY, so it is the smaller number.`} />
-<Stat label="Won" n={m.won} v={m.wonValue} tone="text-green-400" />
-<Stat label="Lost" n={m.lost} v={m.lostValue} tone="text-red-400" />
+<Stat label="Won" n={m.won} v={m.wonValue} rows={m.rowsWon} tone="text-green-400" />
+<Stat label="Lost" n={m.lost} v={m.lostValue} rows={m.rowsLost} tone="text-red-400" />
 </div>
 {/* Spells out the Open/On-Hold split so Pending can never look like it contradicts
     the Open-only KPI further down the page. */}
@@ -918,13 +972,13 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
     below are the control. */}
 {iAmAdmin && (
 <KPIRow cols={4}>
-<KPICard tone="accent" label="Open pipeline" value={money(openValue)}
+<KPICard tone="accent" label="Open pipeline" value={money(openValue)} details={openDetails}
   sub={<>{open.length} open{unlikelyOpen.length ? <> · {money(likelyValue)} likely</> : null}</>}
   info={<>Open deals quoted in {from || '…'} → {to || 'today'}, excluding On Hold. {unlikelyOpen.length ? `${money(unlikelyValue)} of it is flagged "might not come".` : ''} The month cards below count Open and On Hold together as pending — {money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}.</>} />
-<KPICard tone="yellow" label="On hold" value={money(onHoldValue)} sub={`${onHold.length} paused`} />
-<KPICard tone="amber" label="Still undecided" value={money(pendingValue)} sub="open + on hold"
+<KPICard tone="yellow" label="On hold" value={money(onHoldValue)} sub={`${onHold.length} paused`} details={holdDetails} />
+<KPICard tone="amber" label="Still undecided" value={money(pendingValue)} sub="open + on hold" details={undecidedDetails}
   info="Everything not yet won or lost in the date range. This is what the month cards call Pending." />
-<KPICard tone="green" label="Won" value={money(wonValue)} sub={`${won.length} deals won`} />
+<KPICard tone="green" label="Won" value={money(wonValue)} sub={`${won.length} deals won`} details={wonDetails} />
 </KPIRow>
 )}
 
@@ -932,6 +986,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 <div className="mb-5">
 <SectionTitle info="Quotes shared, still pending, and won — counted in the month the quote went out. A fixed window: it ignores the date filter. Bankable = pending deals likely to confirm (tier A 80%+ or B 60–80%), at full value.">Last 2 months</SectionTitle>
 <div className="grid md:grid-cols-2 gap-3">{monthsAgg.map(m => <MonthCard key={m.key} m={m} />)}</div>
+{monthDetail && <CardDetail label={monthDetail.label} value={monthDetail.value} details={monthDetail.details} onClose={() => setMonthDetail(null)} />}
 </div>
 )}
 

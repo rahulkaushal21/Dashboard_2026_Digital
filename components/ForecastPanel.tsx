@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
+import type { CardDetails } from '@/components/CardDetail'
+import type { ForecastMonth } from '@/lib/forecast'
 import InfoTip from '@/components/InfoTip'
 import { KPIRow, Panel } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
@@ -79,6 +81,45 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
     }
   }, [opps])
 
+  // What sits behind the two cards that are made of months. A forecast is a projection,
+  // so the rows are the twelve months it adds up (settled, part booked, forecast) and
+  // the full months still to come against the pace each one has to hit.
+  const monthDetails = useMemo((): { projected?: CardDetails<ForecastMonth>; needed?: CardDetails<ForecastMonth> } => {
+    if (!fc) return {}
+    const basis = (m: ForecastMonth) => (m.actual ? 'Actual' : m.partial ? 'Part booked' : 'Forecast')
+    const month = { key: 'month', label: 'Month', value: (m: ForecastMonth) => m.label, sort: (m: ForecastMonth) => m.key }
+    const future = fc.months.filter(m => !m.actual && !m.partial)
+    return {
+      projected: {
+        subtitle: `The twelve months of ${fc.fyLabel}: settled months at their actual, the month in progress at its expected close, the rest at the seasonal forecast`,
+        rows: fc.months, rowKey: m => m.key, groupBy: basis, defaultSort: 'month',
+        groupTotal: rs => usdK(rs.reduce((s, m) => s + m.value, 0)),
+        columns: [
+          month,
+          { key: 'basis', label: 'Basis', value: basis },
+          { key: 'index', label: 'Index', value: m => Math.round(m.index), align: 'right', sort: m => m.index },
+          { key: 'value', label: 'Amount', value: m => fmtUsd(Math.round(m.value)), align: 'right', sort: m => m.value,
+            total: rs => usdK(rs.reduce((s, m) => s + m.value, 0)) },
+          { key: 'range', label: 'Range', value: m => (m.actual ? '—' : `${fmtUsd(Math.round(Math.max(0, m.low)))} – ${fmtUsd(Math.round(m.high))}`) },
+        ],
+      },
+      needed: fc.gap > 0 && future.length ? {
+        subtitle: `Each of the ${future.length} full months left has to bill ${fmtUsd(Math.round(fc.neededPerMonth))} to reach ${usdK(fc.target)}; the month in progress is not counted`,
+        rows: future, rowKey: m => m.key, defaultSort: 'month',
+        columns: [
+          month,
+          { key: 'value', label: 'Forecast', value: m => fmtUsd(Math.round(m.value)), align: 'right', sort: m => m.value,
+            total: rs => fmtUsd(Math.round(rs.reduce((s, m) => s + m.value, 0))) },
+          { key: 'need', label: 'Needed', value: () => fmtUsd(Math.round(fc.neededPerMonth)), align: 'right',
+            total: rs => fmtUsd(Math.round(fc.neededPerMonth * rs.length)) },
+          { key: 'short', label: 'Short by', value: m => fmtUsd(Math.round(Math.max(0, fc.neededPerMonth - m.value))), align: 'right',
+            sort: m => fc.neededPerMonth - m.value,
+            total: rs => fmtUsd(Math.round(rs.reduce((s, m) => s + Math.max(0, fc.neededPerMonth - m.value), 0))) },
+        ],
+      } : undefined,
+    }
+  }, [fc])
+
   const futureMonths = fc ? fc.months.filter(m => !m.actual).length : 0
   // Months the scenarios can still act on — next month onward, not the one in progress.
   const actionable = Math.max(0, futureMonths - 1)
@@ -148,11 +189,13 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
           <KPIRow cols={4}>
             <KPICard tone="accent" label={`${fc.fyLabel} projected`} value={usdK(fc.projected)}
               sub={`likely ${usdK(fc.projectedLow)}–${usdK(fc.projectedHigh)}`}
+              details={monthDetails.projected}
               info={<>Across {fc.historyMonths} complete months, a typical month is currently worth {fmtUsd(Math.round(fc.level))} once seasonal shape is removed. Carried forward, {fc.fyLabel} lands near {usdK(fc.projected)} (likely {usdK(fc.projectedLow)}–{usdK(fc.projectedHigh)}) against a {usdK(fc.target)} target{fc.gap > 0 && <> — short by {usdK(fc.gap)}</>}.</>} />
             <KPICard tone={fc.pctOfTarget >= 100 ? 'green' : 'amber'} label="Against target" value={`${fc.pctOfTarget.toFixed(0)}%`}
               sub={`of ${usdK(fc.target)}`} />
             <KPICard tone={fc.gap > 0 ? 'red' : 'green'} label={fc.gap > 0 ? 'Shortfall' : 'Surplus'} value={usdK(Math.abs(fc.gap))} />
             <KPICard tone="amber" label="Needed / full month left" value={usdK(fc.neededPerMonth)}
+              details={monthDetails.needed}
               sub={fc.gap > 0 && fc.monthsRemaining > 0
                 ? <>{fc.monthsRemaining} months · record {fmtUsd(Math.round(fc.bestMonth.value))} ({fc.bestMonth.label})</>
                 : undefined}
