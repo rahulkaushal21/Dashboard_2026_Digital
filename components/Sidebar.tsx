@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
@@ -30,6 +30,9 @@ const nav: Entry[] = [
   // read to EXPLAIN something afterwards went into the group below. Thirteen top-level
   // items meant scanning the whole rail to find the two or three anybody opens daily.
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  // What needs a PM today, across projects and deals, each with the button that clears
+  // it. Second, because it is the page a PM opens to START the day.
+  { href: '/actions', label: 'Actions', icon: Zap },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   // The page has always held the feedback sheet plus manually added praise; 'Delights'
   // described the best of it rather than the thing itself. The URL stays /delights so
@@ -66,6 +69,14 @@ const nav: Entry[] = [
   // Forecast is likewise absent: it is a tab inside Business Trend now, because the two
   // answered the same question from opposite ends and reading one without the other was
   // how the same month got two different explanations.
+  //
+  // Small working tools a PM uses mid-task. A group from the start, because the Vendor
+  // Calculator is the first of several.
+  {
+    label: 'PM Tools', icon: Wrench, children: [
+      { href: '/pm-tools/vendor-calculator', label: 'Vendor Calculator', icon: Calculator },
+    ],
+  },
   { href: '/admin', label: 'Settings', icon: Settings },
 ]
 

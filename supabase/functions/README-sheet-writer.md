@@ -57,6 +57,7 @@ not a sheet id and is a sign the wrong value is in it.
 | `Web, Hub & LP` | the source tab verbatim from `sheet_raw` (all 40 columns, every row), plus everything confirmed in the dashboard mapped into the same columns and marked `Confirmed (dashboard)` in Project Status |
 | `Quotes` | the `quotes` table, plus deals that exist only here (entered by hand, or found in email) |
 | `Feedback` | the `feedback` table |
+| `Vendor Calculator` | **hidden** — every calculation saved from PM Tools → Vendor Calculator (`vendor_calculations`). Created hidden and re-hidden each run if someone unhides it. |
 
 ## Decisions worth knowing
 

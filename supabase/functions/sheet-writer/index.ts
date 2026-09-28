@@ -19,6 +19,7 @@
 //                    columns.
 //   Quotes        — the quotes table, plus dashboard-origin deals the sheet has no line for.
 //   Feedback      — the feedback table.
+//   Vendor Calculator — HIDDEN; calculations saved from PM Tools → Vendor Calculator.
 //
 // Full replace rather than append because these are DUMPS. An append would need to know
 // what it wrote last time, and any disagreement between that memory and the sheet leaves
@@ -77,6 +78,11 @@ const COLUMN_KINDS: Record<string, Kind> = {
   "usd conversion": "usd", "outsource price (usd)": "usd",
   "internal hrs": "number", "actual hrs": "number", "confirmed in days": "number",
   "optimization": "percent",
+  // The hidden Vendor Calculator tab.
+  "vendor cost (inr)": "money", "margin (inr)": "money", "client price (aud)": "money",
+  "vendor cost (usd)": "usd", "client price (usd)": "usd",
+  "usd to inr": "number", "usd to aud": "number",
+  "margin %": "percent",
 };
 // Hours and days get no format: a plain number already reads right.
 const KIND_FORMAT: Partial<Record<Kind, { type: string; pattern: string }>> = {
@@ -237,13 +243,26 @@ async function api(tok: string, url: string, init?: RequestInit) {
   return j;
 }
 
+// Tabs that exist to hold data, not to be read. Created hidden, and put back to hidden
+// every run if somebody unhides one — the next run tidies it away again rather than
+// leaving a working tab on show in the sheet people open.
+const HIDDEN_TABS = new Set(["Vendor Calculator"]);
+
 async function ensureTabs(tok: string, id: string, names: string[]) {
   const meta = await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}?fields=sheets.properties`);
-  const have = new Set((meta.sheets || []).map((x: any) => x.properties.title));
-  const add = names.filter((n) => !have.has(n)).map((title) => ({ addSheet: { properties: { title } } }));
-  if (add.length) {
+  const props = new Map<string, any>((meta.sheets || []).map((x: any) => [x.properties.title, x.properties]));
+  const requests: unknown[] = [];
+  for (const title of names) {
+    const p = props.get(title);
+    const hidden = HIDDEN_TABS.has(title);
+    if (!p) requests.push({ addSheet: { properties: { title, hidden } } });
+    else if (hidden && !p.hidden) {
+      requests.push({ updateSheetProperties: { properties: { sheetId: p.sheetId, hidden: true }, fields: "hidden" } });
+    }
+  }
+  if (requests.length) {
     await api(tok, `https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, {
-      method: "POST", body: JSON.stringify({ requests: add }),
+      method: "POST", body: JSON.stringify({ requests }),
     });
   }
 }
@@ -930,6 +949,36 @@ async function buildFeedback(sb: any): Promise<string[][]> {
   return grid;
 }
 
+// ---- Vendor Calculator (hidden tab) ----------------------------------------
+//
+// Every calculation a PM saved from PM Tools → Vendor Calculator, oldest first so the
+// rows keep their positions run to run (the writer matches by position). Every input is
+// written, not only the margin: a margin is meaningless later without the exchange rate
+// it was worked out at.
+const VENDOR_HEADERS = [
+  "Added Date", "Project", "Client", "Vendor", "Vendor Cost (INR)", "USD to INR", "USD to AUD",
+  "Vendor Cost (USD)", "Client Price (USD)", "Client Price (AUD)", "Margin %", "Margin (INR)",
+  "Note", "Saved By",
+];
+
+async function buildVendorCalcs(sb: any): Promise<string[][]> {
+  const grid: string[][] = [VENDOR_HEADERS];
+  const { data, error } = await sb.from("vendor_calculations")
+    .select("created_at, project, client, vendor, vendor_inr, usd_inr, aud_rate, vendor_usd, client_usd, client_aud, margin_pct, margin_inr, note, created_by")
+    .order("id");
+  if (error) throw new Error("vendor_calculations: " + error.message);
+  for (const v of data || []) {
+    grid.push([
+      sheetDate(v.created_at), s(v.project), s(v.client), s(v.vendor),
+      money(v.vendor_inr), s(v.usd_inr), s(v.aud_rate),
+      money(v.vendor_usd), money(v.client_usd), money(v.client_aud),
+      v.margin_pct === null || v.margin_pct === undefined ? "" : `${Number(v.margin_pct)}%`,
+      money(v.margin_inr), s(v.note), s(v.created_by),
+    ]);
+  }
+  return grid;
+}
+
 // ---- Entry point ----------------------------------------------------------
 Deno.serve(async (req) => {
   const url = new URL(req.url);
@@ -978,6 +1027,7 @@ Deno.serve(async (req) => {
       "Web, Hub & LP": await buildRevenue(sb, tok, sheetId),
       "Quotes": await buildQuotes(sb),
       "Feedback": await buildFeedback(sb),
+      "Vendor Calculator": await buildVendorCalcs(sb),
     };
     const counts = Object.fromEntries(Object.entries(tabs).map(([k, v]) => [k, v.length - 1]));
 

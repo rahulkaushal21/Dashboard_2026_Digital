@@ -55,6 +55,8 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/forecast', label: 'Forecast' },
   { href: '/last-year', label: 'Quarter over Quarter Review' },
   { href: '/pm-team', label: 'PM Team' },
+  { href: '/actions', label: 'Actions' },
+  { href: '/pm-tools/vendor-calculator', label: 'Vendor Calculator' },
 ]
 
 // Derived from the Google identity now rather than read from a table. `role` is
