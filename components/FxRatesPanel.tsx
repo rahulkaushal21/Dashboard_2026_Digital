@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { getFxRates, saveFxRate, deleteFxRate, type FxRate } from '@/lib/supabase'
+import { Panel } from './PageParts'
 
 // Conversion rates to USD.
 //
@@ -68,27 +69,28 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
   const inp = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow'
 
   return (
-    <div>
-      <h2 className="text-base font-semibold mb-1">Currency conversion</h2>
-      <p className="text-sm text-mav-muted mb-4">
-        How a quote in another currency becomes USD — the value is multiplied by the rate.
-        Every figure in the dashboard is USD, so these decide what a non-USD deal books at.
+    <Panel title="Currency conversion"
+      info="How a quote in another currency becomes USD — the value is multiplied by the rate. Every figure in the dashboard is USD, so these decide what a non-USD deal books at."
+      /* Unlike the contractor list, this stays admin-only: a rate is not local knowledge
+         somebody fills in as they go, it silently reprices every non-USD deal confirmed
+         after it changes. The database enforces the same rule. */
+      right={
+        <span className="text-xs">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">
+            Admins only
+          </span>
+          <span className="text-mav-muted ml-2">
+            {canEdit ? 'You can change these.' : 'You can see these but not change them.'}
+          </span>
+        </span>
+      }>
+      {/* The one caveat that changes how a rate reads, so it stays visible. */}
+      <p className="text-xs text-mav-muted mb-3">
         Changing a rate affects deals confirmed <span className="text-mav-fg">from now on</span>; anything
         already booked keeps the figure it was booked at.
       </p>
-      {/* Unlike the contractor list, this stays admin-only: a rate is not local knowledge
-          somebody fills in as they go, it silently reprices every non-USD deal confirmed
-          after it changes. The database enforces the same rule. */}
-      <p className="text-xs mb-4">
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-mav-line text-mav-muted">
-          Admins only
-        </span>
-        <span className="text-mav-muted ml-2">
-          {canEdit ? 'You can change these.' : 'You can see these but not change them.'}
-        </span>
-      </p>
 
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-4">
+      <div className="border border-mav-line rounded-lg overflow-x-auto mb-4">
         <table className="w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
@@ -148,13 +150,13 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
         <div className="flex flex-wrap items-center gap-2">
           <input value={newCur} onChange={e => setNewCur(e.target.value.toUpperCase())} placeholder="Code, e.g. ZAR" className={`${inp} w-32`} maxLength={5} />
           <input value={newRate} onChange={e => setNewRate(e.target.value)} placeholder="Rate to USD" className={`${inp} w-40`} />
-          <button onClick={add} disabled={busy} className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+          <button onClick={add} disabled={busy} className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-60">
             {busy ? 'Saving…' : 'Add currency'}
           </button>
           {status && <span className="text-sm text-mav-muted">{status}</span>}
         </div>
       )}
       {!canEdit && status && <p className="text-sm text-mav-muted">{status}</p>}
-    </div>
+    </Panel>
   )
 }

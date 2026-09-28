@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { getPickListAll, addPickItem, setPickItemActive, type PickItem } from '@/lib/supabase'
+import { Panel } from './PageParts'
 
 // The experts and the contractors, maintained here rather than in code.
 //
@@ -49,11 +50,8 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
   const inp = 'bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow'
 
   return (
-    <div>
-      <h2 className="text-base font-semibold mb-1">{title}</h2>
-      <p className="text-sm text-mav-muted mb-4">{blurb}</p>
-
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-3">
+    <Panel title={title} info={blurb} right={<span className="font-mono text-xs text-mav-muted">{active.length} active</span>}>
+      <div className="border border-mav-line rounded-lg overflow-hidden mb-3">
         <table className="w-full text-sm">
           <tbody>
             {active.map((r, i) => (
@@ -77,7 +75,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
             placeholder="Add a name" className={`${inp} w-56`} />
-          <button onClick={add} disabled={busy} className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+          <button onClick={add} disabled={busy} className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-60">
             {busy ? 'Saving…' : 'Add'}
           </button>
           {status && <span className="text-sm text-mav-muted">{status}</span>}
@@ -86,7 +84,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
 
       {retired.length > 0 && (
         <div>
-          <button onClick={() => setShowRetired(v => !v)} className="text-xs text-mav-muted hover:text-mav-fg">
+          <button onClick={() => setShowRetired(v => !v)} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
             {showRetired ? 'Hide' : 'Show'} {retired.length} retired
           </button>
           {showRetired && (
@@ -104,6 +102,6 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
           </p>
         </div>
       )}
-    </div>
+    </Panel>
   )
 }

@@ -3,7 +3,10 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useThemeInk } from '@/lib/use-theme-ink'
 import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
-import { UnplacedNote } from '@/components/UnitToggle'
+import { UnplacedNote, NotSplitNote } from '@/components/UnitToggle'
+import KPICard from '@/components/KPICard'
+import InfoTip from '@/components/InfoTip'
+import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import { inUnit, unitOf } from '@/lib/business-unit'
 import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
@@ -134,7 +137,7 @@ function Stat({ label, value, sub, tone }: {
   const colour = tone === 'good' ? 'text-green-300' : tone === 'warn' ? 'text-amber-300' : tone === 'bad' ? 'text-red-300' : 'text-mav-fg'
   return (
     <div className="rounded-lg border border-mav-line bg-mav-dark/40 px-3.5 py-3">
-      <div className="text-[11px] uppercase tracking-wide text-mav-muted">{label}</div>
+      <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-muted">{label}</div>
       <div className={`text-lg font-semibold mt-0.5 tabular-nums ${colour}`}>{value}</div>
       {sub && <div className="text-[11px] text-mav-fg/50 mt-0.5 leading-snug">{sub}</div>}
     </div>
@@ -325,7 +328,15 @@ export default function Clients() {
     getClientQbrs(name).then(setQbrs)
   }, [selC])
   // The Client-Backup directory: every client on the sheet, booked or not.
-  const [dir, setDir] = useState<ClientDirectory[]>([])
+  const [dirAll, setDir] = useState<ClientDirectory[]>([])
+  // The directory's own BU column says Digital / MarTech, which is not the LP/HUB / Web
+  // split the department switch asks about. A company that has booked revenue can still
+  // be placed — by the client it matched, the same way the revenue list is placed — so
+  // those follow the switch. One that has never booked carries no department at all and
+  // stays in view (said so on the page) rather than being quietly assigned a side.
+  const dir = useMemo(() => unit === 'all' ? dirAll : dirAll.filter(d =>
+    !d.is_revenue_client || inUnit(clientDepts.get(clientKey(d.matched_client || d.company_name)), unit)),
+    [dirAll, clientDepts, unit])
   const [mode, setMode] = useState<'clients' | 'directory'>('clients')
   const [bu, setBu] = useState<string[]>([]); const [linked, setLinked] = useState<'' | 'yes' | 'no'>('')
   // Directory-only: filter by the AI stance classified from each company's own site text
@@ -477,6 +488,9 @@ export default function Clients() {
     }
     return out
   }, [bookings])
+  // Counted over the clients in view, not every booking row: the dip map is built from all
+  // revenue, and a count that ignored the department switch disagreed with the table.
+  const dipCount = useMemo(() => clients.filter(c => dipByClient.has(norm(c.company_name))).length, [clients, dipByClient])
   const dipWindow = `${monLabel(monthsAgoYM(2))}–${monLabel(monthsAgoYM(1))} vs ${monLabel(monthsAgoYM(4))}–${monLabel(monthsAgoYM(3))}`
 
   const tenureOf = (c: Client): Tenure | null => {
@@ -606,7 +620,8 @@ export default function Clients() {
 
   // Filter options come from the owner sets, so picking a PM finds the clients they
   // share as well as the ones the record hands them outright.
-  const owners = useMemo(() => uniq([...ownerMap.values()].flat()), [ownerMap])
+  // Scoped to the clients in view, so the list does not offer the other department's PMs.
+  const owners = useMemo(() => uniq(clients.flatMap(c => ownerMap.get(clientKey(c.company_name)) || [])), [ownerMap, clients])
   const geos = uniq(clients.map(c => c.geo))
   const industries = uniq(clients.map(c => c.industry))
   const aiCount = clients.filter(c => c.ai_focus).length
@@ -756,13 +771,15 @@ export default function Clients() {
   // rather than written down, so the argument below can't quietly go stale — and the
   // concentration number is the point: one client currently IS this service line.
   const aiBook = useMemo(() => {
-    const rows = bookings.filter(b => /ai\s*&?\s*automation/i.test(b.service_name || ''))
+    // AI & Automation sits under Web by decision (lib/business-unit), so the service name
+    // places the line: under LP/HUB this is honestly nothing.
+    const rows = bookings.filter(b => /ai\s*&?\s*automation/i.test(b.service_name || '') && inUnit(b.service_name, unit))
     const total = rows.reduce((s, b) => s + (Number(b.booking_amount) || 0), 0)
     const byClient: Record<string, number> = {}
     rows.forEach(b => { const k = displayName(b.company_name) || '—'; byClient[k] = (byClient[k] || 0) + (Number(b.booking_amount) || 0) })
     const top = Object.entries(byClient).sort((a, b) => b[1] - a[1])[0]
     return { total, count: rows.length, topName: top?.[0] || '', topShare: total > 0 && top ? Math.round((top[1] / total) * 100) : 0 }
-  }, [bookings])
+  }, [bookings, unit])
 
   const rows = useMemo(() => {
     // date-range filter runs on each client's last-activity date; a client with no
@@ -859,12 +876,101 @@ export default function Clients() {
     return sortAsc ? ' ↑' : ' ↓'
   }
 
+  // The health rule, word for word. It was a paragraph above the table that everybody
+  // scrolled past; it now sits behind the ⓘ on the list heading, one hover away.
+  const healthInfo = (
+    <><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">📉 revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</>
+  )
+  // A health card is a shortcut to the same filter as the Health dropdown. It lands on the
+  // revenue list, because health is only worked out for booked clients.
+  const pickStat = (s: string) => { setMode('clients'); setStat(v => v === s ? '' : s) }
+  // Quick-view pills, the reference page's style: tinted when on.
+  const pill = (on: boolean, onCls = 'bg-mav-fill text-black border-mav-yellow font-medium') =>
+    `text-xs px-3 py-1.5 rounded-full border transition-colors ${on ? onCls : 'border-mav-line text-mav-muted hover:text-mav-fg'}`
+  const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
+
   return (
     <div>
-      <Header title="Client 360" subtitle="Booked clients, sorted by latest action. Click a client for its live discussions — escalations, open quotes & email conversations." />
+      <Header title="Client 360"
+        subtitle="Booked clients, sorted by latest action. Click a client for its live discussions — escalations, open quotes & email conversations."
+        chip={from || to ? `Activity ${from || '…'} → ${to || 'today'}` : undefined} />
       <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      {/* Cards first, as on every page. Each one is a shortcut to its rows — the counts are
+          the same ones the Health dropdown and the dip toggle carry. */}
+      <KPIRow cols={5}>
+        <KPICard tone="accent" label="Revenue clients" value={clients.length.toLocaleString()}
+          sub={`${dir.length.toLocaleString()} in the full directory`}
+          info="The client list comes only from booking data. The full directory is every company on the Client-Backup sheet, booked or not — a directory row that matches a booked client is flagged, never counted twice."
+          onClick={() => { setMode('clients'); setStat(''); setDipOnly(false) }} active={mode === 'clients' && !stat && !dipOnly} />
+        <KPICard tone="red" label="At risk" value={statCount('At risk').toLocaleString()} sub="live, worked out here"
+          info=">2 escalations in a month or a major escalation in the last 2 months. A client whose latest sentiment event is positive feedback after their last escalation counts as recovered instead."
+          onClick={() => pickStat('At risk')} active={stat === 'At risk'} />
+        <KPICard tone="amber" label="Watch" value={statCount('Watch').toLocaleString()} sub="live, worked out here"
+          info="Email-sensed frustration, an older escalation, a contract winding down (no recent booking), an escalation marked Unresolved, or a revenue dip."
+          onClick={() => pickStat('Watch')} active={stat === 'Watch'} />
+        <KPICard tone="green" label="Positive" value={statCount('Positive').toLocaleString()} sub="recovered or praised"
+          onClick={() => pickStat('Positive')} active={stat === 'Positive'} />
+        <KPICard tone="yellow" label="Revenue dip" value={dipCount.toLocaleString()} sub={dipWindow}
+          info={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`}
+          onClick={() => { setMode('clients'); setDipOnly(v => !v) }} active={dipOnly} />
+      </KPIRow>
+
+      {/* Opens CLOSED: a reference chart, not the reason anybody comes to this page. */}
+      <Panel className="mb-5"
+        title={
+          <button onClick={() => setShowInd(v => !v)} className="inline-flex items-center gap-1.5 uppercase hover:text-mav-fg transition-colors">
+            <span>{showInd ? '▾' : '▸'}</span>Clients by industry
+            {/* An active filter has to be visible even when the panel is shut, or you
+                are looking at a filtered table with nothing saying why. */}
+            {!showInd && ind.length > 0 && <span className="normal-case tracking-normal font-sans text-xs px-2 py-0.5 rounded-full bg-mav-yellow/15 text-mav-yellow">{indLabel}</span>}
+          </button>
+        }
+        right={
+          <div className="text-xs text-mav-muted">
+            {(mode === 'clients' ? clients.length : dir.length)} total
+            {showInd
+              ? <> · click a bar to filter{ind.length ? ` · showing ${indLabel}` : ''} · <button onClick={() => setShowInd(false)} className="hover:text-mav-fg underline underline-offset-2">hide</button></>
+              : <> · <button onClick={() => setShowInd(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
+            {!showInd && ind.length > 0 && <> · <button onClick={() => setInd([])} className="hover:text-mav-fg underline underline-offset-2">clear filter</button></>}
+          </div>
+        }>
+        <div className={`space-y-1.5 ${showInd ? '' : 'hidden'}`}>
+          {(mode === 'clients' ? indCounts : dirIndCounts).map(([name, n]) => {
+            const active = ind.includes(name)
+            const pct = Math.round((n / (mode === 'clients' ? maxIndCount : (dirIndCounts[0]?.[1] || 1))) * 100)
+            return (
+              <button key={name} onClick={() => setInd(active ? ind.filter(x => x !== name) : [...ind, name])} title={`${n} client${n === 1 ? '' : 's'} — click to ${active ? 'clear' : 'filter'}`}
+                className="w-full flex items-center gap-3 text-left group py-0.5">
+                <span className={`w-44 shrink-0 truncate text-xs ${active ? 'text-mav-yellow font-medium' : 'text-mav-muted group-hover:text-mav-fg'}`}>{name}</span>
+                <span className="flex-1 h-4 rounded bg-mav-dark overflow-hidden">
+                  <span className={`block h-full rounded ${active ? 'bg-mav-yellow' : 'bg-mav-yellow/40 group-hover:bg-mav-yellow/70'}`} style={{ width: `${pct}%` }} />
+                </span>
+                <span className={`w-8 text-right text-xs font-semibold ${active ? 'text-mav-yellow' : 'text-mav-fg'}`}>{n}</span>
+              </button>
+            )
+          })}
+        </div>
+        {showInd && ind.length > 0 && <button onClick={() => setInd([])} className="mt-3 text-xs text-mav-muted hover:text-mav-fg">✕ Clear industry filter</button>}
+      </Panel>
+
+      <SectionTitle info={healthInfo}>Clients</SectionTitle>
+      {/* The page's main split: the booked list, or every company on the directory sheet. */}
+      <Segments<'clients' | 'directory'>
+        value={mode}
+        onChange={setMode}
+        items={[
+          { id: 'clients', label: 'Revenue clients', count: clients.length },
+          { id: 'directory', label: 'Full directory', count: dir.length },
+        ]} />
+      {mode === 'directory' && (
+        <NotSplitNote className="-mt-2 mb-3" what="Directory companies with no booked revenue"
+          reason="carry no department (the sheet's BU column is Digital / MarTech, not LP/HUB / Web); booked ones follow their client's department" />
+      )}
+
+      {/* Every filter in one box: what the client IS on the first row, then when something
+          last happened on it, then the quick views. */}
+      <FilterBar right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{mode === 'clients' ? rows.length : dirRows.length} shown</span>}>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
             hidden={allClients.filter(c => !mine.ownsClient(c.company_name)).length} />
@@ -884,70 +990,25 @@ export default function Clients() {
           <option value="Positive">🟢 Positive ({statCount('Positive')})</option>
           <option value="Neutral">🟡 Neutral ({statCount('Neutral')})</option>
         </select>
-        <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={`text-sm px-3 py-2 rounded-md border transition-colors ${aiOnly ? 'bg-mav-fill text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
-        <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${dipOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>📉 Revenue dip{dipByClient.size ? ` (${dipByClient.size})` : ''}</button>
-        <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={`text-sm px-3 py-2 rounded-md border transition-colors ${recentOnly ? 'bg-mav-fill text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex rounded-md border border-mav-line overflow-hidden">
-            <button onClick={() => setMode('clients')} className={`text-xs px-3 py-2 transition-colors ${mode === 'clients' ? 'bg-mav-fill text-black font-medium' : 'text-mav-muted hover:text-mav-fg'}`}>Revenue clients ({clients.length})</button>
-            <button onClick={() => setMode('directory')} className={`text-xs px-3 py-2 transition-colors ${mode === 'directory' ? 'bg-mav-fill text-black font-medium' : 'text-mav-muted hover:text-mav-fg'}`}>Full directory ({dir.length})</button>
-          </div>
-          <span className="text-xs text-mav-muted">{mode === 'clients' ? rows.length : dirRows.length} shown</span>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <span className="text-xs text-mav-muted">Activity between</span>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
-        <span className="text-xs text-mav-muted">and</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
+        <div className="basis-full h-0" />
+        <span className={lbl}>Activity</span>
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="Activity from" />
+        <span className="text-xs text-mav-muted">→</span>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="Activity to" />
         {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear dates</button>}
-        <span className="text-xs text-mav-muted ml-auto">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>
-      </div>
-
-      <p className="text-xs text-mav-muted mb-4"><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">📉 revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</p>
-
-      <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-        <div className="flex flex-wrap items-baseline justify-between gap-2 mb-4">
-          <button onClick={() => setShowInd(v => !v)} className="text-sm font-medium inline-flex items-center gap-1.5 hover:text-mav-yellow transition-colors">
-            <span className="text-xs text-mav-muted">{showInd ? '▾' : '▸'}</span>Clients by industry
-            {/* An active filter has to be visible even when the panel is shut, or you
-                are looking at a filtered table with nothing saying why. */}
-            {!showInd && ind.length > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/15 text-mav-yellow font-normal">{indLabel}</span>}
-          </button>
-          <div className="text-xs text-mav-muted">
-            {(mode === 'clients' ? clients.length : dir.length)} total
-            {showInd
-              ? <> · click a bar to filter{ind.length ? ` · showing ${indLabel}` : ''} · <button onClick={() => setShowInd(false)} className="hover:text-mav-fg underline underline-offset-2">hide</button></>
-              : <> · <button onClick={() => setShowInd(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
-            {!showInd && ind.length > 0 && <> · <button onClick={() => setInd([])} className="hover:text-mav-fg underline underline-offset-2">clear filter</button></>}
-          </div>
-        </div>
-        <div className={`space-y-1.5 ${showInd ? '' : 'hidden'}`}>
-          {(mode === 'clients' ? indCounts : dirIndCounts).map(([name, n]) => {
-            const active = ind.includes(name)
-            const pct = Math.round((n / (mode === 'clients' ? maxIndCount : (dirIndCounts[0]?.[1] || 1))) * 100)
-            return (
-              <button key={name} onClick={() => setInd(active ? ind.filter(x => x !== name) : [...ind, name])} title={`${n} client${n === 1 ? '' : 's'} — click to ${active ? 'clear' : 'filter'}`}
-                className="w-full flex items-center gap-3 text-left group py-0.5">
-                <span className={`w-44 shrink-0 truncate text-xs ${active ? 'text-mav-yellow font-medium' : 'text-mav-muted group-hover:text-mav-fg'}`}>{name}</span>
-                <span className="flex-1 h-4 rounded bg-mav-dark overflow-hidden">
-                  <span className={`block h-full rounded ${active ? 'bg-mav-yellow' : 'bg-mav-yellow/40 group-hover:bg-mav-yellow/70'}`} style={{ width: `${pct}%` }} />
-                </span>
-                <span className={`w-8 text-right text-xs font-semibold ${active ? 'text-mav-yellow' : 'text-mav-fg'}`}>{n}</span>
-              </button>
-            )
-          })}
-        </div>
-        {ind.length > 0 && <button onClick={() => setInd([])} className="mt-3 text-xs text-mav-muted hover:text-mav-fg">✕ Clear industry filter</button>}
-      </div>
+        <span className={`${lbl} ml-2`}>Quick views</span>
+        <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={pill(aiOnly)}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
+        <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={pill(dipOnly, 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium')}>📉 Revenue dip{dipCount ? ` (${dipCount})` : ''}</button>
+        <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={pill(recentOnly)}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
+      </FilterBar>
 
       {mode === 'clients' ? (
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+      <Panel flush title="Revenue clients"
+        right={<span className="text-xs text-mav-muted">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[980px]">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-              {['', 
+              {['',
                 <button key="client" onClick={() => handleSort('name')} className="hover:text-mav-fg cursor-pointer">Client{getSortIndicator('name')}</button>,
                 'Industry',
                 <button key="geo" onClick={() => handleSort('geo')} className="hover:text-mav-fg cursor-pointer">GEO{getSortIndicator('geo')}</button>,
@@ -995,9 +1056,9 @@ export default function Clients() {
           </table>
         </div>
         <Pager />
-      </div>
+      </Panel>
       ) : (
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+      <Panel flush title="Full directory">
         {/* Legend for the marks in the Industry column. These were previously explained
             only on hover, which meant nobody knew the tick was there to be hovered. */}
         <div className="px-4 py-3 border-b border-mav-line flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
@@ -1053,7 +1114,7 @@ export default function Clients() {
           </table>
         </div>
         <Pager />
-      </div>
+      </Panel>
       )}
 
       {/* ---- Automation opportunities by industry --------------------------------
@@ -1062,60 +1123,65 @@ export default function Clients() {
           builds we could sell against that. The counts are live; the plays are a
           fixed catalogue in lib/automation-plays.ts. */}
       <div className="mt-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-3 mb-1">
-          <button onClick={() => setShowAuto(v => !v)} className="text-lg font-semibold inline-flex items-center gap-2 hover:text-mav-yellow transition-colors">
-            <span className="text-xs text-mav-muted">{showAuto ? '▾' : '▸'}</span>⚡ Automation opportunities by industry
+        <SectionTitle
+          info={<>
+            Where each industry still runs on a person, a spreadsheet and an inbox — and what Mavlers.ai could sell against it.
+            {aiBook.count > 0 && <> Booked <span className="text-mav-yellow">AI &amp; Automation</span> revenue is <span className="text-mav-fg">{fmtUsd(aiBook.total)} across {aiBook.count} booking{aiBook.count === 1 ? '' : 's'}</span>
+            {aiBook.topName && <>, and <span className="text-mav-fg">{aiBook.topShare}% of it is one client</span> ({aiBook.topName} — timesheet sync, warranty accounting, a nightly SAP cleanse, an AI translation plugin)</>}.</>}
+            {' '}Against a directory of {autoTotals.companies.toLocaleString()} companies who already trust us with their websites, that is the gap this section is about.
+            Click an industry to open its plays.
+          </>}
+          right={
+            <div className="text-xs text-mav-muted">
+              {autoTotals.companies.toLocaleString()} companies in the directory · {autoTotals.booked} already buying · {autoRows.length} industries
+              {' · '}
+              <button onClick={() => setShowAuto(v => !v)} className="hover:text-mav-fg underline underline-offset-2">{showAuto ? 'hide' : 'show'}</button>
+            </div>
+          }>
+          <button onClick={() => setShowAuto(v => !v)} className="inline-flex items-center gap-1.5 uppercase hover:text-mav-fg transition-colors">
+            <span>{showAuto ? '▾' : '▸'}</span>⚡ Automation opportunities by industry
           </button>
-          <div className="text-xs text-mav-muted">
-            {autoTotals.companies.toLocaleString()} companies in the directory · {autoTotals.booked} already buying · {autoRows.length} industries
-            {' · '}
-            <button onClick={() => setShowAuto(v => !v)} className="hover:text-mav-fg underline underline-offset-2">{showAuto ? 'hide' : 'show'}</button>
-          </div>
-        </div>
+        </SectionTitle>
         {showAuto && <>
-        <p className="text-xs text-mav-muted mb-4 max-w-4xl leading-relaxed">
-          Where each industry still runs on a person, a spreadsheet and an inbox — and what Mavlers.ai could sell against it.
-          {aiBook.count > 0 && <>Booked <span className="text-mav-yellow">AI &amp; Automation</span> revenue is <span className="text-mav-fg">{fmtUsd(aiBook.total)} across {aiBook.count} booking{aiBook.count === 1 ? '' : 's'}</span>
-          {aiBook.topName && <>, and <span className="text-mav-fg">{aiBook.topShare}% of it is one client</span> ({aiBook.topName} — timesheet sync, warranty accounting, a nightly SAP cleanse, an AI translation plugin)</>}. </>}
-          Against a directory of {autoTotals.companies.toLocaleString()} companies who already trust us with their websites, that is the gap this section is about.
-          Click an industry to open its plays.
-        </p>
-        <p className="text-[11px] text-mav-muted mb-4 max-w-4xl leading-relaxed">
-          <span className="text-mav-fg">How the LTV figure on each industry is calculated:</span> it is the sum of every dollar we have billed
-          the <em>already-booked</em> clients in that industry &mdash; all-time, not a rolling window, and not a projection for the whole industry.
-          It comes from the bookings master (all business units), plus any client that appears only in the web-revenue feed, so nothing is double-counted.
-          {ltvWindow && <> The revenue we hold runs <span className="text-mav-fg">{monLabel(ltvWindow.lo)} &rarr; {monLabel(ltvWindow.hi)}</span> ({ltvWindow.months} months),
-          so &ldquo;lifetime&rdquo; means that window &mdash; a client who spent with us before {monLabel(ltvWindow.lo)} will read low here.</>}
-          {' '}The {autoTotals.companies.toLocaleString()}-company count beside it is the whole directory, booked or not, which is why a big list can sit next to a small LTV.
-        </p>
 
-        {/* The four numbers that size this, from widest to warmest. The last one is the
+        {/* The numbers that size this, from widest to warmest. The AI-native one is the
             trap: ⚡ AI-native counts clients whose OWN business is AI — it is not the
             opportunity, and reading it as such understates the list by two orders of
-            magnitude. */}
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 mb-5">
-          {[
-            { n: autoTotals.companies.toLocaleString(), label: 'Addressable', sub: 'companies in the directory, all with an industry playbook below', cls: 'text-mav-fg' },
-            { n: autoTotals.booked.toLocaleString(), label: 'Warm', sub: 'already buying from us — we hold the relationship and built the site', cls: 'text-mav-yellow' },
-            { n: autoTotals.demand.toLocaleString(), label: 'Demand already heard', sub: 'have asked us for automation, integration or dashboard work in a quote or a conversation', cls: 'text-green-400' },
-            { n: `${dirAi.native} + ${dirAi.adjacent}`, label: 'AI-native / AI-positioned', sub: `across the whole directory, read from each company's own site text — ${dirAi.unknown} more have no site text and are unknown, not no`, cls: 'text-blue-400' },
-          ].map(s => (
-            <div key={s.label} className="bg-mav-panel border border-mav-line rounded-xl p-4">
-              <div className={`text-2xl font-semibold ${s.cls}`}>{s.n}</div>
-              <div className="text-xs font-medium mt-0.5">{s.label}</div>
-              <div className="text-[11px] text-mav-muted leading-relaxed mt-1">{s.sub}</div>
-            </div>
-          ))}
-        </div>
+            magnitude. The last card is what the service line has actually billed. */}
+        <KPIRow cols={aiBook.count > 0 ? 5 : 4}>
+          <KPICard tone="accent" label="Addressable" value={autoTotals.companies.toLocaleString()} sub="companies in the directory"
+            info="Companies in the directory, all with an industry playbook below." />
+          <KPICard tone="yellow" label="Warm" value={autoTotals.booked.toLocaleString()} sub="already buying from us"
+            info="Already buying from us — we hold the relationship and built the site." />
+          <KPICard tone="green" label="Demand already heard" value={autoTotals.demand.toLocaleString()} sub="asked for this kind of work"
+            info="Have asked us for automation, integration or dashboard work in a quote or a conversation." />
+          <KPICard tone="blue" label="AI-native / AI-positioned" value={`${dirAi.native} + ${dirAi.adjacent}`} sub={`${dirAi.unknown} unknown, not no`}
+            info={`Across the whole directory, read from each company's own site text — ${dirAi.unknown} more have no site text and are unknown, not no.`} />
+          {aiBook.count > 0 && (
+            <KPICard label="AI & Automation billed" value={fmtUsd(aiBook.total)}
+              sub={`${aiBook.count} booking${aiBook.count === 1 ? '' : 's'}${aiBook.topName ? ` · ${aiBook.topShare}% one client` : ''}`}
+              info={aiBook.topName ? `${aiBook.topShare}% of it is ${aiBook.topName}.` : undefined} />
+          )}
+        </KPIRow>
 
-        <div className="flex flex-wrap items-center gap-2 mb-4">
-          <span className="text-xs text-mav-muted">Filter by build type:</span>
+        <FilterBar right={
+          <span className="inline-flex items-center gap-1.5 text-xs text-mav-muted">How LTV is counted
+            <InfoTip align="right" text={<>
+              <span className="text-mav-fg">How the LTV figure on each industry is calculated:</span> it is the sum of every dollar we have billed
+              the <em>already-booked</em> clients in that industry &mdash; all-time, not a rolling window, and not a projection for the whole industry.
+              It comes from the bookings master (all business units), plus any client that appears only in the web-revenue feed, so nothing is double-counted.
+              With a department picked, only that department&rsquo;s clients are summed.
+              {ltvWindow && <> The revenue we hold runs <span className="text-mav-fg">{monLabel(ltvWindow.lo)} &rarr; {monLabel(ltvWindow.hi)}</span> ({ltvWindow.months} months),
+              so &ldquo;lifetime&rdquo; means that window &mdash; a client who spent with us before {monLabel(ltvWindow.lo)} will read low here.</>}
+              {' '}The {autoTotals.companies.toLocaleString()}-company count beside it is the whole directory, booked or not, which is why a big list can sit next to a small LTV.
+            </>} />
+          </span>}>
+          <span className={lbl}>Build type</span>
           {(Object.keys(PLAY_TYPE_TONE) as PlayType[]).map(t => (
-            <button key={t} onClick={() => setPlayType(playType === t ? '' : t)}
-              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${playType === t ? 'bg-mav-fill text-black border-mav-yellow font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{t}</button>
+            <button key={t} onClick={() => setPlayType(playType === t ? '' : t)} className={pill(playType === t)}>{t}</button>
           ))}
           {playType && <button onClick={() => setPlayType('')} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
-        </div>
+        </FilterBar>
 
         <div className="space-y-2">
           {autoRows.map(r => {
@@ -1160,8 +1226,8 @@ export default function Clients() {
                     </div>
                     {r.demand.length > 0 && (
                       <div className="mt-4 rounded-lg border border-green-500/25 bg-green-500/5 p-4">
-                        <div className="text-xs font-medium text-green-400 mb-1">Start here — {r.demand.length} client{r.demand.length === 1 ? ' has' : 's have'} already asked</div>
-                        <p className="text-[11px] text-mav-muted mb-3">Automation-shaped language found in their own quote lines or logged conversations. Quoted below so you can judge each one rather than trust a score.</p>
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-green-400 mb-3">Start here — {r.demand.length} client{r.demand.length === 1 ? ' has' : 's have'} already asked
+                          <InfoTip text="Automation-shaped language found in their own quote lines or logged conversations. Quoted below so you can judge each one rather than trust a score." /></div>
                         <div className="flex flex-wrap gap-2">
                           {r.demand.slice(0, 12).map(d => (
                             <span key={d.company} title={d.evidence.join(' · ')} className="text-xs px-2 py-1 rounded-md bg-mav-dark/60 border border-mav-line">
@@ -1183,9 +1249,8 @@ export default function Clients() {
           })}
         </div>
 
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mt-4">
-          <div className="text-sm font-medium mb-1">Sells into any industry</div>
-          <p className="text-xs text-mav-muted mb-4">Structural rather than sectoral — start here on an account whose industry you are not sure about.</p>
+        <Panel className="mt-4" title="Sells into any industry"
+          info="Structural rather than sectoral — start here on an account whose industry you are not sure about.">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {(playType ? UNIVERSAL_PLAYS.filter(p => p.type === playType) : UNIVERSAL_PLAYS).map(p => (
               <div key={p.name} className="rounded-lg border border-mav-line bg-mav-dark/40 p-4">
@@ -1200,7 +1265,7 @@ export default function Clients() {
               </div>
             ))}
           </div>
-        </div>
+        </Panel>
         </>}
       </div>
 
@@ -1258,23 +1323,22 @@ export default function Clients() {
                   been delivered, how do they feel about us, and what did we agree on the
                   last call — and stacking all five meant scrolling past four to reach the
                   fifth. */}
-              <div className="mt-5 flex items-center gap-1 border-b border-mav-line overflow-x-auto">
-                {([['overview', 'Overview'], ['work', 'Revenue & work'], ['projects', 'Projects & quotes'], ['health', 'Health & talk'], ['qbr', 'QBR']] as const).map(([k, label]) => (
-                  <button key={k} onClick={() => setCTab(k)}
-                    className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${cTab === k
-                      // Filled, like every other chosen-state on these pages. A yellow
-                      // underline alone was too quiet to answer "which tab am I on"
-                      // without reading the labels.
-                      ? 'bg-mav-fill text-black border-mav-yellow font-medium rounded-t-md'
-                      : 'border-transparent text-mav-muted hover:text-mav-fg hover:bg-mav-fg/5 rounded-t-md'}`}>
-                    {label}
-                  </button>
-                ))}
+              <div className="mt-5 flex flex-wrap items-center gap-2 border-b border-mav-line pb-1">
+                {/* The same segmented pills as every page's main split, so "which tab am
+                    I on" is answered without reading the labels. */}
+                <Segments<typeof cTab> className="mb-2" value={cTab} onChange={setCTab}
+                  items={[
+                    { id: 'overview', label: 'Overview' },
+                    { id: 'work', label: 'Revenue & work' },
+                    { id: 'projects', label: 'Projects & quotes' },
+                    { id: 'health', label: 'Health & talk' },
+                    { id: 'qbr', label: 'QBR', count: qbrs.length || undefined },
+                  ]} />
                 {/* Said once, on screen whichever tab is open. Every figure in this
                     drawer is USD — the sheet books in eight currencies and converts, so a
                     bare $ on an AU/NZ client reads as Australian dollars to the person
                     whose account it is. */}
-                <span className="ml-auto pl-3 pr-1 text-[11px] text-mav-muted whitespace-nowrap"
+                <span className="ml-auto pl-3 pr-1 mb-2 font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted whitespace-nowrap"
                   title="Converted with the revenue sheet's own USD conversion, whatever the work was billed in.">
                   figures in USD
                 </span>
@@ -1372,11 +1436,8 @@ export default function Clients() {
                 if (!m || !(m.tech_split?.length || m.service_split?.length || m.dept_split?.length)) return null
                 return (
                   <div className="xl:col-span-2 mt-6 border-t border-mav-line pt-4">
-                    <div className="text-xs uppercase tracking-wide text-mav-muted mb-1">What they buy</div>
-                    <p className="text-[11px] text-mav-muted mb-4">
-                      Everything on this client&rsquo;s record, by share of their {fmtUsd(m.lifetime_usd)} lifetime value &mdash;
-                      not only the one they buy most. Each list adds to 100%.
-                    </p>
+                    <SectionTitle info={<>Everything on this client&rsquo;s record, by share of their {fmtUsd(m.lifetime_usd)} lifetime value &mdash;
+                      not only the one they buy most. Each list adds to 100%.</>}>What they buy</SectionTitle>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-6">
                       <MixList title="Technology" note="what it was built in" rows={m.tech_split} />
                       <MixList title="Service type" note="what we did" rows={m.service_split} />
@@ -1488,7 +1549,8 @@ export default function Clients() {
                   <div className="mt-5 space-y-8">
                     <div>
                       <div className="flex items-baseline gap-2 flex-wrap mb-1">
-                        <span className="text-xs uppercase tracking-wide text-mav-muted">Quotes journey</span>
+                        <span className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Quotes journey
+                          <InfoTip text="Every quote this client was ever sent, newest first — won, lost and still open. Conversion counts quotes, not money." /></span>
                         <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">{cQuotes.length}</span>
                         {cQuotes.length > 0 && (
                           <span className="text-[11px] text-mav-muted">
@@ -1498,10 +1560,7 @@ export default function Clients() {
                           </span>
                         )}
                       </div>
-                      <p className="text-[11px] text-mav-muted mb-3">
-                        Every quote this client was ever sent, newest first &mdash; won, lost and still open.
-                        Conversion counts quotes, not money.
-                      </p>
+                      <div className="mb-3" />
                       {cQuotes.length === 0
                         ? <p className="text-sm text-mav-muted">No quotes on record for this client. Only 274 of 405 clients have any &mdash; the older revenue predates the Quotes sheet.</p>
                         : (
@@ -1537,14 +1596,12 @@ export default function Clients() {
 
                     <div>
                       <div className="flex items-baseline gap-2 flex-wrap mb-1">
-                        <span className="text-xs uppercase tracking-wide text-mav-muted">Delivery history</span>
+                        <span className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Delivery history
+                          <InfoTip text="Every project on the revenue sheet for this client, newest first — who built it, when it landed, and how the hours came out. Optimization is internal hours against actual." /></span>
                         <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-medium">{cProjects.length}</span>
                         {hrs.length > 0 && <span className="text-[11px] text-mav-muted">{hrs.length} with hours logged</span>}
                       </div>
-                      <p className="text-[11px] text-mav-muted mb-3">
-                        Every project on the revenue sheet for this client, newest first &mdash; who built it, when it
-                        landed, and how the hours came out. Optimization is internal hours against actual.
-                      </p>
+                      <div className="mb-3" />
                       {cProjects.length === 0
                         ? <p className="text-sm text-mav-muted">Nothing delivered on record yet.</p>
                         : (
@@ -1607,7 +1664,7 @@ export default function Clients() {
                 })
                 return (
                   <div className="xl:col-span-2 mt-6 border-t border-mav-line pt-4">
-                    <div className="text-xs uppercase tracking-wide text-mav-muted mb-3">Client score</div>
+                    <SectionTitle info="Built from escalations, feedback, email tone, booking recency and live quotes — everything this dashboard already holds. CSAT is not in it: the feedback sheet has a score on 1 row out of 68, so a CSAT-weighted number would be mostly invented.">Client score</SectionTitle>
                     <div className="flex flex-wrap items-start gap-6">
                       <div className="shrink-0">
                         <div className={`text-4xl font-semibold tabular-nums ${sc.tone}`}>{sc.score}</div>
@@ -1630,11 +1687,8 @@ export default function Clients() {
                             </div>
                           ))}
                         </div>
-                        <p className="text-[11px] text-mav-muted mt-3 max-w-2xl">
-                          Built from escalations, feedback, email tone, booking recency and live quotes &mdash; everything
-                          this dashboard already holds. CSAT is not in it: the feedback sheet has a score on 1 row out of 68,
-                          so a CSAT-weighted number would be mostly invented. Treat this as a prompt to go and look, not a verdict.
-                        </p>
+                        {/* The one caveat that changes how the number reads stays on screen. */}
+                        <p className="text-[11px] text-mav-muted mt-3 max-w-2xl">Treat this as a prompt to go and look, not a verdict.</p>
                       </div>
                     </div>
                   </div>

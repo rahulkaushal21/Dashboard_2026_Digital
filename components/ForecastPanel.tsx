@@ -1,9 +1,13 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
-import { useThemeInk } from '@/lib/use-theme-ink'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
-import { getBookingsFull, getOpportunities, type BookingRow, type Opportunity } from '@/lib/supabase'
+import InfoTip from '@/components/InfoTip'
+import { KPIRow, Panel } from '@/components/PageParts'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { inUnit, unitLabel } from '@/lib/business-unit'
+import { useThemeInk } from '@/lib/use-theme-ink'
+import { getBookingsFull, getOpportunities, getOpportunityDepts, type BookingRow, type Opportunity } from '@/lib/supabase'
 import { buildForecast, churnDrag, backtest, type Forecast } from '@/lib/forecast'
 import { FY_TARGET } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
@@ -20,16 +24,6 @@ const pct = (n: number, d = 0) => (n >= 0 ? '+' : '') + n.toFixed(d) + '%'
 // value open pipeline on evidence rather than on the win% someone typed in.
 const bandRate = (v: number) => (v >= 10000 ? 0.043 : v >= 3000 ? 0.355 : v >= 1000 ? 0.455 : 0.75)
 
-const Card = ({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) => (
-  <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
-    <div className="flex flex-wrap items-baseline justify-between gap-2 px-5 pt-5 mb-4">
-      <div className="text-sm font-medium">{title}</div>
-      {note && <div className="text-xs text-mav-muted">{note}</div>}
-    </div>
-    {children}
-  </div>
-)
-
 // The forecast, as a panel.
 //
 // It lives here rather than in app/forecast so Business Trend can show it as a tab. The
@@ -39,9 +33,9 @@ const Card = ({ title, note, children }: { title: string; note?: string; childre
 //
 // `embedded` drops its own page header when it is a tab under Business Trend's.
 export default function ForecastPanel({ embedded = false }: { embedded?: boolean } = {}) {
-  const ink = useThemeInk()
-  const [bookings, setBookings] = useState<BookingRow[]>([])
-  const [opps, setOpps] = useState<Opportunity[]>([])
+  const [bookingsAll, setBookings] = useState<BookingRow[]>([])
+  const [oppsAll, setOpps] = useState<Opportunity[]>([])
+  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
   const [loading, setLoading] = useState(true)
   const [showAccounts, setShowAccounts] = useState(false)
   // Set after mount: computing "today" during render makes the static export's
@@ -51,11 +45,20 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   const load = async () => {
     setLoading(true)
     try {
-      const [b, o] = await Promise.all([getBookingsFull(), getOpportunities()])
-      setBookings(b); setOpps(o); setToday(new Date())
+      const [b, o, od] = await Promise.all([getBookingsFull(), getOpportunities(), getOpportunityDepts()])
+      setBookings(b); setOpps(o); setOppDepts(od); setToday(new Date())
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
+
+  // ── Business unit ───────────────────────────────────────────────────────────
+  // Scoped at the source, the way Business Trend's own tab is: revenue lines by their
+  // service department, open deals by opportunity_dept_mv (the PM's pod, then the
+  // client's history, then geo). Everything below — the fit, the churn drag, the
+  // backtest, the pipeline — is then that unit's, not the company's.
+  const { unit } = useUnit()
+  const bookings = useMemo(() => bookingsAll.filter(b => inUnit(b.service_name, unit)), [bookingsAll, unit])
+  const opps = useMemo(() => oppsAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [oppsAll, oppDepts, unit])
 
   const fc: Forecast | null = useMemo(
     () => (today ? buildForecast(bookings, FY_TARGET, today) : null), [bookings, today])
@@ -80,119 +83,125 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   // Months the scenarios can still act on — next month onward, not the one in progress.
   const actionable = Math.max(0, futureMonths - 1)
 
+  const recalc = (
+    <button onClick={load} disabled={loading}
+      className="inline-flex items-center gap-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs disabled:opacity-50">
+      <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Recalculate
+    </button>
+  )
+
+  // The method and its blind spots, one hover away. They matter when a figure is
+  // questioned, not on every read.
+  const method = fc && (
+    <>
+      <ol className="space-y-1.5 list-decimal pl-4">
+        <li>Roll revenue to complete calendar months. The month in progress is never used to fit anything, because revenue books to the month and today&apos;s month is always short.</li>
+        <li>Build a seasonal index per calendar month — that month&apos;s average against the all-month average.</li>
+        <li>Divide each of the last six complete months by its own index and average them. That is the underlying level: <span className="font-semibold tabular-nums">{fmtUsd(Math.round(fc.level))}</span>.</li>
+        <li>Forecast each remaining month as level × its index.</li>
+        <li>Band it by the historical standard deviation of monthly revenue (<span className="font-semibold tabular-nums">{fmtUsd(Math.round(fc.sd))}</span>).</li>
+      </ol>
+      <p className="mt-2">Nothing here is stored. A forecast that stops updating keeps sounding confident while the ground moves, so every figure is recomputed from <span className="font-semibold">web_revenue</span> on each load.</p>
+    </>
+  )
+  const blind = fc && (
+    <ul className="space-y-1.5">
+      <li>• <span className="font-semibold">Structural change.</span> Winning or losing one major account moves the year by more than every scenario above combined.</li>
+      <li>• <span className="font-semibold">The month in progress</span> is part-booked, so its estimate is the least certain figure here and the year total moves with it.</li>
+      <li>• <span className="font-semibold">Price and headcount changes</span>, and any deal not yet in the Quotes tab.</li>
+      <li>• <span className="font-semibold">The band</span> covers ordinary fluctuation, not a break in the trend.</li>
+      <li>• <span className="font-semibold">The target itself.</span> {usdK(fc.target)} is taken as given from Business Trend; nothing here judges whether it was the right number when it was set.</li>
+    </ul>
+  )
+
   return (
     <div>
-      {!embedded && <Header title="Forecast" subtitle="Where the year lands if nothing changes" />}
+      {!embedded && <Header title="Forecast" subtitle="Where the year lands if nothing changes"
+        chip={fc?.fyLabel} actions={recalc} />}
 
-      <div className="flex flex-wrap items-center gap-3 mb-6 text-xs">
-        <span className="text-mav-muted">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">
+        <span>
           {loading ? 'Reading the revenue history…'
             : fc ? `${fc.fyLabel} · built from ${fc.historyMonths} complete months · recomputed every load, never stored`
               : 'Not enough history to forecast'}
         </span>
-        <button onClick={load} disabled={loading}
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg hover:border-mav-yellow disabled:opacity-50">
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Recalculate
-        </button>
+        {method && <span className="inline-flex items-center gap-1.5">How it&apos;s calculated <InfoTip text={method} /></span>}
+        {blind && <span className="inline-flex items-center gap-1.5">What it cannot see <InfoTip text={blind} align="right" /></span>}
+        {embedded && <span className="ml-auto normal-case tracking-normal font-sans">{recalc}</span>}
       </div>
+      {fc && unit !== 'all' && (
+        <p className="-mt-2 mb-4 text-[11px] text-mav-muted">
+          {unitLabel(unit)} revenue only, measured against the company-wide {usdK(fc.target)} target — there is no per-unit target.
+        </p>
+      )}
 
       {!fc ? (
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-6">
+        <Panel>
           <p className="text-sm text-mav-muted">
             {loading ? 'Loading…' : 'A forecast needs at least 12 complete months of revenue. There is not enough history yet — this page fills in as the data accumulates.'}
           </p>
-        </div>
+        </Panel>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <KPICard label={`${fc.fyLabel} projected`} value={usdK(fc.projected)} />
-            <KPICard label="Against target" value={`${fc.pctOfTarget.toFixed(0)}%`} />
-            <KPICard label={fc.gap > 0 ? 'Shortfall' : 'Surplus'} value={usdK(Math.abs(fc.gap))} />
-            <KPICard label="Needed / full month left" value={usdK(fc.neededPerMonth)} />
-          </div>
-
-          {/* ---------------- headline ---------------- */}
-          <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-            <p className="text-sm leading-relaxed">
-              Across {fc.historyMonths} complete months, a typical month is currently worth{' '}
-              <span className="font-medium tabular-nums">{fmtUsd(Math.round(fc.level))}</span> once seasonal shape is
-              removed. Carried forward, <span className="font-medium">{fc.fyLabel}</span> lands near{' '}
-              <span className="font-medium text-mav-yellow tabular-nums">{usdK(fc.projected)}</span>{' '}
-              (likely {usdK(fc.projectedLow)}–{usdK(fc.projectedHigh)}) against a{' '}
-              <span className="tabular-nums">{usdK(fc.target)}</span> target
-              {fc.gap > 0 && <> — short by <span className="font-medium tabular-nums">{usdK(fc.gap)}</span></>}.
-            </p>
-            {fc.gap > 0 && fc.monthsRemaining > 0 && (
-              <p className="text-sm leading-relaxed mt-3 text-mav-muted">
-                Reaching target needs{' '}
-                <span className="text-mav-fg font-medium tabular-nums">{fmtUsd(Math.round(fc.neededPerMonth))}</span>{' '}
-                in each of the {fc.monthsRemaining} full months left, on top of however the month in progress closes.
-                The best month on record is{' '}
-                <span className="text-mav-fg tabular-nums">{fmtUsd(Math.round(fc.bestMonth.value))}</span> ({fc.bestMonth.label})
-                {fc.neededPerMonth > fc.bestMonth.value && <>
-                  {' '}— so target means beating the all-time record by{' '}
-                  <span className="text-mav-fg font-medium">
-                    {Math.round(((fc.neededPerMonth - fc.bestMonth.value) / fc.bestMonth.value) * 100)}%
-                  </span>, every month, {fc.monthsRemaining} times running.
-                </>}
-              </p>
-            )}
-          </div>
+          {/* The headline sentence used to sit in its own box under these cards; its
+              figures are on the cards now and the sentence itself is behind their ⓘ. */}
+          <KPIRow cols={4}>
+            <KPICard tone="accent" label={`${fc.fyLabel} projected`} value={usdK(fc.projected)}
+              sub={`likely ${usdK(fc.projectedLow)}–${usdK(fc.projectedHigh)}`}
+              info={<>Across {fc.historyMonths} complete months, a typical month is currently worth {fmtUsd(Math.round(fc.level))} once seasonal shape is removed. Carried forward, {fc.fyLabel} lands near {usdK(fc.projected)} (likely {usdK(fc.projectedLow)}–{usdK(fc.projectedHigh)}) against a {usdK(fc.target)} target{fc.gap > 0 && <> — short by {usdK(fc.gap)}</>}.</>} />
+            <KPICard tone={fc.pctOfTarget >= 100 ? 'green' : 'amber'} label="Against target" value={`${fc.pctOfTarget.toFixed(0)}%`}
+              sub={`of ${usdK(fc.target)}`} />
+            <KPICard tone={fc.gap > 0 ? 'red' : 'green'} label={fc.gap > 0 ? 'Shortfall' : 'Surplus'} value={usdK(Math.abs(fc.gap))} />
+            <KPICard tone="amber" label="Needed / full month left" value={usdK(fc.neededPerMonth)}
+              sub={fc.gap > 0 && fc.monthsRemaining > 0
+                ? <>{fc.monthsRemaining} months · record {fmtUsd(Math.round(fc.bestMonth.value))} ({fc.bestMonth.label})</>
+                : undefined}
+              info={fc.gap > 0 && fc.monthsRemaining > 0 ? <>
+                Reaching target needs {fmtUsd(Math.round(fc.neededPerMonth))} in each of the {fc.monthsRemaining} full months left, on top of however the month in progress closes. The best month on record is {fmtUsd(Math.round(fc.bestMonth.value))} ({fc.bestMonth.label})
+                {fc.neededPerMonth > fc.bestMonth.value && <> — so target means beating the all-time record by {Math.round(((fc.neededPerMonth - fc.bestMonth.value) / fc.bestMonth.value) * 100)}%, every month, {fc.monthsRemaining} times running</>}.
+              </> : undefined} />
+          </KPIRow>
 
           {/* ---------------- history + forecast chart ---------------- */}
-          <Card title="The line so far, and where it goes"
-            note={`${fc.historyMonths} months actual · ${futureMonths} forecast`}>
-            <div className="px-5 pb-5">
-              <TrendChart fc={fc} />
-            </div>
-          </Card>
+          <Panel className="mb-5" title="The line so far, and where it goes"
+            right={<span className="text-xs text-mav-muted">{fc.historyMonths} months actual · {futureMonths} forecast</span>}>
+            <TrendChart fc={fc} />
+          </Panel>
 
           {/* ---------------- why it's flat ---------------- */}
-          <Card title="Why it lands there" note="Flat is not idle">
-            <div className="px-5 pb-5 space-y-3 text-sm leading-relaxed max-w-3xl">
-              <p>
-                The last six complete months averaged{' '}
-                <span className="font-medium tabular-nums">{fmtUsd(Math.round(fc.drift.recent))}</span> against{' '}
-                <span className="tabular-nums">{fmtUsd(Math.round(fc.drift.prior))}</span> in the six before —{' '}
-                <span className={`font-medium ${Math.abs(fc.drift.pct) < 5 ? 'text-amber-300' : fc.drift.pct > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {pct(fc.drift.pct, 1)}
-                </span>. Monthly revenue has stayed inside a narrow band for well over a year.
-              </p>
+          <Panel className="mb-5" title="Why it lands there"
+            info={drag.perMonth > 0 ? <>
+              Monthly revenue has stayed inside a narrow band for well over a year. That is not because nothing is happening: {drag.clients} accounts that used to bill regularly have gone quiet, and at their own historical rate they were worth {fmtUsd(Math.round(drag.perMonth))} a month between them. That revenue is gone — yet the monthly total has not fallen. Something is replacing roughly {fmtUsd(Math.round(drag.perMonth))} of run-rate every month and landing almost exactly where the losses left off. That equilibrium is what produces a flat line. The acquisition work is real; it is being spent standing still. Growth needs acquisition to exceed replacement, or churn to fall below it.
+            </> : 'Monthly revenue has stayed inside a narrow band for well over a year.'}
+            right={<span className="text-xs text-mav-muted">Flat is not idle</span>}>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Stat label="Last 6 complete months" value={fmtUsd(Math.round(fc.drift.recent))} note="average per month" />
+              <Stat label="The 6 before" value={fmtUsd(Math.round(fc.drift.prior))} note="average per month" />
+              <Stat label="Change" value={pct(fc.drift.pct, 1)}
+                tone={Math.abs(fc.drift.pct) < 5 ? 'text-amber-300' : fc.drift.pct > 0 ? 'text-green-400' : 'text-red-400'}
+                note="recent six vs prior six" />
               {drag.perMonth > 0 && (
-                <>
-                  <p className="text-mav-muted">
-                    That is not because nothing is happening. <span className="text-mav-fg">{drag.clients} accounts</span> that
-                    used to bill regularly have gone quiet, and at their own historical rate they were worth{' '}
-                    <span className="text-mav-fg font-medium tabular-nums">{fmtUsd(Math.round(drag.perMonth))} a month</span>{' '}
-                    between them. That revenue is gone — yet the monthly total has not fallen.
-                  </p>
-                  <p className="text-mav-muted">
-                    Something is replacing roughly {fmtUsd(Math.round(drag.perMonth))} of run-rate every month and landing
-                    almost exactly where the losses left off. That equilibrium is what produces a flat line. The acquisition
-                    work is real; it is being spent standing still.{' '}
-                    <span className="text-mav-fg">Growth needs acquisition to exceed replacement, or churn to fall below it.</span>
-                  </p>
-                </>
+                <Stat label="Gone quiet" value={`${fmtUsd(Math.round(drag.perMonth))}/mo`}
+                  note={`${drag.clients} accounts that used to bill regularly — replaced, so the total held`} />
               )}
             </div>
-          </Card>
+          </Panel>
 
           {/* ---------------- month by month ---------------- */}
-          <Card title="Month by month" note={`Bar = forecast · red line = ${usdK(fc.neededPerMonth)} pace needed for ${usdK(fc.target)}`}>
+          <Panel flush className="mb-5" title="Month by month"
+            info={<>Bar = forecast · red line = {usdK(fc.neededPerMonth)} pace needed for {usdK(fc.target)}. Green is settled. Index is the seasonal index: 100 is an average month, so 113 means that month historically runs 13% above one.</>}
+            right={<span className="text-xs text-mav-muted">red line = {usdK(fc.neededPerMonth)}/mo needed</span>}>
             <MonthTable fc={fc} />
-            <p className="px-5 py-3 text-xs text-mav-muted border-t border-mav-line leading-relaxed">
-              Green is settled. <span className="text-mav-muted">Index</span> is the seasonal index: 100 is an average
-              month, so 113 means that month historically runs 13% above one.
-              {fc.thinSeasonality > 0 && <> {fc.thinSeasonality} of the 12 calendar months rest on a single year of
-                observations, so treat the seasonal shape as a reasonable expectation, not an established pattern.</>}
-            </p>
-          </Card>
+            {fc.thinSeasonality > 0 && (
+              <p className="px-4 py-2.5 text-[11px] text-mav-muted border-t border-mav-line">
+                {fc.thinSeasonality} of the 12 calendar months rest on a single year of observations — treat the seasonal shape as a reasonable expectation, not an established pattern.
+              </p>
+            )}
+          </Panel>
 
           {/* ---------------- scenarios ---------------- */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-            <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-              <div className="text-sm font-medium mb-1">What moves the number</div>
-              <p className="text-xs text-mav-muted mb-4">Each row adds to the one above it, applied from next month.</p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+            <Panel title="What moves the number" info="Each row adds to the one above it, applied from next month.">
               <ul className="space-y-3.5">
                 <Scenario name="Same situation" value={fc.projected} target={fc.target}
                   note="Churn continues, acquisition keeps replacing it, close rates hold. The base case, and on the evidence the most likely one." />
@@ -211,10 +220,9 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
                     note={`${pipeline.bigCount} open deals above $10k carry ${fmtUsd(Math.round(pipeline.bigValue))}. At the historical 4% win rate that is worth ${fmtUsd(Math.round(pipeline.bigWeighted))}; at 30% it is ${fmtUsd(Math.round(pipeline.bigAt30))}. Real — but note it adds less than retention does.`} />
                 )}
               </ul>
-            </div>
+            </Panel>
 
-            <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-              <div className="text-sm font-medium mb-4">What the forecast already absorbs</div>
+            <Panel title="What the forecast already absorbs">
               <dl className="space-y-4 text-sm">
                 <Row label="Revenue gone quiet" value={`${fmtUsd(Math.round(drag.perMonth))}/mo`}
                   note={`${drag.clients} accounts that used to bill regularly and have stopped, worth ${fmtUsd(Math.round(drag.trailing))} across their last twelve active months.`} />
@@ -225,7 +233,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
               </dl>
               {drag.accounts.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-mav-line">
-                  <button onClick={() => setShowAccounts(v => !v)} className="text-xs text-mav-yellow hover:underline">
+                  <button onClick={() => setShowAccounts(v => !v)} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
                     {showAccounts ? 'Hide the quiet accounts' : `Show the ${drag.accounts.length} quiet accounts`}
                   </button>
                   {showAccounts && (
@@ -242,97 +250,54 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
                   )}
                 </div>
               )}
-            </div>
+            </Panel>
           </div>
 
           {/* ---------------- seasonal profile ---------------- */}
-          <Card title="Seasonal shape" note="100 = an average month">
-            <div className="px-5 pb-5">
-              <SeasonChart seasonal={fc.seasonal} />
-              <p className="text-xs text-mav-muted mt-4 leading-relaxed max-w-3xl">
-                Bars run above and below the 100 line, because the index measures a month against a typical one — a
-                March at {fc.seasonal[2] ? fc.seasonal[2].index.toFixed(0) : '—'} bills that much above average, a
-                January at {fc.seasonal[0] ? fc.seasonal[0].index.toFixed(0) : '—'} that much below. Hatched bars rest
-                on a single year of data. A March peak and a January trough fit a client base weighted to the UK and
-                Australia, where the financial year ends in March — but on this much history that is a plausible
-                explanation, not a proven one.
-              </p>
-            </div>
-          </Card>
+          <Panel className="mb-5" title="Seasonal shape"
+            info={<>Bars run above and below the 100 line, because the index measures a month against a typical one — a March at {fc.seasonal[2] ? fc.seasonal[2].index.toFixed(0) : '—'} bills that much above average, a January at {fc.seasonal[0] ? fc.seasonal[0].index.toFixed(0) : '—'} that much below. Hatched bars rest on a single year of data. A March peak and a January trough fit a client base weighted to the UK and Australia, where the financial year ends in March — but on this much history that is a plausible explanation, not a proven one.</>}
+            right={<span className="text-xs text-mav-muted">100 = an average month</span>}>
+            <SeasonChart seasonal={fc.seasonal} />
+          </Panel>
 
           {/* ---------------- backtest ---------------- */}
           {bt && (
-            <Card title="How accurate has this been?" note={`Walk-forward test over the last ${bt.folds} months`}>
-              <div className="px-5 pb-5">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
-                  <Stat label="Average miss" value={`${bt.mape.toFixed(1)}%`}
-                    note="Typical absolute error on a single month" />
-                  <Stat label="Bias" value={pct(bt.bias, 1)}
-                    note={Math.abs(bt.bias) < 3 ? 'Essentially unbiased' : bt.bias > 0 ? 'Runs optimistic' : 'Runs pessimistic'} />
-                  <Stat label="Worst miss" value={pct(bt.worst.errPct, 0)} note={bt.worst.label} />
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[420px]">
-                    <thead className="text-left text-mav-muted border-b border-mav-line">
-                      <tr>
-                        <th className="py-2 pr-4 font-medium">Month</th>
-                        <th className="py-2 px-4 font-medium text-right">Predicted</th>
-                        <th className="py-2 px-4 font-medium text-right">Actual</th>
-                        <th className="py-2 pl-4 font-medium text-right">Miss</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bt.results.map(r => (
-                        <tr key={r.key} className="border-b border-mav-line/60">
-                          <td className="py-2 pr-4">{r.label}</td>
-                          <td className="py-2 px-4 text-right tabular-nums text-mav-muted">{fmtUsd(Math.round(r.predicted))}</td>
-                          <td className="py-2 px-4 text-right tabular-nums">{fmtUsd(Math.round(r.actual))}</td>
-                          <td className={`py-2 pl-4 text-right tabular-nums font-medium ${Math.abs(r.errPct) > 15 ? 'text-red-400' : Math.abs(r.errPct) > 8 ? 'text-amber-300' : 'text-green-400'}`}>
-                            {pct(r.errPct, 1)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-xs text-mav-muted mt-4 leading-relaxed max-w-3xl">
-                  Each month was predicted using only the months before it — the model never saw the answer. It misses a
-                  single month by about {bt.mape.toFixed(0)}% on average, but the errors run in both directions
-                  ({pct(bt.bias, 1)} bias overall), so they largely cancel across a full year. That is why the annual figure
-                  deserves more confidence than any one month on it.
-                </p>
+            <Panel className="mb-5" title="How accurate has this been?"
+              info={<>Each month was predicted using only the months before it — the model never saw the answer. It misses a single month by about {bt.mape.toFixed(0)}% on average, but the errors run in both directions ({pct(bt.bias, 1)} bias overall), so they largely cancel across a full year. That is why the annual figure deserves more confidence than any one month on it.</>}
+              right={<span className="text-xs text-mav-muted">Walk-forward test over the last {bt.folds} months</span>}>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+                <Stat label="Average miss" value={`${bt.mape.toFixed(1)}%`}
+                  note="Typical absolute error on a single month" />
+                <Stat label="Bias" value={pct(bt.bias, 1)}
+                  note={Math.abs(bt.bias) < 3 ? 'Essentially unbiased' : bt.bias > 0 ? 'Runs optimistic' : 'Runs pessimistic'} />
+                <Stat label="Worst miss" value={pct(bt.worst.errPct, 0)} note={bt.worst.label} />
               </div>
-            </Card>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[420px]">
+                  <thead className="text-left text-mav-muted border-b border-mav-line">
+                    <tr>
+                      <th className="py-2 pr-4 font-medium">Month</th>
+                      <th className="py-2 px-4 font-medium text-right">Predicted</th>
+                      <th className="py-2 px-4 font-medium text-right">Actual</th>
+                      <th className="py-2 pl-4 font-medium text-right">Miss</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bt.results.map(r => (
+                      <tr key={r.key} className="border-b border-mav-line/60">
+                        <td className="py-2 pr-4">{r.label}</td>
+                        <td className="py-2 px-4 text-right tabular-nums text-mav-muted">{fmtUsd(Math.round(r.predicted))}</td>
+                        <td className="py-2 px-4 text-right tabular-nums">{fmtUsd(Math.round(r.actual))}</td>
+                        <td className={`py-2 pl-4 text-right tabular-nums font-medium ${Math.abs(r.errPct) > 15 ? 'text-red-400' : Math.abs(r.errPct) > 8 ? 'text-amber-300' : 'text-green-400'}`}>
+                          {pct(r.errPct, 1)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
           )}
-
-          {/* ---------------- method + caveats ---------------- */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-              <div className="text-sm font-medium mb-3">How this is calculated</div>
-              <ol className="space-y-2 text-sm text-mav-muted list-decimal pl-4 leading-relaxed">
-                <li>Roll revenue to complete calendar months. The month in progress is never used to fit anything, because revenue books to the month and today&apos;s month is always short.</li>
-                <li>Build a seasonal index per calendar month — that month&apos;s average against the all-month average.</li>
-                <li>Divide each of the last six complete months by its own index and average them. That is the underlying level: <span className="text-mav-fg tabular-nums">{fmtUsd(Math.round(fc.level))}</span>.</li>
-                <li>Forecast each remaining month as level × its index.</li>
-                <li>Band it by the historical standard deviation of monthly revenue (<span className="text-mav-fg tabular-nums">{fmtUsd(Math.round(fc.sd))}</span>).</li>
-              </ol>
-              <p className="text-xs text-mav-muted mt-3 leading-relaxed">
-                Nothing here is stored. A forecast that stops updating keeps sounding confident while the ground moves,
-                so every figure is recomputed from <span className="text-mav-fg">web_revenue</span> on each load.
-              </p>
-            </div>
-
-            <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-              <div className="text-sm font-medium mb-3">What this cannot see</div>
-              <ul className="space-y-2 text-sm text-mav-muted leading-relaxed">
-                <li>• <span className="text-mav-fg">Structural change.</span> Winning or losing one major account moves the year by more than every scenario above combined.</li>
-                <li>• <span className="text-mav-fg">The month in progress</span> is part-booked, so its estimate is the least certain figure here and the year total moves with it.</li>
-                <li>• <span className="text-mav-fg">Price and headcount changes</span>, and any deal not yet in the Quotes tab.</li>
-                <li>• <span className="text-mav-fg">The band</span> covers ordinary fluctuation, not a break in the trend.</li>
-                <li>• <span className="text-mav-fg">The target itself.</span> {usdK(fc.target)} is taken as given from Business Trend; nothing here judges whether it was the right number when it was set.</li>
-              </ul>
-            </div>
-          </div>
         </>
       )}
     </div>
@@ -541,11 +506,11 @@ function Row({ label, value, note }: { label: string; value: string; note: strin
   )
 }
 
-function Stat({ label, value, note }: { label: string; value: string; note: string }) {
+function Stat({ label, value, note, tone = '' }: { label: string; value: string; note: string; tone?: string }) {
   return (
     <div className="bg-mav-dark/50 border border-mav-line rounded-lg p-3">
-      <div className="text-xs text-mav-muted">{label}</div>
-      <div className="text-xl font-semibold tabular-nums mt-0.5">{value}</div>
+      <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-muted">{label}</div>
+      <div className={`font-mono text-xl font-semibold tabular-nums mt-1 ${tone}`}>{value}</div>
       <div className="text-[11px] text-mav-muted mt-0.5 leading-snug">{note}</div>
     </div>
   )

@@ -10,10 +10,11 @@ import MultiSelect from '@/components/MultiSelect'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import KPICard from '@/components/KPICard'
+import { KPIRow, FilterBar, Panel } from '@/components/PageParts'
 import { getEscalations, getEscalationDepts, type Escalation } from '@/lib/supabase'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
-const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+const selCls = 'bg-mav-panel border border-mav-line rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
 const isMajor = (x: Escalation) => /major/i.test(x.business_impact || '') || /major/i.test(x.escalation_type || '')
 
 type SortField = 'date' | 'company' | 'type'
@@ -37,6 +38,9 @@ export default function Escalations() {
   const unplaced = useMemo(
     () => unit === 'all' ? 0 : all.filter(x => unitOf(escDepts.get(Number(x.id))) === null).length,
     [all, escDepts, unit])
+  // The department's rows, before any other filter. The dropdown options and the "My
+  // clients" hidden count read from this so they never offer another department's GEOs.
+  const inDept = useMemo(() => all.filter(x => inUnit(escDepts.get(Number(x.id)), unit)), [all, escDepts, unit])
 
   const [search, setSearch] = useState('')
   const [fType, setFType] = useState<string[]>([])
@@ -61,8 +65,7 @@ export default function Escalations() {
   const inRange = (d?: string) => { if (!d) return !from && !to; if (from && d < from) return false; if (to && d > to) return false; return true }
   
   const e = useMemo(() => {
-    let result = all
-      .filter(x => inUnit(escDepts.get(Number(x.id)), unit))
+    let result = inDept
       .filter(x => !justMine || mine.ownsClient(x.company_name))
       .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase()))
       .filter(x => keeps(fType, x.escalation_type))
@@ -97,7 +100,7 @@ export default function Escalations() {
     })
     
     return result
-  }, [all, escDepts, unit, search, fType, fGeo, from, to, sortBy, sortAsc, justMine, mine])
+  }, [inDept, search, fType, fGeo, from, to, sortBy, sortAsc, justMine, mine])
   
   const handleSort = (field: SortField) => {
     if (sortBy === field) {
@@ -119,27 +122,36 @@ export default function Escalations() {
     <div>
       <Header title="Major Process Gap" subtitle="Client escalations & experience triggers — filter by type, GEO and date, click headers to sort" />
       <UnplacedNote n={unplaced} noun="escalations" className="-mt-3 mb-4" />
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        {mine.canScope && (
-          <MineFilter on={justMine} onChange={setJustMine} label="My clients"
-            hidden={all.filter(x => !mine.ownsClient(x.company_name)).length} />
-        )}
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company…" className={`${selCls} w-44`} />
-        <MultiSelect label="All types" options={uniq(all.map(x => x.escalation_type))} selected={fType} onChange={setFType} className="w-44" />
-        <MultiSelect label="All GEO" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} className="w-36" />
-        <span className="text-xs text-mav-muted ml-1">From</span>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
-        <span className="text-xs text-mav-muted">To</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
-        <button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>
-      </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <KPICard label="Major process gaps" value={String(e.length)} />
-        <KPICard label="Major impact" value={String(e.filter(isMajor).length)} />
+
+      {/* The cards read the filtered list, so they always describe the table below. */}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Major process gaps" value={String(e.length)} />
+        <KPICard tone="red" label="Major impact" value={String(e.filter(isMajor).length)} />
         <KPICard label="Companies" value={String(uniq(e.map(x => x.company_name)).length)} />
         <KPICard label="Types" value={String(uniq(e.map(x => x.escalation_type)).length)} />
-      </div>
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
+      </KPIRow>
+
+      <FilterBar right={
+        <button onClick={reset} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">Reset</button>
+      }>
+        {mine.canScope && (
+          <MineFilter on={justMine} onChange={setJustMine} label="My clients"
+            hidden={inDept.filter(x => !mine.ownsClient(x.company_name)).length} />
+        )}
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company…" className={`${selCls} w-44`} />
+        <MultiSelect label="All types" options={uniq(inDept.map(x => x.escalation_type))} selected={fType} onChange={setFType} className="w-44" />
+        <MultiSelect label="All GEO" options={uniq(inDept.map(x => x.geo))} selected={fGeo} onChange={setFGeo} className="w-36" />
+        <div className="basis-full h-0" />
+        <span className="text-xs text-mav-muted">From</span>
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} aria-label="From" />
+        <span className="text-xs text-mav-muted">To</span>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} aria-label="To" />
+      </FilterBar>
+
+      <Panel flush title="Escalations"
+        info={`Click a row for the full record and the email insight. Click Date, Company or Type to sort.${e.length > 400 ? ' The table shows the first 400 rows; narrow the filters to see the rest.' : ''}`}
+        right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{Math.min(e.length, 400)} of {e.length} shown</span>}>
+      <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[720px]">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
@@ -167,6 +179,7 @@ export default function Escalations() {
           ))}</tbody>
         </table>
       </div>
+      </Panel>
       {sel && <EscalationDetail e={sel} onClose={() => setSel(null)} />}
     </div>
   )

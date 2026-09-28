@@ -1,6 +1,10 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
+import KPICard from '@/components/KPICard'
+import InfoTip from '@/components/InfoTip'
+import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
+import { NotSplitNote } from '@/components/UnitToggle'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 
@@ -93,11 +97,16 @@ export default function BusinessNumbers() {
   // ('LP/HUB', 'WEB-US'…), which is the same vocabulary the switch speaks.
   const { unit } = useUnit()
   const rows = useMemo(() => rowsAll.filter(r => inUnit(r.bucket, unit)), [rowsAll, unit])
-  const deals = useMemo(() => dealsAll.filter(d => inUnit(oppDepts.get(Number(d.id)), unit)), [dealsAll, oppDepts, unit])
+  // The top 25 are taken AFTER the department filter, not before: cutting to 25 across
+  // every department first left a department view with whichever handful of its deals
+  // happened to rank in the company-wide top 25.
+  const deals = useMemo(() => dealsAll.filter(d => inUnit(oppDepts.get(Number(d.id)), unit)).slice(0, 25), [dealsAll, oppDepts, unit])
   const [unpriced, setUnpriced] = useState(0)
   const [loading, setLoading] = useState(true)
   // Normally empty, and then this renders nothing at all.
-  const [mismatch, setMismatch] = useState<MonthDateMismatch[]>([])
+  const [mismatchAll, setMismatch] = useState<MonthDateMismatch[]>([])
+  // The sheet rows carry their service department, so the warning follows the switch too.
+  const mismatch = useMemo(() => mismatchAll.filter(r => inUnit(r.service_dept, unit)), [mismatchAll, unit])
 
   // Opens on the whole of the current month, first day to last.
   const now = useMemo(() => new Date(), [])
@@ -118,7 +127,8 @@ export default function BusinessNumbers() {
   }, [from, to])
 
   useEffect(() => {
-    getBigOpenDeals(25).then(d => { setDeals(d.rows); setUnpriced(d.unpriced) })
+    // Every priced open deal, ranked; the page cuts to 25 once the department is applied.
+    getBigOpenDeals(100000).then(d => { setDeals(d.rows); setUnpriced(d.unpriced) })
     getOpportunityDepts().then(setOppDepts)
     getMonthDateMismatches().then(setMismatch)
   }, [])
@@ -149,44 +159,42 @@ export default function BusinessNumbers() {
   const td = 'px-3 py-3 whitespace-nowrap'
   const th = 'px-3 py-2 font-medium whitespace-nowrap'
   const dateBox = 'bg-mav-dark border border-mav-line rounded-md px-2 py-1.5 text-sm text-mav-fg [color-scheme:dark]'
+  const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
+  const dash = loading ? '…' : null
+
+  // How the two windows are counted. Was a paragraph above the cards; it sits behind the
+  // ⓘ on the service table now, word for word.
+  const basis = (
+    <>
+      <b>{thisLabel}</b> against <b>{prevLabel}</b> — the month before, stopping at today&rsquo;s date while this month is
+      still running, so the two are worth putting side by side.
+      {w?.whole_month
+        ? <> A whole month is counted by the web revenue sheet&rsquo;s <b>Month</b> column,
+            so this page and the Dashboard report the same figure the sheet does.</>
+        : <> A range narrower than a month is counted on <b>Start Date</b>, because a
+            month column cannot tell you about the 12th. The two agree row for row, so this adds up to the
+            whole-month figure.</>}
+      {' '}Won money and quoted money are shown apart and never added together.
+    </>
+  )
 
   return (
     <div>
       <Header title="Business Numbers"
-        subtitle="How each service is doing, against the same point of the month before" />
-
-      {/* Outside the loading gate on purpose: changing a date refetches, and controls
-          that vanish while the numbers reload are controls you cannot correct a typo in. */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <label className="text-xs text-mav-muted">From</label>
-        <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} className={dateBox} />
-        <label className="text-xs text-mav-muted">To</label>
-        <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} className={dateBox} />
-        <div className="flex flex-wrap gap-1.5 ml-1">
-          {ranges.map(r => (
-            <button key={r.key} onClick={() => { setFrom(r.from); setTo(r.to) }}
-              className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${activeRange === r.key
-                ? 'border-mav-yellow text-mav-fg bg-mav-yellow/10'
-                : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-              {r.label}
-            </button>
-          ))}
-        </div>
-        {from > to && <span className="text-xs text-red-400">From is after To.</span>}
-      </div>
+        subtitle="How each service is doing, against the same point of the month before"
+        chip={thisLabel || undefined} />
 
       {/* Silent when the sheet is clean, which is nearly always. A row here makes the
           whole-month and part-month figures differ by its own value, and it is invisible
           in the sheet itself — the one that got through was found by holding two pages
           side by side, which is not a process. */}
       {mismatch.length > 0 && (
-        <div className="mb-4 text-xs rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 max-w-4xl">
-          <span className="text-mav-fg">
-            {mismatch.length === 1 ? 'One row has' : `${mismatch.length} rows have`} a Month column and a Start Date in
-            different months, worth {fmtUsd(mismatch.reduce((a, r) => a + (Number(r.amount_usd) || 0), 0))}.
-          </span>{' '}
-          Whole months are counted by the Month column and shorter ranges by the Start Date, so these rows change the
-          answer depending on the dates you pick. Fix them in the sheet:
+        <div className="mb-4 text-xs rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
+            ⚠ {mismatch.length === 1 ? 'One row has' : `${mismatch.length} rows have`} a Month column and a Start Date in
+            different months, worth {fmtUsd(mismatch.reduce((a, r) => a + (Number(r.amount_usd) || 0), 0))} — fix them in the sheet
+            <InfoTip text="Whole months are counted by the Month column and shorter ranges by the Start Date, so these rows change the answer depending on the dates you pick." />
+          </div>
           <ul className="mt-1.5 space-y-0.5">
             {mismatch.slice(0, 5).map(r => (
               <li key={r.row_key} className="text-mav-muted">
@@ -200,49 +208,51 @@ export default function BusinessNumbers() {
         </div>
       )}
 
-      {w?.prev_capped && (
-        <div className="mb-4 text-xs rounded-lg border border-mav-line bg-mav-dark px-3 py-2 max-w-4xl text-mav-muted">
-          The month is still running, so the comparison stops at the same date last month:{' '}
-          <span className="text-mav-fg">{thisLabel}</span> against <span className="text-mav-fg">{prevLabel}</span>.
-          Holding it against a finished month instead would show every service collapsing, every month, until the 30th.
-        </div>
-      )}
+      {/* The four numbers a leader checks first. */}
+      <KPIRow cols={4}>
+        {[
+          { label: 'Revenue', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue, sub: `${fmtUsd(t.prev_revenue)} in ${prevLabel}`, tone: 'accent' as const },
+          { label: 'Projects started', value: String(t.this_deals), now: t.this_deals, before: t.prev_deals, sub: `${t.prev_deals} in ${prevLabel}`, tone: 'green' as const },
+          { label: 'Quotes raised', value: String(t.this_quotes), now: t.this_quotes, before: t.prev_quotes, sub: `${fmtUsd(t.this_quotes_usd)} quoted · ${t.prev_quotes} in ${prevLabel}`, tone: 'default' as const },
+          { label: 'Open pipeline', value: fmtUsd(t.open_quotes_usd), now: 0, before: 0, sub: `${t.open_quotes} quotes still in play, all time`, tone: 'amber' as const },
+        ].map(c => (
+          <KPICard key={c.label} tone={c.tone} label={c.label} value={dash ?? c.value}
+            sub={loading ? undefined : <>
+              {(c.now || c.before) ? <><Delta now={c.now} before={c.before} /><br /></> : null}
+              <span className="text-[11px]">{c.sub}</span>
+            </>} />
+        ))}
+      </KPIRow>
+
+      {/* The window is the page's main split. Outside the loading gate on purpose:
+          changing a date refetches, and controls that vanish while the numbers reload are
+          controls you cannot correct a typo in. */}
+      <Segments<string>
+        value={activeRange}
+        onChange={k => { const r = ranges.find(x => x.key === k); if (r) { setFrom(r.from); setTo(r.to) } }}
+        items={[
+          ...ranges.map(r => ({ id: r.key, label: r.label })),
+          ...(activeRange ? [] : [{ id: '', label: 'Custom range' }]),
+        ]} />
+
+      <FilterBar right={w?.prev_capped ? (
+        <span className="flex items-center gap-1.5 text-xs text-mav-muted">
+          Compared with <span className="text-mav-fg">{prevLabel}</span>, same days
+          <InfoTip align="right" text={<>The month is still running, so the comparison stops at the same date last month: <b>{thisLabel}</b> against <b>{prevLabel}</b>. Holding it against a finished month instead would show every service collapsing, every month, until the 30th.</>} />
+        </span>) : undefined}>
+        <span className={lbl}>From</span>
+        <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} className={dateBox} aria-label="From" />
+        <span className="text-xs text-mav-muted">→</span>
+        <span className={lbl}>To</span>
+        <input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} className={dateBox} aria-label="To" />
+        {from > to && <span className="text-xs text-red-400">From is after To.</span>}
+      </FilterBar>
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p> : (
         <>
-          <p className="text-xs text-mav-muted mb-4 max-w-4xl">
-            <span className="text-mav-fg">{thisLabel}</span> against <span className="text-mav-fg">{prevLabel}</span> —
-            the month before, stopping at today's date while this month is still running, so the two are worth
-            putting side by side.
-            {w?.whole_month
-              ? <> A whole month is counted by the web revenue sheet&rsquo;s <span className="text-mav-fg">Month</span> column,
-                  so this page and the Dashboard report the same figure the sheet does.</>
-              : <> A range narrower than a month is counted on <span className="text-mav-fg">Start Date</span>, because a
-                  month column cannot tell you about the 12th. The two agree row for row, so this adds up to the
-                  whole-month figure.</>}
-            {' '}Won money and quoted money are shown apart and never added together.
-          </p>
-
-          {/* The four numbers a leader checks first. */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-            {[
-              { label: 'Revenue', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue, sub: `${fmtUsd(t.prev_revenue)} in ${prevLabel}` },
-              { label: 'Projects started', value: String(t.this_deals), now: t.this_deals, before: t.prev_deals, sub: `${t.prev_deals} in ${prevLabel}` },
-              { label: 'Quotes raised', value: String(t.this_quotes), now: t.this_quotes, before: t.prev_quotes, sub: `${fmtUsd(t.this_quotes_usd)} quoted · ${t.prev_quotes} in ${prevLabel}` },
-              { label: 'Open pipeline', value: fmtUsd(t.open_quotes_usd), now: 0, before: 0, sub: `${t.open_quotes} quotes still in play, all time` },
-            ].map(c => (
-              <div key={c.label} className="bg-mav-panel border border-mav-line rounded-xl p-4">
-                <div className="text-xs text-mav-muted">{c.label}</div>
-                <div className="text-2xl font-semibold mt-1 tabular-nums">{c.value}</div>
-                <div className="mt-1 flex items-center gap-2">
-                  {(c.now || c.before) ? <Delta now={c.now} before={c.before} /> : null}
-                </div>
-                <div className="text-[11px] text-mav-muted mt-1">{c.sub}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto mb-8">
+          <Panel flush className="mb-6" title="By service" info={basis}
+            right={<span className="text-[11px] text-mav-muted">{thisLabel} vs {prevLabel}</span>}>
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-mav-fg/70 border-b border-mav-line">
                 <tr>
@@ -285,7 +295,8 @@ export default function BusinessNumbers() {
                   </tr>
                 ))}
                 <tr className="bg-mav-dark/40">
-                  <td className={`${td} font-semibold`}>All of Web</td>
+                  {/* Under a department it is that department's total, so it says so. */}
+                  <td className={`${td} font-semibold`}>{unit === 'all' ? 'All of Web' : 'Total'}</td>
                   <td className={`${td} text-right tabular-nums font-semibold`}>{fmtUsd(t.this_revenue)}
                     <div className="text-[11px] text-mav-muted font-normal">{fmtUsd(t.prev_revenue)} last</div>
                   </td>
@@ -299,21 +310,20 @@ export default function BusinessNumbers() {
               </tbody>
             </table>
           </div>
+          </Panel>
 
           {/* Where the next month comes from. Open, priced, biggest first. */}
-          <div className="flex items-baseline justify-between gap-3 flex-wrap mb-1">
-            <h2 className="text-base font-semibold">Biggest open opportunities</h2>
-            <span className="text-xs text-mav-muted">
-              {deals.length} shown of {fmtUsd(deals.reduce((s, d) => s + (d.est_value || 0), 0))}
-              {unpriced > 0 && <> · {unpriced} more open with no price on them yet</>}
-            </span>
-          </div>
-          <p className="text-[11px] text-mav-muted mb-3 max-w-3xl">
-            Still in play — not won, not lost, not marked unlikely. Ranked by quoted value. A deal with no figure
-            is not a small deal, it is an unpriced one, so those are counted separately rather than ranked at zero.
-            Click one to open it.
-          </p>
-          <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
+          <Panel flush title="Biggest open opportunities"
+            info="Still in play — not won, not lost, not marked unlikely. Ranked by quoted value. A deal with no figure is not a small deal, it is an unpriced one, so those are counted separately rather than ranked at zero. Click one to open it."
+            right={
+              <span className="text-xs text-mav-muted">
+                {deals.length} shown of {fmtUsd(deals.reduce((s, d) => s + (d.est_value || 0), 0))}
+                {unpriced > 0 && <> · {unpriced} more open with no price on them yet{unit !== 'all' ? ' (all departments)' : ''}</>}
+              </span>}>
+          {/* The unpriced count comes back from the database as one number for every
+              department; the rows behind it are never fetched, so it cannot be split here. */}
+          {unpriced > 0 && <NotSplitNote className="px-4 pt-2" what="The count of unpriced open deals" reason="arrives as a single company-wide number" />}
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-mav-fg/70 border-b border-mav-line">
                 <tr>
@@ -347,6 +357,7 @@ export default function BusinessNumbers() {
               </tbody>
             </table>
           </div>
+          </Panel>
         </>
       )}
     </div>

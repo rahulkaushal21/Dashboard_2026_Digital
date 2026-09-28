@@ -4,6 +4,12 @@ import { useThemeInk } from '@/lib/use-theme-ink'
 import { RefreshCw } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts'
 import Header from '@/components/Header'
+import KPICard from '@/components/KPICard'
+import InfoTip from '@/components/InfoTip'
+import { KPIRow, Panel, SectionTitle, Segments } from '@/components/PageParts'
+import { useUnit } from '@/components/BusinessUnitProvider'
+import { UnplacedNote } from '@/components/UnitToggle'
+import { inUnit, unplaceable } from '@/lib/business-unit'
 import { getRevenueHistory, getRevenueSources, getBookingsFull, type RevenueHistoryRow, type RevenueSource, type BookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
@@ -46,24 +52,6 @@ const deptOfService = (s?: string) => {
   if (v.startsWith('LP')) return 'LP'
   return 'Web'
 }
-
-const Panel = ({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) => (
-  <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-    <div className="flex items-baseline justify-between gap-3 mb-4">
-      <div className="text-sm font-medium">{title}</div>
-      {right}
-    </div>
-    {children}
-  </div>
-)
-
-const Kpi = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
-  <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-    <div className="text-xs text-mav-muted">{label}</div>
-    <div className="text-2xl font-semibold mt-1 tabular-nums">{value}</div>
-    {sub && <div className="text-[11px] text-mav-muted mt-1">{sub}</div>}
-  </div>
-)
 
 // A labelled share bar + legend, reused for engagement model and geo.
 const Split = ({ rows, total, color }: { rows: { name: string; amount: number }[]; total: number; color: (n: string) => string }) => (
@@ -109,6 +97,7 @@ const Move = ({ label, amount, n, max }: { label: string; amount: number; n: num
 
 export default function RevenueHistory() {
   const ink = useThemeInk()
+  const { unit } = useUnit()
   const [rows, setRows] = useState<RevenueHistoryRow[]>([])
   const [live, setLive] = useState<BookingRow[]>([])
   const [sources, setSources] = useState<RevenueSource[]>([])
@@ -133,7 +122,7 @@ export default function RevenueHistory() {
   // One combined series: the history sheet up to its last month, the live
   // revenue table from the month after. Nothing is written to web_revenue and
   // nothing about it changes — it is read here exactly as the other pages read it.
-  const all = useMemo<Row[]>(() => {
+  const every = useMemo<Row[]>(() => {
     const cut = rows.reduce((mx, r) => (ym(r.booking_month) > mx ? ym(r.booking_month) : mx), '')
     const hist: Row[] = rows.map(r => ({
       month: ym(r.booking_month), amount: Number(r.booking_amount || 0), client: r.company_name,
@@ -149,6 +138,11 @@ export default function RevenueHistory() {
       }))
     return [...hist, ...liveRows]
   }, [rows, live])
+  // Both eras carry a department (Web / HUB / LP), so the department switch applies to
+  // every figure below — the bridge, the mix tables and the splits all read `all`.
+  // A sheet row with no department cannot be placed and is counted out loud instead.
+  const all = useMemo(() => every.filter(r => inUnit(r.dept, unit)), [every, unit])
+  const unplaced = useMemo(() => unplaceable(every, r => r.dept), [every])
 
   const d = useMemo(() => {
     const total = all.reduce((s, r) => s + r.amount, 0)
@@ -291,29 +285,45 @@ export default function RevenueHistory() {
   }, [all, selFy, d.fys])
 
   const src = sources[0]
+  const histN = all.filter(r => r.era === 'history').length
+  const fyChoices = ya.years.filter(y => ya.years.includes(y - 1))
 
   return (
     <div>
-      <Header title="Revenue history" subtitle="April 2023 to current. Earlier months come from the historical spreadsheet; from April 2025 the live revenue table takes over, read exactly as the other pages read it." />
+      <Header title="Revenue history"
+        subtitle="April 2023 to current. Earlier months come from the historical spreadsheet; from April 2025 the live revenue table takes over, read exactly as the other pages read it."
+        chip={d.months.length ? `${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}` : undefined}
+        actions={
+          <button onClick={resync} disabled={syncing}
+            className="flex items-center gap-2 rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-60">
+            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Reloading…' : 'Reload from sheets'}
+          </button>
+        } />
+      <UnplacedNote n={unplaced} noun="revenue rows" className="-mt-3 mb-4" />
+      {note && <p className={`-mt-2 mb-4 text-xs ${note.startsWith('Failed') ? 'text-red-400' : 'text-mav-muted'}`}>{note}</p>}
 
       {loading ? <p className="text-mav-muted text-sm">Loading…</p> : rows.length === 0 ? (
         <p className="text-mav-muted text-sm">No historical revenue loaded yet.</p>
+      ) : all.length === 0 ? (
+        <p className="text-mav-muted text-sm">No revenue recorded for this department.</p>
       ) : (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Kpi label="Total billed" value={fmtUsd(d.total)} sub={`${d.months.length} months`} />
-            <Kpi label="Period" value={`${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}`} sub="by confirmation month" />
-            <Kpi label="Clients" value={String(d.clientCount)} sub="distinct agencies" />
-            <Kpi label="Rows" value={all.length.toLocaleString()} sub={`${rows.length.toLocaleString()} sheet · ${(all.length - rows.length).toLocaleString()} live`} />
-          </div>
+          <KPIRow cols={4}>
+            <KPICard tone="accent" label="Total billed" value={fmtUsd(d.total)} sub={`${d.months.length} months`} />
+            <KPICard label="Period" value={`${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}`} sub="by confirmation month" />
+            <KPICard label="Clients" value={String(d.clientCount)} sub="distinct agencies" />
+            <KPICard label="Rows" value={all.length.toLocaleString()} sub={`${histN.toLocaleString()} sheet · ${(all.length - histN).toLocaleString()} live`} />
+          </KPIRow>
 
-          <Panel title="Monthly billing" right={
-            <span className="text-[11px] text-mav-muted flex items-center gap-3">
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#b99a1f' }} />spreadsheet</span>
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#FFDB2D' }} />live table</span>
-              <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#5c5015' }} />month in progress</span>
-            </span>
-          }>
+          <Panel title="Monthly billing"
+            info="The month in progress is only part-billed, so its bar is dimmed — it is not a collapse. It stays in the chart and out of the year-on-year."
+            right={
+              <span className="text-[11px] text-mav-muted flex items-center gap-3">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#b99a1f' }} />spreadsheet</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#FFDB2D' }} />live table</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm" style={{ background: '#5c5015' }} />month in progress</span>
+              </span>
+            }>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={d.series} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -340,35 +350,37 @@ export default function RevenueHistory() {
             </ResponsiveContainer>
           </Panel>
 
-          <div className="flex flex-wrap items-baseline justify-between gap-3 pt-2">
-            <div>
-              <h2 className="text-base font-medium">Year on year</h2>
-              <p className="text-xs text-mav-muted mt-0.5">
-                {ya.partial
-                  ? `${fyLabel(ya.cur)} is still running, so every figure below compares ${ya.windowLabel} against ${ya.windowLabel} of ${fyLabel(ya.prev)}${ya.droppedNow ? `, leaving out ${ya.nowLabel} while it is still being billed` : ''}.`
-                  : `${fyLabel(ya.cur)} against ${fyLabel(ya.prev)}, full year against full year.`}
-              </p>
-            </div>
-            <div className="flex gap-1.5">
-              {ya.years.filter(y => ya.years.includes(y - 1)).map(y => (
-                <button key={y} onClick={() => setSelFy(y)}
-                  className={`text-xs px-2.5 py-1 rounded-md border transition-colors ${
-                    y === ya.cur ? 'bg-mav-fill text-black border-mav-yellow font-medium'
-                                 : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-                  {fyLabel(y)}
-                </button>
-              ))}
-            </div>
+          <div className="pt-2">
+            <SectionTitle
+              info={ya.droppedNow
+                ? `${ya.nowLabel} is excluded on both sides. It is still being billed, so measuring a part-month against a whole one would show a fall that is only the calendar.`
+                : undefined}>
+              Year on year
+            </SectionTitle>
+            {/* Kept visible: it changes how every figure below reads. */}
+            <p className="text-xs text-mav-muted mb-3">
+              {ya.partial
+                ? `${fyLabel(ya.cur)} is still running — ${ya.windowLabel} against ${ya.windowLabel} of ${fyLabel(ya.prev)}${ya.droppedNow ? `, leaving out ${ya.nowLabel}` : ''}.`
+                : `${fyLabel(ya.cur)} against ${fyLabel(ya.prev)}, full year against full year.`}
+            </p>
+            {fyChoices.length > 0 && (
+              <Segments
+                items={fyChoices.map(y => ({ id: String(y), label: fyLabel(y) }))}
+                value={String(ya.cur)}
+                onChange={id => setSelFy(Number(id))} />
+            )}
           </div>
 
           {!ya.hasPrev ? (
             <Panel title="What moved the year"><p className="text-sm text-mav-muted">No prior year to compare against.</p></Panel>
           ) : (
-          <Panel title="What moved the year" right={
-            <span className="text-[11px] text-mav-muted">
-              {ya.partial ? `${ya.windowLabel} like-for-like` : 'full year'}
-            </span>
-          }>
+          <Panel title="What moved the year"
+            info="The four movements add up exactly to the change in the total, so they explain it rather than merely describe it. A client counts as new when it billed nothing in the comparison window last year, and as stopped billing when it billed nothing in it this year — over a part-year window that can mean quiet rather than lost."
+            right={
+              <span className="text-[11px] text-mav-muted">
+                {ya.partial ? `${ya.windowLabel} like-for-like` : 'full year'}
+              </span>
+            }>
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-5">
               <span className="text-mav-muted text-sm tabular-nums">{fyLabel(ya.prev)} {fmtUsd(ya.prevTotal)}</span>
               <span className="text-mav-muted">&rarr;</span>
@@ -417,19 +429,6 @@ export default function RevenueHistory() {
                 <div className="text-[10px] text-mav-muted">{fmtUsd(ya.nw)} billed</div>
               </div>
             </div>
-
-            <p className="mt-4 text-[11px] text-mav-muted leading-relaxed">
-              The four movements add up exactly to the change in the total, so they explain it rather than merely
-              describe it. A client counts as <span className="text-mav-muted">new</span> when it billed nothing in the
-              comparison window last year, and as <span className="text-mav-muted">stopped billing</span> when it billed
-              nothing in it this year — over a part-year window that can mean quiet rather than lost.
-            </p>
-            {ya.droppedNow && (
-              <p className="mt-2 text-[11px] text-mav-muted leading-relaxed">
-                {ya.nowLabel} is excluded on both sides. It is still being billed, so measuring a part-month against a
-                whole one would show a fall that is only the calendar.
-              </p>
-            )}
           </Panel>
           )}
 
@@ -464,14 +463,16 @@ export default function RevenueHistory() {
             </Panel>
           </div>
 
-          <Panel title="Engagement model by year" right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
-            <div className="overflow-x-auto -mx-1 px-1">
+          <Panel title="Engagement model by year" flush
+            info="Years marked * do not cover a full Apr–Mar span, so no percentage is shown into or out of them. Model names are reproduced as the source spreadsheet spells them."
+            right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
+            <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-[11px] uppercase tracking-wide text-mav-muted">
-                    <th className="text-left font-medium pb-2">Model</th>
+                  <tr>
+                    <th className="text-left px-4 py-2">Model</th>
                     {ya.modelYears.map(y => (
-                      <th key={y} className="text-right font-medium pb-2 px-3 whitespace-nowrap">
+                      <th key={y} className="text-right px-3 py-2 whitespace-nowrap">
                         {fyLabel(y)}
                         {!(d.fys.find(f => f.fy === y)?.complete) && <span className="text-mav-muted"> *</span>}
                       </th>
@@ -481,7 +482,7 @@ export default function RevenueHistory() {
                 <tbody>
                   {ya.byModel.map(m => (
                     <tr key={m.name} className="border-t border-mav-line/60">
-                      <td className="py-2 pr-3">
+                      <td className="py-2 px-4">
                         <span className="inline-flex items-center gap-2">
                           <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: colorFor(m.name) }} />
                           {m.name}
@@ -508,29 +509,27 @@ export default function RevenueHistory() {
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
-              Years marked <span className="text-mav-muted">*</span> do not cover a full Apr–Mar span, so no percentage is
-              shown into or out of them. Model names are reproduced as the source spreadsheet spells them.
-            </p>
           </Panel>
 
-          <Panel title="Client mix" right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
-            <div className="overflow-x-auto -mx-1 px-1">
+          <Panel title="Client mix" flush
+            info="Top-10 share is the concentration risk: the higher it climbs, the more of the year rests on a handful of accounts, and the harder a single one leaving lands."
+            right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
+            <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[720px]">
                 <thead>
-                  <tr className="text-[11px] uppercase tracking-wide text-mav-muted">
-                    <th className="text-left font-medium pb-2">Year</th>
-                    <th className="text-right font-medium pb-2 px-3">Billed</th>
-                    <th className="text-right font-medium pb-2 px-3">Clients</th>
-                    <th className="text-right font-medium pb-2 px-3">Per client</th>
-                    <th className="text-right font-medium pb-2 px-3 whitespace-nowrap">Top 10 share</th>
-                    <th className="text-right font-medium pb-2 pl-3 whitespace-nowrap">Clients &ge; $50k</th>
+                  <tr>
+                    <th className="text-left px-4 py-2">Year</th>
+                    <th className="text-right px-3 py-2">Billed</th>
+                    <th className="text-right px-3 py-2">Clients</th>
+                    <th className="text-right px-3 py-2">Per client</th>
+                    <th className="text-right px-3 py-2 whitespace-nowrap">Top 10 share</th>
+                    <th className="text-right px-4 py-2 whitespace-nowrap">Clients &ge; $50k</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ya.mix.map(m => (
                     <tr key={m.fy} className="border-t border-mav-line/60">
-                      <td className="py-2 pr-3 font-medium whitespace-nowrap">
+                      <td className="py-2 px-4 font-medium whitespace-nowrap">
                         {fyLabel(m.fy)}
                         {!m.complete && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-mav-line text-mav-muted">partial</span>}
                       </td>
@@ -538,23 +537,21 @@ export default function RevenueHistory() {
                       <td className="py-2 px-3 text-right tabular-nums">{m.clients}</td>
                       <td className="py-2 px-3 text-right tabular-nums">{fmtUsd(m.perClient)}</td>
                       <td className="py-2 px-3 text-right tabular-nums">{m.top10Pct.toFixed(0)}%</td>
-                      <td className="py-2 pl-3 text-right tabular-nums">{m.big}</td>
+                      <td className="py-2 px-4 text-right tabular-nums">{m.big}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
-              Top-10 share is the concentration risk: the higher it climbs, the more of the year rests on a handful of
-              accounts, and the harder a single one leaving lands.
-            </p>
           </Panel>
 
           <div className="grid lg:grid-cols-2 gap-5">
             <Panel title="By engagement model">
               <Split rows={d.models} total={d.total} color={colorFor} />
             </Panel>
-            <Panel title="By financial year" right={<span className="text-[11px] text-mav-muted">Apr–Mar</span>}>
+            <Panel title="By financial year"
+              info="A year is marked partial when the data does not cover its full Apr–Mar span — FY26-27 is still in progress. Year-on-year is shown only between two complete years, so a part-finished year never produces a growth figure that is really just a shorter window."
+              right={<span className="text-[11px] text-mav-muted">Apr–Mar</span>}>
               <div className="space-y-2">
                 {d.fys.map((f, i) => {
                   const prev = i > 0 ? d.fys[i - 1] : null
@@ -576,24 +573,15 @@ export default function RevenueHistory() {
                   )
                 })}
               </div>
-              <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
-                A year is marked <span className="text-mav-muted">partial</span> when the data does not cover its full
-                Apr–Mar span — FY26-27 is still in progress. Year-on-year is shown only between two complete years, so a
-                part-finished year never produces a growth figure that is really just a shorter window.
-              </p>
             </Panel>
           </div>
 
           <div className="grid lg:grid-cols-2 gap-5">
-            <Panel title="By service" right={<span className="text-[11px] text-mav-muted">Web / HUB / LP</span>}>
+            <Panel title="By service"
+              info="From April 2025 this comes straight from the live table's Service Department (WEB-US / WEB-AU / WEB-UK roll up to Web). The earlier spreadsheet has no such column, so those months are derived from Technology: Hubspot → HUB, LP or Banner → LP, everything else → Web. Banner counts as LP — against the reported FY24-25 figures that derivation puts HUB within $3 and LP within $42. This is also the department the switch in the sidebar filters on."
+              right={<span className="text-[11px] text-mav-muted">Web / HUB / LP</span>}>
               <Split rows={d.depts} total={d.total}
                 color={(n) => ({ Web: '#FFDB2D', HUB: '#3b82f6', LP: '#10b981' } as any)[n] || '#333'} />
-              <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
-                From April 2025 this comes straight from the live table's Service Department (WEB-US / WEB-AU / WEB-UK
-                roll up to Web). The earlier spreadsheet has no such column, so those months are derived from Technology:
-                Hubspot &rarr; HUB, LP or Banner &rarr; LP, everything else &rarr; Web. Banner counts as LP — against the
-                reported FY24-25 figures that derivation puts HUB within $3 and LP within $42.
-              </p>
             </Panel>
             <Panel title="By geography">
               <Split rows={d.geos} total={d.total}
@@ -614,12 +602,8 @@ export default function RevenueHistory() {
             </Panel>
           </div>
 
-          <Panel title="Source" right={
-            <button onClick={resync} disabled={syncing}
-              className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md bg-mav-fill text-black font-medium disabled:opacity-60">
-              <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Reloading…' : 'Reload from sheets'}
-            </button>
-          }>
+          <Panel title="Source"
+            info="Add another year by inserting a row into revenue_sources with its published CSV URL and a column map — no code change needed. Rows are replaced per source, so reloading one year never touches another. The row and dollar counts here describe the whole sheet load, not the department selected. Reload from the button at the top of the page.">
             {src ? (
               <div className="text-sm space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -634,39 +618,30 @@ export default function RevenueHistory() {
                 {src.last_message && <div className="text-[11px] text-mav-muted">{src.last_message}</div>}
               </div>
             ) : <p className="text-sm text-mav-muted">No source registered.</p>}
-            <div className="mt-4 pt-3 border-t border-mav-line">
-              <div className="text-xs uppercase tracking-wide text-mav-muted mb-1.5">Basis, and a known variance</div>
-              <p className="text-[11px] text-mav-muted leading-relaxed">
-                Projects marked <span className="text-mav-muted">Pending</span>,{' '}
-                <span className="text-mav-muted">On Hold</span>, <span className="text-mav-muted">Cancelled</span> or{' '}
-                <span className="text-mav-muted">Awaiting Information</span> are excluded, matching the live revenue sync
-                so both sides of the April-2025 seam mean the same thing.
-              </p>
-              <p className="mt-2 text-[11px] text-mav-muted leading-relaxed">
-                The separately reported FY24-25 figures count all of those except On Hold, so they read higher here:
-                Web <span className="tabular-nums">$2,457,588</span> against a reported{' '}
-                <span className="tabular-nums">$2,481,187</span> — a{' '}
-                <span className="tabular-nums">$23,599</span> difference that is entirely those statuses, not the
-                Web/HUB/LP classification. On the same basis HUB and LP reconcile to within $3 and $42. This is a
-                deliberate choice of basis, not a gap in the data.
-              </p>
+            <div className="mt-4 pt-3 border-t border-mav-line flex flex-wrap gap-x-6 gap-y-2 text-xs text-mav-muted">
+              <span className="flex items-center gap-1.5">
+                Basis, and a known variance
+                <InfoTip text={<>
+                  Projects marked Pending, On Hold, Cancelled or Awaiting Information are excluded, matching the live
+                  revenue sync so both sides of the April-2025 seam mean the same thing.
+                  <br /><br />
+                  The separately reported FY24-25 figures count all of those except On Hold, so they read higher here:
+                  Web $2,457,588 against a reported $2,481,187 — a $23,599 difference that is entirely those statuses,
+                  not the Web/HUB/LP classification. On the same basis HUB and LP reconcile to within $3 and $42. This is
+                  a deliberate choice of basis, not a gap in the data.
+                </>} />
+              </span>
+              <span className="flex items-center gap-1.5">
+                From April 2025: the live table
+                <InfoTip text={<>
+                  Months after {d.histMonths.length ? monLabel(d.histMonths[d.histMonths.length - 1]) : '—'} come from{' '}
+                  <code className="text-mav-yellow">web_revenue</code>, unchanged and read the same way the Dashboard,
+                  Business Trend and Forecast pages read it. Each month is taken from exactly one source, so the handover
+                  cannot double-count — the live table holds a few stray Jan and Mar 2025 rows that the spreadsheet also
+                  covers, and those are ignored here in favour of the spreadsheet.
+                </>} />
+              </span>
             </div>
-            <div className="mt-4 pt-3 border-t border-mav-line">
-              <div className="text-xs uppercase tracking-wide text-mav-muted mb-1.5">From April 2025: the live table</div>
-              <p className="text-[11px] text-mav-muted leading-relaxed">
-                Months after {d.histMonths.length ? monLabel(d.histMonths[d.histMonths.length - 1]) : '—'} come from{' '}
-                <code className="text-mav-yellow">web_revenue</code>, unchanged and read the same way the Dashboard,
-                Business Trend and Forecast pages read it. Each month is taken from exactly one source, so the handover
-                cannot double-count — the live table holds a few stray Jan and Mar 2025 rows that the spreadsheet also
-                covers, and those are ignored here in favour of the spreadsheet.
-              </p>
-            </div>
-            <p className="mt-3 text-[11px] text-mav-muted leading-relaxed">
-              Add another year by inserting a row into <code className="text-mav-yellow">revenue_sources</code> with its
-              published CSV URL and a column map — no code change needed. Rows are replaced per source, so reloading one
-              year never touches another.
-            </p>
-            {note && <p className="mt-2 text-xs">{note}</p>}
           </Panel>
         </div>
       )}

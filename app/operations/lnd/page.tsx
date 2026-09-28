@@ -2,6 +2,10 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { RefreshCw } from 'lucide-react'
 import Header from '@/components/Header'
+import KPICard from '@/components/KPICard'
+import InfoTip from '@/components/InfoTip'
+import { KPIRow, Panel, Segments, FilterBar } from '@/components/PageParts'
+import { NotSplitNote } from '@/components/UnitToggle'
 import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { getLnd, getLndModules, creditedPct, strictPct, type LndRow, type LndModule } from '@/lib/supabase'
@@ -39,11 +43,7 @@ type Group = { key: string; n: number; credited: number; zero: number; complete:
 // Shared by "By level" and "By reporting manager" — both want the same three facts:
 // how many people, how many finished, and who is not moving.
 const Breakdown = ({ title, rows, note }: { title: string; rows: Group[]; note?: string }) => (
-  <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-    <div className="flex items-baseline justify-between mb-4">
-      <h2 className="font-semibold">{title}</h2>
-      {note && <span className="text-xs text-mav-muted">{note}</span>}
-    </div>
+  <Panel title={title} right={note && <span className="text-xs text-mav-muted">{note}</span>}>
     <div className="space-y-4">
       {rows.map(g => (
         <div key={g.key}>
@@ -63,15 +63,7 @@ const Breakdown = ({ title, rows, note }: { title: string; rows: Group[]; note?:
         </div>
       ))}
     </div>
-  </div>
-)
-
-const Stat = ({ label, value, sub, tone = '' }: { label: string; value: string; sub?: string; tone?: string }) => (
-  <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-    <div className="text-xs uppercase tracking-wide text-mav-muted">{label}</div>
-    <div className={`text-3xl font-semibold mt-2 ${tone}`}>{value}</div>
-    {sub && <div className="text-xs text-mav-muted mt-2">{sub}</div>}
-  </div>
+  </Panel>
 )
 
 // completed / in-progress / not-started as one bar.
@@ -287,60 +279,72 @@ export default function LndPage() {
     </div>
   )
 
+  const toggleOnly = (v: typeof only) => setOnly(only === v ? '' : v)
+
   return (
     <div>
       <Header
         title="Learning & Development"
         subtitle={`Team upskilling program · ${k.learners} learners · snapshot ${fmtDate(latest)}`}
-      />
+        chip={`Snapshot ${fmtDate(latest)}`}
+        actions={
+          <button onClick={syncNow} disabled={syncing}
+            title="Re-read the L&D sheet now instead of waiting for the hourly pull"
+            className="flex items-center gap-2 rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-60">
+            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Syncing…' : 'Sync now'}
+          </button>
+        } />
+      {/* The programme sheet has a Sub-department column, but it is empty for every
+          learner, so there is nothing to split the cohort on. Said out loud rather than
+          quietly showing everyone under LP/HUB or Web. */}
+      <NotSplitNote what="L&D progress" reason="is not split by department: the programme sheet leaves every learner's sub-department blank" className="-mt-3 mb-4" />
+      {syncMsg && (
+        <p className={`-mt-2 mb-4 text-xs ${syncMsg.startsWith('Sync failed') ? 'text-red-400' : 'text-mav-muted'}`}>{syncMsg}</p>
+      )}
 
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <button onClick={syncNow} disabled={syncing}
-          title="Re-read the L&D sheet now instead of waiting for the hourly pull"
-          className="flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-mav-line hover:border-mav-yellow hover:text-mav-fg text-mav-muted disabled:opacity-60 disabled:hover:border-mav-line">
-          <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? 'Syncing…' : 'Sync now'}
-        </button>
-        {syncMsg && (
-          <span className={`text-xs ${syncMsg.startsWith('Sync failed') ? 'text-red-400' : 'text-mav-muted'}`}>{syncMsg}</span>
-        )}
+      {/* The single most important caveat about this data — one line, detail behind the ⓘ. */}
+      <div className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-mav-muted flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="flex items-center gap-1.5">
+          <span className="text-amber-300 font-semibold">Progress is recomputed here, not read from the sheet.</span>
+          <InfoTip text={<>
+            Every figure below is derived from the raw module counts, with an in-progress module credited as half.
+            The sheet&rsquo;s own <em>Overall Progress</em> column changed definition on 29 Jul 2026 — nine learners
+            appeared to jump ahead without finishing a single module — so it is stored for audit and never displayed.
+          </>} />
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="text-amber-300 font-semibold">The Pre-Assessment is not a course.</span>
+          <InfoTip text={<>
+            The sheet lists it as a module, so counting it overstates learning — {courseStats.gateDone} of
+            the cohort&rsquo;s {courseStats.gateDone + courseStats.done} completions are just that entry gate.
+            Course figures here exclude it.
+          </>} />
+        </span>
       </div>
 
-      {/* The single most important caveat about this data. */}
-      <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-amber-300 font-semibold">Progress is recomputed here, not read from the sheet.</span>{' '}
-        Every figure below is derived from the raw module counts, with an in-progress module credited as half.
-        The sheet&rsquo;s own <em>Overall Progress</em> column changed definition on 29 Jul 2026 — nine learners
-        appeared to jump ahead without finishing a single module — so it is stored for audit and never displayed.
-        <div className="mt-2">
-          <span className="text-amber-300 font-semibold">The Pre-Assessment is not a course.</span>{' '}
-          The sheet lists it as a module, so counting it overstates learning — {courseStats.gateDone} of
-          the cohort&rsquo;s {courseStats.gateDone + courseStats.done} completions are just that entry gate.
-          Course figures here exclude it.
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 mb-4">
-        <Stat label="Active learners" value={String(k.learners)}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Active learners" value={String(k.learners)}
           sub={`${k.carried} continuing · ${k.fresh} new this snapshot`} />
-        <Stat label="Cohort progress" value={pct(k.credited)}
+        <KPICard label="Cohort progress" value={pct(k.credited)}
           sub={`${pct(k.strict)} counting completed modules only`} />
-        <Stat label="Courses completed" value={`${courseStats.done} / ${courseStats.assigned}`}
-          tone={courseStats.done === 0 ? 'text-red-400' : ''}
-          sub={`excludes the entry assessment (${courseStats.gateDone}/${courseStats.gateAssigned} passed)`} />
-        <Stat label="Never started" value={String(k.zero)} tone={k.zero ? 'text-red-400' : 'text-green-400'}
-          sub={k.zero ? 'no module opened at all' : 'everyone has begun'} />
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-3 mb-6">
-        <Stat label={`Stalled ${STALL_DAYS}+ days`} value={String(k.stalled)} tone={k.stalled ? 'text-amber-400' : ''}
-          sub="started, then went quiet" />
-        <Stat label="Finished the track" value={String(k.complete)} tone={k.complete ? 'text-green-400' : ''}
-          sub="all assigned modules complete" />
-        <Stat label="Nothing but the entry assessment" value={String(courseStats.peopleWithNoCourse)}
-          tone={courseStats.peopleWithNoCourse ? 'text-red-400' : 'text-green-400'}
+        <KPICard label="Courses completed" value={`${courseStats.done} / ${courseStats.assigned}`}
+          tone={courseStats.done === 0 ? 'red' : 'default'}
+          sub={`excl. entry assessment (${courseStats.gateDone}/${courseStats.gateAssigned} passed)`} />
+        <KPICard label="Never started" value={String(k.zero)} tone={k.zero ? 'red' : 'green'}
+          sub={k.zero ? 'no module opened at all' : 'everyone has begun'}
+          onClick={() => toggleOnly('zero')} active={only === 'zero'} />
+      </KPIRow>
+      <KPIRow cols={3}>
+        <KPICard label={`Stalled ${STALL_DAYS}+ days`} value={String(k.stalled)} tone={k.stalled ? 'amber' : 'default'}
+          sub="started, then went quiet" onClick={() => toggleOnly('stalled')} active={only === 'stalled'} />
+        <KPICard label="Finished the track" value={String(k.complete)} tone={k.complete ? 'green' : 'default'}
+          sub="all assigned modules complete" onClick={() => toggleOnly('done')} active={only === 'done'} />
+        <KPICard label="Only the entry assessment" value={String(courseStats.peopleWithNoCourse)}
+          tone={courseStats.peopleWithNoCourse ? 'red' : 'green'}
+          info="Nothing but the entry assessment: passed the gate, finished no course."
           sub={`of ${courseStats.people} — passed the gate, finished no course`} />
-      </div>
+      </KPIRow>
 
       <div className="grid gap-4 lg:grid-cols-2 mb-6">
         <Breakdown title="By level" rows={byLevel} />
@@ -348,26 +352,20 @@ export default function LndPage() {
       </div>
 
       {byCourse.length > 0 && (
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-          <div className="flex items-baseline justify-between mb-1">
-            <h2 className="font-semibold">By course</h2>
-            <span className="text-xs text-mav-muted">{mods.length} assignments across {byCourse.length} courses</span>
-          </div>
-          <p className="text-xs text-mav-muted mb-4">
-            Where the cohort gets stuck. A course with people in progress and nobody finishing is a
-            course problem, not a motivation problem.
-          </p>
+        <Panel title="By course" flush className="mb-6"
+          info="Where the cohort gets stuck. A course with people in progress and nobody finishing is a course problem, not a motivation problem."
+          right={<span className="text-xs text-mav-muted">{mods.length} assignments across {byCourse.length} courses</span>}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[720px]">
-              <thead className="text-left text-xs uppercase tracking-wide text-mav-muted border-b border-mav-line">
+              <thead className="text-left border-b border-mav-line">
                 <tr>
-                  <th className="px-2 py-2">Course</th>
+                  <th className="px-4 py-2">Course</th>
                   <th className="px-2 py-2">Track</th>
                   <th className="px-2 py-2 text-right">Assigned</th>
                   <th className="px-2 py-2 text-right">Completed</th>
                   <th className="px-2 py-2 text-right">In progress</th>
                   <th className="px-2 py-2 text-right">Not started</th>
-                  <th className="px-2 py-2 w-32">Mix</th>
+                  <th className="px-4 py-2 w-32">Mix</th>
                 </tr>
               </thead>
               <tbody>
@@ -375,7 +373,7 @@ export default function LndPage() {
                   const stuck = c.n >= 5 && c.done === 0
                   return (
                     <tr key={c.course} className="border-b border-mav-line/60 last:border-0">
-                      <td className="px-2 py-2">
+                      <td className="px-4 py-2">
                         {c.course}
                         {stuck && <span className="ml-2 text-[11px] text-red-400">nobody finishing</span>}
                       </td>
@@ -384,7 +382,7 @@ export default function LndPage() {
                       <td className={`px-2 py-2 text-right ${c.done ? 'text-green-400' : 'text-mav-muted'}`}>{c.done}</td>
                       <td className={`px-2 py-2 text-right ${c.doing ? 'text-mav-yellow' : 'text-mav-muted'}`}>{c.doing}</td>
                       <td className="px-2 py-2 text-right text-mav-muted">{c.ns}</td>
-                      <td className="px-2 py-2">
+                      <td className="px-4 py-2">
                         <div className="flex h-2 w-full overflow-hidden rounded-full bg-mav-line">
                           <div className="bg-green-500" style={{ width: `${(c.done / c.n) * 100}%` }} />
                           <div className="bg-mav-yellow" style={{ width: `${(c.doing / c.n) * 100}%` }} />
@@ -396,10 +394,23 @@ export default function LndPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </Panel>
       )}
 
-      <div className="flex flex-wrap gap-2 mb-4 items-center">
+      <Segments
+        items={[
+          { id: 'all', label: 'All learners', count: k.learners },
+          { id: 'zero', label: 'Never started', count: k.zero },
+          { id: 'stalled', label: 'Stalled', count: k.stalled },
+          { id: 'done', label: 'Complete', count: k.complete },
+        ]}
+        value={only || 'all'}
+        onChange={id => setOnly(id === 'all' ? '' : id as typeof only)} />
+
+      <FilterBar right={<>
+        {(q || level.length > 0 || mgr.length > 0 || only) && <button onClick={() => { setQ(''); setLevel([]); setMgr([]); setOnly('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
+        <span className="text-xs text-mav-muted">{filtered.length} learners</span>
+      </>}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search learner or manager…" className={`${sel} min-w-[200px] flex-1`} />
         <MultiSelect label="All levels" options={levels} selected={level} onChange={setLevel} className="w-40" />
         <MultiSelect label="All managers" options={mgrs} selected={mgr} onChange={setMgr} className="w-44" />
@@ -408,26 +419,12 @@ export default function LndPage() {
           <option value="name">Sort: name</option>
           <option value="activity">Sort: last activity</option>
         </select>
-        <button onClick={() => setOnly(only === 'zero' ? '' : 'zero')}
-          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'zero' ? 'border-red-400 text-red-300 bg-red-500/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-          Never started ({k.zero})
-        </button>
-        <button onClick={() => setOnly(only === 'stalled' ? '' : 'stalled')}
-          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'stalled' ? 'border-amber-400 text-amber-300 bg-amber-500/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-          Stalled ({k.stalled})
-        </button>
-        <button onClick={() => setOnly(only === 'done' ? '' : 'done')}
-          className={`text-xs px-2 py-1.5 rounded-md border ${only === 'done' ? 'border-green-400 text-green-300 bg-green-500/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-          Complete ({k.complete})
-        </button>
-        {(q || level.length > 0 || mgr.length > 0 || only) && <button onClick={() => { setQ(''); setLevel([]); setMgr([]); setOnly('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
-        <span className="text-xs text-mav-muted ml-auto">{filtered.length} learners</span>
-      </div>
+      </FilterBar>
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[720px]">
-            <thead className="text-left text-xs uppercase tracking-wide text-mav-muted border-b border-mav-line">
+            <thead className="text-left border-b border-mav-line">
               <tr>
                 <th className="px-4 py-3">Learner</th>
                 <th className="px-4 py-3">Level</th>

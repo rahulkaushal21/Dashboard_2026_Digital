@@ -4,6 +4,8 @@ import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote } from '@/components/UnitToggle'
+import KPICard from '@/components/KPICard'
+import { KPIRow, Segments, FilterBar, SectionTitle } from '@/components/PageParts'
 import { inUnit, unitOf } from '@/lib/business-unit'
 
 import MultiSelect from '@/components/MultiSelect'
@@ -14,7 +16,7 @@ import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type C
 import { askReason } from '@/lib/ask'
 import { currentEmail } from '@/lib/access'
 
-const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+const sel = 'bg-mav-panel border border-mav-line rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const day = (s?: string) => (s || '').slice(0, 10)
 // open = nobody has triaged it · unresolved = looked at, still broken · resolved = done
@@ -69,16 +71,21 @@ export default function CriticalEscalations() {
   const openCount = rows.filter(r => r.status === 'open').length
   const unresolvedCount = rows.filter(r => r.status === 'unresolved').length
 
-  const filtered = useMemo(() => rows.filter(r => {
+  const resolvedCount = rows.filter(r => r.status === 'resolved').length
+
+  // Every filter except status. The status tabs count against this, so each tab says how
+  // many rows it would show under the other filters as they stand.
+  const scoped = useMemo(() => rows.filter(r => {
     if (justMine && !mine.ownsClient(r.company_name)) return false
-    if (status !== 'all' && r.status !== status) return false
     if (!keeps(geo, r.geo)) return false
     if (q) { const hay = `${r.company_name} ${r.headline || ''} ${r.items.map(i => i.escalation_summary).join(' ')}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
     const d = day(r.last_flagged_date)
     if (from && (!d || d < from)) return false
     if (to && (!d || d > to)) return false
     return true
-  }), [rows, q, geo, status, from, to, justMine, mine])
+  }), [rows, q, geo, from, to, justMine, mine])
+  const filtered = useMemo(() => status === 'all' ? scoped : scoped.filter(r => r.status === status), [scoped, status])
+  const tabCount = (s: string) => scoped.filter(r => r.status === s).length
 
   const key = (r: CriticalEscalation) => r.threadIds.join(',')
   const patch = (r: CriticalEscalation, fields: Partial<CriticalEscalation>) => {
@@ -120,30 +127,52 @@ export default function CriticalEscalations() {
       <Header title="Critical Escalations" subtitle="Major negative feedback raised by clients over email — one row per client. Escalations stay here even after they're resolved; mark them Fixed or Positive yourself." />
       <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
 
-      <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-red-300 font-semibold">How this works:</span> one entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="text-mav-fg">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-300">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-300">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="text-mav-muted">Remove</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.
-      </div>
+      {/* The four states as cards, each a shortcut to its tab. Counts are the whole board
+          in this department — the filters below narrow the list, not these. */}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Clients escalated" value={String(rows.length)} sub="one row per client"
+          onClick={() => setStatus('all')} active={status === 'all'} />
+        <KPICard tone="red" label="Open" value={String(openCount)} sub="nobody has triaged it"
+          onClick={() => setStatus('open')} active={status === 'open'} />
+        <KPICard tone="amber" label="Unresolved" value={String(unresolvedCount)} sub="looked at, still broken"
+          info="Amber, not red and not green: an Unresolved escalation is still live — it stays in the list and keeps counting, here and on the Clients board — but someone has already worked it."
+          onClick={() => setStatus('unresolved')} active={status === 'unresolved'} />
+        <KPICard tone="green" label="Resolved" value={String(resolvedCount)} sub="marked fixed / positive"
+          onClick={() => setStatus('resolved')} active={status === 'resolved'} />
+      </KPIRow>
 
-      <div className="flex flex-wrap gap-2 mb-4 items-center">
+      <SectionTitle info={<>One entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="font-semibold">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-400">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-400">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="font-semibold">Remove</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.</>}>
+        How this works
+      </SectionTitle>
+
+      {/* Status is the page's main split. Each count is what that tab would show under
+          every other filter as it stands. */}
+      <Segments<'all' | 'open' | 'unresolved' | 'resolved'>
+        value={status}
+        onChange={setStatus}
+        items={[
+          { id: 'open', label: '● Open', count: tabCount('open') },
+          { id: 'unresolved', label: '⚑ Unresolved', count: tabCount('unresolved') },
+          { id: 'resolved', label: '✓ Resolved', count: tabCount('resolved') },
+          { id: 'all', label: 'All', count: scoped.length },
+        ]} />
+
+      <FilterBar right={
+        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{filtered.length} clients · {openCount} open · {unresolvedCount} unresolved</span>
+      }>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
             hidden={rows.filter(r => !mine.ownsClient(r.company_name)).length} />
         )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or detail…" className={`${sel} min-w-[220px] flex-1`} />
-        <select value={status} onChange={e => setStatus(e.target.value as 'all' | 'open' | 'unresolved' | 'resolved')} className={sel}>
-          <option value="all">All statuses</option>
-          <option value="open">● Open only</option>
-          <option value="unresolved">⚑ Unresolved only</option>
-          <option value="resolved">✓ Resolved only</option>
-        </select>
         <MultiSelect label="All GEOs" options={geos} selected={geo} onChange={setGeo} className="w-36" />
+        <div className="basis-full h-0" />
         <span className="text-xs text-mav-muted">From</span>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="From" />
         <span className="text-xs text-mav-muted">to</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo.length > 0 || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo([]); setFrom(''); setTo(''); setStatus('all') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
-        <span className="text-xs text-mav-muted ml-auto">{filtered.length} clients · {openCount} open · {unresolvedCount} unresolved</span>
-      </div>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="To" />
+        {(q || geo.length > 0 || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo([]); setFrom(''); setTo(''); setStatus('all') }} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">✕ Clear</button>}
+      </FilterBar>
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p>
         : !rows.length ? <div className="rounded-lg border border-mav-line bg-mav-panel px-4 py-10 text-center text-sm text-mav-muted">No client escalations captured yet.</div>

@@ -4,6 +4,8 @@ import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote } from '@/components/UnitToggle'
+import KPICard from '@/components/KPICard'
+import { KPIRow, Segments, FilterBar, SectionTitle } from '@/components/PageParts'
 import { inUnit, unitOf } from '@/lib/business-unit'
 
 import { askReason } from '@/lib/ask'
@@ -16,7 +18,7 @@ import { currentEmail, getStoredProfile } from '@/lib/access'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 
-const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+const sel = 'bg-mav-panel border border-mav-line rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const day = (s?: string) => (s || '').slice(0, 10)
 
@@ -59,9 +61,14 @@ export default function Delights() {
     approvers.find(a => a.dept_pattern.toUpperCase() === (dept || '').toUpperCase())
   // Waiting on THIS person. Admins see everything waiting, because chasing it is theirs.
   const pending = useMemo(() => manual.filter(m => m.status === 'pending'), [manual])
-  const minePending = useMemo(
+  const mineAnyUnit = useMemo(
     () => pending.filter(m => iAmAdmin || approverFor(m.service_dept)?.email === me),
     [pending, iAmAdmin, me, approvers])
+  // Manual feedback carries its own service department, so the queue follows the
+  // department switch like everything else. What it hides is counted underneath — an
+  // approval must never vanish just because the switch is on the other unit.
+  const minePending = useMemo(() => mineAnyUnit.filter(m => inUnit(m.service_dept, unit)), [mineAnyUnit, unit])
+  const pendingElsewhere = mineAnyUnit.length - minePending.length
   // Starts on this person's own clients. A PM opens Delights to see their own accounts
   // being praised; everybody's is a nice read and not the job. One click shows the lot.
   const mine = useMine()
@@ -81,31 +88,57 @@ export default function Delights() {
     email: rows.filter(r => (r.email_count || 0) > 0).length,
   }), [rows])
 
-  const filtered = useMemo(() => rows.filter(r => {
+  // Every filter except the source. The source tabs count against this, so each tab
+  // says how many clients it would show under the other filters as they stand.
+  const scoped = useMemo(() => rows.filter(r => {
     if (justMine && !mine.ownsClient(r.company_name)) return false
     if (!keeps(geo, r.geo)) return false
-    if (src === 'sheet' && !(r.sheet_count || 0)) return false
-    if (src === 'email' && !(r.email_count || 0)) return false
     if (q) { const hay = `${r.company_name} ${r.headline || ''} ${r.items.map(i => `${i.quote || ''} ${i.project || ''}`).join(' ')}`.toLowerCase(); if (!hay.includes(q.toLowerCase())) return false }
     const d = day(r.date)
     if (from && (!d || d < from)) return false
     if (to && (!d || d > to)) return false
     return true
-  }), [rows, q, geo, src, from, to, justMine, mine])
+  }), [rows, q, geo, from, to, justMine, mine])
+  const filtered = useMemo(() => scoped.filter(r => {
+    if (src === 'sheet' && !(r.sheet_count || 0)) return false
+    if (src === 'email' && !(r.email_count || 0)) return false
+    return true
+  }), [scoped, src])
 
   return (
     <div>
       {adding && <AddFeedbackDialog onClose={() => setAdding(false)} onAdded={() => { setAdding(false); loadManual() }} />}
-      <Header title="Feedback" subtitle="What clients actually said — the standout praise from the feedback sheet, plus anything logged by hand once its approver signs it off." />
+      <Header title="Feedback" subtitle="What clients actually said — the standout praise from the feedback sheet, plus anything logged by hand once its approver signs it off."
+        actions={
+          <button onClick={() => setAdding(true)} className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm hover:brightness-95 transition whitespace-nowrap">
+            + Add feedback
+          </button>
+        } />
       <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
+
+      {/* Department totals, before the filters below. A client can be praised on both the
+          sheet and email, so the two source cards overlap and need not add up. */}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Happy clients" value={String(rows.length)} sub="one card per client"
+          onClick={() => setSrc('')} active={src === ''} />
+        <KPICard tone="green" label="From sheet" value={String(srcCounts.sheet)} sub="📋 feedback sheet"
+          onClick={() => setSrc('sheet')} active={src === 'sheet'} />
+        <KPICard tone="blue" label="From email" value={String(srcCounts.email)} sub="✉ email review"
+          onClick={() => setSrc('email')} active={src === 'email'} />
+        <KPICard tone={minePending.length ? 'amber' : 'default'} label="Waiting for you" value={String(minePending.length)} sub="manual feedback to approve" />
+      </KPIRow>
 
       {/* Waiting on somebody. Above the board on purpose: an approval queue nobody sees
           is an approval queue nobody clears, and the feedback sits invisible meanwhile. */}
+      {minePending.length === 0 && pendingElsewhere > 0 && (
+        <p className="mb-4 text-[11px] text-mav-muted">{pendingElsewhere} piece{pendingElsewhere > 1 ? 's' : ''} of feedback waiting for you in the other department — switch it in the sidebar.</p>
+      )}
       {minePending.length > 0 && (
         <div className="mb-4 rounded-lg border border-mav-yellow/50 bg-mav-yellow/10 px-4 py-3">
           <div className="text-sm font-semibold text-mav-yellow mb-2">
             {minePending.length} piece{minePending.length > 1 ? 's' : ''} of feedback waiting for you
           </div>
+          {pendingElsewhere > 0 && <p className="text-[11px] text-mav-muted -mt-1 mb-2">+{pendingElsewhere} more in the other department — switch it in the sidebar.</p>}
           <ul className="space-y-2">
             {minePending.map(m => (
               <li key={m.id} className="text-sm border-t border-mav-yellow/20 pt-2 first:border-0 first:pt-0">
@@ -140,35 +173,35 @@ export default function Delights() {
         </div>
       )}
 
-      <div className="mb-4 rounded-lg border border-green-500/30 bg-green-500/5 px-4 py-3 text-sm text-mav-muted">
-        <span className="text-green-300 font-semibold">✨ Real appreciation only:</span> three sources — testimonials
-        from the feedback sheet, praise found in the email review (<span className="text-sky-300">✉ email</span>), and
-        anything said on Slack or a call that somebody typed in and an approver signed off. The first two are scored on
-        what the text does: unprompted, praising the work, the people or the effect it had. A thanks that stops inside a
-        line, a delivery note and a pricing thread with a compliment in it all stay out, however warm they read.
-      </div>
+      <SectionTitle info={<>Three sources — testimonials from the feedback sheet, praise found in the email review (<span className="text-sky-400">✉ email</span>), and anything said on Slack or a call that somebody typed in and an approver signed off. The first two are scored on what the text does: unprompted, praising the work, the people or the effect it had. A thanks that stops inside a line, a delivery note and a pricing thread with a compliment in it all stay out, however warm they read.</>}>
+        ✨ Real appreciation only
+      </SectionTitle>
 
-      <div className="flex flex-wrap gap-2 mb-4 items-center">
+      {/* Source is the page's main split. The two overlap: a client praised in both
+          places is under each tab. */}
+      <Segments<'' | 'sheet' | 'email'>
+        value={src}
+        onChange={setSrc}
+        items={[
+          { id: '', label: 'All', count: scoped.length },
+          { id: 'sheet', label: '📋 From sheet', count: scoped.filter(r => (r.sheet_count || 0) > 0).length },
+          { id: 'email', label: '✉ From email', count: scoped.filter(r => (r.email_count || 0) > 0).length },
+        ]} />
+
+      <FilterBar right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{filtered.length} happy clients</span>}>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
             hidden={rows.filter(r => !mine.ownsClient(r.company_name)).length} />
         )}
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or quote…" className={`${sel} min-w-[220px] flex-1`} />
-        <button onClick={() => setAdding(true)}
-          className="text-sm px-3 py-2 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors whitespace-nowrap">
-          + Add feedback
-        </button>
         <MultiSelect label="All GEOs" options={geos} selected={geo} onChange={setGeo} className="w-36" />
-        {(['sheet', 'email'] as const).map(k => (
-          <button key={k} onClick={() => setSrc(v => v === k ? '' : k)} className={`text-xs px-2.5 py-2 rounded-md border transition-colors ${src === k ? (k === 'email' ? 'bg-sky-500/20 text-sky-300 border-sky-500/50' : 'bg-green-500/20 text-green-300 border-green-500/50') : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{k === 'email' ? '✉ From email' : '📋 From sheet'} ({srcCounts[k]})</button>
-        ))}
+        <div className="basis-full h-0" />
         <span className="text-xs text-mav-muted">From</span>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="From" />
         <span className="text-xs text-mav-muted">to</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(q || geo.length > 0 || src || from || to) && <button onClick={() => { setQ(''); setGeo([]); setSrc(''); setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
-        <span className="text-xs text-mav-muted ml-auto">{filtered.length} happy clients</span>
-      </div>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="To" />
+        {(q || geo.length > 0 || src || from || to) && <button onClick={() => { setQ(''); setGeo([]); setSrc(''); setFrom(''); setTo('') }} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">✕ Clear</button>}
+      </FilterBar>
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p>
         : !rows.length ? <div className="rounded-lg border border-mav-line bg-mav-panel px-4 py-10 text-center text-sm text-mav-muted">No client delights captured yet.</div>

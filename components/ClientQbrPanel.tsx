@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import InfoTip from '@/components/InfoTip'
 import { saveClientQbr, getQbrBrief, getQbrEvidence, qbrPoint, type ClientQbr, type QbrBrief, type QbrEvidence } from '@/lib/supabase'
 
 // The quarterly review, written up.
@@ -88,22 +89,19 @@ export default function ClientQbrPanel({ company, rows, canEdit, onSaved }: {
 
   return (
     <div className="mt-6 border-t border-mav-line pt-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
         <div className="flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-mav-muted">Quarterly business reviews</span>
+          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Quarterly business reviews</span>
+          {/* The why, one hover away rather than a paragraph above every review. */}
+          <InfoTip text="The one part of this page nothing can work out on its own — what was agreed on the call lives in the recording or the minutes. Whoever ran it writes it up here, and the next review opens with these action items already in front of it." />
           {rows.length > 0 && <span className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-medium">{rows.length}</span>}
         </div>
         {canEdit && !form && (
-          <button onClick={() => start()} className="text-xs px-3 py-1.5 rounded-md bg-mav-fill text-black font-medium hover:brightness-110 transition">
+          <button onClick={() => start()} className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm hover:brightness-95 transition">
             Record a QBR
           </button>
         )}
       </div>
-      <p className="text-[11px] text-mav-muted mb-4 max-w-2xl">
-        The one part of this page nothing can work out on its own &mdash; what was agreed on the call lives in the
-        recording or the minutes. Whoever ran it writes it up here, and the next review opens with these action items
-        already in front of it.
-      </p>
 
       {/* PREP, not minutes. Assembled from the revenue lines, the open quotes, the
           escalations nobody closed and the client's own words — every line traceable to

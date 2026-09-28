@@ -1,15 +1,15 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/Header'
-import { useUnit } from '@/components/BusinessUnitProvider'
-import { inUnit } from '@/lib/business-unit'
-
+import KPICard from '@/components/KPICard'
+import { KPIRow, Segments, Panel } from '@/components/PageParts'
+import { UnplacedNote } from '@/components/UnitToggle'
 import { useAuth } from '@/components/AuthProvider'
 import { OWNER_EMAIL } from '@/lib/access'
-import { getBookingsFull, getOpportunities, getOpportunityDepts, getQuotes, getPmFeedback, getEmailSignals, getClientOwners, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
-import { buildPmStats, growthPct, type PmQuarter } from '@/lib/pm-metrics'
+import { growthPct, type PmQuarter } from '@/lib/pm-metrics'
 import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, type FQ, type PmMember } from '@/lib/pm-team'
+import { usePmData } from './usePmData'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 const NOW = new Date()
@@ -18,6 +18,7 @@ const CUR_FQ = fqOf(NOW.getFullYear(), NOW.getMonth() + 1)
 // Every quarter of the current financial year up to the one we are in, oldest
 // first — the KPI sheet stacks them the same way as the year fills out.
 const QUARTERS: FQ[] = Array.from({ length: CUR_FQ.q }, (_, i) => ({ fy: CUR_FQ.fy, q: i + 1 }))
+const fqId = (f: FQ) => `${f.fy}-${f.q}`
 
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const qMonths = (f: FQ) => {
@@ -27,6 +28,14 @@ const qMonths = (f: FQ) => {
 }
 
 const totalColour = (t: number) => (t >= 70 ? 'text-green-400' : t >= 45 ? 'text-mav-yellow' : 'text-red-400')
+
+// What the numbers mean, stated once, in plain terms — behind the ⓘ on each rule card.
+const HOW = {
+  growth: 'The quarter’s average monthly booking against the PM’s base. The base is their last-year monthly average and it only moves up: beat it in a quarter and that quarter’s average becomes the new base. Miss it and the old base stands. The last-year average is a single hand-typed figure per PM, so it is not split by department.',
+  q2c: 'Confirmations land in the quarter they were WON in, not the quarter the quote was raised — a Q1 quote signed in Q2 is Q2’s win. The denominator is everything raised in the quarter plus anything older confirmed in it, sheet and email together. Quotes still open count against the quarter, so an unclosed quote weighs on the number rather than vanishing from it, and a closed quarter never moves afterwards.',
+  feedback: 'Client feedbacks recorded against the PM in the quarter — from the feedback sheet and from email.',
+  total: 'How far each measure got towards full marks — 16% growth, 85% Q2C, 8 feedbacks — weighted 40/40/20 and capped at 100%. Negative growth counts as zero rather than pulling the total below it.',
+}
 
 interface Cell {
   pm: PmMember
@@ -46,30 +55,13 @@ export default function PmTeam() {
   // whole grid computation.
   const roster = useMemo(() => (isAdmin ? PM_TEAM : me ? [me] : []), [isAdmin, me])
 
-  const [bookingsAll, setBookings] = useState<BookingRow[]>([])
-  const [oppsAll, setOpps] = useState<Opportunity[]>([])
-  const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
-
   // ── Business unit ───────────────────────────────────────────────────────────
-  // Scoped at the source, so every scorecard figure follows the switch.
-  const { unit } = useUnit()
-  const bookings = useMemo(() => bookingsAll.filter(b => inUnit(b.service_name, unit)), [bookingsAll, unit])
-  const opps = useMemo(() => oppsAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [oppsAll, oppDepts, unit])
-  const [quotes, setQuotes] = useState<Quote[]>([])
-  const [fb, setFb] = useState<PmFeedbackRow[]>([])
-  const [sigs, setSigs] = useState<EmailSignal[]>([])
-  // Who owns each client. Feedback is credited to the client's owner rather than to
-  // whoever typed the row up, so a shared account lands on the right scorecard.
-  const [owners, setOwners] = useState<Map<string, string[]>>(new Map())
-  const [loading, setLoading] = useState(true)
+  // Scoped at the source (see usePmData), so every scorecard figure follows the switch.
+  const { stats, loading, unplaced } = usePmData()
 
-  useEffect(() => {
-    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals(), getClientOwners(), getOpportunityDepts()])
-      .then(([b, o, qs, f, sg, ow, od]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg); setOwners(ow); setOppDepts(od) })
-      .finally(() => setLoading(false))
-  }, [])
-
-  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb, sigs, undefined, owners), [bookings, opps, quotes, fb, sigs, owners])
+  // One quarter at a time by default — the one in progress — with every quarter of the
+  // year still one tap away, or all of them stacked the way the KPI sheet does.
+  const [pick, setPick] = useState<string>(fqId(CUR_FQ))
 
   // One cell per PM per quarter, computed once so the table only has to read it.
   const grid = useMemo(() => QUARTERS.map(fq => ({
@@ -83,10 +75,17 @@ export default function PmTeam() {
     }),
   })), [stats, roster])
 
+  const shownGrid = pick === 'all' ? grid : grid.filter(g => fqId(g.fq) === pick)
+  const segs = [
+    ...QUARTERS.map(f => ({ id: fqId(f), label: qLabel(f), count: f.q === CUR_FQ.q ? 'now' : undefined, title: qMonths(f) })),
+    { id: 'all', label: 'All quarters', count: QUARTERS.length },
+  ]
+
   return (
     <div>
       <Header
         title={isAdmin ? 'PM Team' : 'My scorecard'}
+        chip={`${qLabel(CUR_FQ)} · ${qMonths(CUR_FQ)}`}
         subtitle={isAdmin
           ? 'Quarterly KPI scorecard — growth, quote conversion and client feedback'
           : 'Your quarterly KPI — growth, quote conversion and client feedback'} />
@@ -102,19 +101,26 @@ export default function PmTeam() {
         </div>
       ) : (
       <>
-      <HowItWorks />
+      {/* The scoring rules, as cards: what full marks is for each measure and how much it
+          weighs. The long explanation of each sits behind its ⓘ. */}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Growth" value={`${TARGETS.growth}%`} sub={`full marks · ${Math.round(WEIGHTS.growth * 100)}% weight`} info={HOW.growth} />
+        <KPICard label="Q2C" value={`${TARGETS.q2c}%`} sub={`full marks · ${Math.round(WEIGHTS.q2c * 100)}% weight`} info={HOW.q2c} />
+        <KPICard label="Feedback" value={String(TARGETS.feedback)} sub={`full marks · ${Math.round(WEIGHTS.feedback * 100)}% weight`} info={HOW.feedback} />
+        <KPICard label="Total" value={[WEIGHTS.growth, WEIGHTS.q2c, WEIGHTS.feedback].map(w => Math.round(w * 100)).join(' / ')} sub="weighted attainment, capped at 100%" info={HOW.total} />
+      </KPIRow>
+
+      <UnplacedNote n={unplaced} noun="quote and feedback rows" className="-mt-3 mb-4" />
+
+      <Segments items={segs} value={pick} onChange={setPick} />
 
       {loading && <p className="text-sm text-mav-muted mb-4">Loading…</p>}
 
-      {grid.map(({ fq, cells }) => (
-        <section key={`${fq.fy}-${fq.q}`} className="mb-8">
-          <div className="flex items-baseline gap-3 mb-3">
-            <h2 className="text-lg font-semibold">{qLabel(fq)}</h2>
-            <span className="text-xs text-mav-muted">{qMonths(fq)}</span>
-            {fq.q === CUR_FQ.q && <span className="text-xs text-amber-400">in progress</span>}
-          </div>
-
-          <div className="border border-mav-line rounded-xl overflow-x-auto">
+      {shownGrid.map(({ fq, cells }) => (
+        <Panel key={fqId(fq)} flush className="mb-6"
+          title={<>{qLabel(fq)} <span className="normal-case tracking-normal">· {qMonths(fq)}</span></>}
+          right={fq.q === CUR_FQ.q ? <span className="text-xs text-amber-400">in progress</span> : undefined}>
+          <div className="overflow-x-auto">
             <table className="text-sm border-collapse min-w-max">
               <thead>
                 <tr className="bg-mav-panel">
@@ -162,7 +168,7 @@ export default function PmTeam() {
                 <tr className="bg-mav-panel/70">
                   <th className="sticky left-0 z-20 bg-mav-panel text-left font-semibold px-4 py-3 border-t-2 border-r border-mav-line">
                     Total
-                    <span className="block text-[11px] text-mav-muted font-normal">weighted attainment</span>
+                    <span className="block text-[11px] text-mav-muted font-normal normal-case tracking-normal">weighted attainment</span>
                   </th>
                   {cells.map(c => (
                     <td key={c.pm.slug} className={`px-4 py-3 border-t-2 border-mav-line text-center tabular-nums text-base font-semibold ${totalColour(c.total)}`}>
@@ -173,7 +179,7 @@ export default function PmTeam() {
               </tbody>
             </table>
           </div>
-        </section>
+        </Panel>
       ))}
       </>
       )}
@@ -188,7 +194,7 @@ function Row({ label, hint, kpi, weight, target, cells, render }: {
 }) {
   return (
     <tr className={kpi ? 'border-t border-mav-line/60' : ''}>
-      <th className={`sticky left-0 z-20 bg-mav-dark text-left px-4 py-2.5 border-r border-mav-line font-normal ${kpi ? 'text-mav-fg' : 'text-mav-muted'}`}>
+      <th className={`sticky left-0 z-20 bg-mav-panel text-left px-4 py-2.5 border-r border-mav-line font-normal ${kpi ? 'text-mav-fg' : 'text-mav-muted'}`}>
         {label}
         <span className="block text-[11px] text-mav-muted">
           {kpi ? `${Math.round((weight || 0) * 100)}% weight · full marks at ${target}` : hint}
@@ -196,23 +202,5 @@ function Row({ label, hint, kpi, weight, target, cells, render }: {
       </th>
       {cells.map(c => <td key={c.pm.slug} className="px-4 py-2.5 text-center">{render(c)}</td>)}
     </tr>
-  )
-}
-
-/** What the numbers mean, stated once, in plain terms. */
-function HowItWorks() {
-  const item = (title: string, body: string) => (
-    <div className="bg-mav-panel border border-mav-line rounded-lg p-3">
-      <div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">{title}</div>
-      <p className="text-xs text-mav-muted leading-relaxed">{body}</p>
-    </div>
-  )
-  return (
-    <div className="grid gap-3 md:grid-cols-4 mb-6">
-      {item('Growth', 'The quarter’s average monthly booking against the PM’s base. The base is their last-year monthly average and it only moves up: beat it in a quarter and that quarter’s average becomes the new base. Miss it and the old base stands.')}
-      {item('Q2C', 'Confirmations land in the quarter they were WON in, not the quarter the quote was raised — a Q1 quote signed in Q2 is Q2’s win. The denominator is everything raised in the quarter plus anything older confirmed in it, sheet and email together. Quotes still open count against the quarter, so an unclosed quote weighs on the number rather than vanishing from it, and a closed quarter never moves afterwards.')}
-      {item('Feedback', 'Client feedbacks recorded against the PM in the quarter — from the feedback sheet and from email.')}
-      {item('Total', 'How far each measure got towards full marks — 16% growth, 85% Q2C, 8 feedbacks — weighted 40/40/20 and capped at 100%. Negative growth counts as zero rather than pulling the total below it.')}
-    </div>
   )
 }

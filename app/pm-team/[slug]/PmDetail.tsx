@@ -1,19 +1,21 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
+import KPICard from '@/components/KPICard'
+import { KPIRow, Segments, Panel } from '@/components/PageParts'
+import { UnplacedNote } from '@/components/UnitToggle'
 import { useAuth } from '@/components/AuthProvider'
 import { OWNER_EMAIL } from '@/lib/access'
-import { getBookingsFull, getOpportunities, getQuotes, getPmFeedback, getEmailSignals, getClientOwners, type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal } from '@/lib/supabase'
-import { buildPmStats, growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost, quoteConfirmDate, oppConfirmDate } from '@/lib/pm-metrics'
+import { growthPct, pendingOpps, oppDate, isNewDevQuote, isWon, isLost, quoteConfirmDate, oppConfirmDate } from '@/lib/pm-metrics'
 import { pmBySlug, pmByEmail, fqOf, qLabel, totalPct, attainment, TARGETS, WEIGHTS, type FQ } from '@/lib/pm-team'
+import { usePmData } from '../usePmData'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
 const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const mLabel = (k: string) => { const [y, m] = k.split('-'); return `${SHORT[Number(m)]} '${y.slice(2)}` }
-const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 
 const NOW = new Date()
 const CUR_FQ = fqOf(NOW.getFullYear(), NOW.getMonth() + 1)
@@ -27,22 +29,11 @@ export default function PmDetail({ slug }: { slug: string }) {
   const isAdmin = !!profile?.is_admin
   const me = pmByEmail(email)
   const blocked = !isAdmin && (!me || !pm || me.slug !== pm.slug)
-  const [bookings, setBookings] = useState<BookingRow[]>([])
-  const [opps, setOpps] = useState<Opportunity[]>([])
-  const [quotes, setQuotes] = useState<Quote[]>([])
-  const [fb, setFb] = useState<PmFeedbackRow[]>([])
-  const [sigs, setSigs] = useState<EmailSignal[]>([])
-  // Who owns each client. Feedback is credited to the client's owner rather than to
-  // whoever typed the row up, so a shared account lands on the right scorecard.
-  const [owners, setOwners] = useState<Map<string, string[]>>(new Map())
+  // Every figure below follows the department switch — the same scoped rows the team
+  // grid reads (see usePmData), so this page and its column there always agree.
+  const { stats, unplaced } = usePmData()
   const [qi, setQi] = useState(QUARTERS.length - 1)
 
-  useEffect(() => {
-    Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals(), getClientOwners()])
-      .then(([b, o, qs, f, sg, ow]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg); setOwners(ow) })
-  }, [])
-
-  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb, sigs, undefined, owners), [bookings, opps, quotes, fb, sigs, owners])
   const s = pm ? stats.get(pm.slug) : undefined
   const fq = QUARTERS[qi]
 
@@ -114,34 +105,43 @@ export default function PmDetail({ slug }: { slug: string }) {
       })),
   ].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
+  const fromEmail = pending.rows.filter(o => o.origin === 'email').length
+  const inProgress = fq.q === CUR_FQ.q
+
   return (
     <div>
       <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-muted hover:text-mav-fg mb-3">
         <ArrowLeft size={14} /> {isAdmin ? 'PM Team' : 'My scorecard'}
       </Link>
-      <Header title={pm.name} subtitle="Project manager — quarterly KPI, bookings and open quotes" />
+      <Header title={pm.name} chip={qLabel(fq)} subtitle="Project manager — quarterly KPI, bookings and open quotes" />
 
-      <div className="flex flex-wrap items-center gap-2 mb-5">
-        <span className="text-xs text-mav-muted">Quarter</span>
-        <select value={qi} onChange={e => setQi(Number(e.target.value))} className={selCls}>
-          {QUARTERS.map((f, i) => <option key={i} value={i}>{qLabel(f)}</option>)}
-        </select>
-        {fq.q === CUR_FQ.q && <span className="text-xs text-amber-400">in progress — {q?.monthsElapsed ?? 0} of 3 months</span>}
-      </div>
+      {/* The quarter picker, as the page's main split. */}
+      <Segments
+        items={QUARTERS.map((f, i) => ({
+          id: String(i), label: qLabel(f),
+          count: f.q === CUR_FQ.q ? `${s?.quarter(f).monthsElapsed ?? 0} of 3 mo` : undefined,
+          title: f.q === CUR_FQ.q ? 'in progress' : undefined,
+        }))}
+        value={String(qi)} onChange={v => setQi(Number(v))} />
+
+      <UnplacedNote n={unplaced} noun="quote and feedback rows" className="-mt-2 mb-4" />
+
+      <KPIRow cols={5}>
+        <KPICard tone="accent" label="Total" value={`${total.toFixed(0)}%`}
+          sub={inProgress ? `in progress — ${q?.monthsElapsed ?? 0} of 3 months` : 'weighted attainment'}
+          info="Each measure scored on how far it got towards full marks, then weighted." />
+        <KPICard label="Growth" tone={growth == null ? 'default' : growth >= 0 ? 'green' : 'red'}
+          value={growth == null ? '—' : `${growth.toFixed(1)}%`} sub={`${money(q?.avg || 0)}/mo vs ${money(base)} base`} />
+        <KPICard label="Q2C" value={q?.q2c == null ? '—' : `${q.q2c.toFixed(0)}%`} sub={`${q?.won ?? 0} of ${q?.shared ?? 0} confirmed`} />
+        <KPICard label="Feedback" value={String(q?.feedback ?? 0)} sub={`${q?.feedbackFromSheet ?? 0} sheet · ${q?.feedbackFromEmail ?? 0} email`} />
+        <KPICard label="Base / month" tone={raised ? 'yellow' : 'default'} value={money(base)} sub={raised ? `raised from ${money(pm.lastYearAvg)}` : 'last-year average'}
+          info="The last-year monthly average is one hand-typed figure per PM, so it is not split by department." />
+      </KPIRow>
 
       {/* ---- The score, and exactly how it was reached ------------------- */}
-      <section className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 border-b border-mav-line">
-          <div>
-            <h2 className="font-medium">{qLabel(fq)} scorecard</h2>
-            <p className="text-xs text-mav-muted mt-0.5">Each measure scored on how far it got towards full marks, then weighted.</p>
-          </div>
-          <div className="text-right">
-            <div className="text-3xl font-semibold tabular-nums">{total.toFixed(0)}%</div>
-            <div className="text-xs text-mav-muted">Total</div>
-          </div>
-        </div>
-
+      <Panel flush className="mb-6" title={`${qLabel(fq)} scorecard`}
+        info="Each measure scored on how far it got towards full marks, then weighted."
+        right={<span className="font-mono text-lg font-semibold tabular-nums">{total.toFixed(0)}% <span className="text-xs text-mav-muted font-sans font-normal">Total</span></span>}>
         <table className="w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
@@ -172,6 +172,7 @@ export default function PmDetail({ slug }: { slug: string }) {
           </tfoot>
         </table>
 
+        {/* Caveats that change how the Total reads — kept visible, one line each. */}
         <div className="px-5 py-3 border-t border-mav-line text-xs text-mav-muted space-y-1">
           <p>
             <span className="text-mav-fg">Base {money(base)} a month.</span>{' '}
@@ -183,12 +184,11 @@ export default function PmDetail({ slug }: { slug: string }) {
           {(q?.shared ?? 0) === 0 && <p className="text-amber-400">No New-development quote was raised this quarter, so Q2C has nothing to measure and contributes nothing.</p>}
           {(q?.open ?? 0) > 0 && <p>{q?.open} quote{(q?.open ?? 0) === 1 ? '' : 's'} raised this quarter and not yet converted — they count against Q2C here, and if one is signed next quarter that win lands there, not back here.</p>}
         </div>
-      </section>
+      </Panel>
 
       {/* ---- Month over month bookings ---------------------------------- */}
-      <section className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-        <h2 className="font-medium mb-1">Month-over-month bookings</h2>
-        <p className="text-xs text-mav-muted mb-4">USD booked each month. Apr–Jun 2026 is fixed to the revenue sheet&rsquo;s pivot, the agreed final figure for that quarter.</p>
+      <Panel className="mb-6" title="Month-over-month bookings"
+        info="USD booked each month. Apr–Jun 2026 is fixed to the revenue sheet’s pivot, the agreed final figure for that quarter. Solid bars are up on the month before; faded bars are down.">
         {months.length === 0 ? <p className="text-sm text-mav-muted">No bookings recorded.</p> : (
           <div className="overflow-x-auto">
             {/* items-stretch, and each column h-full, is load-bearing: with
@@ -216,27 +216,25 @@ export default function PmDetail({ slug }: { slug: string }) {
             </div>
           </div>
         )}
-        <p className="text-xs text-mav-muted mt-3">Solid bars are up on the month before; faded bars are down.</p>
-      </section>
+        <div className="flex items-center gap-4 text-[11px] text-mav-muted mt-3">
+          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-mav-yellow" />up on the month before</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-mav-yellow/45" />down</span>
+        </div>
+      </Panel>
 
       {/* ---- The quotes behind Q2C -------------------------------------- */}
-      <section className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
-        <div className="px-5 py-4">
-          <h2 className="font-medium">New-development quotes · {qLabel(fq)}</h2>
-          <p className="text-xs text-mav-muted mt-1">
-            Everything behind the Q2C figure: raised this quarter, or raised earlier and confirmed in it. Quotes-tab rows with
-            Project Type “New Development”, plus deals worked over email that were never written onto the sheet — those are read
-            from the subject and brief, and only counted on an explicit build signal.
-          </p>
-          <p className="text-xs text-mav-muted mt-1">
+      <Panel flush className="mb-6" title={`New-development quotes · ${qLabel(fq)}`}
+        info="Everything behind the Q2C figure: raised this quarter, or raised earlier and confirmed in it. Quotes-tab rows with Project Type “New Development”, plus deals worked over email that were never written onto the sheet — those are read from the subject and brief, and only counted on an explicit build signal."
+        right={
+          <span className="text-xs text-mav-muted">
             {q?.shared ?? 0} raised ({(q?.shared ?? 0) - (q?.sharedFromEmail ?? 0)} sheet · {q?.sharedFromEmail ?? 0} email)
-            {' · '}{q?.won ?? 0} confirmed · {q?.lost ?? 0} cancelled · {q?.open ?? 0} still open.
-          </p>
-        </div>
-        {q2cRows.length === 0 ? <p className="px-5 pb-5 text-sm text-mav-muted">No New-development work raised this quarter.</p> : (
+            {' · '}{q?.won ?? 0} confirmed · {q?.lost ?? 0} cancelled · {q?.open ?? 0} still open
+          </span>
+        }>
+        {q2cRows.length === 0 ? <p className="px-5 py-5 text-sm text-mav-muted">No New-development work raised this quarter.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[740px]">
-              <thead className="text-left text-mav-muted border-y border-mav-line">
+              <thead className="text-left text-mav-muted border-b border-mav-line">
                 <tr>{['Raised', 'Confirmed', 'Client', 'Project', 'Value', 'Found in', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
               </thead>
               <tbody>
@@ -258,22 +256,23 @@ export default function PmDetail({ slug }: { slug: string }) {
             </table>
           </div>
         )}
-      </section>
+      </Panel>
 
       {/* ---- Open opportunities ----------------------------------------- */}
-      <section className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
-        <div className="px-5 py-4">
-          <h2 className="font-medium">Open opportunities</h2>
-          <p className="text-xs text-mav-muted mt-1">
-            Raised this month and still open — Quotes tab and email together.
-            {' '}{pending.rows.filter(o => o.origin === 'email').length} of the {pending.rows.length} below came from email.
-            {pending.toppedUp > 0 && ` It is early in the month, so the ${pending.toppedUp} most recent open deals from previous months are included.`}
+      <Panel flush title="Open opportunities"
+        info="Raised this month and still open — Quotes tab and email together."
+        right={<span className="text-xs text-mav-muted">{fromEmail} of the {pending.rows.length} below came from email</span>}>
+        {/* Early in the month the list is topped up from earlier months — that changes
+            what the list means, so it stays visible rather than behind the ⓘ. */}
+        {pending.toppedUp > 0 && (
+          <p className="px-5 pt-3 text-xs text-mav-muted">
+            It is early in the month, so the {pending.toppedUp} most recent open deals from previous months are included.
           </p>
-        </div>
-        {pending.rows.length === 0 ? <p className="px-5 pb-5 text-sm text-mav-muted">Nothing open.</p> : (
+        )}
+        {pending.rows.length === 0 ? <p className="px-5 py-5 text-sm text-mav-muted">Nothing open.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[720px]">
-              <thead className="text-left text-mav-muted border-y border-mav-line">
+              <thead className="text-left text-mav-muted border-b border-mav-line">
                 <tr>{['Date', 'Client', 'Subject', 'Value', 'Source', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
               </thead>
               <tbody>
@@ -291,7 +290,7 @@ export default function PmDetail({ slug }: { slug: string }) {
             </table>
           </div>
         )}
-      </section>
+      </Panel>
     </div>
   )
 }

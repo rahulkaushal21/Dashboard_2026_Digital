@@ -5,6 +5,7 @@ import GreetingBar from '@/components/GreetingBar'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 import KPICard from '@/components/KPICard'
+import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, getOpportunityDepts, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
@@ -261,11 +262,13 @@ export default function Dashboard() {
     })
     return { segData: m, engData: e }
   }, [bookingRows, segMonths])
+  // Only the departments inside the selected unit get a row. The data is already scoped,
+  // so the others would be six months of $0 — rows that look like a collapse.
   const segRows = useMemo(() => {
-    const rows = [...SEG_ORDER]
+    const rows = SEG_ORDER.filter(seg => inUnit(seg, unit))
     if (segData['Other'] && Object.values(segData['Other']).some(v => v)) rows.push('Other')
     return rows
-  }, [segData])
+  }, [segData, unit])
   const colTotal = (k: string) => segRows.reduce((s, seg) => s + (segData[seg]?.[k] || 0), 0)
   const rowTotal = (seg: string) => segMonths.reduce((s, k) => s + (segData[seg]?.[k] || 0), 0)
   const engCell = (seg: string, g: Eng, k: string) => engData[seg]?.[g]?.[k] || 0
@@ -333,10 +336,11 @@ export default function Dashboard() {
       const d = (b.booking_date || '').slice(0, 10)
       if (d >= prevFrom && d <= prevTo) m[k].prev += b.booking_amount || 0
     })
-    const rows = [...BIZ_ORDER]
+    // Same rule as the segment table: a bucket outside the selected unit is not shown as $0.
+    const rows = BIZ_ORDER.filter(seg => inUnit(seg, unit))
     if (m['Other'] && (m['Other'].now || m['Other'].prev)) rows.push('Other')
     return { rows, m }
-  }, [bookingRows, daysGone])
+  }, [bookingRows, daysGone, unit])
 
   // The comparison stops at today's DATE last month rather than running to the end of it.
   // Held against a finished month, this month reads as a 49% collapse every single time
@@ -370,6 +374,14 @@ export default function Dashboard() {
     () => scoped ? opps.filter(o => mine.ownsPm(o.pm_owner) || mine.ownsClient(o.company_name)) : opps,
     [opps, scoped, mine])
 
+  // Clients carry no department, so under a unit a client belongs to it when it has
+  // revenue there — the same way every client figure on this page is already counted.
+  const unitClients = useMemo(() => {
+    if (unit === 'all') return clients
+    const names = new Set(rev.map(r => (r.client_name || '').trim().toLowerCase()))
+    return clients.filter(c => names.has((c.company_name || '').trim().toLowerCase()))
+  }, [clients, rev, unit])
+
   const activeClients = useMemo(() =>
     new Set(rangeRev.filter(r => (r.amount_usd || 0) !== 0).map(r => r.client_name)).size, [rangeRev])
   // Open pipeline raised in this period, as MONEY.
@@ -398,16 +410,24 @@ export default function Dashboard() {
     [myBookings, myOpps, closeSpeed],
   )
 
+  const syncBtn = (
+    <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
+      className="inline-flex items-center gap-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs disabled:opacity-50">
+      <RefreshCw size={13} className={(syncing || refreshing) ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
+    </button>
+  )
+
   return (
     <div>
       {/* The greeting replaces the page header here: "Dashboard / Revenue, clients and
           pipeline at a glance" told a returning user nothing they did not know. The name
-          and their client region's holidays do. */}
+          and their client region's holidays do. It takes the header's shape — chip for
+          the department and the period, Sync now on the right. */}
       {/* The department switch that sat beside it moved to the sidebar, with every page's. */}
-      <GreetingBar />
+      <GreetingBar chip={`${rangeLabel}${scoped ? ' · My accounts' : ''}`} actions={syncBtn} />
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5 text-xs">
-        <span className="uppercase tracking-wide text-mav-muted">Last sync</span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Last sync</span>
         <span className="inline-flex items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full ${freshWithin(syncRev, 45, nowMs) ? 'bg-green-400' : syncRev ? 'bg-amber-400' : 'bg-mav-line'}`} />
           <span className="text-mav-muted">Web revenue</span><span className="font-medium">{ago(syncRev, nowMs)}</span>
@@ -429,81 +449,76 @@ export default function Dashboard() {
           {/* CONVERSATIONS, not messages. "618 unread" is true and useless — it is mostly
               alerts and calendar invites, and a number nobody can act on gets ignored,
               which is how it ends up meaning nothing at all. This counts threads with a
-              person outside the company on them. */}
+              person outside the company on them. The mailbox is one inbox for the whole
+              company, so this count does not split by department. */}
           {mail && mail.waiting_threads > 0 && (
             <span className={mail.arrived_since > 0 ? 'text-amber-300' : 'text-mav-muted'}
-              title={`${mail.waiting_msgs.toLocaleString('en-US')} messages across ${mail.waiting_threads} conversations with someone outside the company. ${mail.unread_total.toLocaleString('en-US')} unread in total — the rest is alerts, calendar invites and automatic replies.`}>
+              title={`${mail.waiting_msgs.toLocaleString('en-US')} messages across ${mail.waiting_threads} conversations with someone outside the company. ${mail.unread_total.toLocaleString('en-US')} unread in total — the rest is alerts, calendar invites and automatic replies. One mailbox for every department, so this does not follow the department switch.`}>
               · {mail.waiting_threads} client conversation{mail.waiting_threads === 1 ? '' : 's'} waiting
               {mail.arrived_since > 0 ? ` (${mail.arrived_since} since)` : ''}
             </span>
           )}
         </span>
         <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
-        <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg hover:border-mav-yellow disabled:opacity-50">
-          <RefreshCw size={13} className={(syncing || refreshing) ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
-        </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-6">
-        {PRESETS.map(p => (
-          <button key={p.key} onClick={() => applyPreset(p.key)}
-            className={`text-sm px-3 py-2 rounded-md border transition-colors ${preset === p.key
-              ? 'bg-mav-fill text-black border-mav-yellow font-medium'
-              : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>{p.label}</button>
-        ))}
-        {mine.canScope && (
-          <span className="ml-2">
-            <MineFilter on={justMine} onChange={setJustMine} label="My accounts"
-              hidden={clients.filter(c => !mine.ownsClient(c.company_name)).length} />
-          </span>
-        )}
-        <span className="text-xs text-mav-muted ml-2">From</span>
-        <input type="date" value={from} onChange={e => onFrom(e.target.value)} className={selCls} />
-        <span className="text-xs text-mav-muted">To</span>
-        <input type="date" value={to} onChange={e => onTo(e.target.value)} className={selCls} />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KPICard label={isMtd ? 'Revenue (this month)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom.pct}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label={isMtd ? 'Revenue (this month)' : 'Revenue (period)'} value={fmtUsd(periodTotal)} change={mom.pct}
           changeLabel={`vs ${fmtUsd(mom.prev)} by this date last month`}
           note={isMtd && daysGone < daysInMonth ? `${daysGone} of ${daysInMonth} days gone — the month is still filling` : undefined} />
-        <KPICard label="Active clients" value={String(activeClients)} />
-        <KPICard label="Open opportunities" value={fmtUsd(openPipeline.usd)}
-          note={openPipeline.n
+        <KPICard label="Active clients" value={String(activeClients)} sub={rangeLabel} />
+        <KPICard tone="amber" label="Open opportunities" value={fmtUsd(openPipeline.usd)}
+          sub={openPipeline.n
             ? `${openPipeline.n} open${openPipeline.unpriced ? ` · ${openPipeline.unpriced} with no value yet` : ''}`
-            : undefined} />
-        <KPICard label="Bookings (period)" value={String(bookings)} />
-      </div>
+            : undefined}
+          info="Open deals raised in the selected period, by their quoted value. A deal with no figure is counted, not priced." />
+        <KPICard label="Bookings (period)" value={String(bookings)} sub="revenue lines in the period" />
+      </KPIRow>
+
+      {/* The period is the page's main split, so it is the pills; the scope and the exact
+          dates sit in the one filter box under it. */}
+      <Segments<string>
+        value={preset}
+        onChange={applyPreset}
+        items={PRESETS.map(p => ({ id: p.key, label: p.label, title: p.key === 'ytd' ? 'Financial year, from 1 April' : undefined }))} />
+      <FilterBar>
+        {mine.canScope && (
+          <MineFilter on={justMine} onChange={setJustMine} label="My accounts"
+            hidden={unitClients.filter(c => !mine.ownsClient(c.company_name)).length} />
+        )}
+        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted ml-1">From</span>
+        <input type="date" value={from} onChange={e => onFrom(e.target.value)} className={selCls} />
+        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">To</span>
+        <input type="date" value={to} onChange={e => onTo(e.target.value)} className={selCls} />
+      </FilterBar>
 
       {/* Company-wide by service, so this is an admin's view: a PM's accounts sit inside
           one of these cards and the other four are somebody else's. */}
       {(!scoped || mine.isAdmin) && (
         <div className="mb-6">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-            <div className="text-sm font-medium">This month by service</div>
-            <div className="text-xs text-mav-muted">
+          <SectionTitle
+            info="Counted by the sheet's Month column, so the cards add up to the headline. Last month is counted to today's date, as Business Numbers does it."
+            right={<span className="text-xs text-mav-muted">
               {monthLabel(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`)} · against last month to the same date
-            </div>
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            {bizNow.rows.map(seg => {
+            </span>}>
+            This month by service
+          </SectionTitle>
+          <KPIRow cols={Math.min(6, Math.max(2, bizNow.rows.length)) as 2 | 3 | 4 | 5 | 6}>
+            {bizNow.rows.map((seg, i) => {
               const v = bizNow.m[seg] || { now: 0, prev: 0 }
               const d = v.prev > 0 ? ((v.now - v.prev) / v.prev) * 100 : null
               return (
-                <div key={seg} className="bg-mav-panel border border-mav-line rounded-xl p-4 border-t-2"
-                  style={{ borderTopColor: 'var(--section)' }}>
-                  <div className="text-xs text-mav-muted truncate" title={seg}>{seg}</div>
-                  <div className="text-xl font-semibold mt-1.5 tabular-nums">{fmtUsd(v.now)}</div>
-                  <div className={`text-xs mt-1 ${d === null ? 'text-mav-muted' : d >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {/* Nothing last month is not "up infinity per cent". Say what happened. */}
-                    {d === null ? (v.now > 0 ? 'new' : '—') : `${d >= 0 ? '+' : ''}${d.toFixed(0)}%`}
-                  </div>
-                  <div className="text-[11px] text-mav-muted mt-0.5 tabular-nums">{fmtUsd(v.prev)} last</div>
-                </div>
+                <KPICard key={seg} tone={i === 0 ? 'accent' : 'default'} label={seg} value={fmtUsd(v.now)}
+                  sub={<>
+                    <span className={d === null ? 'text-mav-muted' : d >= 0 ? 'text-green-400' : 'text-red-400'}>
+                      {/* Nothing last month is not "up infinity per cent". Say what happened. */}
+                      {d === null ? (v.now > 0 ? 'new' : '—') : `${d >= 0 ? '+' : ''}${d.toFixed(0)}%`}
+                    </span>
+                    <span className="tabular-nums"> · {fmtUsd(v.prev)} last</span>
+                  </>} />
               )
             })}
-          </div>
+          </KPIRow>
         </div>
       )}
 
@@ -517,20 +532,12 @@ export default function Dashboard() {
           have: their own accounts sit inside one department and the other five rows are
           somebody else's. It stays for admins, who are the ones comparing departments,
           and for anyone who has cleared the scope to see all of Web. */}
-      {/* mb-6 like every other block here: it lost its gap when it moved above the
-          chart row, and the table ended flush against the next card. */}
       {(!scoped || mine.isAdmin) && (
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
-        <div className="flex items-baseline justify-between px-5 pt-5 mb-3">
-          <div className="text-sm font-medium">Revenue by segment — month over month</div>
-          <div className="text-xs text-mav-muted">Service department · trailing 6 months · USD</div>
-        </div>
-        <div className="px-5 pb-3 text-xs text-mav-muted max-w-3xl">
-          {/* Said once, here, rather than leaving two unlabelled sub-rows to be guessed at. */}
-          Each segment is split into <span className="text-mav-fg">Dedicated</span> — retainers, including
-          Partial Dedicated — and <span className="text-mav-fg">P2P</span>, which is everything won project by
-          project: new development, ad-hoc, maintenance, additional pages.
-        </div>
+      <Panel flush className="mb-6" title="Revenue by segment — month over month"
+        // Said once, here, rather than leaving two unlabelled sub-rows to be guessed at.
+        info={<>Each segment is split into <b>Dedicated</b> — retainers, including Partial Dedicated — and <b>P2P</b>,
+          which is everything won project by project: new development, ad-hoc, maintenance, additional pages.</>}
+        right={<span className="text-xs text-mav-muted">Service department · trailing 6 months · USD</span>}>
         <div className="overflow-x-auto">
           {/* A real grid, not just row rules.
               The lines are mav-FG at low alpha rather than mav-line, so they follow the
@@ -540,11 +547,11 @@ export default function Dashboard() {
               border-mav-line was doing neither well enough to separate a month from the
               month beside it. */}
           <table className="w-full text-sm min-w-[720px] border-collapse">
-            <thead className="text-left text-mav-muted">
+            <thead className="text-left">
               <tr className="border-b-2 border-mav-fg/25">
-                <th className="px-5 py-3 font-medium border-r border-mav-fg/15">Segment</th>
-                {segMonths.map(k => <th key={k} className="px-4 py-3 font-medium text-right whitespace-nowrap border-r border-mav-fg/15">{monthLabel(k)}</th>)}
-                <th className="px-5 py-3 font-medium text-right whitespace-nowrap">6-mo total</th>
+                <th className="px-5 py-3 border-r border-mav-fg/15">Segment</th>
+                {segMonths.map(k => <th key={k} className="px-4 py-3 text-right whitespace-nowrap border-r border-mav-fg/15">{monthLabel(k)}</th>)}
+                <th className="px-5 py-3 text-right whitespace-nowrap">6-mo total</th>
               </tr>
             </thead>
             <tbody>
@@ -589,21 +596,17 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Panel>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div className="lg:col-span-2"><RevenueChart data={trendSeries} title={scoped ? 'Your revenue — last 6 months' : 'Revenue — last 6 months'}
           note="The last bar is the month still running, so it is part of a month against five whole ones." /></div>
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-          <div className="mb-4">
-            <div className="text-sm font-medium">Top clients</div>
-            {/* The period, because this panel follows the date filter while the chart
-                next to it is fixed to six months. Two panels side by side on different
-                periods, with only one of them saying so, is how a number gets quoted in
-                a meeting as the wrong thing. */}
-            <div className="text-xs text-mav-muted mt-0.5">{rangeLabel}{isMtd ? ' · so far' : ''}</div>
-          </div>
+        {/* The period, because this panel follows the date filter while the chart next to
+            it is fixed to six months. Two panels side by side on different periods, with
+            only one of them saying so, is how a number gets quoted in a meeting as the
+            wrong thing. */}
+        <Panel title="Top clients" right={<span className="text-xs text-mav-muted">{rangeLabel}{isMtd ? ' · so far' : ''}</span>}>
           {monthSeries.length === 0 ? (
             <p className="text-sm text-mav-muted">No revenue in the selected range.</p>
           ) : (
@@ -616,24 +619,17 @@ export default function Dashboard() {
               ))}
             </ul>
           )}
-        </div>
+        </Panel>
       </div>
 
       {insights.length > 0 && (
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-            <div className="text-sm font-medium inline-flex items-center gap-2">
-              <Sparkles size={15} className="text-mav-yellow" /> AI Insights
-            </div>
-            <div className="text-xs text-mav-muted">
-              Full history · recomputed every load{closeSpeed ? ` · close speed from ${closeSpeed.n} quotes` : ''}
-            </div>
-          </div>
-          <p className="text-xs text-mav-muted mb-4">
-            What the numbers above don&apos;t say. Ignores the date filter — these read the whole revenue and quote history
-            {scoped ? <> for <span className="text-mav-fg">your accounts</span></> : ''}.
-          </p>
-
+        <Panel className="mb-6"
+          title={<span className="inline-flex items-center gap-2"><Sparkles size={14} className="text-mav-yellow" /> AI Insights</span>}
+          info={<>What the numbers above don&apos;t say. Ignores the date filter — these read the whole revenue and quote history
+            {scoped ? <> for <b>your accounts</b></> : ''}.</>}
+          right={<span className="text-xs text-mav-muted">
+            Full history · recomputed every load{closeSpeed ? ` · close speed from ${closeSpeed.n} quotes` : ''}
+          </span>}>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {insights.map(ins => {
               const t = TONE[ins.tone]
@@ -677,7 +673,7 @@ export default function Dashboard() {
               )
             })}
           </div>
-        </div>
+        </Panel>
       )}
 
     </div>

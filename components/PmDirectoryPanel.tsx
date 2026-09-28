@@ -4,6 +4,7 @@ import { Trash2 } from 'lucide-react'
 import { listDirectory, addDirectoryMember, updateDirectoryMember, removeDirectoryMember, type DirectoryMember, type PmTeam } from '@/lib/supabase'
 import { ALLOWED_DOMAINS, isAllowedDomain } from '@/lib/access'
 import { PM_TEAMS } from '@/lib/deal-fields'
+import { Panel } from './PageParts'
 
 // The PM directory, managed here instead of in code.
 //
@@ -87,15 +88,10 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
 
 
   return (
-    <div>
-      <h2 className="text-base font-semibold mb-1">PM directory</h2>
-      <p className="text-sm text-mav-muted mb-4">
-        The PM team, and who may confirm a deal. A person here can confirm the deals they are named on as PM; an admin can
-        confirm anything; everyone else on {ALLOWED_DOMAINS.join(' or ')} can look but not change. The pod is a label for
-        grouping the team — it does not affect what anyone can confirm.
-      </p>
-
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-4">
+    <Panel title="PM directory"
+      info={`The PM team, and who may confirm a deal. A person here can confirm the deals they are named on as PM; an admin can confirm anything; everyone else on ${ALLOWED_DOMAINS.join(' or ')} can look but not change. The pod is a label for grouping the team — it does not affect what anyone can confirm.`}
+      right={<span className="font-mono text-xs text-mav-muted">{rows.filter(r => r.active).length} active · {rows.length} listed</span>}>
+      <div className="border border-mav-line rounded-lg overflow-x-auto mb-4">
         <table className="w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
@@ -165,7 +161,7 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
             </select>
             <input value={nAliases} onChange={e => setNAliases(e.target.value)} placeholder="spellings, comma separated" className={`${inp} w-72`} />
             <button onClick={add} disabled={busy || !nName.trim() || !nEmail.trim()}
-              className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+              className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-60">
               {busy ? 'Saving…' : 'Add to directory'}
             </button>
           </div>
@@ -188,6 +184,6 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
           {status && <p className="text-sm text-mav-muted">{status}</p>}
         </div>
       )}
-    </div>
+    </Panel>
   )
 }

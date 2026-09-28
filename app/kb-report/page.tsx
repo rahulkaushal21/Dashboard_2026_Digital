@@ -1,6 +1,8 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
+import KPICard, { type KPITone } from '@/components/KPICard'
+import { KPIRow, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 
@@ -56,23 +58,12 @@ const keeps = (picked: string[], v?: string) => picked.length === 0 || picked.in
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 
-/** A headline figure. Square, equal, and never carrying magnitude in its size. */
-const Box = ({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) => (
-  <div className="bg-mav-panel border border-mav-line rounded-xl p-4 border-t-2" style={{ borderTopColor: 'var(--section)' }}>
-    <div className="text-[11px] uppercase tracking-wide text-mav-muted truncate" title={label}>{label}</div>
-    <div className={`text-2xl font-semibold mt-1.5 tabular-nums ${tone || ''}`}>{value}</div>
-    {sub && <div className="text-[11px] text-mav-muted mt-1 leading-snug">{sub}</div>}
-  </div>
-)
-
 /** name · bar · money. One component, because six panels here are the same shape. */
 const Breakdown = ({ title, note, rows, total, empty = 'Nothing matches those filters.' }:
   { title: string; note?: string; rows: { name: string; usd: number; n?: number }[]; total: number; empty?: string }) => {
   const max = rows.length ? rows[0].usd : 0
   return (
-    <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-      <div className="text-sm font-medium mb-1">{title}</div>
-      {note && <p className="text-xs text-mav-muted mb-4">{note}</p>}
+    <Panel title={title} info={note}>
       {rows.length === 0 ? <p className="text-sm text-mav-muted">{empty}</p> : (
         <ul className="space-y-2">
           {rows.map(r => (
@@ -89,7 +80,7 @@ const Breakdown = ({ title, note, rows, total, empty = 'Nothing matches those fi
           ))}
         </ul>
       )}
-    </div>
+    </Panel>
   )
 }
 
@@ -120,6 +111,13 @@ export default function Reports() {
   const [fGeo, setFGeo] = useState<string[]>([])
   const [fAgency, setFAgency] = useState<string[]>([])
   const [fDept, setFDept] = useState<string[]>([])
+
+  // The service departments inside the selected unit. The filter offers only these and
+  // the department boxes show only these — under LP/HUB, four Web boxes at $0 would read
+  // as four departments that earned nothing. A pick from another unit is dropped when
+  // the unit changes, or it would silently empty the page.
+  const unitDepts = useMemo(() => DEPT_ORDER.filter(d => inUnit(d, unit)), [unit])
+  useEffect(() => { setFDept(p => p.filter(d => unitDepts.includes(d))) }, [unitDepts])
 
   useEffect(() => {
     Promise.all([getProjectLedger(), getOpportunities(), getOpportunityDepts()])
@@ -221,10 +219,10 @@ export default function Reports() {
   }, [shown])
 
   const depts = useMemo(() => {
-    const list = [...DEPT_ORDER]
+    const list = [...unitDepts]
     if (byDept['Other']) list.push('Other')
     return list.sort((a, b) => (byDept[b]?.usd || 0) - (byDept[a]?.usd || 0))
-  }, [byDept])
+  }, [byDept, unitDepts])
 
   const byTech = useMemo(() => groupBy(r => r.technology || '', 10), [shown])
   const byGeo = useMemo(() => groupBy(r => r.geo || ''), [shown])
@@ -315,18 +313,71 @@ export default function Reports() {
     setFAm([]); setFPm([]); setFEng([]); setFTech([]); setFGeo([]); setFAgency([]); setFDept([])
   }
 
+  // The window in words, for the header chip.
+  const rangeChip = useMemo(() => {
+    if (!from || !to) return undefined
+    const f = new Date(from + 'T00:00:00'), t = new Date(to + 'T00:00:00')
+    if (from === ymd(monthStart(f)) && to === ymd(monthEnd(f))) return `${MON[f.getMonth()]} ${f.getFullYear()}`
+    return `${dayLabel(from)} – ${dayLabel(to)} ${t.getFullYear()}`
+  }, [from, to])
+
   const monthValue = months.includes((from || '').slice(0, 7)) && from.slice(8) === '01'
     && to === ymd(monthEnd(new Date(from + 'T00:00:00'))) ? from.slice(0, 7) : ''
 
+  const hoursPct = hours.planned ? Math.round((hours.actual / hours.planned - 1) * 100) : 0
+  const label = 'font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted'
+
   return (
     <div>
-      <Header title="KB report"
-        subtitle="The whole business through one set of filters — what the revenue is made of, which stack earns it, and whether it was delivered in the hours it was sold on." />
+      <Header title="KB report" chip={rangeChip}
+        subtitle={<>
+          The whole business through one set of filters — what the revenue is made of, which stack earns it, and
+          whether it was delivered in the hours it was sold on.
+          <br /><br />
+          Dated on <b>Start Date</b>, the same basis as Business Numbers and the Business Overview sheet. Awaiting
+          Information is excluded, as everywhere else. Open pipeline counts deals <b>raised</b> in this window that are
+          still open, so a past month shows what was opened then and has not closed since &mdash; not today&rsquo;s
+          whole pipeline.
+        </>} />
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <span className="text-xs text-mav-muted">Start date</span>
+      {/* The eight figures a leader checks before asking anything else. */}
+      {loading ? <p className="text-sm text-mav-muted mb-5">Loading…</p> : (
+        <KPIRow cols={4}>
+          <KPICard tone="accent" label="Revenue" value={fmtUsd(total)}
+            sub={prev.from
+              ? `${shown.length.toLocaleString()} lines · ${fmtUsd(prev.usd)} in ${dayLabel(prev.from)}–${dayLabel(prev.to)}${momPct === null ? '' : ` (${momPct > 0 ? '+' : ''}${momPct}%)`}`
+              : `${shown.length.toLocaleString()} project lines`}
+            info="The comparison is the same range one month back, stopped on today's date last month, under every filter except the dates." />
+          <KPICard label="Clients" value={String(clients)} sub={clients ? `${fmtUsd(Math.round(total / clients))} average each` : undefined} />
+          <KPICard label="Average project" value={shown.length ? fmtUsd(Math.round(total / shown.length)) : '—'}
+            sub={`largest ${topAgencies.length ? fmtUsd(Math.max(...shown.map(r => r.amount_usd || 0))) : '—'}`} />
+          <KPICard label="Dedicated" value={`${pctOf(dedicated)}%`} sub={`${fmtUsd(dedicated)} committed · ${fmtUsd(total - dedicated)} won project by project`} />
+          <KPICard label="New business" value={`${pctOf(newBiz)}%`} sub={`${fmtUsd(newBiz)} new · ${fmtUsd(total - newBiz)} repeat`} />
+          <KPICard tone="yellow" label="Top 5 clients" value={`${top5Share}%`} sub="of revenue in this view"
+            info="Concentration risk: how much of this view rests on the five largest clients. 60% in three names is a different business from 60% in thirty." />
+          <KPICard tone="amber" label="Open pipeline" value={fmtUsd(pipeline.usd)}
+            sub={`${pipeline.n} deal${pipeline.n === 1 ? '' : 's'} raised in this window, still open${pipeline.unpriced ? ` · ${pipeline.unpriced} unpriced` : ''}`}
+            info="Technology and engagement filters do not apply: an open deal has neither recorded." />
+          <KPICard label="Hours delivered"
+            tone={hours.planned && hours.actual > hours.planned ? 'red' : hours.planned ? 'green' : 'default'}
+            value={hours.planned ? `${hoursPct > 0 ? '+' : ''}${hoursPct}%` : '—'}
+            sub={hours.planned ? `${Math.round(hours.actual).toLocaleString()} actual vs ${Math.round(hours.planned).toLocaleString()} planned` : 'no hours recorded'}
+            info="Only lines carrying BOTH a planned and an actual figure count, or a row missing one would read as a 100% over-run." />
+        </KPIRow>
+      )}
+
+      {/* Every filter in one box: the window first, then the fields, then the quick range. */}
+      <FilterBar right={
+        // Shown whenever ANYTHING is off default, dates included. It used to appear only
+        // for the dropdowns, so picking a range left no way back but a page reload.
+        (anyFilter || datesChanged) && (
+          <button onClick={reset} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+            ✕ Clear filters
+          </button>
+        )}>
+        <span className={label}>Start date</span>
         <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} className={`${sel} [color-scheme:dark]`} />
-        <span className="text-xs text-mav-muted">to</span>
+        <span className={label}>to</span>
         <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} className={`${sel} [color-scheme:dark]`} />
 
         {/* A month is the unit people ask in, and typing two dates to get one is work. */}
@@ -338,14 +389,6 @@ export default function Reports() {
           <option value="">Month…</option>
           {months.map(m => <option key={m} value={m}>{monLabel(m)}</option>)}
         </select>
-
-        <MultiSelect label="All services" options={DEPT_ORDER} selected={fDept} onChange={setFDept} className="w-40" />
-        <MultiSelect label="All AMs" options={ams} selected={fAm} onChange={setFAm} className="w-40" />
-        <MultiSelect label="All PMs" options={pms} selected={fPm} onChange={setFPm} className="w-40" />
-        <MultiSelect label="P2P &amp; Dedicated" options={['Dedicated', 'P2P']} selected={fEng} onChange={setFEng} className="w-44" />
-        <MultiSelect label="All technologies" options={techs} selected={fTech} onChange={setFTech} className="w-44" />
-        <MultiSelect label="All geos" options={geos} selected={fGeo} onChange={setFGeo} className="w-40" />
-        <MultiSelect label="All agencies" options={agencies} selected={fAgency} onChange={setFAgency} className="w-52" />
 
         {/* The range people ask for most after "this month": the month before, stopped on
             today's date, so the two are the same number of days. It toggles — clicking it
@@ -359,84 +402,57 @@ export default function Reports() {
           Last month, same day
         </button>
 
-        {/* Shown whenever ANYTHING is off default, dates included. It used to appear only
-            for the dropdowns, so picking a range left no way back but a page reload. */}
-        {(anyFilter || datesChanged) && (
-          <button onClick={reset} className="text-xs px-3 py-2 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
-            ✕ Clear filters
-          </button>
-        )}
-      </div>
+        <div className="basis-full h-0" />
 
-      {loading ? <p className="text-sm text-mav-muted">Loading…</p> : (
+        <MultiSelect label="All services" options={unitDepts} selected={fDept} onChange={setFDept} className="w-40" />
+        <MultiSelect label="All AMs" options={ams} selected={fAm} onChange={setFAm} className="w-40" />
+        <MultiSelect label="All PMs" options={pms} selected={fPm} onChange={setFPm} className="w-40" />
+        <MultiSelect label="P2P &amp; Dedicated" options={['Dedicated', 'P2P']} selected={fEng} onChange={setFEng} className="w-44" />
+        <MultiSelect label="All technologies" options={techs} selected={fTech} onChange={setFTech} className="w-44" />
+        <MultiSelect label="All geos" options={geos} selected={fGeo} onChange={setFGeo} className="w-40" />
+        <MultiSelect label="All agencies" options={agencies} selected={fAgency} onChange={setFAgency} className="w-52" />
+      </FilterBar>
+
+      {!loading && (
         <>
-          <p className="text-xs text-mav-muted mb-4 max-w-4xl">
-            Dated on <span className="text-mav-fg">Start Date</span>, the same basis as Business Numbers and the
-            Business Overview sheet. Awaiting Information is excluded, as everywhere else. Open pipeline counts deals
-            <span className="text-mav-fg"> raised</span> in this window that are still open, so a past month shows what
-            was opened then and has not closed since &mdash; not today&rsquo;s whole pipeline.
-          </p>
-
-          {/* The eight figures a leader checks before asking anything else. */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-            <Box label="Revenue" value={fmtUsd(total)}
-              sub={prev.from
-                ? `${shown.length.toLocaleString()} lines · ${fmtUsd(prev.usd)} in ${dayLabel(prev.from)}–${dayLabel(prev.to)}${momPct === null ? '' : ` (${momPct > 0 ? '+' : ''}${momPct}%)`}`
-                : `${shown.length.toLocaleString()} project lines`} />
-            <Box label="Clients" value={String(clients)} sub={clients ? `${fmtUsd(Math.round(total / clients))} average each` : undefined} />
-            <Box label="Average project" value={shown.length ? fmtUsd(Math.round(total / shown.length)) : '—'}
-              sub={`largest ${topAgencies.length ? fmtUsd(Math.max(...shown.map(r => r.amount_usd || 0))) : '—'}`} />
-            <Box label="Dedicated" value={`${pctOf(dedicated)}%`} sub={`${fmtUsd(dedicated)} committed · ${fmtUsd(total - dedicated)} won project by project`} />
-            <Box label="New business" value={`${pctOf(newBiz)}%`} sub={`${fmtUsd(newBiz)} new · ${fmtUsd(total - newBiz)} repeat`} />
-            <Box label="Top 5 clients" value={`${top5Share}%`} sub="of revenue in this view — concentration risk" />
-            <Box label="Open pipeline" value={fmtUsd(pipeline.usd)}
-              sub={`${pipeline.n} deal${pipeline.n === 1 ? '' : 's'} raised in this window, still open${pipeline.unpriced ? ` · ${pipeline.unpriced} unpriced` : ''}`} />
-            <Box label="Hours delivered" value={hours.planned ? `${Math.round((hours.actual / hours.planned - 1) * 100) > 0 ? '+' : ''}${Math.round((hours.actual / hours.planned - 1) * 100)}%` : '—'}
-              tone={hours.planned && hours.actual > hours.planned ? 'text-red-400' : hours.planned ? 'text-green-400' : ''}
-              sub={hours.planned ? `${Math.round(hours.actual).toLocaleString()} actual vs ${Math.round(hours.planned).toLocaleString()} planned` : 'no hours recorded'} />
-          </div>
-
           {/* A box per service department. Equal size on purpose: the eye should compare
               the figures, and a box cannot carry relative size without lying about area,
               so the bar underneath does that job. */}
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
-            <span className="text-sm font-medium">By service department</span>
-            {/* The split bar on each box is unlabelled otherwise, and a colour nobody
-                explained is a colour nobody reads. */}
-            <span className="text-xs text-mav-muted">
+          <SectionTitle
+            // The split bar on each box is unlabelled otherwise, and a colour nobody
+            // explained is a colour nobody reads.
+            right={<span className="text-xs text-mav-muted">
               <span className="inline-block w-2.5 h-2.5 rounded-sm bg-mav-yellow mr-1 align-middle" />Dedicated
               <span className="inline-block w-2.5 h-2.5 rounded-sm bg-mav-fg/25 ml-3 mr-1 align-middle" />P2P
-            </span>
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-            {depts.map(d => {
+            </span>}>
+            By service department
+          </SectionTitle>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+            {depts.map((d, i) => {
               const v = byDept[d] || { usd: 0, lines: 0, clients: new Set<string>(), p2p: 0, ded: 0 }
+              const tone: KPITone = i === 0 ? 'accent' : 'default'
               return (
-                <div key={d} className="bg-mav-panel border border-mav-line rounded-xl p-4 border-t-2 flex flex-col"
-                  style={{ borderTopColor: 'var(--section)' }}>
-                  <div className="text-xs uppercase tracking-wide text-mav-muted truncate" title={d}>{d}</div>
-                  <div className="text-2xl font-semibold mt-2 tabular-nums">{fmtUsd(v.usd)}</div>
-                  <div className="text-[11px] text-mav-muted mt-1">
-                    {v.lines} line{v.lines === 1 ? '' : 's'} · {v.clients.size} client{v.clients.size === 1 ? '' : 's'} · {pctOf(v.usd)}% of total
-                  </div>
-                  <div className="mt-3 h-1.5 rounded-sm bg-mav-dark overflow-hidden flex">
-                    <div className="h-full bg-mav-yellow" style={{ width: `${v.usd > 0 ? (v.ded / v.usd) * 100 : 0}%` }} title={`Dedicated ${fmtUsd(v.ded)}`} />
-                    <div className="h-full bg-mav-fg/25" style={{ width: `${v.usd > 0 ? (v.p2p / v.usd) * 100 : 0}%` }} title={`P2P ${fmtUsd(v.p2p)}`} />
-                  </div>
-                  <div className="mt-1.5 flex justify-between text-[11px] text-mav-muted tabular-nums">
-                    <span><span className="inline-block w-2 h-2 rounded-sm bg-mav-yellow mr-1" />{fmtUsd(v.ded)}</span>
-                    <span><span className="inline-block w-2 h-2 rounded-sm bg-mav-fg/25 mr-1" />{fmtUsd(v.p2p)}</span>
-                  </div>
-                </div>
+                <KPICard key={d} tone={tone} label={d} value={fmtUsd(v.usd)}
+                  sub={<>
+                    <span className="block text-[11px]">
+                      {v.lines} line{v.lines === 1 ? '' : 's'} · {v.clients.size} client{v.clients.size === 1 ? '' : 's'} · {pctOf(v.usd)}% of total
+                    </span>
+                    <span className="mt-3 h-1.5 rounded-sm bg-mav-dark overflow-hidden flex">
+                      <span className="h-full bg-mav-yellow" style={{ width: `${v.usd > 0 ? (v.ded / v.usd) * 100 : 0}%` }} title={`Dedicated ${fmtUsd(v.ded)}`} />
+                      <span className="h-full bg-mav-fg/25" style={{ width: `${v.usd > 0 ? (v.p2p / v.usd) * 100 : 0}%` }} title={`P2P ${fmtUsd(v.p2p)}`} />
+                    </span>
+                    <span className="mt-1.5 flex justify-between text-[11px] tabular-nums">
+                      <span><span className="inline-block w-2 h-2 rounded-sm bg-mav-yellow mr-1" />{fmtUsd(v.ded)}</span>
+                      <span><span className="inline-block w-2 h-2 rounded-sm bg-mav-fg/25 mr-1" />{fmtUsd(v.p2p)}</span>
+                    </span>
+                  </>} />
               )
             })}
           </div>
 
           {/* Month by month, inside whatever is filtered. */}
           {byMonth.length > 1 && (
-            <div className="bg-mav-panel border border-mav-line rounded-xl p-5 mb-6">
-              <div className="text-sm font-medium mb-1">Month by month</div>
-              <p className="text-xs text-mav-muted mb-4">Start-date month, inside the current filters.</p>
+            <Panel className="mb-6" title="Month by month" info="Start-date month, inside the current filters.">
               <div className="flex items-end gap-2 h-40">
                 {byMonth.map(m => {
                   const max = Math.max(...byMonth.map(x => x.usd), 1)
@@ -449,7 +465,7 @@ export default function Reports() {
                   )
                 })}
               </div>
-            </div>
+            </Panel>
           )}
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
@@ -461,11 +477,8 @@ export default function Reports() {
             <Breakdown title="By account owner" note="Revenue on accounts they hold — account managers and the NBD team together. Everyone with revenue in this view." rows={byAm} total={total} />
           </div>
 
-          <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
-            <div className="text-sm font-medium mb-1">Top agencies</div>
-            <p className="text-xs text-mav-muted mb-4">
-              Under the filters above &mdash; the top five are {top5Share}% of this view. Click one to open it in Client 360.
-            </p>
+          <Panel title="Top agencies" info="Under the filters above. Click one to open it in Client 360."
+            right={<span className="text-xs text-mav-muted">the top five are {top5Share}% of this view</span>}>
             {topAgencies.length === 0 ? <p className="text-sm text-mav-muted">Nothing matches those filters.</p> : (
               <ul className="space-y-2">
                 {topAgencies.map((a, i) => (
@@ -481,7 +494,7 @@ export default function Reports() {
                 ))}
               </ul>
             )}
-          </div>
+          </Panel>
 
           {hours.n > 0 && (
             <p className="text-xs text-mav-muted mt-4 max-w-4xl">

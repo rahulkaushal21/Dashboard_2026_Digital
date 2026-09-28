@@ -3,6 +3,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 import Header from '@/components/Header'
+import KPICard from '@/components/KPICard'
+import InfoTip from '@/components/InfoTip'
+import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
+import { NotSplitNote } from '@/components/UnitToggle'
 import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
 import Link from 'next/link'
@@ -234,7 +238,9 @@ export default function ProjectLedger() {
     am: uniq(rows.map(r => r.sales_person)),
   }), [rows])
 
-  const shown = useMemo(() => {
+  // Every filter except the source split. Kept apart so the Sheet / Dashboard tabs can
+  // each say how many lines they would show under everything else that is set.
+  const preSource = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows
       .filter(r => !q || (r.company_name || '').toLowerCase().includes(q) || (r.project_name || '').toLowerCase().includes(q) || (r.contact_email || '').toLowerCase().includes(q))
@@ -243,9 +249,13 @@ export default function ProjectLedger() {
       .filter(r => keeps(fGeo, r.geo))
       .filter(r => keeps(fPm, r.pm_owner))
       .filter(r => keeps(fAm, r.sales_person))
-      .filter(r => !fSource || (fSource === 'sheet' ? r.in_sheet : !r.in_sheet))
       .filter(r => !fFrom || rowMonth(r) >= fFrom)
       .filter(r => !fTo || rowMonth(r) <= fTo)
+  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fFrom, fTo])
+
+  const shown = useMemo(() => {
+    return preSource
+      .filter(r => !fSource || (fSource === 'sheet' ? r.in_sheet : !r.in_sheet))
       // Newest month first, and within a month the newest entry first — so today's
       // bookings are at the top on the 21st, then the 20th, then the 19th. A column sort
       // replaces the second half of that, never the month grouping, because the page is
@@ -265,7 +275,7 @@ export default function ProjectLedger() {
         }
         return rowDate(b).localeCompare(rowDate(a)) || (a.company_name || '').localeCompare(b.company_name || '')
       })
-  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fSource, fFrom, fTo, sortKey, sortAsc])
+  }, [preSource, fSource, sortKey, sortAsc])
 
   useEffect(() => { setPage(0) }, [search, fDept, fModel, fGeo, fPm, fAm, fSource, fFrom, fTo])
 
@@ -345,6 +355,22 @@ export default function ProjectLedger() {
   const pageAwaitingTotal = mAwaiting.reduce((s, r) => s + (r.amount_usd || 0), 0)
   const pageClients = new Set(mCounted.map(r => (r.company_name || '').toLowerCase())).size
   const notInSheet = pageRows.filter(r => !r.in_sheet)
+  // Tab counts: the month on screen, under every filter but the source split.
+  const pageAllSources = pageMonth === RANGE ? preSource : preSource.filter(r => (rowMonth(r) || '—') === pageMonth)
+  const sourceCounts = {
+    all: pageAllSources.length,
+    sheet: pageAllSources.filter(r => r.in_sheet).length,
+    dashboard: pageAllSources.filter(r => !r.in_sheet).length,
+  }
+
+  // Booked-twice alerts follow the department switch. Both sides of a pair are ledger
+  // lines, so the department is read off whichever side is loaded; a pair is shown when
+  // either side is in the selected department.
+  const unitDupes = useMemo(() => {
+    if (unit === 'all') return dupes
+    const dept = new Map(rowsAll.map(r => [r.row_key, r.service_dept]))
+    return dupes.filter(d => inUnit(dept.get(d.dashboard_row), unit) || inUnit(dept.get(d.sheet_row), unit))
+  }, [dupes, rowsAll, unit])
 
   const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFSource(''); setFFrom(''); setFTo('') }
   const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || [fDept, fModel, fGeo, fPm, fAm].some(x => x.length > 0)
@@ -441,21 +467,49 @@ export default function ProjectLedger() {
   const th = 'px-3 py-2 font-medium whitespace-nowrap'
   const td = 'px-3 py-2 whitespace-nowrap'
 
+  // What the page is and how to read it. Was a paragraph under the table; it sits behind
+  // the ⓘ on the table now, word for word, so the numbers are above the fold.
+  const aboutLines = (
+    <>
+      Shown in the <b>Web, Hub &amp; LP</b> tab&rsquo;s own columns and order.
+      Filtering and paging are on <b>Start Date</b>, the same basis as Business Numbers
+      and the Business Overview sheet, so a line sits in the same month wherever you look at it.
+      It opens on this month and on your own lines &mdash; clear the filters to see everything.
+      <b> Pending</b> means confirmed here and not yet carried into the sheet by the
+      hourly writer. A greyed &mdash; on a sheet line is a column the dashboard has
+      never stored, not an empty one; those values are in the source spreadsheet.
+      <br /><br />
+      <b>Double-click a cell to fill it in</b> &mdash; Project Id, Quote ID, Expert, dates,
+      hours, invoice &mdash; or use Edit at the start of the row for the lot. Only the row&rsquo;s own PC/SME can change it
+      {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
+      the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
+    </>
+  )
+  const secBtn = 'rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs transition-colors'
+  const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
+
   return (
     <div>
-      <Header title="Web, Hub & LP" subtitle="Every booked line, plus everything confirmed in the dashboard. Filter, tick, and move to the next month." />
+      <Header title="Project sheet"
+        subtitle="The Web, Hub & LP tab: every booked line, plus everything confirmed in the dashboard. Filter, tick, and move to the next month."
+        chip={periodLabel || undefined}
+        actions={<>
+          {/* Thirty-five columns for reconciling against the sheet; the compact few for
+              ticking retainers. */}
+          <button onClick={() => setSheetView(v => !v)} className={secBtn}>
+            {sheetView ? 'Compact view' : 'All sheet columns'}
+          </button>
+          <button onClick={exportCsv} className={secBtn} title="Exports what is on screen, under the sheet's own headers">Export CSV</button>
+        </>} />
 
-      {dupes.length > 0 && (
-        <div className="mb-4 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-3">
-          <div className="text-sm font-semibold text-red-300">
-            ⚠ {dupes.length} job{dupes.length > 1 ? 's' : ''} may be booked twice — confirmed here AND typed into the sheet
+      {unitDupes.length > 0 && (
+        <div className="mb-4 rounded-xl border border-red-500/50 bg-red-500/10 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-red-300 mb-2">
+            ⚠ {unitDupes.length} job{unitDupes.length > 1 ? 's' : ''} may be booked twice — confirmed here AND typed into the sheet
+            <InfoTip text="Same client, same amount, same month, one from each side. If it is one job, remove whichever line is the duplicate; if they are genuinely two jobs, leave them and this will keep showing until the amounts differ." />
           </div>
-          <p className="text-xs text-mav-muted mt-0.5 mb-2">
-            Same client, same amount, same month, one from each side. If it is one job, remove whichever line is the
-            duplicate; if they are genuinely two jobs, leave them and this will keep showing until the amounts differ.
-          </p>
           <ul className="space-y-1">
-            {dupes.slice(0, 8).map(d => (
+            {unitDupes.slice(0, 8).map(d => (
               <li key={d.dashboard_row} className="text-xs flex flex-wrap items-baseline gap-x-2">
                 <span className="text-mav-fg">{d.company_name || '—'}</span>
                 <span className="text-mav-muted">{money(d.dashboard_usd || 0)}</span>
@@ -464,15 +518,52 @@ export default function ProjectLedger() {
                 <span className="text-mav-muted">· also {d.sheet_row}</span>
               </li>
             ))}
-            {dupes.length > 8 && <li className="text-xs text-mav-muted">+{dupes.length - 8} more</li>}
+            {unitDupes.length > 8 && <li className="text-xs text-mav-muted">+{unitDupes.length - 8} more</li>}
           </ul>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      {/* THE HEADLINE IS THE MONTH ON SCREEN — see pageTotal above. */}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Revenue" value={loading ? '…' : money(pageTotal)}
+          sub={<>in {periodLabel}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</>}
+          info="USD Conversion of every line in the month on screen, under the filters set. Awaiting Information lines are not revenue yet and are left out — they stay in the table so somebody chases them." />
+        <KPICard label="Lines" value={loading ? '…' : pageRows.length.toLocaleString()}
+          sub={`${pageClients} client${pageClients === 1 ? '' : 's'}`} />
+        <KPICard tone="amber" label="Not in the sheet yet" value={loading ? '…' : String(notInSheet.length)}
+          sub="confirmed here, pending"
+          info="Confirmed in the dashboard and not yet carried into the sheet by the hourly writer. Click to show only these."
+          onClick={() => setFSource(fSource === 'dashboard' ? '' : 'dashboard')} active={fSource === 'dashboard'} />
+        <KPICard tone="yellow" label="Awaiting information" value={loading ? '…' : money(pageAwaitingTotal)}
+          sub={`${mAwaiting.length} line${mAwaiting.length === 1 ? '' : 's'} · not counted`}
+          info="The work is not agreed yet, so the figure is a quote, not money. Kept out of Revenue; still listed below." />
+      </KPIRow>
+
+      {/* The two sources, as tabs. The "In sheet" column is the only distinction that
+          matters, so it is the page's main split. Counts are for the month on screen. */}
+      <Segments<string>
+        value={fSource}
+        onChange={v => setFSource(v)}
+        items={[
+          { id: '', label: 'Sheet + dashboard', count: sourceCounts.all },
+          { id: 'sheet', label: 'In the sheet', count: sourceCounts.sheet },
+          { id: 'dashboard', label: 'Confirmed here only', count: sourceCounts.dashboard },
+        ]} />
+
+      <FilterBar right={
+        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">
+          {loading ? 'Loading…' : `${pageRows.length.toLocaleString()} shown`}
+        </span>}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-56`} />
+        <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
+        <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
+        <MultiSelect label="All GEOs" options={opts.geo} selected={fGeo} onChange={setFGeo} className="w-40" />
+        <MultiSelect label="All PMs" options={opts.pm} selected={fPm} onChange={v => { filtersTouched.current = true; setFPm(v) }} className="w-40" />
+        <MultiSelect label="All AMs" options={opts.am} selected={fAm} onChange={setFAm} className="w-40" />
+        <div className="basis-full h-0" />
         {/* The month sits with the filters, not under the table. It is the control people
             reach for most, and it was the one you had to scroll past everything to find. */}
+        <span className={lbl}>Month</span>
         <select value={rangeMode ? RANGE : pageMonth}
           onChange={e => {
             // Picking a month ends the range — that is the "either" half of either/or.
@@ -480,47 +571,27 @@ export default function ProjectLedger() {
             setFFrom(''); setFTo('')
             setPage(Math.max(0, monthPagesAll.indexOf(e.target.value)))
           }}
-          className={`${sel} max-h-60`} size={1} aria-label="Month" title="Month — newest first, back to April 2025. Setting a From/To range below replaces this.">
+          className={`${sel} max-h-60`} size={1} aria-label="Month" title="Month — newest first, back to April 2025. Setting a From/To range replaces this.">
           {rangeMode && <option value={RANGE}>{rangeLabel} (range)</option>}
           {monthPagesAll.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
         </select>
-        <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
-        <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
-        <MultiSelect label="All GEOs" options={opts.geo} selected={fGeo} onChange={setFGeo} className="w-40" />
-        <MultiSelect label="All PMs" options={opts.pm} selected={fPm} onChange={v => { filtersTouched.current = true; setFPm(v) }} className="w-40" />
-        <MultiSelect label="All AMs" options={opts.am} selected={fAm} onChange={setFAm} className="w-40" />
-        <select value={fSource} onChange={e => setFSource(e.target.value)} className={sel}>
-          <option value="">Sheet + dashboard</option><option value="sheet">In the sheet</option><option value="dashboard">Confirmed here only</option>
-        </select>
-        <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={sel} title="From month — on Start Date" />
-        <input type="month" value={fTo} onChange={e => { filtersTouched.current = true; setFTo(e.target.value) }} className={sel} title="To month — on Start Date" />
-        {anyFilter && <button onClick={clearAll} className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">Clear</button>}
+        <span className={`${lbl} ml-2`} title="A From/To range replaces the month picker. On Start Date.">Range</span>
+        <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={sel} title="From month — on Start Date" aria-label="From month" />
+        <span className="text-xs text-mav-muted">→</span>
+        <input type="month" value={fTo} onChange={e => { filtersTouched.current = true; setFTo(e.target.value) }} className={sel} title="To month — on Start Date" aria-label="To month" />
+        <div className="basis-full h-0" />
+        <span className={lbl}>Quick views</span>
         {/* Partial Dedicated is dedicated work — a shared resource rather than a whole one,
             but billed and planned the same way. Left out, this shortcut quietly hid six
             lines and $15,005 in September alone. Everywhere else that splits P2P from
             Dedicated tests for the word, so it already counted these; only this button
             matched the exact string. */}
         <button onClick={() => { filtersTouched.current = true; setFModel(['Dedicated', 'Partial Dedicated']); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
-          className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
+          className="text-xs px-3 py-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
           This month&rsquo;s Dedicated
         </button>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div className="text-sm text-mav-muted">
-          {loading ? 'Loading…' : <>{pageRows.length.toLocaleString()} line{pageRows.length === 1 ? '' : 's'} · {pageClients} client{pageClients === 1 ? '' : 's'} · <span className="text-mav-fg">{money(pageTotal)}</span>
-            <span className="ml-1 text-mav-muted/80">in {periodLabel}{fPm.length === 1 ? `, ${fPm[0]}` : fPm.length ? `, ${fPm.length} PMs` : ''}</span>
-            {notInSheet.length > 0 && <span className="ml-2 text-amber-300">· {notInSheet.length} not in the sheet yet</span>}
-            {mAwaiting.length > 0 && <span className="ml-2 text-amber-300">· {money(pageAwaitingTotal)} awaiting information, not counted</span>}</>}
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setSheetView(v => !v)}
-            className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
-            {sheetView ? 'Compact view' : 'All sheet columns'}
-          </button>
-          <button onClick={exportCsv} className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg hover:border-mav-fg/40 transition-colors">Export CSV</button>
-        </div>
-      </div>
+        {anyFilter && <button onClick={clearAll} className={`ml-auto ${secBtn}`}>Clear all</button>}
+      </FilterBar>
 
       {/* The action bar only exists once something is ticked, so it never sits there as
           a control with no object. */}
@@ -532,7 +603,7 @@ export default function ProjectLedger() {
             {months.map(m => <option key={m} value={m}>{monLabel(m)}</option>)}
           </select>
           <button onClick={moveSelected} disabled={busy}
-            className="text-xs px-4 py-1.5 rounded-md bg-green-500 text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
+            className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-40 hover:brightness-95 transition">
             {busy ? `Moving ${pickedRows.length}…` : `Move ${pickedRows.length} to ${monLabel(target)}`}
           </button>
           <button onClick={() => setPicked(new Set())} className="text-xs text-mav-muted hover:text-mav-fg">Clear selection</button>
@@ -547,7 +618,9 @@ export default function ProjectLedger() {
         </div>
       )}
 
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto">
+      <Panel flush title={<>Lines · {periodLabel || '…'}</>} info={aboutLines}
+        right={<span className="text-[11px] text-mav-muted">Double-click a cell to fill it in</span>}>
+      <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-mav-fg/70 border-b border-mav-line">
             <tr>
@@ -647,6 +720,7 @@ export default function ProjectLedger() {
           </tbody>
         </table>
       </div>
+      </Panel>
 
       {monthPages.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 mt-3 text-sm">
@@ -660,40 +734,23 @@ export default function ProjectLedger() {
           {/* Nothing to page through when the range IS the page. */}
           <div className={`flex items-center gap-2 ${rangeMode ? 'hidden' : ''}`}>
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 transition-colors">Newer month</button>
+              className={`${secBtn} disabled:opacity-30`}>Newer month</button>
             <button onClick={() => setPage(p => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg disabled:opacity-30 transition-colors">Older month</button>
+              className={`${secBtn} disabled:opacity-30`}>Older month</button>
           </div>
         </div>
       )}
 
-      <p className="text-xs text-mav-muted mt-4 max-w-3xl">
-        Shown in the <span className="text-mav-fg">Web, Hub &amp; LP</span> tab&rsquo;s own columns and order.
-        Filtering and paging are on <span className="text-mav-fg">Start Date</span>, the same basis as Business Numbers
-        and the Business Overview sheet, so a line sits in the same month wherever you look at it.
-        It opens on this month and on your own lines &mdash; clear the filters to see everything.
-        <span className="text-amber-300"> Pending</span> means confirmed here and not yet carried into the sheet by the
-        hourly writer. A greyed <span className="text-mav-fg/40">&mdash;</span> on a sheet line is a column the dashboard has
-        never stored, not an empty one; those values are in the source spreadsheet.
-        <br />
-        <span className="text-mav-fg">Double-click a cell to fill it in</span> &mdash; Project Id, Quote ID, Expert, dates,
-        hours, invoice &mdash; or use Edit at the end of the row for the lot. Only the row&rsquo;s own PC/SME can change it
-        {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
-        the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
-      </p>
-
       {/* Removed lines. Deliberately at the bottom and admin-only: it is a short list
           that should stay short, and its job is to make a mistake reversible rather than
           to be read every day. What is here is exactly what the spreadsheet shows as
-          Deleted, because both read the same view. */}
+          Deleted, because both read the same view.
+          It cannot follow the department switch: a removed line is, by definition, no
+          longer in the ledger, so there is nothing left to read its department from. */}
       {isAdmin && gone.length > 0 && (
-        <div className="mt-6 bg-mav-panel border border-mav-line rounded-xl p-4">
-          <div className="text-sm font-medium mb-1">Removed lines · {gone.length}</div>
-          <p className="text-xs text-mav-muted mb-3">
-            Out of every figure here, and marked <span className="text-mav-fg">Deleted</span> in the spreadsheet with
-            who removed it and why &mdash; the row itself is kept, so nothing is lost. Put one back and both follow
-            within the hour.
-          </p>
+        <Panel className="mt-6" title={<>Removed lines · {gone.length}</>}
+          info={<>Out of every figure here, and marked <b>Deleted</b> in the spreadsheet with who removed it and why &mdash; the row itself is kept, so nothing is lost. Put one back and both follow within the hour.</>}>
+          <NotSplitNote className="mb-2" what="Removed lines are listed for every department:" reason="a removed line is no longer in the ledger, so its department cannot be read" />
           <ul className="space-y-1.5">
             {gone.map(d => {
               const row = rows.find(r => r.row_key === d.row_key)
@@ -712,7 +769,7 @@ export default function ProjectLedger() {
               )
             })}
           </ul>
-        </div>
+        </Panel>
       )}
 
       {editing && (

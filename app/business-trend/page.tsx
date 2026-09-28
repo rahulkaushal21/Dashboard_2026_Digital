@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
-import { inUnit } from '@/lib/business-unit'
+import { inUnit, unitLabel } from '@/lib/business-unit'
+import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 
 import ForecastPanel from '@/components/ForecastPanel'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
@@ -392,57 +393,63 @@ export default function BusinessTrendPage() {
 
   return (
     <div>
-      <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes and confirmations, and where the year lands" />
+      <Header title="Business Trend" subtitle="Revenue pacing, 6-month analysis, quotes and confirmations, and where the year lands"
+        chip="FY 2026-27" />
 
       {/* Trend and Forecast were two pages answering the same question from opposite
           ends — what the year is pacing at, and what it will land at. Reading one
           without the other is how the same month got two different explanations in the
           same week. One page, two tabs. */}
-      <div className="flex gap-1 border-b border-mav-line mb-6">
-        {([['trend', 'Trend'], ['forecast', 'Forecast']] as const).map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${tab === k
-              // Filled, like every other chosen-state on these pages. A yellow
-              // underline alone was too quiet to answer "which tab am I on"
-              // without reading the labels.
-              ? 'bg-mav-fill text-black border-mav-yellow font-medium rounded-t-md'
-              : 'border-transparent text-mav-muted hover:text-mav-fg hover:bg-mav-fg/5 rounded-t-md'}`}>{label}</button>
-        ))}
-      </div>
+      <Segments<'trend' | 'forecast'> value={tab} onChange={setTab} items={[
+        { id: 'trend', label: 'Trend', count: revenueSeries.length ? `${revenueSeries.length} mo` : undefined, title: 'What happened — revenue by month, pacing, and how we close the gap' },
+        { id: 'forecast', label: 'Forecast', title: 'Where the year lands if nothing changes' },
+      ]} />
 
       {tab === 'forecast' ? <ForecastPanel embedded /> : (
       <>
-      <div className="flex gap-4 items-center mb-6 text-xs">
-        <label className="flex flex-col gap-1">
-          <span className="uppercase tracking-wide text-mav-muted">From</span>
+      {/* The year at a glance — the four figures the FY forecast panel below used to
+          carry inside it. */}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Avg monthly revenue" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))}
+          sub={`${fy26Analysis.completedMonths} months completed`}
+          info="Based on completed months in FY 2026-27 (April 2026 to March 2027)." />
+        <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="Projected total (12 mo)" value={fmtUsd(fy26Analysis.projected)}
+          sub={`${fy26Analysis.projectedPercent}% of ${FY_TARGET_LABEL}`}
+          info="(Actual revenue to date) + (Average monthly × remaining months)." />
+        <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="FY status" value={fy26Analysis.onTrack ? '✓ On Track' : '✗ Off Track'}
+          sub={`Target ${FY_TARGET_LABEL}`} />
+        <KPICard tone="amber" label="Remaining months" value={fy26Analysis.monthsRemaining.toString()} />
+      </KPIRow>
+
+      {/* The From/To pickers only narrow the chart; everything else below reads the
+          whole series. */}
+      <FilterBar right={<span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">{monthsInView} month(s) in view</span>}>
+        <label className="flex items-center gap-2">
+          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">From</span>
           <input type="month" value={fromMonth} onChange={e => setFromMonth(e.target.value)} className={selCls} />
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="uppercase tracking-wide text-mav-muted">To</span>
+        <label className="flex items-center gap-2">
+          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">To</span>
           <input type="month" value={toMonth} onChange={e => setToMonth(e.target.value)} className={selCls} />
         </label>
-        <button onClick={() => { setFromMonth(''); setToMonth('') }} className="mt-6 text-xs px-3 py-2 bg-mav-line border border-mav-line text-mav-muted rounded hover:border-mav-yellow hover:text-mav-fg transition-colors">
+        <button onClick={() => { setFromMonth(''); setToMonth('') }}
+          className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
           Reset
         </button>
-        <span className="text-xs text-mav-muted ml-4">
-          {monthsInView} month(s) in view
-        </span>
-      </div>
+      </FilterBar>
       <RevenueChart data={revenueSeries} title="Revenue trend" from={fromMonth} to={toMonth} />
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
-        <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
-          <div className="text-sm font-medium">Last 6 Months Analysis</div>
-        </div>
+
+      <Panel flush className="mb-5" title="Last 6 months analysis">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
-                <th className="px-5 py-3 font-medium">Month</th>
-                <th className="px-5 py-3 font-medium text-right">Revenue</th>
-                <th className="px-5 py-3 font-medium text-right">Growth %</th>
-                <th className="px-5 py-3 font-medium text-right">Quotes</th>
-                <th className="px-5 py-3 font-medium text-right">Confirmations</th>
-                <th className="px-5 py-3 font-medium text-right">Confirm Rate %</th>
+                <th className="px-4 py-3 font-medium">Month</th>
+                <th className="px-4 py-3 font-medium text-right">Revenue</th>
+                <th className="px-4 py-3 font-medium text-right">Growth %</th>
+                <th className="px-4 py-3 font-medium text-right">Quotes</th>
+                <th className="px-4 py-3 font-medium text-right">Confirmations</th>
+                <th className="px-4 py-3 font-medium text-right">Confirm Rate %</th>
               </tr>
             </thead>
             <tbody>
@@ -453,98 +460,75 @@ export default function BusinessTrendPage() {
                 const monthData = getMonthQuotes(monthKey)
                 return (
                   <tr key={item.month} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                    <td className="px-5 py-3 whitespace-nowrap">{item.monthLabel}</td>
-                    <td className="px-5 py-3 text-right font-medium">{fmtUsd(item.revenue)}</td>
-                    <td className="px-5 py-3 text-right text-mav-muted">{growth > 0 ? '+' : ''}{growth}%</td>
-                    <td className="px-5 py-3 text-right">{monthData.total}</td>
-                    <td className="px-5 py-3 text-right">{monthData.confirmed}</td>
-                    <td className="px-5 py-3 text-right">{monthData.total > 0 ? monthData.rate + '%' : '—'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{item.monthLabel}</td>
+                    <td className="px-4 py-3 text-right font-medium">{fmtUsd(item.revenue)}</td>
+                    <td className="px-4 py-3 text-right text-mav-muted">{growth > 0 ? '+' : ''}{growth}%</td>
+                    <td className="px-4 py-3 text-right">{monthData.total}</td>
+                    <td className="px-4 py-3 text-right">{monthData.confirmed}</td>
+                    <td className="px-4 py-3 text-right">{monthData.total > 0 ? monthData.rate + '%' : '—'}</td>
                   </tr>
                 )
               }) : (
                 <tr>
-                  <td colSpan={6} className="px-5 py-6 text-center text-mav-muted">No data available</td>
+                  <td colSpan={6} className="px-4 py-6 text-center text-mav-muted">No data available</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-      </div>
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
-        <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
-          <div className="text-sm font-medium">FY 2026-27 Forecast (Apr 2026 - Mar 2027)</div>
-        </div>
-        <div className="p-5 space-y-6">
-          <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-4">
-            <div className="text-xs font-medium text-mav-yellow mb-3">Definitions</div>
-            <div className="text-xs text-mav-muted space-y-1">
-              <p><strong className="text-mav-fg">Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
-              <p><strong className="text-mav-fg">Target:</strong> {FY_TARGET_LABEL} total revenue</p>
-              <p><strong className="text-mav-fg">Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
-              <p><strong className="text-mav-fg">Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
+      </Panel>
+
+      <Panel className="mb-5" title="FY 2026-27 forecast (Apr 2026 – Mar 2027)"
+        info={<>
+          <p><strong>Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
+          <p><strong>Target:</strong> {FY_TARGET_LABEL} total revenue</p>
+          <p><strong>Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
+          <p><strong>Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
+        </>}>
+        <div className="space-y-5">
+          <div>
+            <div className="flex justify-between mb-2">
+              <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Projected vs {FY_TARGET_LABEL} target</span>
+              <span className="text-sm font-semibold text-mav-yellow">{fy26Analysis.projectedPercent}%</span>
             </div>
+            <div className="w-full bg-mav-line rounded-full h-3 overflow-hidden">
+              <div
+                className={`h-3 rounded-full ${fy26Analysis.onTrack ? 'bg-green-500' : 'bg-red-500'}`}
+                style={{ width: `${Math.min(fy26Analysis.projectedPercent, 100)}%` }}
+              />
+            </div>
+            <div className="flex justify-between mt-2 text-xs text-mav-muted">
+              <span>Projected: <span className="text-mav-fg font-medium">{fmtUsd(fy26Analysis.projected)}</span></span>
+              <span>Target: <span className="text-mav-fg font-medium">{FY_TARGET_LABEL}</span></span>
+            </div>
+            {!fy26Analysis.onTrack && (
+              <p className="text-xs text-red-400 mt-2">
+                Shortfall: {fmtUsd(FY_TARGET - fy26Analysis.projected)} | Need {fmtUsd(Math.ceil((FY_TARGET - fy26Analysis.projected) / Math.max(1, fy26Analysis.monthsRemaining)))}/month average
+              </p>
+            )}
+            {unit !== 'all' && (
+              <p className="text-[11px] text-mav-muted mt-1">{unitLabel(unit)} revenue against the company-wide {FY_TARGET_LABEL} target — there is no per-unit target.</p>
+            )}
           </div>
           <div>
-            <div className="text-xs font-medium text-mav-yellow mb-3">Key Metrics</div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-                <div className="text-xs text-mav-muted mb-1">Avg Monthly Revenue</div>
-                <KPICard label="" value={fmtUsd(Math.round(fy26Analysis.avgMonthly))} />
-              </div>
-              <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-                <div className="text-xs text-mav-muted mb-1">Projected Total (12 mo)</div>
-                <KPICard label="" value={fmtUsd(fy26Analysis.projected)} />
-              </div>
-              <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-                <div className="text-xs text-mav-muted mb-1">FY Status</div>
-                <KPICard label="" value={fy26Analysis.onTrack ? '✓ On Track' : '✗ Off Track'} />
-              </div>
-              <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-                <div className="text-xs text-mav-muted mb-1">Remaining Months</div>
-                <KPICard label="" value={fy26Analysis.monthsRemaining.toString()} />
-              </div>
+            <div className="flex items-baseline justify-between mb-2">
+              <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Monthly breakdown (FY 2026-27)</span>
+              <span className="text-xs text-mav-muted">{fy26Analysis.completedMonths} months completed</span>
             </div>
-          </div>
-          <div>
-            <div className="text-xs font-medium text-mav-yellow mb-3">Progress Toward {FY_TARGET_LABEL} Target</div>
-            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-4">
-              <div className="flex justify-between mb-3">
-                <span className="text-sm font-medium">Projected vs Target</span>
-                <span className="text-sm font-medium text-mav-yellow">{fy26Analysis.projectedPercent}%</span>
-              </div>
-              <div className="w-full bg-mav-line rounded-full h-3 overflow-hidden">
-                <div
-                  className={`h-3 rounded-full ${fy26Analysis.onTrack ? 'bg-green-500' : 'bg-red-500'}`}
-                  style={{ width: `${Math.min(fy26Analysis.projectedPercent, 100)}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-3 text-xs text-mav-muted">
-                <span>Projected: <span className="text-mav-fg font-medium">{fmtUsd(fy26Analysis.projected)}</span></span>
-                <span>Target: <span className="text-mav-fg font-medium">{FY_TARGET_LABEL}</span></span>
-              </div>
-              {!fy26Analysis.onTrack && (
-                <p className="text-xs text-red-400 mt-3">
-                  Shortfall: {fmtUsd(FY_TARGET - fy26Analysis.projected)} | Need {fmtUsd(Math.ceil((FY_TARGET - fy26Analysis.projected) / Math.max(1, fy26Analysis.monthsRemaining)))}/month average
-                </p>
-              )}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs font-medium text-mav-yellow mb-3">Monthly Breakdown (FY 2026-27)</div>
             {fy26Analysis.data.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left text-mav-muted border-b border-mav-line">
                     <tr>
-                      <th className="px-5 py-3 font-medium">Month</th>
-                      <th className="px-5 py-3 font-medium text-right">Revenue</th>
+                      <th className="px-4 py-3 font-medium">Month</th>
+                      <th className="px-4 py-3 font-medium text-right">Revenue</th>
                     </tr>
                   </thead>
                   <tbody>
                     {fy26Analysis.data.map((item) => (
                       <tr key={item.month} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                        <td className="px-5 py-3 whitespace-nowrap">{item.monthLabel}</td>
-                        <td className="px-5 py-3 text-right font-medium">{fmtUsd(item.revenue)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{item.monthLabel}</td>
+                        <td className="px-4 py-3 text-right font-medium">{fmtUsd(item.revenue)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -553,172 +537,142 @@ export default function BusinessTrendPage() {
             ) : (
               <p className="text-sm text-mav-muted">No FY 2026-27 data available yet (waiting for Apr 2026+ bookings)</p>
             )}
-            <p className="text-xs text-mav-muted mt-3">
-              {fy26Analysis.completedMonths} months completed
+          </div>
+        </div>
+      </Panel>
+
+      <SectionTitle right={<span className="text-xs text-mav-muted">{plan.monthsLeft} months left · {fmtUsd(plan.gap)} to go</span>}>
+        How we get to {FY_TARGET_LABEL}
+      </SectionTitle>
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Booked so far" value={fmtUsd(plan.booked)} />
+        <KPICard label="Run-rate / month" value={fmtUsd(plan.runRate)}
+          info={`Average of the ${plan.completeMonths} completed months. ${plan.partialMonth || 'The month in progress'} is excluded — a half-billed month would understate it.`} />
+        <KPICard tone="amber" label="Needed / month" value={fmtUsd(plan.needPerMonth)} />
+        <KPICard tone="red" label="Uplift required" value={`+${fmtUsd(plan.upliftPerMonth)}`} />
+      </KPIRow>
+
+      <Panel className="mb-5" title="🤖 AI insights"
+        info="Read straight off the revenue and pipeline on this page — each line is a fact and the action it points to, not a forecast.">
+        <div className="grid gap-3 md:grid-cols-2">
+          {insights.map((i, n) => (
+            <div key={n} className={`rounded-lg border p-3 ${i.tone === 'good' ? 'border-green-500/30 bg-green-500/[0.05]' : i.tone === 'warn' ? 'border-mav-yellow/30 bg-mav-yellow/[0.05]' : 'border-red-500/30 bg-red-500/[0.05]'}`}>
+              <div className={`text-sm font-semibold mb-1 ${i.tone === 'good' ? 'text-green-300' : i.tone === 'warn' ? 'text-mav-yellow' : 'text-red-300'}`}>{i.head}</div>
+              <p className="text-xs text-mav-muted leading-relaxed">{i.body}</p>
+            </div>
+          ))}
+          {!insights.length && <p className="text-sm text-mav-muted">Not enough completed months in FY 2026-27 yet.</p>}
+        </div>
+      </Panel>
+
+      <div className="grid gap-4 xl:grid-cols-2 mb-5">
+        <Panel flush title="Deals to close"
+          info="Open quotes ranked by what they are actually worth — value × the win probability on the deal."
+          right={<span className="text-xs text-mav-muted">{fmtUsd(plan.weighted)} weighted of {fmtUsd(plan.pipelineValue)} open</span>}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[720px]">
+              <thead className="text-left text-mav-muted border-b border-mav-line">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Client</th>
+                  <th className="px-3 py-2 font-medium text-right">Value</th>
+                  <th className="px-3 py-2 font-medium text-right">Win %</th>
+                  <th className="px-3 py-2 font-medium text-right">Weighted</th>
+                  <th className="px-3 py-2 font-medium">Owner</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium text-right">Age</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.openDeals.slice(0, 12).map(o => (
+                  <tr key={o.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                    <td className="px-4 py-2"><ClientLink name={o.company_name} /></td>
+                    <td className="px-3 py-2 text-right">{fmtUsd(o.value || 0)}</td>
+                    <td className="px-3 py-2 text-right">{o.win ? `${o.win}%` : '—'}</td>
+                    <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(o.expected)}</td>
+                    <td className="px-3 py-2 text-mav-muted">{o.sales_person || '—'}</td>
+                    <td className="px-3 py-2 text-mav-muted">{o.status || '—'}</td>
+                    <td className={`px-4 py-2 text-right ${o.age !== null && o.age > 90 ? 'text-red-400' : 'text-mav-muted'}`}>{o.age !== null ? `${o.age}d` : '—'}</td>
+                  </tr>
+                ))}
+                {!plan.openDeals.length && <tr><td colSpan={7} className="px-4 py-4 text-mav-muted">No open quotes carry a value yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {plan.stale.length > 0 && (
+            <p className="px-4 py-2.5 text-xs text-red-400 border-t border-mav-line"
+              title="Chase or close them — a dead quote in the pipeline hides the real gap.">
+              {plan.stale.length} of these have not moved in over 90 days ({fmtUsd(plan.staleValue)}). Chase or close them.
             </p>
-          </div>
-        </div>
-      </div>
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden mb-6">
-        <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
-          <div className="text-sm font-medium">How we get to {FY_TARGET_LABEL}</div>
-          <div className="text-xs text-mav-muted">{plan.monthsLeft} months left · {fmtUsd(plan.gap)} to go</div>
-        </div>
-        <div className="p-5 space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-              <div className="text-xs text-mav-muted mb-1">Booked so far</div>
-              <div className="text-xl font-bold">{fmtUsd(plan.booked)}</div>
-            </div>
-            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-              <div className="text-xs text-mav-muted mb-1" title={`Average of the ${plan.completeMonths} completed months. ${plan.partialMonth || 'The month in progress'} is excluded — a half-billed month would understate it.`}>Run-rate / month</div>
-              <div className="text-xl font-bold">{fmtUsd(plan.runRate)}</div>
-            </div>
-            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-              <div className="text-xs text-mav-muted mb-1">Needed / month</div>
-              <div className="text-xl font-bold text-mav-yellow">{fmtUsd(plan.needPerMonth)}</div>
-            </div>
-            <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-              <div className="text-xs text-mav-muted mb-1">Uplift required</div>
-              <div className="text-xl font-bold text-red-400">+{fmtUsd(plan.upliftPerMonth)}</div>
-            </div>
-          </div>
+          )}
+        </Panel>
 
-          <div>
-            <div className="text-xs font-medium text-mav-yellow mb-1">🤖 AI insights</div>
-            <p className="text-xs text-mav-muted mb-3">Read straight off the revenue and pipeline on this page — each line is a fact and the action it points to, not a forecast.</p>
-            <div className="grid gap-3 md:grid-cols-2">
-              {insights.map((i, n) => (
-                <div key={n} className={`rounded-lg border p-3 ${i.tone === 'good' ? 'border-green-500/30 bg-green-500/[0.05]' : i.tone === 'warn' ? 'border-mav-yellow/30 bg-mav-yellow/[0.05]' : 'border-red-500/30 bg-red-500/[0.05]'}`}>
-                  <div className={`text-sm font-semibold mb-1 ${i.tone === 'good' ? 'text-green-300' : i.tone === 'warn' ? 'text-mav-yellow' : 'text-red-300'}`}>{i.head}</div>
-                  <p className="text-xs text-mav-muted leading-relaxed">{i.body}</p>
-                </div>
-              ))}
-              {!insights.length && <p className="text-sm text-mav-muted">Not enough completed months in FY 2026-27 yet.</p>}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-xs font-medium text-mav-yellow mb-1">Deals to close</div>
-            <p className="text-xs text-mav-muted mb-3">Open quotes ranked by what they are actually worth — value × the win probability on the deal. {fmtUsd(plan.weighted)} weighted out of {fmtUsd(plan.pipelineValue)} open.</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[720px]">
-                <thead className="text-left text-mav-muted border-b border-mav-line">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Client</th>
-                    <th className="px-3 py-2 font-medium text-right">Value</th>
-                    <th className="px-3 py-2 font-medium text-right">Win %</th>
-                    <th className="px-3 py-2 font-medium text-right">Weighted</th>
-                    <th className="px-3 py-2 font-medium">Owner</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 font-medium text-right">Age</th>
+        <Panel flush title="Clients to push"
+          info={<>Accounts that billed materially less in the last three completed months than the three before. &ldquo;Was billing&rdquo; is their old monthly average — what comes back if the account is re-activated, worth {fmtUsd(plan.recoverable)}/month in total. Click a client to see the last business we closed with them.</>}
+          right={<span className="text-xs text-mav-muted">{fmtUsd(plan.recoverable)}/mo recoverable · click a row</span>}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[560px]">
+              <thead className="text-left text-mav-muted border-b border-mav-line">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Client</th>
+                  <th className="px-3 py-2 font-medium text-right">Prior 3 mo</th>
+                  <th className="px-3 py-2 font-medium text-right">Last 3 mo</th>
+                  <th className="px-3 py-2 font-medium text-right">Was billing</th>
+                  <th className="px-4 py-2 font-medium">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.slipped.slice(0, 12).map(c => (
+                  <tr key={c.name} onClick={() => setPushSel(c.name)} title="What did we last sell them? — service department, SME, owner and technology" className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
+                    <td className="px-4 py-2 text-mav-yellow">{c.name}</td>
+                    <td className="px-3 py-2 text-right text-mav-muted">{fmtUsd(Math.round(c.prior3))}</td>
+                    <td className="px-3 py-2 text-right">{fmtUsd(Math.round(c.last3))}</td>
+                    <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(c.perMonth)}/mo</td>
+                    <td className="px-4 py-2">{c.lapsed
+                      ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">Stopped</span>
+                      : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300">Slowing</span>}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {plan.openDeals.slice(0, 12).map(o => (
-                    <tr key={o.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                      <td className="px-3 py-2"><ClientLink name={o.company_name} /></td>
-                      <td className="px-3 py-2 text-right">{fmtUsd(o.value || 0)}</td>
-                      <td className="px-3 py-2 text-right">{o.win ? `${o.win}%` : '—'}</td>
-                      <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(o.expected)}</td>
-                      <td className="px-3 py-2 text-mav-muted">{o.sales_person || '—'}</td>
-                      <td className="px-3 py-2 text-mav-muted">{o.status || '—'}</td>
-                      <td className={`px-3 py-2 text-right ${o.age !== null && o.age > 90 ? 'text-red-400' : 'text-mav-muted'}`}>{o.age !== null ? `${o.age}d` : '—'}</td>
-                    </tr>
-                  ))}
-                  {!plan.openDeals.length && <tr><td colSpan={7} className="px-3 py-4 text-mav-muted">No open quotes carry a value yet.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-            {plan.stale.length > 0 && <p className="text-xs text-red-400 mt-2">{plan.stale.length} of these have not moved in over 90 days ({fmtUsd(plan.staleValue)}). Chase or close them — a dead quote in the pipeline hides the real gap.</p>}
+                ))}
+                {!plan.slipped.length && <tr><td colSpan={5} className="px-4 py-4 text-mav-muted">No client has slowed materially in the last three months.</td></tr>}
+              </tbody>
+            </table>
           </div>
-
-          <div>
-            <div className="text-xs font-medium text-mav-yellow mb-1">Clients to push</div>
-            <p className="text-xs text-mav-muted mb-3">Accounts that billed materially less in the last three completed months than the three before. &ldquo;Was billing&rdquo; is their old monthly average — what comes back if the account is re-activated, worth {fmtUsd(plan.recoverable)}/month in total. <span className="text-mav-yellow">Click a client</span> to see the last business we closed with them.</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[720px]">
-                <thead className="text-left text-mav-muted border-b border-mav-line">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Client</th>
-                    <th className="px-3 py-2 font-medium text-right">Prior 3 mo</th>
-                    <th className="px-3 py-2 font-medium text-right">Last 3 mo</th>
-                    <th className="px-3 py-2 font-medium text-right">Was billing</th>
-                    <th className="px-3 py-2 font-medium">State</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plan.slipped.slice(0, 12).map(c => (
-                    <tr key={c.name} onClick={() => setPushSel(c.name)} title="What did we last sell them? — service department, SME, owner and technology" className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
-                      <td className="px-3 py-2 text-mav-yellow">{c.name}</td>
-                      <td className="px-3 py-2 text-right text-mav-muted">{fmtUsd(Math.round(c.prior3))}</td>
-                      <td className="px-3 py-2 text-right">{fmtUsd(Math.round(c.last3))}</td>
-                      <td className="px-3 py-2 text-right font-medium text-mav-yellow">{fmtUsd(c.perMonth)}/mo</td>
-                      <td className="px-3 py-2">{c.lapsed
-                        ? <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-400">Stopped</span>
-                        : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-300">Slowing</span>}</td>
-                    </tr>
-                  ))}
-                  {!plan.slipped.length && <tr><td colSpan={5} className="px-3 py-4 text-mav-muted">No client has slowed materially in the last three months.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        </Panel>
       </div>
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
-        <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-mav-line">
-          <div className="text-sm font-medium">Quotes & Confirmations (Last 6 Months)</div>
-        </div>
-        <div className="p-5 space-y-5">
-          <div>
-            <div className="text-xs font-medium text-mav-yellow mb-3">Summary</div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-                <div className="text-xs text-mav-muted mb-1">Total Quotes</div>
-                <div className="text-2xl font-bold">{quotesAnalysis.total}</div>
-              </div>
-              <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-                <div className="text-xs text-mav-muted mb-1">Confirmed</div>
-                <div className="text-2xl font-bold">{quotesAnalysis.confirmed}</div>
-              </div>
-              <div className="bg-mav-dark/40 border border-mav-line/40 rounded-lg p-3">
-                <div className="text-xs text-mav-muted mb-1">Confirm Rate</div>
-                <div className="text-2xl font-bold text-mav-yellow">{quotesAnalysis.rate}%</div>
-              </div>
-            </div>
-          </div>
-          <div>
-            <div className="text-xs font-medium text-mav-yellow mb-3">Monthly Details</div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[720px]">
-                <thead className="text-left text-mav-muted border-b border-mav-line">
-                  <tr>
-                    <th className="px-5 py-3 font-medium">Month</th>
-                    <th className="px-5 py-3 font-medium text-right">Total Quotes</th>
-                    <th className="px-5 py-3 font-medium text-right">Confirmed</th>
-                    <th className="px-5 py-3 font-medium text-right">Confirm Rate %</th>
+
+      <SectionTitle>Quotes &amp; confirmations (last 6 months)</SectionTitle>
+      <KPIRow cols={3}>
+        <KPICard tone="accent" label="Total quotes" value={String(quotesAnalysis.total)} />
+        <KPICard tone="green" label="Confirmed" value={String(quotesAnalysis.confirmed)} />
+        <KPICard tone="yellow" label="Confirm rate" value={`${quotesAnalysis.rate}%`} />
+      </KPIRow>
+      <Panel flush title="Monthly details">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="text-left text-mav-muted border-b border-mav-line">
+              <tr>
+                <th className="px-4 py-3 font-medium">Month</th>
+                <th className="px-4 py-3 font-medium text-right">Total Quotes</th>
+                <th className="px-4 py-3 font-medium text-right">Confirmed</th>
+                <th className="px-4 py-3 font-medium text-right">Confirm Rate %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {last6Mo.map(month => {
+                const monthKey = ym(month.month)
+                const monthData = getMonthQuotes(monthKey)
+                return (
+                  <tr key={month.month} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                    <td className="px-4 py-3 whitespace-nowrap">{month.monthLabel}</td>
+                    <td className="px-4 py-3 text-right">{monthData.total}</td>
+                    <td className="px-4 py-3 text-right">{monthData.confirmed}</td>
+                    <td className="px-4 py-3 text-right">{monthData.total > 0 ? monthData.rate + '%' : '—'}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {last6Mo.map(month => {
-                    const monthKey = ym(month.month)
-                    const monthData = getMonthQuotes(monthKey)
-                    return (
-                      <tr key={month.month} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
-                        <td className="px-5 py-3 whitespace-nowrap">{month.monthLabel}</td>
-                        <td className="px-5 py-3 text-right">{monthData.total}</td>
-                        <td className="px-5 py-3 text-right">{monthData.confirmed}</td>
-                        <td className="px-5 py-3 text-right">{monthData.total > 0 ? monthData.rate + '%' : '—'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
-      </div>
+      </Panel>
 
       {pushDetail && (
         <div className="fixed inset-0 lg:left-60 z-40" onClick={() => setPushSel(null)}>

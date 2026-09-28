@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { THEMES, DEFAULT_THEME } from '@/lib/themes'
 import { setMyTheme, useTheme, cacheTeamTheme } from './ThemeToggle'
 import { getSettings, saveSettings } from '@/lib/config'
+import { Panel } from './PageParts'
+import InfoTip from './InfoTip'
 
 // The theme picker.
 //
@@ -40,13 +42,8 @@ export default function ThemePanel({ canEdit }: { canEdit: boolean }) {
   }
 
   return (
-    <div className="mb-10">
-      <h2 className="text-base font-semibold mb-1">Appearance</h2>
-      <p className="text-sm text-mav-muted mb-4 max-w-3xl">
-        Click one to try it &mdash; it applies straight away, across the whole dashboard. A swatch tells you very
-        little about what a page of tables and charts actually looks like, so the only useful preview is using it.
-        Your choice is remembered in this browser and nobody else is affected.
-      </p>
+    <Panel title="Appearance"
+      info="Click one to try it — it applies straight away, across the whole dashboard. A swatch tells you very little about what a page of tables and charts actually looks like, so the only useful preview is using it. Your choice is remembered in this browser and nobody else is affected.">
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {THEMES.map(t => {
@@ -79,19 +76,15 @@ export default function ThemePanel({ canEdit }: { canEdit: boolean }) {
       {canEdit && (
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button onClick={makeDefault} disabled={busy || !theme || theme === teamDefault}
-            className="text-xs px-4 py-2 rounded-md bg-mav-fill text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
+            className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-40 hover:brightness-95 transition">
             {busy ? 'Saving…' : theme === teamDefault ? 'This is already the default' : 'Make this the team default'}
           </button>
-          <span className="text-[11px] text-mav-muted max-w-xl">
-            {/* Worth saying plainly, or somebody will set the default and wonder why the
-                room does not change. */}
-            The default is what a new person, a new laptop, or anybody who has never opened this panel gets.
-            It does not override a choice somebody has already made for themselves, and it reaches them on their
-            next load rather than instantly.
-          </span>
+          {/* Worth saying plainly, or somebody will set the default and wonder why the
+              room does not change. */}
+          <InfoTip text="The default is what a new person, a new laptop, or anybody who has never opened this panel gets. It does not override a choice somebody has already made for themselves, and it reaches them on their next load rather than instantly." />
         </div>
       )}
       {status && <p className="text-sm text-mav-muted mt-2">{status}</p>}
-    </div>
+    </Panel>
   )
 }

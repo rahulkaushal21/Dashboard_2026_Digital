@@ -4,6 +4,7 @@ import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import MultiSelect from '@/components/MultiSelect'
 import KPICard from '@/components/KPICard'
+import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
@@ -129,11 +130,15 @@ export default function LastYearReview() {
   const qDelta = (r: Row) => r.qv[qCur] - r.qv[qBase]
   const qPct = (r: Row) => r.qv[qBase] > 0 ? Math.round((qDelta(r) / r.qv[qBase]) * 100) : null
 
-  const view = useMemo(() => data
+  // Every filter except the movement. The movement tabs count against this, so each tab
+  // says how many clients it would show under the search as it stands.
+  const scoped = useMemo(() => data
     .filter(r => r.client.toLowerCase().includes(q.toLowerCase()))
+    .filter(r => r.fyLast || r.fyTd || r.qv.some(v => v)), [data, q])
+  const view = useMemo(() => scoped
     .filter(r => !mv || qStatus(r) === mv)
-    .filter(r => r.fyLast || r.fyTd || r.qv.some(v => v))
-    .sort((a, b) => b.fyTd - a.fyTd || b.fyLast - a.fyLast), [data, q, mv, qCur, qBase])
+    .sort((a, b) => b.fyTd - a.fyTd || b.fyLast - a.fyLast), [scoped, mv, qCur, qBase])
+  const mvCount = (s: string) => scoped.filter(r => qStatus(r) === s).length
 
   const tot = (sel: (r: Row) => number) => view.reduce((s, r) => s + sel(r), 0)
   const aggTq = data.reduce((s, r) => s + r.qv[qCur], 0)
@@ -148,35 +153,40 @@ export default function LastYearReview() {
     Down: 'bg-amber-500/15 text-amber-400', Dropped: 'bg-red-500/15 text-red-400',
     Flat: 'bg-mav-line text-mav-muted',
   } as Record<string, string>)[s] || 'bg-mav-line text-mav-muted'
-  const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+  const sel = 'bg-mav-panel border border-mav-line rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
 
   return (
     <div>
-      <Header title="Quarter over Quarter Review" subtitle={`Quarter against quarter and year against year — who’s growing, slipping or dropped off`} />
+      <Header title="Quarter over Quarter Review" subtitle={`Quarter against quarter and year against year — who’s growing, slipping or dropped off`}
+        chip={`${qLabel(QS[qCur])} vs ${qLabel(QS[qBase])}`} />
 
-      <div className="mb-4 text-xs text-mav-muted bg-mav-panel border border-mav-line rounded-lg px-3 py-2">
-        Pick any two quarters with the <span className="text-mav-fg">Compare / vs</span> selectors — use two <em>completed</em> quarters (e.g. {qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete. <span className="text-mav-fg">Dropped</span> = had revenue in {qLabel(QS[qBase])} but none in {qLabel(QS[qCur])}; <span className="text-mav-fg">New</span> = the reverse. The FY columns&rsquo; <span className="text-mav-fg">&ldquo;to date&rdquo;</span> still counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.
-        {upcoming > 0 && <span> Excludes <span className="text-mav-yellow">{money(upcoming)}</span> in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</span>}
-        <span> <span className="text-mav-fg">PM</span> is whoever is on the client&rsquo;s most recent booking; a <span className="text-mav-fg">+n</span> beside it means the account changed hands during the period — hover to see everyone who held it. Filtering by PM narrows every figure on the page to that PM&rsquo;s bookings only.</span>
-      </div>
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label={`FY ${lyStart}-${String(tyStart).slice(2)} (Apr–Mar)`} value={money(tot(r => r.fyLast))} />
+        <KPICard label={`FY ${tyStart}-${String(tyStart + 1).slice(2)} to date`} value={money(tot(r => r.fyTd))}
+          note={upcoming > 0 ? `Excludes ${money(upcoming)} future-dated` : undefined}
+          info={<>&ldquo;To date&rdquo; counts Apr&nbsp;{tyStart}–{SHORT[curM]}&nbsp;{tyStart}.{upcoming > 0 && <> It excludes {money(upcoming)} in future-dated/scheduled bookings beyond {SHORT[curM]}&nbsp;{tyStart}.</>}</>} />
+        <KPICard tone={qoqPct == null ? 'default' : qoqPct >= 0 ? 'green' : 'red'} label={`${qLabel(QS[qBase])} → ${qLabel(QS[qCur])}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct}
+          info={`Pick any two quarters with the Compare / vs selectors — use two completed quarters (e.g. ${qLabel(QS[Math.max(0, CUR_I - 1)])}) to avoid the current quarter being incomplete.`} />
+        <KPICard tone={dropped ? 'red' : 'default'} label="Dropped / New" value={`${dropped} / ${newq}`}
+          info={`Dropped = had revenue in ${qLabel(QS[qBase])} but none in ${qLabel(QS[qCur])}; New = the reverse.`} />
+      </KPIRow>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <KPICard label={`FY ${lyStart}-${String(tyStart).slice(2)} (Apr–Mar)`} value={money(tot(r => r.fyLast))} />
-        <KPICard label={`FY ${tyStart}-${String(tyStart + 1).slice(2)} to date`} value={money(tot(r => r.fyTd))} />
-        <KPICard label={`${qLabel(QS[qBase])} → ${qLabel(QS[qCur])}`} value={(qoqPct == null ? '—' : (qoqPct >= 0 ? '+' : '') + qoqPct + '%')} change={qoqPct} />
-        <KPICard label="Dropped / New" value={`${dropped} / ${newq}`} />
-      </div>
+      {/* The movement between the two chosen quarters is the page's main split. */}
+      <Segments<string>
+        value={mv}
+        onChange={setMv}
+        items={[
+          { id: '', label: 'All movements', count: scoped.length },
+          { id: 'Dropped', label: 'Dropped', count: mvCount('Dropped'), title: 'Had baseline, not compared' },
+          { id: 'New', label: 'New', count: mvCount('New'), title: 'Compared only' },
+          { id: 'Up', label: 'Up', count: mvCount('Up'), title: 'Up vs baseline' },
+          { id: 'Down', label: 'Down', count: mvCount('Down'), title: 'Down vs baseline' },
+          { id: 'Flat', label: 'Flat', count: mvCount('Flat') },
+        ]} />
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      {/* Row 1: which quarters and who; row 2: the month range that narrows everything. */}
+      <FilterBar right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{view.length} clients</span>}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client…" className={`${sel} w-56`} />
-        <select value={mv} onChange={e => setMv(e.target.value)} className={sel}>
-          <option value="">All movements</option>
-          <option value="Dropped">Dropped (had baseline, not compared)</option>
-          <option value="New">New (compared only)</option>
-          <option value="Up">Up vs baseline</option>
-          <option value="Down">Down vs baseline</option>
-          <option value="Flat">Flat</option>
-        </select>
         <span className="text-xs text-mav-muted ml-1">Compare</span>
         <select value={qCur} onChange={e => setQCur(+e.target.value)} className={sel} title="Quarter to compare">
           {QS.map((f, i) => <option key={i} value={i}>{qLabel(f)}{i === CUR_I ? ' · current' : ''}</option>)}
@@ -185,18 +195,20 @@ export default function LastYearReview() {
         <select value={qBase} onChange={e => setQBase(+e.target.value)} className={sel} title="Quarter to compare against">
           {QS.map((f, i) => <option key={i} value={i}>{qLabel(f)}{i === CUR_I ? ' · current' : ''}</option>)}
         </select>
+        <div className="basis-full h-0" />
         <MultiSelect label="All GEO" options={geos} selected={fGeo} onChange={setFGeo} className="w-36" />
         <MultiSelect label="All services" options={services} selected={fService} onChange={setFService} className="w-44" />
         <MultiSelect label="All PMs" options={pms} selected={fPm} onChange={setFPm} className="w-40" />
         <span className="text-xs text-mav-muted ml-1">From</span>
-        <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} />
+        <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="From month" />
         <span className="text-xs text-mav-muted">To</span>
-        <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} />
-        {(from || to || fGeo.length > 0 || fService.length > 0 || fPm.length > 0) && <button onClick={() => { setFrom(''); setTo(''); setFGeo([]); setFService([]); setFPm([]) }} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>}
-        <span className="text-xs text-mav-muted ml-auto">{view.length} clients · scroll right for all quarters →</span>
-      </div>
+        <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="To month" />
+        {(from || to || fGeo.length > 0 || fService.length > 0 || fPm.length > 0) && <button onClick={() => { setFrom(''); setTo(''); setFGeo([]); setFService([]); setFPm([]) }} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">Reset</button>}
+      </FilterBar>
 
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+      <Panel flush title="Clients by quarter"
+        info={<><span className="font-semibold">PM</span> is whoever is on the client&rsquo;s most recent booking; a <span className="font-semibold">+n</span> beside it means the account changed hands during the period — hover to see everyone who held it. Filtering by PM narrows every figure on the page to that PM&rsquo;s bookings only.</>}
+        right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">scroll right for all quarters →</span>}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[860px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
@@ -241,7 +253,7 @@ export default function LastYearReview() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Panel>
     </div>
   )
 }

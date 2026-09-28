@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { getContractors, saveContractor, setContractorActive, type Contractor } from '@/lib/supabase'
 import { CURRENCIES } from '@/lib/deal-fields'
+import { Panel } from './PageParts'
 
 // Outsourcing partners.
 //
@@ -58,17 +59,15 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
   const inp = 'bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow'
 
   return (
-    <div className="mb-10">
-      <h2 className="text-base font-semibold mb-1">Contractors</h2>
-      <p className="text-sm text-mav-muted mb-4">
-        Who outsourced work goes to. Offered once a deal&rsquo;s Expert is set to <span className="text-mav-fg">Contractor</span>,
-        and their cost lands in the sheet&rsquo;s Outsource Price column. Choosing one sets the cost currency to whatever
-        they invoice in. <span className="text-mav-fg">Any PM or admin can add one</span> &mdash; you do not need to raise a request.
-      </p>
+    <Panel title="Contractors"
+      info="Who outsourced work goes to. Offered once a deal’s Expert is set to Contractor, and their cost lands in the sheet’s Outsource Price column. Choosing one sets the cost currency to whatever they invoice in."
+      right={<span className="font-mono text-xs text-mav-muted">{active.length} active</span>}>
+      {/* Kept visible, not behind the ⓘ: it is the one line that changes what a PM does. */}
+      <p className="text-xs text-mav-muted mb-3"><span className="text-mav-fg">Any PM or admin can add one</span> &mdash; you do not need to raise a request.</p>
 
-      <div className="bg-mav-panel border border-mav-line rounded-xl overflow-x-auto mb-3">
+      <div className="border border-mav-line rounded-lg overflow-x-auto mb-3">
         <table className="w-full text-sm">
-          <thead className="text-left text-mav-fg/70 border-b border-mav-line">
+          <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
               <th className="px-4 py-2 font-medium">Name</th>
               <th className="px-4 py-2 font-medium">Agency</th>
@@ -103,7 +102,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
       </div>
 
       {canEdit && (
-        <div className="bg-mav-panel border border-mav-line rounded-xl p-4 mb-3">
+        <div className="bg-mav-dark/40 border border-mav-line rounded-lg p-4 mb-3">
           <div className="text-sm font-medium mb-3">{editing ? `Editing ${editing}` : 'Add a contractor'}</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <label className="block">
@@ -134,12 +133,12 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
           </div>
           <div className="flex items-center gap-2 mt-3">
             <button onClick={save} disabled={busy}
-              className="bg-mav-fill text-black font-medium rounded-md px-4 py-2 text-sm disabled:opacity-60">
+              className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-60">
               {busy ? 'Saving…' : editing ? 'Save changes' : 'Add contractor'}
             </button>
             {editing && (
               <button onClick={() => { setEditing(null); setDraft({ ...blank }) }}
-                className="text-xs px-3 py-2 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg">Cancel</button>
+                className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">Cancel</button>
             )}
             {status && <span className="text-sm text-mav-muted">{status}</span>}
           </div>
@@ -148,7 +147,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
 
       {retired.length > 0 && (
         <div>
-          <button onClick={() => setShowRetired(v => !v)} className="text-xs text-mav-muted hover:text-mav-fg">
+          <button onClick={() => setShowRetired(v => !v)} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
             {showRetired ? 'Hide' : 'Show'} {retired.length} retired
           </button>
           {showRetired && (
@@ -166,6 +165,6 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
           </p>
         </div>
       )}
-    </div>
+    </Panel>
   )
 }

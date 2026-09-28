@@ -7,6 +7,9 @@ import { inUnit, unitOf } from '@/lib/business-unit'
 import { getNeedsInput, getOpportunityDepts, getOpportunities, canConfirmLocally, getDirectoryMember, type DirectoryMember, type NeedsInputRow, type NeedsReason, type Opportunity } from '@/lib/supabase'
 import { currentEmail, getStoredProfile } from '@/lib/access'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
+import KPICard, { type KPITone } from '@/components/KPICard'
+import InfoTip from '@/components/InfoTip'
+import { KPIRow, Segments, Panel } from '@/components/PageParts'
 
 // The work list. If this page is empty there is nothing for you to do, and that is the
 // intended resting state rather than a sign something is broken.
@@ -18,10 +21,11 @@ import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 // mattered; a queue nobody can clear teaches people to ignore it, so the bar for adding a
 // fourth reason here should be high.
 
-const REASONS: { key: NeedsReason; label: string; tone: string }[] = [
-  { key: 'confirm_started',       label: 'Half-confirmed',       tone: 'border-amber-500/50 text-amber-300' },
-  { key: 'awaiting_confirmation', label: 'Client has committed', tone: 'border-green-500/50 text-green-300' },
-  { key: 'missing_value',         label: 'No value',             tone: 'border-blue-400/50 text-blue-300' },
+// `tone` colours the pill in the table; `card` tints the matching headline card the same way.
+const REASONS: { key: NeedsReason; label: string; tone: string; card: KPITone }[] = [
+  { key: 'confirm_started',       label: 'Half-confirmed',       tone: 'border-amber-500/50 text-amber-300', card: 'amber' },
+  { key: 'awaiting_confirmation', label: 'Client has committed', tone: 'border-green-500/50 text-green-300', card: 'green' },
+  { key: 'missing_value',         label: 'No value',             tone: 'border-blue-400/50 text-blue-300',  card: 'blue' },
 ]
 
 const money = (n?: number) => n == null || n === 0 ? '—' : `$${Math.round(n).toLocaleString('en-US')}`
@@ -75,33 +79,31 @@ export default function NeedsInput() {
       <Header title="Needs input" subtitle="The only two things the system cannot work out for itself — a value nobody has written down, and a decision nobody has made." />
       <UnplacedNote n={unplaced} noun="deals" className="-mt-3 mb-4" />
 
-      <div className="flex flex-wrap items-center gap-2 mb-5">
-        <button onClick={() => setMineOnly(true)}
-          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${mineOnly ? 'border-mav-yellow/50 text-mav-yellow bg-mav-yellow/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-          Mine ({mineCount})
-        </button>
-        <button onClick={() => setMineOnly(false)}
-          className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${!mineOnly ? 'border-mav-yellow/50 text-mav-yellow bg-mav-yellow/10' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-          Everyone ({rows.length})
-        </button>
-        <span className="w-px h-5 bg-mav-line mx-1" />
-        {REASONS.map(r => {
-          const n = rows.filter(x => x.reason === r.key).length
-          return (
-            <button key={r.key} onClick={() => setReason(reason === r.key ? '' : r.key)}
-              className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${reason === r.key ? r.tone + ' bg-mav-fg/5' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-              {r.label} ({n})
-            </button>
-          )
-        })}
-      </div>
+      {/* One card per reason, each a shortcut to its rows — the reason filter that used
+          to be a row of small buttons. Counts are across everyone, as they always were. */}
+      <KPIRow cols={4}>
+        <KPICard tone="accent" label="Waiting" value={String(rows.length)} sub="all reasons"
+          onClick={() => setReason('')} active={reason === ''} />
+        {REASONS.map(r => (
+          <KPICard key={r.key} tone={r.card} label={r.label} value={String(rows.filter(x => x.reason === r.key).length)}
+            onClick={() => setReason(reason === r.key ? '' : r.key)} active={reason === r.key} />
+        ))}
+      </KPIRow>
+
+      <Segments<'mine' | 'all'>
+        value={mineOnly ? 'mine' : 'all'}
+        onChange={v => setMineOnly(v === 'mine')}
+        items={[
+          { id: 'mine', label: 'Mine', count: mineCount },
+          { id: 'all', label: 'Everyone', count: rows.length },
+        ]} />
 
       {/* An unowned deal cannot be confirmed by any PM — only an admin — so it is called
           out rather than left to sit in a list nobody feels responsible for. */}
       {unassigned > 0 && !mineOnly && (
-        <div className="mb-5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs">
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs">
           <span className="text-amber-300 font-medium">{unassigned} of these have no owner the system recognises.</span>
-          <span className="text-mav-muted"> Nobody but an admin can confirm them. Either put a known owner on the deal, or add that person in Settings &rarr; PM directory.</span>
+          <InfoTip text="Nobody but an admin can confirm them. Either put a known owner on the deal, or add that person in Settings → PM directory." />
         </div>
       )}
 
@@ -111,7 +113,9 @@ export default function NeedsInput() {
           <div className="text-xs text-mav-muted mt-1">That is the normal state — everything else the system works out for itself.</div>
         </div>
       ) : (
-        <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+        <Panel flush title={reason ? REASONS.find(x => x.key === reason)?.label : 'Work list'}
+          right={<span className="font-mono text-xs text-mav-muted">{shown.length} shown</span>}>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
@@ -144,7 +148,7 @@ export default function NeedsInput() {
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       {deal && mayConfirm && (
                         <button onClick={() => setConfirming(deal)}
-                          className="text-xs px-3 py-1.5 rounded-md bg-green-500 text-black font-medium hover:brightness-110 transition">
+                          className="text-xs px-3 py-1.5 rounded-full bg-green-500 text-black font-semibold hover:brightness-110 transition">
                           {r.reason === 'missing_value' ? 'Add value & confirm' : 'Confirm'}
                         </button>
                       )}
@@ -154,7 +158,8 @@ export default function NeedsInput() {
               })}
             </tbody>
           </table>
-        </div>
+          </div>
+        </Panel>
       )}
 
       {confirming && <ConfirmDealDialog deal={confirming} onClose={() => setConfirming(null)} onConfirmed={() => { setConfirming(null); load() }} />}
