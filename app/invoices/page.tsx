@@ -78,7 +78,8 @@ function Th<K extends string>({ id, label, hint, num, sort, dir, onSort }: {
 }) {
   const on = sort === id
   return (
-    <th className={`px-4 py-3 font-medium whitespace-nowrap ${num ? 'text-right' : 'text-left'}`}>
+    <th className={`sticky top-0 z-10 bg-mav-panel px-4 py-3 font-medium whitespace-nowrap
+      border-b border-mav-line ${num ? 'text-right' : 'text-left'}`}>
       <button onClick={() => onSort(id)} title={hint}
         className={`inline-flex items-center gap-1 hover:text-mav-fg ${on ? 'text-mav-fg' : ''}`}>
         {label}
@@ -325,10 +326,12 @@ export default function Invoices() {
             </KPIRow>
           )}
           <Panel flush>
-            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[1040px]">
+            {/* Bounded box, scrolling both ways: the header sticks to the top of THIS
+                container, so titles stay put while the rows move under them. */}
+            <div className="overflow-auto max-h-[70vh]"><table className="w-full text-sm min-w-[1040px]">
               {/* Every header names its SOURCE and its unit. 'Sheet USD / Cost / Invoiced
                   / Paid' side by side said nothing about which system each came from. */}
-              <thead className="text-mav-muted border-b border-mav-line"><tr>
+              <thead className="text-mav-muted"><tr>
                 <Th id="status" label="Invoice status" hint="The status the invoice app holds, or 'Not raised' / 'No project id' where this dashboard cannot find one" sort={mSort} dir={mDir} onSort={clickM} />
                 <Th id="company_name" label="Client" sort={mSort} dir={mDir} onSort={clickM} />
                 <Th id="project_name" label="Project" sort={mSort} dir={mDir} onSort={clickM} />
@@ -407,9 +410,10 @@ export default function Invoices() {
 
           <div className="grid lg:grid-cols-[320px_1fr] gap-4">
             <Panel title="By month" flush>
-              <table className="w-full text-sm">
-                <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-                  {['Month', 'App', 'Gap'].map(h => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}
+              <div className="overflow-auto max-h-[70vh]"><table className="w-full text-sm">
+                <thead className="text-left text-mav-muted"><tr>
+                  {['Month', 'App', 'Gap'].map(h =>
+                    <th key={h} className="sticky top-0 z-10 bg-mav-panel px-4 py-2 font-medium border-b border-mav-line">{h}</th>)}
                 </tr></thead>
                 <tbody>{byMonth.map(([k, v]) => (
                   <tr key={k} className="border-b border-mav-line/60">
@@ -421,12 +425,12 @@ export default function Invoices() {
                     </td>
                   </tr>
                 ))}</tbody>
-              </table>
+              </table></div>
             </Panel>
 
             <Panel title={`Invoices the revenue sheet does not have (${gap.length})`} flush>
-              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[900px]">
-                <thead className="text-mav-muted border-b border-mav-line"><tr>
+              <div className="overflow-auto max-h-[70vh]"><table className="w-full text-sm min-w-[900px]">
+                <thead className="text-mav-muted"><tr>
                   <Th id="invoice_no" label="Invoice no (app)" sort={gSort} dir={gDir} onSort={clickG} />
                   <Th id="project_id" label="Project ID (app)" hint="The id the invoice app raised this against. Paste it into the sheet to close the row." sort={gSort} dir={gDir} onSort={clickG} />
                   <Th id="invoice_date" label="Invoice date" sort={gSort} dir={gDir} onSort={clickG} />
