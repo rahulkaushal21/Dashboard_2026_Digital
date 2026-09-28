@@ -15,6 +15,7 @@ import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/P
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import InfoTip from '@/components/InfoTip'
+import DateCell from '@/components/DateCell'
 import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
@@ -142,18 +143,20 @@ const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
 
 type SortKey = 'company' | 'value' | 'win' | 'intent' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
-{ key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'intent', label: 'Intent' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
+{ key: 'date', label: 'Date' }, { key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'intent', label: 'Intent' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
 { key: 'type', label: 'Type' }, { key: 'owner', label: 'Owner / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
-{ key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
+{ key: 'flag', label: 'Review' },
 ]
 // What the table shows before anybody picks. Identity, money, where it stands, who owns
 // it, when, and whether it needs a look — enough to work the list without scrolling
 // sideways. Win %, Source, Type, GEO and Tech are one tick away in "Columns". Pick and
-// Action are locked: they are how a row is worked, not a field about it.
-const DEFAULT_COLS: SortKey[] = ['company', 'value', 'intent', 'status', 'owner', 'date', 'flag']
+// Action are locked: they are how a row is worked, not a field about it. Date leads and
+// is locked too — the table opens newest first, and "what came in today" is the first
+// question anybody asks of it.
+const DEFAULT_COLS: SortKey[] = ['date', 'company', 'value', 'intent', 'status', 'owner', 'flag']
 const TABLE_COLS: ColumnDef[] = [
 { key: 'pick', label: 'Pick', locked: true },
-...COLS.map(c => ({ key: c.key, label: c.label, locked: c.key === 'company', default: DEFAULT_COLS.includes(c.key) })),
+...COLS.map(c => ({ key: c.key, label: c.label, locked: c.key === 'company' || c.key === 'date', default: DEFAULT_COLS.includes(c.key) })),
 { key: 'action', label: 'Action', locked: true },
 ]
 // Type label from the Quotes tab Business Type (col P). A booked client can send
@@ -928,7 +931,7 @@ return (
 <InfoTip text="The sheet is the master record, so nothing books or drops out of pipeline until you update it there. This alert clears itself on the next sync." /></div>
 </div>
 <button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setMarkedOnly(false); setSearch('') }}
-className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 text-amber-300 hover:bg-amber-500/15 transition-colors">Show {lagRows.length > 1 ? 'them' : 'it'}</button>
+className="shrink-0 rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 transition-colors">Show {lagRows.length > 1 ? 'them' : 'it'}</button>
 </div>
 {lagWon.length > 0 && (
 <div className="mt-2.5">
@@ -1046,7 +1049,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
     {o.length} shown · {money(o.reduce((s, x) => s + (x.value || 0), 0))}
     {hiddenNoValue > 0 && <span className="text-amber-300/80 normal-case" title="These match every other filter but carry no quoted figure, so a value band cannot place them. Clear the band to see them."> · {hiddenNoValue} hidden (no value)</span>}
   </span>
-  <button onClick={reset} className="text-xs px-3 py-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg">Clear all</button>
+  <button onClick={reset} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 whitespace-nowrap">Clear all</button>
 </div>
 {moreOpen && (<>
 <div className="basis-full h-0" />
@@ -1085,7 +1088,7 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 </button>
 )
 })}
-{bandOn && <button onClick={() => { setVMin(''); setVMax('') }} className="text-xs px-2 py-1 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">clear</button>}
+{bandOn && <button onClick={() => { setVMin(''); setVMax('') }} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">clear</button>}
 <div className="basis-full h-0" />
 <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted">Quick views</span>
 <button onClick={() => setFlagOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>Needs review{flagged ? ` (${flagged})` : ''}</button>
@@ -1124,10 +1127,10 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
     title={picked.size === 1
       ? 'Fill in the revenue-sheet details and book it'
       : 'Pick which deal carries the invoice, then confirm it once for the lot'}
-    className="ml-auto text-xs px-3 py-1.5 rounded-md bg-mav-yellow text-black font-medium hover:bg-mav-yellow/90 disabled:opacity-40">
+    className="ml-auto rounded-full bg-mav-fill text-black font-semibold px-3 py-1 text-xs hover:brightness-95 disabled:opacity-40">
     {picked.size === 1 ? 'Confirm' : `Combine & confirm (${picked.size})`}
   </button>
-  <button onClick={() => setPicked(new Set())} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>
+  <button onClick={() => setPicked(new Set())} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">✕ clear</button>
 </div>
 )}
 
@@ -1168,11 +1171,12 @@ return (
   <span className="inline-block w-4 h-4 align-middle" title={`${x.pm_owner || 'Nobody'} owns this deal`} />
 )}
 </td>
+<td className="px-3 py-2.5 text-mav-muted"><DateCell d={x.source_date || x.first_date} /></td>
 <td className="px-3 py-2.5 max-w-[260px]">
 <div className="flex items-center gap-1.5 min-w-0">
 {x.unlikely && <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>Unlikely</span>}
 {x.email_won && <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>Confirmed</span>}
-<span className="truncate"><ClientLink name={x.company_name} /></span>
+<span className="truncate"><ClientLink name={x.company_name} className="text-mav-yellow" /></span>
 </div>
 {x.summary && <div className="text-xs text-mav-muted truncate" title={x.summary}>{x.summary.slice(0, 80)}</div>}
 </td>
@@ -1193,7 +1197,6 @@ return (
 {cols.on('owner') && <td className="px-3 py-2.5 text-mav-muted max-w-[200px]">{x.sales_person ? <div className="truncate" title={`${x.nbd_owner ? 'New Business Development — opened this account' : 'Account Manager — works an account we already have'}: ${x.sales_person}`}>{ownerRole(x)}: {x.sales_person}</div> : <span className="text-mav-muted">Owner: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5 truncate" title={`Project Manager: ${x.pm_owner}`}>PM: {x.pm_owner}</div>}</td>}
 {cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted">{x.geo}</td>}
 {cols.on('tech') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap max-w-[160px] truncate" title={x.technology || ''}>{x.technology || '—'}</td>}
-{cols.on('date') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>}
 {/* lostLag is checked directly, not just via x.flag: flag comes from the last data
     load, so a deal marked Lost in this session must still show the alert instantly. */}
 {cols.on('flag') && <td className="px-3 py-2.5">{(x.flag || sheetLag(x)) ? <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={bookedLag(x) ? 'Already invoiced in the revenue sheet — the Quotes sheet still shows it Open. Set that row to Confirmed.' : confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? 'Update sheet' : 'Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
@@ -1208,7 +1211,7 @@ return (
     className="rounded-full bg-mav-fill text-black text-xs font-semibold px-3 py-1 hover:brightness-95">Confirm</button>
 )}
 <button type="button" onClick={() => setSel(x)}
-  className="rounded-full bg-mav-fill text-black text-xs font-semibold px-3 py-1 hover:brightness-95">Open</button>
+  className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">Open</button>
 </div>
 </td>
 </tr>
@@ -1245,10 +1248,10 @@ return (
     running, what has been escalated, when they last booked — and until now
     that meant leaving the page, finding the client list and searching. */}
 <Link href={`/clients?client=${encodeURIComponent(sel.company_name || '')}`}
-  className="group inline-flex items-center gap-1.5 text-xl font-semibold hover:text-mav-yellow transition-colors"
+  className="group inline-flex items-center gap-1.5 text-xl font-semibold text-mav-yellow hover:underline underline-offset-2 transition-colors"
   title={`Open ${sel.company_name} in Client 360`}>
   {sel.company_name}
-  <span className="text-sm text-mav-muted group-hover:text-mav-yellow">↗</span>
+  <span className="text-sm text-mav-yellow">↗</span>
 </Link>
 <div className="mt-1 flex flex-wrap gap-1">
 <span className={`text-xs px-2 py-1 rounded-full ${statusTone(oppStatus(sel))}`}>{oppStatus(sel)}</span>
@@ -1290,7 +1293,7 @@ return (
     half-row into the sheet. Full width because it is the thing you came here to do. */}
 {canConfirmLocally(sel, me, iAmAdmin) && !sel.won && (
 <button onClick={() => setConfirming(sel)}
-className="w-full mb-2 px-3 py-2.5 rounded-md bg-green-500 text-black text-sm font-bold hover:brightness-110 transition">
+className="w-full mb-2 px-3 py-2.5 rounded-full bg-mav-fill text-black text-sm font-semibold hover:brightness-95 transition">
 Mark Confirmed
 </button>
 )}
@@ -1299,18 +1302,18 @@ Mark Confirmed
     confirmation made by mistake. */}
 {sel.email_won && (
 <button disabled={savingWon} onClick={() => toggleConfirmed(sel)}
-className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors disabled:opacity-50">
+className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 transition-colors disabled:opacity-50">
 {savingWon ? 'Saving…' : 'Undo confirm'}
 </button>
 )}
 <button disabled={savingLost} onClick={() => toggleLost(sel)}
-className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-mav-fg' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
+className={`rounded-full border px-3 py-1 text-xs transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10' : 'border-red-500/50 text-red-400 hover:bg-red-500/10'}`}>
 {savingLost ? 'Saving…' : sel.email_lost ? 'Undo Lost' : 'Mark Lost'}
 </button>
 {/* "Might not come" is a pipeline-confidence call, so it only applies while the deal is still live. */}
 {(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || sel.unlikely) && (
 <button disabled={savingUnlikely} onClick={() => toggleUnlikely(sel)}
-className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-line text-mav-muted hover:text-mav-fg' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/15'}`}>
+className={`rounded-full border px-3 py-1 text-xs transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/10'}`}>
 {savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo unlikely' : 'Might not come'}
 </button>
 )}
@@ -1318,19 +1321,19 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 {sel.email_won && (sel.email_won_reason || sel.email_won_by) && (
 <div className="mt-2.5 pt-2 border-t border-green-500/20 text-xs text-mav-muted">
 {sel.email_won_reason && <div className="text-green-200/80">“{sel.email_won_reason}”</div>}
-{sel.email_won_by && <div className="mt-0.5">confirmed by {sel.email_won_by}{sel.email_won_at ? ` · ${sel.email_won_at.slice(0, 10)}` : ''}</div>}
+{sel.email_won_by && <div className="mt-0.5">confirmed by {sel.email_won_by}{sel.email_won_at ? ` · ${fmtDay(sel.email_won_at)}` : ''}</div>}
 </div>
 )}
 {sel.email_lost && (sel.email_lost_reason || sel.email_lost_by) && (
 <div className="mt-2.5 pt-2 border-t border-red-500/20 text-xs text-mav-muted">
 {sel.email_lost_reason && <div className="text-red-200/80">“{sel.email_lost_reason}”</div>}
-{sel.email_lost_by && <div className="mt-0.5">marked by {sel.email_lost_by}{sel.email_lost_at ? ` · ${sel.email_lost_at.slice(0, 10)}` : ''}</div>}
+{sel.email_lost_by && <div className="mt-0.5">marked by {sel.email_lost_by}{sel.email_lost_at ? ` · ${fmtDay(sel.email_lost_at)}` : ''}</div>}
 </div>
 )}
 {sel.unlikely && (sel.unlikely_reason || sel.unlikely_by) && (
 <div className="mt-2.5 pt-2 border-t border-orange-500/20 text-xs text-mav-muted">
 {sel.unlikely_reason && <div className="text-orange-200/80">“{sel.unlikely_reason}”</div>}
-{sel.unlikely_by && <div className="mt-0.5">flagged by {sel.unlikely_by}{sel.unlikely_at ? ` · ${sel.unlikely_at.slice(0, 10)}` : ''}</div>}
+{sel.unlikely_by && <div className="mt-0.5">flagged by {sel.unlikely_by}{sel.unlikely_at ? ` · ${fmtDay(sel.unlikely_at)}` : ''}</div>}
 </div>
 )}
 {sheetLag(sel) && (
@@ -1533,7 +1536,7 @@ Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since Apr
 <div><div className="text-xs text-mav-muted">Type</div>{typeLabel(sel)}{sel.mis_tagged_new && <div className="text-xs text-red-400 mt-0.5">Sheet says “New”, but {sel.sales_person || 'no owner'} is not NBD — counted as Repeat.</div>}</div>
 <div><div className="text-xs text-mav-muted">RFQ / quote status</div><span className={`text-xs px-2 py-1 rounded-full ${badge(sel.rfq_status)}`}>{sel.status || sel.rfq_status || (sel.rfq ? 'RFQ' : '—')}</span></div>
 <div><div className="text-xs text-mav-muted">GEO</div>{sel.geo || '—'}</div>
-<div><div className="text-xs text-mav-muted">Date</div>{(sel.source_date || sel.first_date || '').slice(0, 10) || '—'}</div>
+<div><div className="text-xs text-mav-muted">Date</div><DateCell d={sel.source_date || sel.first_date} /></div>
 {/* Where to go in the Quotes tab. Absent on email-origin deals, which have no line yet. */}
 <div><div className="text-xs text-mav-muted">Quotes sheet row</div>{sel.sheet_row ? <span className="tabular-nums">{sel.sheet_row}</span> : <span className="text-mav-muted">not in the sheet</span>}</div>
 <div className="col-span-2"><div className="text-xs text-mav-muted">{sel.quote_ref ? 'Quote / subject' : 'Subject'}</div>{sel.source_subject || '—'}</div>

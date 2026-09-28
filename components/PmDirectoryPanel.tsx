@@ -84,7 +84,7 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
     setStatus('Removed.'); refresh()
   }
 
-  const inp = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow'
+  const inp = 'bg-mav-dark border border-mav-line rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow'
 
 
   return (
@@ -118,8 +118,8 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
                   <label className="text-xs text-mav-muted mr-3">
                     <input type="checkbox" checked={draft.active} onChange={e => setDraft({ ...draft, active: e.target.checked })} className="mr-1 align-middle" />active
                   </label>
-                  <button onClick={saveEdit} disabled={busy} className="text-xs text-mav-yellow hover:underline mr-2">Save</button>
-                  <button onClick={() => { setEditing(null); setDraft(null) }} className="text-xs text-mav-muted hover:text-mav-fg">Cancel</button>
+                  <button onClick={saveEdit} disabled={busy} className="rounded-full bg-mav-fill text-black font-semibold px-3 py-1 text-xs hover:brightness-95 mr-2 disabled:opacity-50">Save</button>
+                  <button onClick={() => { setEditing(null); setDraft(null) }} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">Cancel</button>
                 </td>
               </tr>
             ) : (
@@ -139,8 +139,8 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
                 <td className="px-4 py-3 text-mav-muted text-xs">{r.aliases.join(', ')}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   {canEdit && (<>
-                    <button onClick={() => startEdit(r)} className="text-xs text-mav-muted hover:text-mav-fg mr-3">Edit</button>
-                    <button onClick={() => drop(r.email)} disabled={busy} className="text-mav-muted hover:text-red-400 disabled:opacity-50 align-middle" aria-label={`Remove ${r.email}`}><Trash2 size={15} /></button>
+                    <button onClick={() => startEdit(r)} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 mr-2">Edit</button>
+                    <button onClick={() => drop(r.email)} disabled={busy} className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 inline-flex items-center gap-1 disabled:opacity-50 align-middle" aria-label={`Remove ${r.email}`}><Trash2 size={13} /> Remove</button>
                   </>)}
                 </td>
               </tr>

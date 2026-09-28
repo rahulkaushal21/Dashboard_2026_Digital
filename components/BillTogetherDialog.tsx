@@ -90,9 +90,9 @@ export default function BillTogetherDialog({ deals, onClose, onChosen }: {
         </p>
 
         <div className="flex items-center justify-end gap-2 mt-4">
-          <button onClick={onClose} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Cancel</button>
+          <button onClick={onClose} className="text-sm px-3 py-2 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10">Cancel</button>
           <button onClick={() => primary && onChosen(primary, typed ?? sum)} disabled={!primary}
-            className="text-sm px-4 py-2 rounded-md bg-mav-yellow text-black font-medium hover:bg-mav-yellow/90 disabled:opacity-40">
+            className="text-sm px-4 py-2 rounded-full bg-mav-fill text-black font-semibold hover:brightness-95 disabled:opacity-40">
             Continue
           </button>
         </div>

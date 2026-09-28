@@ -15,7 +15,7 @@ export const metadata = {
 export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' as const }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-theme="studio" data-family="light">
+    <html lang="en" data-theme="dark" data-family="dark">
       <head>
         {/* Sets the saved theme before the first paint. Without it the page paints dark,
             then React mounts and switches to light — a black flash on every load for

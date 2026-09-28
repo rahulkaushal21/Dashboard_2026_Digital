@@ -32,7 +32,7 @@ function SettingsForm({ canEdit }: { canEdit: boolean }) {
   // Read-only rendering for non-admins. The database refuses the write anyway
   // (app_settings is admin-only), so this is about not offering a button that
   // would only fail.
-  const box = `w-full bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none ${canEdit ? 'focus:border-mav-yellow' : 'text-mav-muted cursor-not-allowed'}`
+  const box = `w-full bg-mav-dark border border-mav-line rounded-md px-3 py-2 text-sm outline-none ${canEdit ? 'text-mav-fg focus:border-mav-yellow' : 'text-mav-muted cursor-not-allowed'}`
 
   return (
     <Panel title="Data sources" className="max-w-2xl">
@@ -120,7 +120,7 @@ function AdminsPanel() {
     finally { setBusy(false) }
   }
 
-  const inp = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow'
+  const inp = 'bg-mav-dark border border-mav-line rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow'
 
   return (
     <Panel title="PM Team access"
@@ -143,8 +143,8 @@ function AdminsPanel() {
                 <td className="px-4 py-3 text-mav-muted">{r.note || '—'}</td>
                 <td className="px-4 py-3 text-right">
                   <button onClick={() => drop(r.email)} disabled={busy}
-                    className="text-mav-muted hover:text-red-400 disabled:opacity-50" aria-label={`Remove ${r.email}`}>
-                    <Trash2 size={15} />
+                    className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 inline-flex items-center gap-1 disabled:opacity-50" aria-label={`Remove ${r.email}`}>
+                    <Trash2 size={13} /> Remove
                   </button>
                 </td>
               </tr>

@@ -31,7 +31,7 @@ export default function Header({ title, subtitle, chip, actions }: {
       <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-2">
         <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight leading-none">{title}</h1>
         {chipText && (
-          <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.1em] px-2.5 py-1 rounded-md bg-mav-fg text-mav-dark whitespace-nowrap">
+          <span className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.1em] px-2.5 py-1 rounded-md border border-mav-yellow/30 bg-mav-yellow/10 text-mav-yellow whitespace-nowrap">
             {chipText}
           </span>
         )}

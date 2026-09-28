@@ -35,7 +35,9 @@ export function Segments<T extends string>({ items, value, onChange, className =
         return (
           <button key={it.id} role="tab" aria-selected={on} onClick={() => onChange(it.id)} title={it.title}
             className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
-              on ? 'bg-mav-fg text-mav-dark border-mav-fg' : 'bg-mav-panel text-mav-fg border-mav-line hover:border-mav-fg/40'}`}>
+              // Tinted, not inverted: a white pill on Charcoal was the brightest thing on
+              // the page and pulled the eye off the data.
+              on ? 'bg-mav-yellow/15 text-mav-fg border-mav-yellow/60' : 'bg-mav-panel text-mav-muted border-mav-line hover:text-mav-fg hover:border-mav-fg/30'}`}>
             {it.label}
             {it.count != null && (
               <span className={`font-mono text-[11px] px-1.5 py-0.5 rounded-md ${on ? 'bg-mav-fill text-black' : 'bg-mav-dark text-mav-muted'}`}>{it.count}</span>

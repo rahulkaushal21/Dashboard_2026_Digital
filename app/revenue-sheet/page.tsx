@@ -540,7 +540,9 @@ export default function ProjectLedger() {
     { label: 'Days waiting', of: r => (r.confirmed_at || r.start_date) }),
     [mAwaiting, periodLabel])
 
-  const secBtn = 'rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs transition-colors'
+  const secBtn = 'rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs transition-colors'
+  // "More filters" is a filter control, not an action, so it stays quiet.
+  const toggleBtn = 'rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs transition-colors'
   const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
 
   return (
@@ -629,7 +631,7 @@ export default function ProjectLedger() {
         <MultiSelect label="All PMs" options={opts.pm} selected={fPm} onChange={v => { filtersTouched.current = true; setFPm(v) }} className="w-40" />
         <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
         <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
-        <button onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen} className={secBtn}>
+        <button onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen} className={toggleBtn}>
           More filters{hiddenActive > 0 ? ` · ${hiddenActive}` : ''}
         </button>
         {moreOpen && <>
@@ -666,7 +668,7 @@ export default function ProjectLedger() {
             className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-40 hover:brightness-95 transition">
             {busy ? `Moving ${pickedRows.length}…` : `Move ${pickedRows.length} to ${monLabel(target)}`}
           </button>
-          <button onClick={() => setPicked(new Set())} className="text-xs text-mav-muted hover:text-mav-fg">Clear selection</button>
+          <button onClick={() => setPicked(new Set())} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">Clear selection</button>
         </div>
       )}
 
@@ -746,7 +748,7 @@ export default function ProjectLedger() {
                         // says what was billed, and the next question is always who they
                         // are. CSV export is untouched — it reads c.get(r), not this.
                         <Link href={`/clients?client=${encodeURIComponent(r.company_name || '')}`}
-                          className="hover:text-mav-yellow transition-colors">{v}</Link>
+                          className="text-mav-yellow hover:underline underline-offset-2">{v}</Link>
                       ) : v}
                     </td>
                   )
@@ -772,8 +774,8 @@ export default function ProjectLedger() {
                     {isAdmin && (
                       <button onClick={() => removeRow(r)} disabled={removing === r.row_key}
                         title="Remove this line from the ledger (admin)"
-                        className="text-xs text-mav-fg/30 hover:text-red-400 disabled:opacity-40 transition-colors">
-                        {removing === r.row_key ? '…' : '✕'}
+                        className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 disabled:opacity-40 transition-colors">
+                        {removing === r.row_key ? '…' : 'Remove'}
                       </button>
                     )}
                   </span>
@@ -834,7 +836,7 @@ export default function ProjectLedger() {
                     const res = await restoreLedgerRow(d.row_key)
                     if (!res.ok) { window.alert(`Could not put it back: ${res.error}`); return }
                     clearReadCache(); load(); loadGone()
-                  }} className="text-xs text-mav-yellow hover:underline underline-offset-2">Put it back</button>
+                  }} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">Put it back</button>
                 </li>
               )
             })}

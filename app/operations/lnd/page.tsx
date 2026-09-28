@@ -482,7 +482,7 @@ export default function LndPage() {
         onChange={id => setOnly(id === 'all' ? '' : id as typeof only)} />
 
       <FilterBar right={<>
-        {(q || level.length > 0 || mgr.length > 0 || only) && <button onClick={() => { setQ(''); setLevel([]); setMgr([]); setOnly('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
+        {(q || level.length > 0 || mgr.length > 0 || only) && <button onClick={() => { setQ(''); setLevel([]); setMgr([]); setOnly('') }} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">✕ clear</button>}
         <span className="text-xs text-mav-muted">{filtered.length} learners</span>
       </>}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search learner or manager…" className={`${sel} min-w-[200px] flex-1`} />
@@ -518,7 +518,7 @@ export default function LndPage() {
                   <tr key={r.id} className="border-b border-mav-line/60 last:border-0 align-top">
                     <td className="px-4 py-3">
                       <button onClick={() => setPicked(r)}
-                        className="font-medium text-left hover:text-mav-yellow hover:underline underline-offset-2">
+                        className="font-medium text-left text-mav-yellow hover:underline underline-offset-2">
                         {displayName(r)}
                       </button>
                       {!p && <div><span className="text-[11px] text-mav-yellow">new this snapshot</span></div>}

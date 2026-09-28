@@ -330,9 +330,9 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
         )}
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg hover:border-mav-fg/40 transition-colors">Cancel</button>
+          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 transition-colors">Cancel</button>
           <button onClick={save} disabled={saving || !company.trim()}
-            className="text-xs px-4 py-1.5 rounded-md bg-mav-fill text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
+            className="text-xs px-4 py-1.5 rounded-full bg-mav-fill text-black font-semibold disabled:opacity-40 hover:brightness-95 transition">
             {saving ? 'Adding…' : needsForce ? 'Add anyway' : 'Add opportunity'}
           </button>
         </div>

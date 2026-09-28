@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import ClientLink from '@/components/ClientLink'
 import Header from '@/components/Header'
 import { useUnit } from '@/components/BusinessUnitProvider'
@@ -7,6 +8,7 @@ import { UnplacedNote } from '@/components/UnitToggle'
 import KPICard from '@/components/KPICard'
 import { daysSince, fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, SectionTitle, Panel } from '@/components/PageParts'
+import DateCell from '@/components/DateCell'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import { inUnit, unitOf } from '@/lib/business-unit'
 
@@ -34,18 +36,19 @@ const kindLabel = (t?: string) => { const v = (t || '').toLowerCase(); if (/comp
 // An empty selection means "all", exactly as the old "All GEOs" option did.
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 
-// One row per client. The defaults are what decides whether a row is yours and how bad it
+// One row per client, newest first. The date leads (it is when the client last flagged
+// it — the thing you scan for). The defaults are what decides whether a row is yours and how bad it
 // is — status, kind, where, what happened, whose client, when. Service and technology, the
 // latest reply and the resolution trail are a tick away in Columns; every thread in full
 // is in the drawer.
 const COLS: ColumnDef[] = [
+  { key: 'last', label: 'Date', locked: true },
   { key: 'client', label: 'Client', locked: true },
   { key: 'status', label: 'Status', default: true },
   { key: 'kind', label: 'Type', default: true },
   { key: 'geo', label: 'GEO', default: true },
   { key: 'what', label: 'What happened', default: true },
   { key: 'pm', label: 'PM', default: true },
-  { key: 'last', label: 'Last flagged', default: true },
   { key: 'first', label: 'First flagged' },
   { key: 'count', label: 'Escalations' },
   { key: 'latest', label: 'Latest update' },
@@ -57,31 +60,71 @@ const COLS: ColumnDef[] = [
 ]
 
 const badge = 'text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap'
-const cta = 'rounded-full bg-mav-fill text-black text-xs font-semibold px-3 py-1 hover:brightness-95 whitespace-nowrap disabled:opacity-50'
+
+// Part A's three action looks: primary (filled), secondary (yellow outline), destructive (red outline).
+const btnPrimary = 'rounded-full bg-mav-fill text-black font-semibold px-3 py-1 text-xs hover:brightness-95 whitespace-nowrap disabled:opacity-50'
+const btnSecondary = 'rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 whitespace-nowrap disabled:opacity-50'
+const btnDanger = 'rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 whitespace-nowrap disabled:opacity-50'
 
 // The row's other status moves, behind "More" so the sticky Action column stays one
 // button wide. Each is the same call the drawer makes.
-function RowMenu({ items, disabled }: { items: { label: string; title?: string; tone?: string; run: () => void }[]; disabled?: boolean }) {
+//
+// The list is portalled to <body> and placed with position: fixed from the button's
+// rect. Rendered inside the cell it was clipped by the table's overflow-x container
+// (only "Po…" of "Positive" showed). Fixed, it always sits in full view: below the
+// button, right-aligned to it, or above it when the button is near the bottom of the
+// screen. Scrolling closes it rather than leaving it floating away from its row.
+type MenuItem = { label: string; title?: string; kind?: 'secondary' | 'danger'; run: () => void }
+function RowMenu({ items, disabled }: { items: MenuItem[]; disabled?: boolean }) {
   const [open, setOpen] = useState(false)
-  const box = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  const place = useCallback(() => {
+    const b = btn.current?.getBoundingClientRect(); if (!b) return
+    const h = menu.current?.offsetHeight || items.length * 40 + 12
+    const right = Math.max(8, window.innerWidth - b.right)
+    const below = b.bottom + 4
+    const top = below + h > window.innerHeight - 8 && b.top - 4 - h >= 8 ? b.top - 4 - h : below
+    setPos({ top, right })
+  }, [items.length])
+  // Measure again once the list has rendered, so the flip uses its real height.
+  useLayoutEffect(() => { if (open) place() }, [open, place])
   useEffect(() => {
     if (!open) return
-    const onDown = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false) }
+    const close = () => setOpen(false)
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (menu.current?.contains(t) || btn.current?.contains(t)) return
+      close()
+    }
+    // Escape closes only the menu, not the page's drawer listener below it.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); close() } }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
   }, [open])
   return (
-    <div className="relative" ref={box} onClick={e => e.stopPropagation()}>
-      <button type="button" disabled={disabled} onClick={() => setOpen(v => !v)} aria-expanded={open}
-        className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-2.5 py-1 text-xs whitespace-nowrap disabled:opacity-50">More</button>
-      {open && (
-        <div className="absolute right-0 z-40 mt-1 w-48 rounded-lg border border-mav-line bg-mav-panel shadow-xl p-1">
+    <div onClick={e => e.stopPropagation()}>
+      <button ref={btn} type="button" disabled={disabled} onClick={() => setOpen(v => !v)} aria-expanded={open} aria-haspopup="menu"
+        className={btnSecondary}>More</button>
+      {open && typeof document !== 'undefined' && createPortal(
+        <div ref={menu} role="menu" onClick={e => e.stopPropagation()}
+          style={{ position: 'fixed', top: pos?.top ?? -9999, right: pos?.right ?? 0 }}
+          className="z-50 w-52 rounded-lg border border-mav-line bg-mav-panel shadow-xl p-1.5 flex flex-col gap-1.5">
           {items.map(it => (
-            <button key={it.label} type="button" title={it.title} onClick={() => { setOpen(false); it.run() }}
-              className={`w-full text-left text-sm px-2 py-1.5 rounded hover:bg-mav-fg/5 ${it.tone || ''}`}>{it.label}</button>
+            <button key={it.label} type="button" role="menuitem" title={it.title} onClick={() => { setOpen(false); it.run() }}
+              className={`w-full text-center ${it.kind === 'danger' ? btnDanger : btnSecondary} py-1.5`}>{it.label}</button>
           ))}
-        </div>
-      )}
+        </div>,
+        document.body)}
     </div>
   )
 }
@@ -167,7 +210,9 @@ export default function CriticalEscalations() {
     if (to && (!d || d > to)) return false
     return true
   }), [rows, q, geo, from, to, justMine, mine])
-  const filtered = useMemo(() => status === 'all' ? scoped : scoped.filter(r => r.status === status), [scoped, status])
+  // Newest first by last flagged — the date the table leads with.
+  const filtered = useMemo(() => (status === 'all' ? scoped : scoped.filter(r => r.status === status))
+    .slice().sort((a, b) => (b.last_flagged_date || '').localeCompare(a.last_flagged_date || '')), [scoped, status])
   const tabCount = (s: string) => scoped.filter(r => r.status === s).length
   const hiddenActive = (from ? 1 : 0) + (to ? 1 : 0)
 
@@ -243,7 +288,7 @@ export default function CriticalEscalations() {
 
       <FilterBar right={<>
         <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{filtered.length} clients · {openCount} open · {unresolvedCount} unresolved</span>
-        {(q || geo.length > 0 || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo([]); setFrom(''); setTo(''); setStatus('all') }} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">✕ Clear all</button>}
+        {(q || geo.length > 0 || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo([]); setFrom(''); setTo(''); setStatus('all') }} className={btnSecondary}>✕ Clear all</button>}
       </>}>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
@@ -252,7 +297,7 @@ export default function CriticalEscalations() {
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client or detail…" className={`${sel} w-64`} />
         <MultiSelect label="All GEOs" options={geos} selected={geo} onChange={setGeo} className="w-40" />
         <button onClick={() => setMore(v => !v)} aria-expanded={more || hiddenActive > 0}
-          className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+          className={btnSecondary}>
           More filters{hiddenActive ? ` (${hiddenActive})` : ''}
         </button>
         {(more || hiddenActive > 0) && <>
@@ -272,13 +317,13 @@ export default function CriticalEscalations() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left border-b border-mav-line"><tr>
+                <th className="px-3 py-2.5">Date</th>
                 <th className="px-3 py-2.5">Client</th>
                 {cols.on('status') && <th className="px-3 py-2.5">Status</th>}
                 {cols.on('kind') && <th className="px-3 py-2.5">Type</th>}
                 {cols.on('geo') && <th className="px-3 py-2.5">GEO</th>}
                 {cols.on('what') && <th className="px-3 py-2.5">What happened</th>}
                 {cols.on('pm') && <th className="px-3 py-2.5">PM</th>}
-                {cols.on('last') && <th className="px-3 py-2.5">Last flagged</th>}
                 {cols.on('first') && <th className="px-3 py-2.5">First flagged</th>}
                 {cols.on('count') && <th className="px-3 py-2.5 text-right">Escalations</th>}
                 {cols.on('latest') && <th className="px-3 py-2.5">Latest update</th>}
@@ -295,6 +340,7 @@ export default function CriticalEscalations() {
                   const sb = sentBucket(r.latest_sentiment)
                   return (
                   <tr key={key(r)} onClick={() => setSel(r)} className="border-b border-mav-line/60 last:border-0 hover:bg-mav-dark/40 cursor-pointer">
+                    <td className="px-3 py-2.5" title="Last flagged"><DateCell d={r.last_flagged_date} /></td>
                     <td className="px-3 py-2.5 font-semibold max-w-[200px] truncate" title={r.company_name}>{r.company_name}</td>
                     {cols.on('status') && <td className="px-3 py-2.5">
                       <div className="flex flex-wrap gap-1">
@@ -308,8 +354,7 @@ export default function CriticalEscalations() {
                     {/* The PM is a default column — it is the one thing that decides
                         whether a row is yours. */}
                     {cols.on('pm') && <td className="px-3 py-2.5 whitespace-nowrap">{r.pm_owner || '—'}</td>}
-                    {cols.on('last') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{day(r.last_flagged_date) || '—'}</td>}
-                    {cols.on('first') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{day(r.first_flagged_date) || '—'}</td>}
+                    {cols.on('first') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{fmtDay(r.first_flagged_date)}</td>}
                     {cols.on('count') && <td className="px-3 py-2.5 text-right tabular-nums">{r.count}</td>}
                     {cols.on('latest') && <td className="px-3 py-2.5">
                       <div className="flex items-center gap-1.5 max-w-[320px]">
@@ -319,21 +364,21 @@ export default function CriticalEscalations() {
                     </td>}
                     {cols.on('service') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.service_dept || '—'}</td>}
                     {cols.on('tech') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.technology || '—'}</td>}
-                    {cols.on('resolved') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.resolved_at ? `${day(r.resolved_at)}${r.resolved_by ? ` · ${r.resolved_by}` : ''}` : '—'}</td>}
+                    {cols.on('resolved') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.resolved_at ? `${fmtDay(r.resolved_at)}${r.resolved_by ? ` · ${r.resolved_by}` : ''}` : '—'}</td>}
                     {cols.on('email') && <td className="px-3 py-2.5 text-mav-muted max-w-[200px] truncate" title={r.client_email}>{r.client_email || '—'}</td>}
                     <td className="px-3 py-2.5 sticky-action" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1.5">
                         {!resolved
-                          ? <button onClick={() => setStatusOf(r, 'fixed')} disabled={b} className={cta}>Mark fixed</button>
-                          : <button onClick={() => setStatusOf(r, 'open')} disabled={b} className={cta}>Reopen</button>}
+                          ? <button onClick={() => setStatusOf(r, 'fixed')} disabled={b} className={btnPrimary}>Mark fixed</button>
+                          : <button onClick={() => setStatusOf(r, 'open')} disabled={b} className={btnPrimary}>Reopen</button>}
                         <RowMenu disabled={b} items={[
                           ...(!resolved ? [
-                            { label: 'Positive', tone: 'text-green-400', run: () => setStatusOf(r, 'positive') },
-                            ...(r.status !== 'unresolved' ? [{ label: 'Unresolved', tone: 'text-amber-300', title: 'Looked at, still broken — keeps it as live risk here and on Clients', run: () => setStatusOf(r, 'unresolved') }] : []),
+                            { label: 'Positive', run: () => setStatusOf(r, 'positive') },
+                            ...(r.status !== 'unresolved' ? [{ label: 'Unresolved', title: 'Looked at, still broken — keeps it as live risk here and on Clients', run: () => setStatusOf(r, 'unresolved') }] : []),
                           ] : [
-                            { label: 'Unresolved', tone: 'text-amber-300', title: 'Closed too early — it is still broken', run: () => setStatusOf(r, 'unresolved') },
+                            { label: 'Unresolved', title: 'Closed too early — it is still broken', run: () => setStatusOf(r, 'unresolved') },
                           ]),
-                          { label: 'Not an issue', tone: 'text-mav-muted hover:text-red-300', title: 'Not really our escalation — e.g. client frustrated for external reasons. Removes it from the list.', run: () => remove(r) },
+                          { label: 'Not an issue', kind: 'danger' as const, title: 'Not really our escalation — e.g. client frustrated for external reasons. Removes it from the list.', run: () => remove(r) },
                           { label: 'Open details', run: () => setSel(r) },
                         ]} />
                       </div>
@@ -370,7 +415,7 @@ export default function CriticalEscalations() {
             <div className="space-y-4">
               {sel_.items.map((it, i) => (
                 <div key={it.thread_id} className="rounded-lg border border-mav-line bg-mav-dark/30 p-3">
-                  {sel_.count > 1 && <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Escalation {i + 1}{it.first_flagged_date ? ` · ${day(it.first_flagged_date)}` : ''}</div>}
+                  {sel_.count > 1 && <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Escalation {i + 1}{it.first_flagged_date ? ` · ${fmtDay(it.first_flagged_date)}` : ''}</div>}
                   <div className="text-xs uppercase tracking-wide text-red-300/80 mb-1">What happened</div>
                   <p className="text-sm leading-relaxed whitespace-pre-line">{it.escalation_summary || it.source_subject || '(no detail)'}</p>
                   {it.latest_summary && it.latest_summary !== it.escalation_summary && (
@@ -387,19 +432,19 @@ export default function CriticalEscalations() {
             <div className="mt-6 border-t border-mav-line pt-4 space-y-3">
               {sel_.status !== 'resolved' ? (
                 <div className="flex gap-2">
-                  <button onClick={() => setStatusOf(sel_, 'fixed')} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-green-500/40 text-green-300 hover:bg-green-500/10 disabled:opacity-50">Mark fixed</button>
-                  <button onClick={() => setStatusOf(sel_, 'positive')} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-green-500/30 text-green-400 hover:bg-green-500/10 disabled:opacity-50">Mark positive</button>
-                  {sel_.status !== 'unresolved' && <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Looked at, still broken — stays as live risk here and on Clients" className="text-sm px-3 py-2 rounded-md border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-50">Unresolved</button>}
+                  <button onClick={() => setStatusOf(sel_, 'fixed')} disabled={busy === key(sel_)} className={btnPrimary}>Mark fixed</button>
+                  <button onClick={() => setStatusOf(sel_, 'positive')} disabled={busy === key(sel_)} className={btnSecondary}>Mark positive</button>
+                  {sel_.status !== 'unresolved' && <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Looked at, still broken — stays as live risk here and on Clients" className={btnSecondary}>Unresolved</button>}
                 </div>
               ) : (
                 <div className="flex gap-2">
-                  <button onClick={() => setStatusOf(sel_, 'open')} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-orange-300 disabled:opacity-50">Reopen</button>
-                  <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Closed too early — it is still broken" className="text-sm px-3 py-2 rounded-md border border-amber-500/40 text-amber-300 hover:bg-amber-500/10 disabled:opacity-50">Unresolved</button>
+                  <button onClick={() => setStatusOf(sel_, 'open')} disabled={busy === key(sel_)} className={btnPrimary}>Reopen</button>
+                  <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Closed too early — it is still broken" className={btnSecondary}>Unresolved</button>
                 </div>
               )}
               <div>
                 <p className="text-xs text-mav-muted mb-2">Not really our escalation — client frustrated for external reasons, not a problem from our side? Remove it (the email signals are preserved).</p>
-                <button onClick={() => remove(sel_)} disabled={busy === key(sel_)} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-50">Not an escalation (remove)</button>
+                <button onClick={() => remove(sel_)} disabled={busy === key(sel_)} className={btnDanger}>Not an escalation (remove)</button>
               </div>
             </div>
           </aside>

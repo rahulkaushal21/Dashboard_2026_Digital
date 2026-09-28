@@ -20,18 +20,19 @@ export interface Theme {
 }
 
 // First in the list is the fallback for anybody with no pick and no team default.
-export const DEFAULT_THEME = 'studio'
+// Charcoal again since 28 Sep 2026 — the light themes glared on a long day.
+export const DEFAULT_THEME = 'dark'
 
 export const THEMES: Theme[] = [
   {
-    id: 'studio', name: 'Studio', family: 'light',
-    blurb: 'The mavlers.com palette — light grey page, white cards, near-black rail, brand yellow. The team default.',
-    swatch: ['#F4F4F4', '#FFFFFF', '#E5E5E5', '#1B1B1B'],
+    id: 'dark', name: 'Charcoal', family: 'dark',
+    blurb: 'The brand near-black from mavlers.com, soft text and yellow only where you act. The team default.',
+    swatch: ['#1B1B1B', '#232323', '#333333', '#E6E6E6'],
   },
   {
-    id: 'dark', name: 'Charcoal', family: 'dark',
-    blurb: 'The original. Near-black, high contrast, what the team has been using.',
-    swatch: ['#1B1B1B', '#242424', '#333333', '#F2F2F2'],
+    id: 'studio', name: 'Studio', family: 'light',
+    blurb: 'The mavlers.com palette in light — light grey page, white cards, near-black rail.',
+    swatch: ['#F4F4F4', '#FFFFFF', '#E5E5E5', '#1B1B1B'],
   },
   {
     id: 'midnight', name: 'Midnight', family: 'dark',

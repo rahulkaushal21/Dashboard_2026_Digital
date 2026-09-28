@@ -121,7 +121,7 @@ export default function CardDetail<T>({ label, value, details, onClose }: {
                 return (
                   <button key={k || 'all'} role="tab" aria-selected={on} onClick={() => setTab(k)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[13px] font-medium border transition-colors ${
-                      on ? 'bg-mav-fg text-mav-dark border-mav-fg' : 'bg-mav-panel border-mav-line hover:border-mav-fg/40'}`}>
+                      on ? 'bg-mav-yellow/15 text-mav-fg border-mav-yellow/60' : 'bg-mav-panel text-mav-muted border-mav-line hover:text-mav-fg hover:border-mav-fg/30'}`}>
                     {k || 'All'}
                     <span className={`text-[11px] px-1.5 py-0.5 rounded-md ${on ? 'bg-mav-fill text-black' : 'bg-mav-dark text-mav-muted'}`}>
                       {rs.length}{groupTotal ? ` · ${groupTotal(rs)}` : ''}

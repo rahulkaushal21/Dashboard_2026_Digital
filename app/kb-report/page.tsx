@@ -505,7 +505,7 @@ export default function Reports() {
         // Shown whenever ANYTHING is off default, dates included. It used to appear only
         // for the dropdowns, so picking a range left no way back but a page reload.
         (anyFilter || datesChanged) && (
-          <button onClick={reset} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+          <button onClick={reset} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">
             ✕ Clear all
           </button>
         )}>

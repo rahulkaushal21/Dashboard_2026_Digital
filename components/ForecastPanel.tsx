@@ -126,7 +126,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
 
   const recalc = (
     <button onClick={load} disabled={loading}
-      className="inline-flex items-center gap-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs disabled:opacity-50">
+      className="inline-flex items-center gap-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs disabled:opacity-50">
       <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Recalculate
     </button>
   )
@@ -276,7 +276,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
               </dl>
               {drag.accounts.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-mav-line">
-                  <button onClick={() => setShowAccounts(v => !v)} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+                  <button onClick={() => setShowAccounts(v => !v)} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">
                     {showAccounts ? 'Hide the quiet accounts' : `Show the ${drag.accounts.length} quiet accounts`}
                   </button>
                   {showAccounts && (

@@ -20,7 +20,7 @@ export default function MineFilter({ on, onChange, label, hidden }: {
       {on && hidden > 0 && (
         <span className="text-xs text-mav-muted">
           {hidden.toLocaleString()} other{hidden === 1 ? '' : 's'} hidden &middot;{' '}
-          <button onClick={() => onChange(false)} className="text-mav-yellow hover:underline">show all</button>
+          <button onClick={() => onChange(false)} className="text-mav-yellow hover:underline underline-offset-2">show all</button>
         </span>
       )}
     </div>

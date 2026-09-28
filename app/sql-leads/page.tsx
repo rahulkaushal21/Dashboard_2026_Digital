@@ -83,7 +83,7 @@ export default function SqlLeads() {
       </KPIRow>
 
       <FilterBar right={
-        <button onClick={reset} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">Reset</button>
+        <button onClick={reset} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">Reset</button>
       }>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search company…" className={`${selCls} w-44`} />
         <MultiSelect label="All ventures" options={uniq(all.map(x => x.venture))} selected={fVenture} onChange={setFVenture} className="w-40" />

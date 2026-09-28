@@ -1035,9 +1035,9 @@ export default function Clients() {
           <div className="text-xs text-mav-muted">
             {(mode === 'clients' ? clients.length : dir.length)} total
             {showInd
-              ? <> · click a bar to filter{ind.length ? ` · showing ${indLabel}` : ''} · <button onClick={() => setShowInd(false)} className="hover:text-mav-fg underline underline-offset-2">hide</button></>
-              : <> · <button onClick={() => setShowInd(true)} className="hover:text-mav-fg underline underline-offset-2">show</button></>}
-            {!showInd && ind.length > 0 && <> · <button onClick={() => setInd([])} className="hover:text-mav-fg underline underline-offset-2">clear filter</button></>}
+              ? <> · click a bar to filter{ind.length ? ` · showing ${indLabel}` : ''} · <button onClick={() => setShowInd(false)} className="text-mav-yellow hover:underline underline-offset-2">hide</button></>
+              : <> · <button onClick={() => setShowInd(true)} className="text-mav-yellow hover:underline underline-offset-2">show</button></>}
+            {!showInd && ind.length > 0 && <> · <button onClick={() => setInd([])} className="text-mav-yellow hover:underline underline-offset-2">clear filter</button></>}
           </div>
         }>
         <div className={`space-y-1.5 ${showInd ? '' : 'hidden'}`}>
@@ -1056,7 +1056,7 @@ export default function Clients() {
             )
           })}
         </div>
-        {showInd && ind.length > 0 && <button onClick={() => setInd([])} className="mt-3 text-xs text-mav-muted hover:text-mav-fg">✕ Clear industry filter</button>}
+        {showInd && ind.length > 0 && <button onClick={() => setInd([])} className="mt-3 rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">✕ Clear industry filter</button>}
       </Panel>
 
       <SectionTitle info={healthInfo}>Clients</SectionTitle>
@@ -1078,7 +1078,7 @@ export default function Clients() {
           behind "More filters" — nothing removed, only regrouped. */}
       <FilterBar right={<>
         <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{mode === 'clients' ? rows.length : dirRows.length} shown</span>
-        {anyFilter && <button onClick={clearAll} className="text-xs text-mav-muted hover:text-mav-fg">✕ Clear all</button>}
+        {anyFilter && <button onClick={clearAll} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">✕ Clear all</button>}
       </>}>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
@@ -1109,7 +1109,7 @@ export default function Clients() {
           <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="Activity from" />
           <span className="text-xs text-mav-muted">→</span>
           <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="Activity to" />
-          {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear dates</button>}
+          {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">✕ clear dates</button>}
           <span className={`${lbl} ml-2`}>Quick views</span>
           <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={pill(aiOnly)}>AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
           <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={pill(dipOnly, 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium')}>Revenue dip{dipCount ? ` (${dipCount})` : ''}</button>
@@ -1252,7 +1252,7 @@ export default function Clients() {
             <div className="text-xs text-mav-muted">
               {autoTotals.companies.toLocaleString()} companies in the directory · {autoTotals.booked} already buying · {autoRows.length} industries
               {' · '}
-              <button onClick={() => setShowAuto(v => !v)} className="hover:text-mav-fg underline underline-offset-2">{showAuto ? 'hide' : 'show'}</button>
+              <button onClick={() => setShowAuto(v => !v)} className="text-mav-yellow hover:underline underline-offset-2">{showAuto ? 'hide' : 'show'}</button>
             </div>
           }>
           <button onClick={() => setShowAuto(v => !v)} className="inline-flex items-center gap-1.5 uppercase hover:text-mav-fg transition-colors">
@@ -1320,7 +1320,7 @@ export default function Clients() {
           {(Object.keys(PLAY_TYPE_TONE) as PlayType[]).map(t => (
             <button key={t} onClick={() => setPlayType(playType === t ? '' : t)} className={pill(playType === t)}>{t}</button>
           ))}
-          {playType && <button onClick={() => setPlayType('')} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear</button>}
+          {playType && <button onClick={() => setPlayType('')} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">✕ clear</button>}
         </FilterBar>
 
         <div className="space-y-2">
@@ -1379,7 +1379,7 @@ export default function Clients() {
                       </div>
                     )}
                     <button onClick={() => { setInd([r.name]); setMode('directory'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
-                      className="mt-4 text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg transition-colors">
+                      className="mt-4 text-xs px-3 py-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 transition-colors">
                       → See the {r.companies.toLocaleString()} {r.name} companies in the directory
                     </button>
                   </div>

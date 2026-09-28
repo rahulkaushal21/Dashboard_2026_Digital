@@ -137,9 +137,9 @@ export default function AddFeedbackDialog({ onClose, onAdded }: { onClose: () =>
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
 
         <div className="flex items-center justify-end gap-2 mt-5">
-          <button onClick={onClose} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Cancel</button>
+          <button onClick={onClose} className="text-sm px-3 py-2 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10">Cancel</button>
           <button onClick={save} disabled={saving || !company.trim() || quote.trim().length < 20}
-            className="text-sm px-4 py-2 rounded-md bg-mav-yellow text-black font-medium hover:bg-mav-yellow/90 disabled:opacity-40">
+            className="text-sm px-4 py-2 rounded-full bg-mav-fill text-black font-semibold hover:brightness-95 disabled:opacity-40">
             {saving ? 'Sending…' : approver ? `Send to ${approver.name}` : 'Send for approval'}
           </button>
         </div>

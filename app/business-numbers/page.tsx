@@ -373,7 +373,7 @@ export default function BusinessNumbers() {
                 {deals.map(d => (
                   <tr key={d.id} className="border-b border-mav-line/60 last:border-0 align-top">
                     <td className={td}>
-                      <Link href={`/opportunities?deal=${d.id}`} className="hover:text-mav-yellow transition-colors">
+                      <Link href={`/opportunities?deal=${d.id}`} className="text-mav-yellow hover:underline underline-offset-2">
                         {d.company_name || '—'}
                       </Link>
                     </td>

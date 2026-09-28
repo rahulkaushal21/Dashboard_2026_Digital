@@ -61,7 +61,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
                 <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   {canEdit && (
                     <button onClick={() => toggle(r)} disabled={busy}
-                      className="text-xs text-mav-muted hover:text-amber-300 disabled:opacity-50">Retire</button>
+                      className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 disabled:opacity-50">Retire</button>
                   )}
                 </td>
               </tr>
@@ -84,7 +84,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
 
       {retired.length > 0 && (
         <div>
-          <button onClick={() => setShowRetired(v => !v)} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+          <button onClick={() => setShowRetired(v => !v)} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">
             {showRetired ? 'Hide' : 'Show'} {retired.length} retired
           </button>
           {showRetired && (
@@ -92,7 +92,7 @@ export default function PickListPanel({ kind, title, blurb, canEdit }: {
               {retired.map(r => (
                 <span key={r.value} className="inline-flex items-center gap-2 text-xs px-2.5 py-1 rounded-full border border-mav-line text-mav-muted">
                   {r.value}
-                  {canEdit && <button onClick={() => toggle(r)} disabled={busy} className="text-mav-yellow hover:underline">restore</button>}
+                  {canEdit && <button onClick={() => toggle(r)} disabled={busy} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 ml-1 disabled:opacity-50">Restore</button>}
                 </span>
               ))}
             </div>

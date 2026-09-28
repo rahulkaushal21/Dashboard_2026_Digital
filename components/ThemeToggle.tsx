@@ -16,11 +16,12 @@ import { THEMES, themeById, isTheme, DEFAULT_THEME } from '@/lib/themes'
 // what the pre-paint script reads. A newly-changed default therefore reaches somebody on
 // their second load, not their first, which is the right trade for never flashing.
 
-// Versioned. Studio became the team default on 28 Sep 2026, and a default only reaches
-// people with no saved pick — so the keys moved on, and every browser starts once on
-// Studio. Anybody who wants Charcoal back picks it again and it sticks from then on.
-export const THEME_KEY = 'mav-theme-v2'          // this person's pick
-export const TEAM_THEME_KEY = 'mav-theme-team-v2' // last known team default
+// Versioned, because a new default only reaches people with no saved pick. v2 moved
+// everybody onto Studio; v3 (same day, 28 Sep 2026) moves everybody back onto Charcoal,
+// which Pratik settled on after the light themes glared. It also drops the cached team
+// default, which by then said Warm Paper. A pick made from here on sticks.
+export const THEME_KEY = 'mav-theme-v3'          // this person's pick
+export const TEAM_THEME_KEY = 'mav-theme-team-v3' // last known team default
 
 export function applyTheme(id: string) {
   const t = themeById(id) || THEMES[0]
@@ -87,7 +88,7 @@ export default function ThemeToggle() {
  * Without it the browser paints the built-in dark, then React mounts and switches — a
  * flash on every load for anybody not on Charcoal. An inline blocking script in <head> is
  * the only place that can be prevented. Falls back through: my pick, the cached team
- * default, then Studio.
+ * default, then Charcoal.
  */
 export const themeScript = `(function(){try{
 var F={${THEMES.map(t => `'${t.id}':'${t.family}'`).join(',')}};
@@ -95,4 +96,4 @@ var t=localStorage.getItem('${THEME_KEY}')||localStorage.getItem('${TEAM_THEME_K
 if(!F[t])t='${DEFAULT_THEME}';
 document.documentElement.setAttribute('data-theme',t);
 document.documentElement.setAttribute('data-family',F[t]);
-}catch(e){document.documentElement.setAttribute('data-theme','${DEFAULT_THEME}');document.documentElement.setAttribute('data-family','light')}})()`
+}catch(e){document.documentElement.setAttribute('data-theme','${DEFAULT_THEME}');document.documentElement.setAttribute('data-family','${themeById(DEFAULT_THEME)?.family || 'dark'}')}})()`

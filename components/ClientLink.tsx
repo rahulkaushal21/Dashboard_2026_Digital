@@ -27,7 +27,7 @@ export default function ClientLink({ name, className = '', title }: { name?: str
       href={`/clients?client=${encodeURIComponent(v)}`}
       onClick={e => e.stopPropagation()}
       title={title || `Open ${v} in Client 360`}
-      className={`hover:text-mav-yellow hover:underline underline-offset-2 decoration-dotted transition-colors ${className}`}>
+      className={`text-mav-yellow hover:underline underline-offset-2 transition-colors ${className}`}>
       {v}
     </Link>
   )

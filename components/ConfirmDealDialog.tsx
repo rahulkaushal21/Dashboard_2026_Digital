@@ -554,11 +554,11 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button onClick={combineAnyway} disabled={saving}
-                  className="text-xs px-3 py-1.5 rounded-md bg-mav-yellow text-black font-medium hover:brightness-110 disabled:opacity-50">
+                  className="text-xs px-3 py-1.5 rounded-full bg-mav-fill text-black font-semibold hover:brightness-95 disabled:opacity-50">
                   {saving ? 'Attaching…' : `Yes — bill ${alsoBilling.length + 1} as one`}
                 </button>
                 <button onClick={onConfirmed} disabled={saving}
-                  className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/25 text-mav-fg/70 hover:text-mav-fg">
+                  className="text-xs px-3 py-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10">
                   Leave them separate
                 </button>
               </div>
@@ -580,14 +580,14 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose}
-              className="text-xs px-3 py-1.5 rounded-md border border-mav-fg/20 text-mav-fg/70 hover:text-mav-fg hover:border-mav-fg/40 transition-colors">
+              className="text-xs px-3 py-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 transition-colors">
               Cancel
             </button>
             {/* Not disabled when incomplete: the checklist above says what is missing, and
                 a dead button with no explanation is the commonest way a form wastes
                 somebody's afternoon. The database refuses either way. */}
             <button onClick={save} disabled={saving}
-              className="text-xs px-4 py-1.5 rounded-md bg-green-500 text-black font-medium disabled:opacity-40 hover:brightness-110 transition">
+              className="text-xs px-4 py-1.5 rounded-full bg-green-500 text-black font-semibold disabled:opacity-40 hover:brightness-110 transition">
               {saving ? 'Confirming…' : 'Confirm as won'}
             </button>
           </div>

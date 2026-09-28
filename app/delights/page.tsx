@@ -6,6 +6,7 @@ import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote } from '@/components/UnitToggle'
 import KPICard from '@/components/KPICard'
 import { daysSince, fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
+import DateCell from '@/components/DateCell'
 import { KPIRow, Segments, FilterBar, SectionTitle, Panel } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import { inUnit, unitOf } from '@/lib/business-unit'
@@ -29,15 +30,16 @@ const keeps = (picked: string[], v?: string | null) => picked.length === 0 || pi
 
 // One row per client. The defaults are what a glance needs — who, where, which source,
 // what they said, how often, when; the rest of what the old cards carried is a tick away
-// in Columns, and every quote in full is in the drawer.
+// in Columns, and every quote in full is in the drawer. Date leads and is locked: the
+// board opens newest first, and "what came in today" is the first question asked of it.
 const COLS: ColumnDef[] = [
+  { key: 'date', label: 'Date', locked: true },
   { key: 'client', label: 'Client', locked: true },
   { key: 'geo', label: 'GEO', default: true },
   { key: 'source', label: 'Source', default: true },
   { key: 'quote', label: 'Feedback', default: true },
   { key: 'project', label: 'Project' },
   { key: 'count', label: 'Testimonials', default: true },
-  { key: 'date', label: 'Date', default: true },
   { key: 'email', label: 'Client email' },
   { key: 'evidence', label: 'Evidence (screenshot)' },
   { key: 'action', label: 'Action', locked: true },
@@ -153,11 +155,13 @@ export default function Delights() {
     if (to && (!d || d > to)) return false
     return true
   }), [rows, q, geo, from, to, justMine, mine])
+  // Newest first, by the client's latest feedback date — the same date the Date column
+  // prints. Undated rows go to the bottom rather than the top.
   const filtered = useMemo(() => scoped.filter(r => {
     if (src === 'sheet' && !(r.sheet_count || 0)) return false
     if (src === 'email' && !(r.email_count || 0)) return false
     return true
-  }), [scoped, src])
+  }).sort((a, b) => day(b.date).localeCompare(day(a.date))), [scoped, src])
 
   // Anything behind "More filters" that is set. The row opens itself when one is, so a
   // live filter is never hidden behind a closed toggle.
@@ -218,7 +222,7 @@ export default function Delights() {
                   <tr key={m.id} className="border-b border-mav-line/60 last:border-0 align-top">
                     <td className="px-3 py-2.5 font-medium whitespace-nowrap">{m.company_name}</td>
                     <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{m.channel}</td>
-                    <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{(m.happened_on || '').slice(0, 10)}</td>
+                    <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{fmtDay(m.happened_on)}</td>
                     <td className="px-3 py-2.5"><p className="max-w-[420px] truncate italic text-mav-fg/80" title={m.quote}>&ldquo;{m.quote}&rdquo;</p></td>
                     <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{m.pm_owner || '—'}</td>
                     <td className="px-3 py-2.5 text-mav-muted max-w-[180px] truncate" title={m.submitted_by}>{m.submitted_by}</td>
@@ -239,7 +243,7 @@ export default function Delights() {
                           const res = await decideManualFeedback(m.id, false, why || undefined)
                           if (!res.ok) { window.alert(res.error); return }
                           loadManual()
-                        }} className="text-xs text-mav-muted hover:text-mav-fg whitespace-nowrap">Not this one</button>
+                        }} className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 whitespace-nowrap">Not this one</button>
                       </div>
                     </td>
                   </tr>
@@ -267,7 +271,7 @@ export default function Delights() {
 
       <FilterBar right={<>
         <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{filtered.length} happy clients</span>
-        {anyFilter && <button onClick={() => { setQ(''); setGeo([]); setSrc(''); setFrom(''); setTo('') }} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">✕ Clear all</button>}
+        {anyFilter && <button onClick={() => { setQ(''); setGeo([]); setSrc(''); setFrom(''); setTo('') }} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 whitespace-nowrap">✕ Clear all</button>}
       </>}>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
@@ -296,13 +300,13 @@ export default function Delights() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left border-b border-mav-line"><tr>
+                <th className="px-3 py-2.5">Date</th>
                 <th className="px-3 py-2.5">Client</th>
                 {cols.on('geo') && <th className="px-3 py-2.5">GEO</th>}
                 {cols.on('source') && <th className="px-3 py-2.5">Source</th>}
                 {cols.on('quote') && <th className="px-3 py-2.5">Feedback</th>}
                 {cols.on('project') && <th className="px-3 py-2.5">Project</th>}
                 {cols.on('count') && <th className="px-3 py-2.5 text-right">Testimonials</th>}
-                {cols.on('date') && <th className="px-3 py-2.5">Date</th>}
                 {cols.on('email') && <th className="px-3 py-2.5">Client email</th>}
                 {cols.on('evidence') && <th className="px-3 py-2.5">Evidence</th>}
                 <th className="px-3 py-2.5 sticky-action">Action</th>
@@ -313,6 +317,7 @@ export default function Delights() {
                   const fallback = `${r.headline_evidence ? 'Great feedback captured as a screenshot' : 'Positive feedback on record'}${r.headline_project ? ` — ${r.headline_project}` : ''}.`
                   return (
                   <tr key={r.company_name} onClick={() => setSel(r)} className="border-b border-mav-line/60 last:border-0 hover:bg-mav-dark/40 cursor-pointer">
+                    <td className="px-3 py-2.5 text-mav-muted"><DateCell d={r.date} /></td>
                     <td className="px-3 py-2.5 font-semibold max-w-[220px] truncate" title={r.company_name}>{r.company_name}</td>
                     {cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.geo || '—'}</td>}
                     {cols.on('source') && <td className="px-3 py-2.5">
@@ -328,11 +333,10 @@ export default function Delights() {
                     </td>}
                     {cols.on('project') && <td className="px-3 py-2.5 text-mav-muted max-w-[180px] truncate" title={r.headline_project}>{r.headline_project || '—'}</td>}
                     {cols.on('count') && <td className="px-3 py-2.5 text-right tabular-nums">{r.count}</td>}
-                    {cols.on('date') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{day(r.date) || '—'}</td>}
                     {cols.on('email') && <td className="px-3 py-2.5 text-mav-muted max-w-[200px] truncate" title={r.client_email}>{r.client_email || '—'}</td>}
                     {cols.on('evidence') && <td className="px-3 py-2.5 whitespace-nowrap">
                       {r.headline_evidence
-                        ? <a href={r.headline_evidence} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-green-400 hover:underline text-xs">View feedback</a>
+                        ? <a href={r.headline_evidence} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-mav-yellow hover:underline underline-offset-2 text-xs">View feedback</a>
                         : <span className="text-mav-muted">—</span>}
                     </td>}
                     <td className="px-3 py-2.5 sticky-action">
@@ -352,7 +356,7 @@ export default function Delights() {
           <aside onClick={e => e.stopPropagation()} className="absolute right-0 top-0 h-full w-full bg-mav-panel border-l border-mav-line shadow-2xl overflow-y-auto p-6 lg:p-8">
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
-                <h2 className="text-xl font-semibold"><ClientLink name={sel_.company_name} /></h2>
+                <h2 className="text-xl font-semibold"><ClientLink name={sel_.company_name} className="text-mav-yellow" /></h2>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {sel_.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.geo}</span>}
                   {sel_.count > 1 && <span className="text-xs px-2 py-1 rounded-full bg-green-500/15 text-green-400">{sel_.count} testimonials</span>}
@@ -373,8 +377,8 @@ export default function Delights() {
                     <span className={`font-semibold px-2 py-0.5 rounded-full ${it.source === 'email' ? 'bg-sky-500/15 text-sky-300' : 'bg-green-500/15 text-green-400'}`} title={it.source === 'email' ? `From the email review${it.subject ? ` — “${it.subject}”` : ''}` : 'Logged in the feedback sheet'}>{it.source === 'email' ? 'Email' : 'Sheet'}</span>
                     {it.project && <span className="px-1.5 py-0.5 rounded-full bg-mav-line">{it.project}</span>}
                     {it.type && <span>{it.type}</span>}
-                    {it.date && <span>· {it.date}</span>}
-                    {it.evidence && <a href={it.evidence} target="_blank" rel="noopener noreferrer" className="text-green-400 hover:underline">View feedback</a>}
+                    {it.date && <span>· {fmtDay(it.date)}</span>}
+                    {it.evidence && <a href={it.evidence} target="_blank" rel="noopener noreferrer" className="text-mav-yellow hover:underline underline-offset-2">View feedback</a>}
                   </div>
                 </div>
               ))}

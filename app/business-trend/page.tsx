@@ -553,7 +553,7 @@ export default function BusinessTrendPage() {
           <input type="month" value={toMonth} onChange={e => setToMonth(e.target.value)} className={selCls} />
         </label>
         <button onClick={() => { setFromMonth(''); setToMonth('') }}
-          className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+          className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">
           Reset
         </button>
       </FilterBar>

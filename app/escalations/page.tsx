@@ -195,7 +195,7 @@ export default function Escalations() {
       </KPIRow>
 
       <FilterBar right={
-        <button onClick={reset} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">Reset</button>
+        <button onClick={reset} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">Reset</button>
       }>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
@@ -295,7 +295,7 @@ function EscalationDetail({ e, onClose }: { e: Escalation; onClose: () => void }
             <Row label="From">{e.source_sender}</Row>
             <Row label="Email date">{e.source_date ? new Date(e.source_date).toLocaleString() : ''}</Row>
             <Row label="Week">{e.week}</Row>
-            <Row label="Link">{isLink(e.link) ? <a href={e.link} target="_blank" rel="noreferrer" className="text-mav-yellow hover:underline break-all">{e.link}</a> : e.link}</Row>
+            <Row label="Link">{isLink(e.link) ? <a href={e.link} target="_blank" rel="noreferrer" className="text-mav-yellow hover:underline underline-offset-2 break-all">{e.link}</a> : e.link}</Row>
           </div>
           {!e.evidence && (
             <div className="mt-3 text-xs text-mav-muted">This escalation came from the tracking sheet — no captured email insight. The subject and situation above summarise it.</div>

@@ -86,9 +86,9 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
                 <td className="px-4 py-2.5 text-right whitespace-nowrap">
                   {canEdit && (
                     <>
-                      <button onClick={() => edit(c)} className="text-xs text-mav-yellow hover:underline mr-3">Edit</button>
+                      <button onClick={() => edit(c)} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 mr-2">Edit</button>
                       <button onClick={() => toggle(c)} disabled={busy}
-                        className="text-xs text-mav-muted hover:text-amber-300 disabled:opacity-50">Retire</button>
+                        className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 disabled:opacity-50">Retire</button>
                     </>
                   )}
                 </td>
@@ -138,7 +138,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
             </button>
             {editing && (
               <button onClick={() => { setEditing(null); setDraft({ ...blank }) }}
-                className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">Cancel</button>
+                className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">Cancel</button>
             )}
             {status && <span className="text-sm text-mav-muted">{status}</span>}
           </div>
@@ -147,7 +147,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
 
       {retired.length > 0 && (
         <div>
-          <button onClick={() => setShowRetired(v => !v)} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+          <button onClick={() => setShowRetired(v => !v)} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">
             {showRetired ? 'Hide' : 'Show'} {retired.length} retired
           </button>
           {showRetired && (
@@ -155,7 +155,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
               {retired.map(c => (
                 <span key={c.name} className="inline-flex items-center gap-2 text-xs px-2.5 py-1 rounded-full border border-mav-line text-mav-muted">
                   {c.name}
-                  {canEdit && <button onClick={() => toggle(c)} disabled={busy} className="text-mav-yellow hover:underline">restore</button>}
+                  {canEdit && <button onClick={() => toggle(c)} disabled={busy} className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10 ml-1 disabled:opacity-50">Restore</button>}
                 </span>
               ))}
             </div>

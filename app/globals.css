@@ -16,21 +16,24 @@
    rgb(var(--mav-fg) / 0.6). Hex here would silently break every /40 and /60 in
    the app, which is most of the secondary text on every page.
 
-   Dark is the default and stays the default: it is what the team has been using,
-   and a theme that changes under people without warning is its own bug. */
+   Charcoal is the default again (Pratik, 28 Sep 2026: the light themes glared), now
+   in the brand's own dark palette from mavlers.com — #1B1B1B, #2D2D2D-family panels,
+   #ACACAC secondary grey, #FFDB2D. Primary text is a soft #E6E6E6 rather than white:
+   pure white on near-black is the brightest thing on screen and it is what makes a
+   dark page tiring. Yellow is kept for the things you act on. */
 :root,
 :root[data-theme='dark'] {
-  --mav-bg:    27 27 27;      /* #1B1B1B page */
-  --mav-panel: 36 36 36;      /* #242424 cards */
+  --mav-bg:    27 27 27;      /* #1B1B1B brand near-black */
+  --mav-panel: 35 35 35;      /* #232323 cards */
   --mav-line:  51 51 51;      /* #333333 borders */
-  --mav-muted: 154 154 154;   /* #9a9a9a secondary text */
-  --mav-fg:    242 242 242;   /* #f2f2f2 primary text */
+  --mav-muted: 172 172 172;   /* #ACACAC brand grey */
+  --mav-fg:    230 230 230;   /* #E6E6E6 — softer than white */
   --mav-yellow: 255 219 45;   /* #FFDB2D brand */
   /* Chart ink, read by components that need a concrete colour string. */
   --chart-grid: #333333;
-  --chart-axis: #9a9a9a;
+  --chart-axis: #ACACAC;
   --chart-tip:  #1B1B1B;
-  --chart-fg:   #f2f2f2;
+  --chart-fg:   #E6E6E6;
   --chart-hover: rgba(255,255,255,0.05);
 }
 

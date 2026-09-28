@@ -58,7 +58,7 @@ export default function PmDetail({ slug }: { slug: string }) {
 
   const pending = useMemo(() => (s ? pendingOpps(s.opps, NOW) : { rows: [], toppedUp: 0 }), [s])
 
-  if (!pm) return <div><Header title="PM not found" /><Link href="/pm-team" className="text-mav-yellow text-sm">← PM Team</Link></div>
+  if (!pm) return <div><Header title="PM not found" /><Link href="/pm-team" className="text-mav-yellow text-sm hover:underline underline-offset-2">← PM Team</Link></div>
 
   if (blocked) return (
     <div className="max-w-md mt-16">
@@ -68,7 +68,7 @@ export default function PmDetail({ slug }: { slug: string }) {
         {me ? ' You can open your own.' : ` Ask ${OWNER_EMAIL} for admin access if you need to see the team's.`}
       </p>
       {me && (
-        <Link href={`/pm-team/${me.slug}`} className="text-mav-yellow text-sm hover:underline">
+        <Link href={`/pm-team/${me.slug}`} className="text-mav-yellow text-sm hover:underline underline-offset-2">
           Go to my scorecard &rarr;
         </Link>
       )}
@@ -165,7 +165,7 @@ export default function PmDetail({ slug }: { slug: string }) {
 
   return (
     <div>
-      <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-muted hover:text-mav-fg mb-3">
+      <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-yellow hover:underline underline-offset-2 mb-3">
         <ArrowLeft size={14} /> {isAdmin ? 'PM Team' : 'My scorecard'}
       </Link>
       <Header title={pm.name} chip={qLabel(fq)} subtitle="Project manager — quarterly KPI, bookings and open quotes" />

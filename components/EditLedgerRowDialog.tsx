@@ -191,7 +191,7 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
           <span className="text-[11px] text-mav-fg/60">Value, owner and month are set at confirmation and cannot be changed here.</span>
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs transition-colors">Cancel</button>
+            <button onClick={onClose} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs transition-colors">Cancel</button>
             <button onClick={save} disabled={saving}
               className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-40 hover:brightness-95 transition">
               {saving ? 'Saving…' : 'Save'}

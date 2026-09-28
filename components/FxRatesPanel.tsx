@@ -66,7 +66,7 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
     if (!res.error) refresh()
   }
 
-  const inp = 'bg-mav-panel border border-mav-line rounded-md px-3 py-2 text-sm outline-none focus:border-mav-yellow'
+  const inp = 'bg-mav-dark border border-mav-line rounded-md px-3 py-2 text-sm text-mav-fg placeholder:text-mav-fg/35 outline-none focus:border-mav-yellow'
 
   return (
     <Panel title="Currency conversion"
@@ -131,10 +131,10 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
                     1 {r.currency} = ${(Number.isFinite(v) ? v : 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} USD
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    {canEdit && changed && <button onClick={() => save(r.currency)} disabled={busy} className="text-xs text-mav-yellow hover:underline mr-3">Save</button>}
+                    {canEdit && changed && <button onClick={() => save(r.currency)} disabled={busy} className="rounded-full bg-mav-fill text-black font-semibold px-3 py-1 text-xs hover:brightness-95 mr-2 disabled:opacity-50">Save</button>}
                     {canEdit && r.currency.toUpperCase() !== 'USD' && (
-                      <button onClick={() => drop(r.currency)} disabled={busy} className="text-mav-muted hover:text-red-400 disabled:opacity-50 align-middle" aria-label={`Remove ${r.currency}`}>
-                        <Trash2 size={15} />
+                      <button onClick={() => drop(r.currency)} disabled={busy} className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10 inline-flex items-center gap-1 disabled:opacity-50 align-middle" aria-label={`Remove ${r.currency}`}>
+                        <Trash2 size={13} /> Remove
                       </button>
                     )}
                   </td>

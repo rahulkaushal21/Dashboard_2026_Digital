@@ -276,7 +276,7 @@ export default function LastYearReview() {
         <input type="month" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="From month" />
         <span className="text-xs text-mav-muted">To</span>
         <input type="month" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="To month" />
-        {(from || to || fGeo.length > 0 || fService.length > 0 || fPm.length > 0) && <button onClick={() => { setFrom(''); setTo(''); setFGeo([]); setFService([]); setFPm([]) }} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">Reset</button>}
+        {(from || to || fGeo.length > 0 || fService.length > 0 || fPm.length > 0) && <button onClick={() => { setFrom(''); setTo(''); setFGeo([]); setFService([]); setFPm([]) }} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs">Reset</button>}
       </FilterBar>
 
       <Panel flush title="Clients by quarter"

@@ -127,7 +127,7 @@ export default function PmTeam() {
                   <th className="sticky left-0 z-20 bg-mav-panel text-left font-medium px-4 py-3 border-b border-r border-mav-line min-w-[160px]">KPI</th>
                   {cells.map(c => (
                     <th key={c.pm.slug} className="px-4 py-3 border-b border-mav-line text-center font-medium min-w-[132px]">
-                      <Link href={`/pm-team/${c.pm.slug}`} className="text-mav-yellow hover:underline">{c.pm.name}</Link>
+                      <Link href={`/pm-team/${c.pm.slug}`} className="text-mav-yellow hover:underline underline-offset-2">{c.pm.name}</Link>
                     </th>
                   ))}
                 </tr>

@@ -513,7 +513,7 @@ export default function Dashboard() {
 
   const syncBtn = (
     <button onClick={refreshAll} disabled={syncing || refreshing} title="Pull the latest revenue sheet into the dashboard"
-      className="inline-flex items-center gap-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs disabled:opacity-50">
+      className="inline-flex items-center gap-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs disabled:opacity-50">
       <RefreshCw size={13} className={(syncing || refreshing) ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync now'}
     </button>
   )
@@ -754,7 +754,7 @@ export default function Dashboard() {
                     <div>
                       <button
                         onClick={() => setInsightsOpen(open ? null : ins.key)}
-                        className="text-xs text-mav-yellow hover:underline">
+                        className="text-xs text-mav-yellow hover:underline underline-offset-2">
                         {open ? 'Hide the numbers' : `Show the numbers (${ins.examples.length})`}
                       </button>
                       {open && (
@@ -769,7 +769,7 @@ export default function Dashboard() {
 
                   {ins.link && (
                     <Link href={ins.link.href}
-                      className="mt-auto pt-1 text-xs text-mav-muted hover:text-mav-fg inline-flex items-center gap-1 w-fit">
+                      className="mt-auto pt-1 text-xs text-mav-yellow hover:underline underline-offset-2 inline-flex items-center gap-1 w-fit">
                       {ins.link.label} <ArrowRight size={12} />
                     </Link>
                   )}
