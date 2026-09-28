@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { THEMES } from '@/lib/themes'
+import { THEMES, DEFAULT_THEME } from '@/lib/themes'
 import { setMyTheme, useTheme, cacheTeamTheme } from './ThemeToggle'
 import { getSettings, saveSettings } from '@/lib/config'
 
@@ -19,7 +19,7 @@ export default function ThemePanel({ canEdit }: { canEdit: boolean }) {
 
   useEffect(() => {
     getSettings().then(s => {
-      const d = s.default_theme || 'dark'
+      const d = s.default_theme || DEFAULT_THEME
       setTeamDefault(d)
       cacheTeamTheme(d)
     }).catch(() => { /* settings are admin-readable; a PM just sees no default marked */ })

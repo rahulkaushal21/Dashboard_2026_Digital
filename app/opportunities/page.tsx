@@ -10,6 +10,8 @@ import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
+import { KPIRow, Segments, FilterBar, SectionTitle } from '@/components/PageParts'
+import InfoTip from '@/components/InfoTip'
 import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
@@ -41,7 +43,13 @@ const haystack = (x: Opportunity) => [
   x.value != null ? String(x.value) : '',
 ].join(' \u0001 ').toLowerCase()
 const searchTerms = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean)
-const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+const selCls = 'bg-mav-panel border border-mav-line rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
+// "2026-04-01" → "01-Apr-2026", the way Web PM prints dates in its header chip.
+const fmtChipDate = (d: string) => {
+  const [y, m, day] = d.split('-').map(Number)
+  if (!y || !m || !day) return d
+  return `${String(day).padStart(2, '0')}-${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]}-${y}`
+}
 
 // An NBD owner is not an account manager, and calling them one gets the org chart wrong
 // on the page people read most. Account managers work accounts we already have; NBD open
@@ -262,10 +270,14 @@ return Object.entries(m).sort((a, b) => b[1].value - a[1].value || b[1].count - 
 }
 
 export default function Opportunities() {
-const [all, setAll] = useState<Opportunity[]>([])
+// Every deal, before the department is applied. `all`, below, is this narrowed to the
+// department picked in the sidebar — and it is what every card, alert, breakdown and the
+// table read, so choosing LP/HUB changes the whole page and not only the table.
+const [raw, setAll] = useState<Opportunity[]>([])
 // Counted from the data on every load, so the sentence under the intent score can
-// never drift from the population it is describing.
-const cohort = useMemo(() => decidedCohort(all), [all])
+// never drift from the population it is describing. The whole book, whichever
+// department is showing: the model is fitted on all of it.
+const cohort = useMemo(() => decidedCohort(raw), [raw])
 const [search, setSearch] = useState(''); const [fType, setFType] = useState(''); const [fGeo, setFGeo] = useState<string[]>([])
 // Rows the Quotes sheet tags "New" under an owner who isn't on the NBD team.
 const [misTagOnly, setMisTagOnly] = useState(false)
@@ -355,7 +367,7 @@ const isAdhoc = (x: Opportunity) => {
 }
 const canPick = (x: Opportunity) =>
   !x.won && !x.email_won && !x.rolled_into && canConfirmLocally(x, me, iAmAdmin)
-const pickedRows = useMemo(() => all.filter(x => picked.has(x.id)), [all, picked])
+const pickedRows = useMemo(() => raw.filter(x => picked.has(x.id)), [raw, picked])
 const pickedClients = useMemo(
   () => Array.from(new Set(pickedRows.map(x => (x.company_name || '').trim()).filter(Boolean))),
   [pickedRows])
@@ -442,7 +454,11 @@ const { unit } = useUnit()
 // Deals nobody could place. Three, at the time of writing: no PM, no client history and
 // no geo. Counted out loud under the table rather than disappearing with the filter.
 const unplacedDeals = useMemo(
-  () => unit === 'all' ? 0 : all.filter(x => unitOf(deptOfOpp(x)) === null).length, [all, deptById, unit])
+  () => unit === 'all' ? 0 : raw.filter(x => unitOf(deptOfOpp(x)) === null).length, [raw, deptById, unit])
+const all = useMemo(
+  () => unit === 'all' ? raw : raw.filter(x => inUnit(deptOfOpp(x), unit)),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [raw, deptById, unit])
 
 // One haystack per row, built when the rows arrive rather than on every keystroke:
 // 950 rows across 20-odd fields is real work at typing speed.
@@ -455,27 +471,28 @@ const terms = useMemo(() => searchTerms(search), [search])
 const matches = useCallback((x: Opportunity) =>
   !terms.length || terms.every(t => (hay.get(x.id) || '').includes(t)), [hay, terms])
 
+// Every filter but status, so the status tabs can count what each one would show.
+const keep = (x: Opportunity, ignoreStatus = false): boolean =>
+  matches(x)
+  && (!fType || typeLabel(x).includes(fType))
+  && (!fGeo.length || fGeo.includes(x.geo || ''))
+  && (!fAM.length || splitNames(x.sales_person).some(n => fAM.includes(n)))
+  && (!fPM.length || splitNames(x.pm_owner).some(n => fPM.includes(n)))
+  && (ignoreStatus || !fStatus || oppStatus(x) === fStatus)
+  && (!fSvc.length || fSvc.includes(svcOf(x)))
+  && (!fTech.length || fTech.includes(x.technology || ''))
+  && (!fDept.length || fDept.includes(deptOfOpp(x)))
+  && (!flagOnly || !!x.flag)
+  && (!unlikelyOnly || !!x.unlikely)
+  && (!lagOnly || !!sheetLag(x))
+  && (!markedOnly || !!markedByHand(x))
+  && (!committedOnly || !!x.flag_committed_in_email)
+  && inAgeBand(x, fAge)
+  && (!misTagOnly || !!x.mis_tagged_new)
+  && (inRange(x.source_date || x.first_date))
+  && inBand(x.value)
 const o = useMemo(() => {
-const rows = all
-.filter(x => inUnit(deptOfOpp(x), unit))
-.filter(x => matches(x))
-.filter(x => !fType || typeLabel(x).includes(fType))
-.filter(x => !fGeo.length || fGeo.includes(x.geo || ''))
-.filter(x => !fAM.length || splitNames(x.sales_person).some(n => fAM.includes(n)))
-.filter(x => !fPM.length || splitNames(x.pm_owner).some(n => fPM.includes(n)))
-.filter(x => !fStatus || oppStatus(x) === fStatus)
-.filter(x => !fSvc.length || fSvc.includes(svcOf(x)))
-.filter(x => !fTech.length || fTech.includes(x.technology || ''))
-.filter(x => !fDept.length || fDept.includes(deptOfOpp(x)))
-.filter(x => !flagOnly || x.flag)
-.filter(x => !unlikelyOnly || x.unlikely)
-.filter(x => !lagOnly || sheetLag(x))
-.filter(x => !markedOnly || markedByHand(x))
-.filter(x => !committedOnly || !!x.flag_committed_in_email)
-.filter(x => inAgeBand(x, fAge))
-.filter(x => !misTagOnly || x.mis_tagged_new)
-.filter(x => inRange(x.source_date || x.first_date))
-.filter(x => inBand(x.value))
+const rows = all.filter(x => keep(x))
 return rows.sort((a, b) => {
 const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
 if (av < bv) return -1 * sort.dir
@@ -483,6 +500,13 @@ if (av > bv) return 1 * sort.dir
 return 0
 })
 }, [all, matches, deptById, unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
+
+const statusCounts = useMemo(() => {
+const c: Record<string, number> = { '': 0, Open: 0, 'On Hold': 0, Won: 0, Lost: 0 }
+for (const x of all) if (keep(x, true)) { c['']++; c[oppStatus(x)] = (c[oppStatus(x)] || 0) + 1 }
+return c
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [all, matches, deptById, search, fType, fGeo, fAM, fPM, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -705,7 +729,7 @@ const pct = m.shared ? Math.round(m.won / m.shared * 100) : 0
 return (
 <div className="bg-mav-panel border border-mav-line rounded-xl p-4">
 <div className="flex items-baseline justify-between mb-3">
-<div className="text-sm font-medium">{m.label}</div>
+<div className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em]">{m.label}</div>
 <div className="text-xs text-mav-muted">
 {m.winRate == null ? 'no quotes' : <>win rate <span className="text-mav-fg font-semibold">{m.winRate}%</span> <span className="opacity-60">of all quotes</span>{m.decidedRate != null && <span className="opacity-60"> · {m.decidedRate}% of decided</span>}</>}
 </div>
@@ -745,9 +769,6 @@ of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)
 {' + '}
 <span title="Tier B — 60-80%. Likely, not certain." className="text-teal-300">B {money(m.tierBValue)}</span>
 <span className="opacity-60"> ({m.tierB})</span>
-<div className="mt-1 text-[11px] opacity-60 leading-snug">
-Bankable = pending deals likely to confirm (tier A 80%+ or B 60–80%), at full value.
-</div>
 </>) : (
 <span className="text-amber-300">nothing in Pending scores above a coin flip — all {money(m.pendingValue)} is tier C or below</span>
 )}
@@ -770,7 +791,7 @@ k === '—' ? [] : cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k]
 
 const Panel = ({ title, rows, active, onPick }: { title: string; rows: [string, { count: number; value: number }][]; active: string[]; onPick: (k: string) => void }) => (
 <div className="bg-mav-panel border border-mav-line rounded-xl p-4">
-<div className="text-sm font-medium mb-3">{title} <span className="text-xs text-mav-muted font-normal">· open pipeline</span></div>
+<div className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted mb-3">{title}</div>
 <div className="space-y-1.5 max-h-64 overflow-y-auto">{rows.map(([k, v]) => (
 <button key={k} onClick={() => onPick(k)}
 className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${active.includes(k) ? 'bg-mav-yellow/15 text-mav-yellow' : 'hover:bg-mav-dark/50'}`}>
@@ -783,20 +804,19 @@ className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-m
 
 return (
 <div>
-<Header title="Opportunities" subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence." />
+<Header title="Opportunities"
+  subtitle="One row per deal from the Quotes sheet (price, status, AM, PM, GEO) + email-only opportunities — with a brief, next step and % confidence."
+  chip={from ? `From ${fmtChipDate(from)}` : undefined}
+  actions={canEnter && (
+    // Entering a deal the email scan did not catch. Hidden for anyone who is neither a
+    // registered PM nor an admin: the RPC refuses them, so offering the button would
+    // only produce a refusal they cannot act on.
+    <button onClick={() => setShowAdd(true)}
+      className="text-sm px-4 py-2 rounded-full bg-mav-fill text-black font-semibold hover:brightness-95 transition">
+      + New opportunity
+    </button>
+  )} />
 <UnplacedNote n={unplacedDeals} noun="deals" className="-mt-3 mb-4" />
-
-{/* Entering a deal the email scan did not catch. Hidden for anyone who is neither a
-    registered PM nor an admin: the RPC refuses them, so offering the button would only
-    produce a refusal they cannot act on. */}
-{canEnter && (
-<div className="-mt-2 mb-6 flex justify-end">
-<button onClick={() => setShowAdd(true)}
-className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
-+ Add opportunity
-</button>
-</div>
-)}
 {showAdd && <AddOpportunityDialog onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); reload() }} />}
 {billing && pickedRows.length > 1 && (
   <BillTogetherDialog deals={pickedRows} onClose={() => setBilling(false)}
@@ -818,11 +838,11 @@ className="text-xs px-3 py-1.5 rounded-md border border-mav-yellow/50 text-mav-y
     up with. Sits above everything — it's the one thing on this page needing action
     elsewhere. Won and Lost are listed separately because the fix differs for each. */}
 {lagRows.length > 0 && (
-<div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+<div className="mb-5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
 <div className="flex flex-wrap items-center justify-between gap-3">
 <div>
-<div className="text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} already decided or invoiced {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet{iAmAdmin ? <span className="font-normal text-amber-300/70"> · across the team</span> : ''}</div>
-<div className="text-xs text-mav-muted mt-0.5">The sheet is the master record, so nothing books or drops out of pipeline until you update it there. This alert clears itself on the next sync.</div>
+<div className="flex items-center gap-2 text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} already decided or invoiced {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet
+<InfoTip text="The sheet is the master record, so nothing books or drops out of pipeline until you update it there. This alert clears itself on the next sync." /></div>
 </div>
 <button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setMarkedOnly(false); setSearch('') }}
 className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 text-amber-300 hover:bg-amber-500/15 transition-colors">Show {lagRows.length > 1 ? 'them' : 'it'}</button>
@@ -857,46 +877,81 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 )}
 
 {/* ── Leadership summary: admins only ────────────────────────────────────────
-    The month cards, the headline totals and the three breakdowns answer "how
-    is the business doing". A PM opening this page is here to work their own
-    list, and a wall of company-wide money above it is noise they scroll past
-    every day. They get the list and the filters, which is the whole job.
+    The headline cards, the month cards and the three breakdowns answer "how is the
+    business doing". A PM opening this page is here to work their own list, and a wall
+    of company-wide money above it is noise they scroll past every day. They get the
+    list and the filters, which is the whole job.
 
-    This hides it, it does not protect it — the data still loads with the anon
-    key. It is a tidier page for PMs, not a permission boundary. */}
+    This hides it, it does not protect it — the data still loads with the anon key. It
+    is a tidier page for PMs, not a permission boundary.
+
+    Cards first, as on every page: the four numbers, each one a shortcut to its rows. */}
+{iAmAdmin && (
+<KPIRow cols={4}>
+<KPICard tone="accent" label="Open pipeline" value={money(openValue)}
+  sub={<>{open.length} open{unlikelyOpen.length ? <> · {money(likelyValue)} likely</> : null}</>}
+  info={<>Open deals quoted in {from || '…'} → {to || 'today'}, excluding On Hold. {unlikelyOpen.length ? `${money(unlikelyValue)} of it is flagged "might not come".` : ''} The month cards below count Open and On Hold together as pending — {money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}.</>}
+  onClick={() => setFStatus('Open')} active={fStatus === 'Open'} />
+<KPICard tone="yellow" label="On hold" value={money(onHoldValue)} sub={`${onHold.length} paused`}
+  onClick={() => setFStatus('On Hold')} active={fStatus === 'On Hold'} />
+<KPICard tone="amber" label="Still undecided" value={money(pendingValue)} sub="open + on hold"
+  info="Everything not yet won or lost in the date range. This is what the month cards call Pending." />
+<KPICard tone="green" label="Won" value={money(wonValue)} sub={`${won.length} deals won`}
+  onClick={() => setFStatus('Won')} active={fStatus === 'Won'} />
+</KPIRow>
+)}
+
 {iAmAdmin && monthsAgg.length > 0 && (
-<div className="mb-6">
-<div className="flex items-baseline gap-2 mb-2">
-<h2 className="text-sm font-medium">Last 2 months</h2>
-<span className="text-xs text-mav-muted">· quotes shared, still pending, and won — counted in the month the quote went out (fixed window, ignores the date filter below)</span>
-</div>
-<div className="grid md:grid-cols-2 gap-4">{monthsAgg.map(m => <MonthCard key={m.key} m={m} />)}</div>
+<div className="mb-5">
+<SectionTitle info="Quotes shared, still pending, and won — counted in the month the quote went out. A fixed window: it ignores the date filter. Bankable = pending deals likely to confirm (tier A 80%+ or B 60–80%), at full value.">Last 2 months</SectionTitle>
+<div className="grid md:grid-cols-2 gap-3">{monthsAgg.map(m => <MonthCard key={m.key} m={m} />)}</div>
 </div>
 )}
 
 {iAmAdmin && (<>
-<div className="text-xs text-mav-muted mb-2">Headline numbers &amp; breakdowns below reflect the date range <span className="text-mav-fg">{from || '…'} → {to || 'today'}</span> (change it in the filter bar).
-{onHold.length > 0 && <> Open pipeline here excludes On Hold; the cards above count both as pending — <span className="text-mav-fg">{money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}</span> still undecided.</>}</div>
-<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
-<KPICard label="Open opportunities" value={String(open.length)} />
-<KPICard label={unlikelyOpen.length ? `Open pipeline, excl. On Hold (${money(likelyValue)} likely)` : 'Open pipeline value (excl. On Hold)'} value={money(openValue)} />
-<KPICard label={`On Hold value (${onHold.length})`} value={money(onHoldValue)} />
-<KPICard label="Won" value={String(won.length)} />
-<KPICard label="Won value" value={money(wonValue)} />
-</div>
-
-<div className="grid md:grid-cols-3 gap-4 mb-6">
+<SectionTitle info="Open pipeline in the date range. Click a row to filter the table to it.">Where the open pipeline sits</SectionTitle>
+<div className="grid md:grid-cols-3 gap-3 mb-5">
 <Panel title="By GEO" rows={byGeo} active={fGeo} onPick={k => { setFStatus('Open'); setFGeo(pickIn(fGeo, k)) }} />
 <Panel title="By Service" rows={bySvc} active={fSvc} onPick={k => { setFStatus('Open'); setFSvc(pickIn(fSvc, k)) }} />
 <Panel title="By Technology" rows={byTech} active={fTech} onPick={k => { setFStatus('Open'); setFTech(pickIn(fTech, k)) }} />
 </div>
 </>)}
 
-<div className="flex flex-wrap items-center gap-2 mb-4">
-<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search anything…" title="Client, contact, subject, quote or invoice number, PM, AM, technology, value" className={`${selCls} w-52`} />
-<select value={fStatus} onChange={e => setFStatus(e.target.value)} className={selCls}><option value="">All status</option><option value="Open">Open</option><option value="On Hold">On Hold</option><option value="Won">Won</option><option value="Lost">Lost</option></select>
+{/* Status is the page's main split, so it is tabs with counts rather than one dropdown
+    among twelve. Each count is what that tab would show under every OTHER filter. */}
+<Segments<string>
+  value={fStatus}
+  onChange={v => setFStatus(v)}
+  items={[
+    { id: 'Open', label: 'Open', count: statusCounts['Open'] },
+    { id: 'On Hold', label: 'On Hold', count: statusCounts['On Hold'] },
+    { id: 'Won', label: 'Won', count: statusCounts['Won'] },
+    { id: 'Lost', label: 'Lost', count: statusCounts['Lost'] },
+    { id: '', label: 'All', count: statusCounts[''] },
+  ]} />
+
+{/* Every per-field filter in one box, in three rows by kind: what the deal IS, when and
+    how big, and the saved shortcuts. The row count sits at the end of the first. */}
+<FilterBar right={
+  <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">
+    {o.length} shown · {money(o.reduce((s, x) => s + (x.value || 0), 0))}
+    {hiddenNoValue > 0 && <span className="text-amber-300/80 normal-case" title="These match every other filter but carry no quoted figure, so a value band cannot place them. Clear the band to see them."> · {hiddenNoValue} hidden (no value)</span>}
+  </span>}>
+<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, quote, PM, subject…" title="Client, contact, subject, quote or invoice number, PM, AM, technology, value" className={`${selCls} w-64`} />
+<select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">Business type</option><option value="New">New (NBD)</option><option value="Repeat">Repeat</option></select>
+<MultiSelect label="Department" className="w-40" options={uniq(all.map(deptOfOpp))} selected={fDept} onChange={setFDept} />
+<MultiSelect label="GEO" className="w-32" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} />
+<MultiSelect label="Service" className="w-40" options={uniq(all.map(svcOf))} selected={fSvc} onChange={setFSvc} />
+<MultiSelect label="Technology" className="w-40" options={uniq(all.map(x => x.technology))} selected={fTech} onChange={setFTech} />
+<MultiSelect label="AM / NBD" className="w-36" options={uniqNames(all.map(x => x.sales_person))} selected={fAM} onChange={setFAM} />
+<MultiSelect label="PM" className="w-36" options={uniqNames(all.map(x => x.pm_owner))} selected={fPM} onChange={v => { pmTouched.current = true; setFPM(v) }} />
+<div className="basis-full h-0" />
+<span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted">Date</span>
+<input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} aria-label="From" />
+<span className="text-xs text-mav-muted">→</span>
+<input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} aria-label="To" />
 <select value={fAge} onChange={e => setFAge(e.target.value)} className={selCls} title="How long ago the quote was raised. Use it to work the backlog down — pick a band, then mark each row Confirmed or Cancelled.">
-<option value="">Any age</option>
+<option value="">Quote age</option>
 {AGE_BANDS.map(b => {
 // Count under the status filter that is actually applied, so the number in the
 // dropdown is the number of rows you get when you pick it. Counting all
@@ -906,30 +961,7 @@ const n = all.filter(x => fStatus ? oppStatus(x) === fStatus
 return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</option>
 })}
 </select>
-<select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">All types</option><option value="New">New (NBD)</option><option value="Repeat">Repeat</option></select>
-<MultiSelect label="All departments" className="w-44" options={uniq(all.map(deptOfOpp))} selected={fDept} onChange={setFDept} />
-<MultiSelect label="All GEO" className="w-36" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} />
-<MultiSelect label="All services" className="w-44" options={uniq(all.map(svcOf))} selected={fSvc} onChange={setFSvc} />
-<MultiSelect label="All tech" className="w-40" options={uniq(all.map(x => x.technology))} selected={fTech} onChange={setFTech} />
-<MultiSelect label="All AMs / NBD" className="w-40" options={uniqNames(all.map(x => x.sales_person))} selected={fAM} onChange={setFAM} />
-<MultiSelect label="All PMs" className="w-40" options={uniqNames(all.map(x => x.pm_owner))} selected={fPM} onChange={v => { pmTouched.current = true; setFPM(v) }} />
-<button onClick={() => setFlagOnly(v => !v)} className={`text-sm px-3 py-2 rounded-md border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
-<button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-sm px-3 py-2 rounded-md border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
-{misTagged.length > 0 && (
-<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Quotes-sheet rows tagged "New" in Business Type (col P) whose owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. Each one is fixable in the sheet; they read as Repeat until it is. Email-only deals are not listed: they have no Business Type cell to correct.`} className={`text-sm px-3 py-2 rounded-md border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Tagged New, not NBD ({misTagged.length})</button>
-)}
-{lagRows.length > 0 && (
-<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-sm px-3 py-2 rounded-md border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Sheet not updated ({lagRows.length})</button>
-)}
-{committedRows.length > 0 && (
-<button onClick={() => { setCommittedOnly(v => !v); setFStatus('') }} title="Still Open in the Quotes sheet, but the client has already said approved / please proceed, or has started discussing the invoice. Threads like these confirmed 96% of the time — these are most likely wins nobody has logged yet." className={`text-sm px-3 py-2 rounded-md border transition-colors ${committedOnly ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✍ Client said yes ({committedRows.length})</button>
-)}
-{markedRows.length > 0 && (
-<button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-sm px-3 py-2 rounded-md border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✎ Marked by hand ({markedRows.length})</button>
-)}
-<span className="text-xs text-mav-muted ml-1">From</span><input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
-<span className="text-xs text-mav-muted">To</span><input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
-<span className="text-xs text-mav-muted ml-1" title="Quoted value in USD. Deals with no quoted figure drop out while a band is set.">Value $</span>
+<span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted ml-2" title="Quoted value in USD. Deals with no quoted figure drop out while a band is set.">Value $</span>
 <input type="number" min="0" step="100" inputMode="numeric" value={vMin} onChange={e => setVMin(e.target.value)} placeholder="min" aria-label="Minimum quoted value" className={`${selCls} w-24`} />
 <span className="text-xs text-mav-muted">–</span>
 <input type="number" min="0" step="100" inputMode="numeric" value={vMax} onChange={e => setVMax(e.target.value)} placeholder="max" aria-label="Maximum quoted value" className={`${selCls} w-24`} />
@@ -946,12 +978,24 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 )
 })}
 {bandOn && <button onClick={() => { setVMin(''); setVMax('') }} className="text-xs px-2 py-1 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">clear</button>}
-<button onClick={reset} className="text-sm px-3 py-2 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Reset</button>
-<span className="text-xs text-mav-muted ml-auto">
-{o.length} shown · {money(o.reduce((s, x) => s + (x.value || 0), 0))}
-{hiddenNoValue > 0 && <span className="text-amber-300/80" title="These match every other filter but carry no quoted figure, so a value band cannot place them. Clear the band to see them."> · {hiddenNoValue} hidden (no quoted value)</span>}
-</span>
-</div>
+<div className="basis-full h-0" />
+<span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted">Quick views</span>
+<button onClick={() => setFlagOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
+<button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
+{misTagged.length > 0 && (
+<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Quotes-sheet rows tagged "New" in Business Type (col P) whose owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. Each one is fixable in the sheet; they read as Repeat until it is. Email-only deals are not listed: they have no Business Type cell to correct.`} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Tagged New, not NBD ({misTagged.length})</button>
+)}
+{lagRows.length > 0 && (
+<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Sheet not updated ({lagRows.length})</button>
+)}
+{committedRows.length > 0 && (
+<button onClick={() => { setCommittedOnly(v => !v); setFStatus('') }} title="Still Open in the Quotes sheet, but the client has already said approved / please proceed, or has started discussing the invoice. Threads like these confirmed 96% of the time — these are most likely wins nobody has logged yet." className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${committedOnly ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✍ Client said yes ({committedRows.length})</button>
+)}
+{markedRows.length > 0 && (
+<button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✎ Marked by hand ({markedRows.length})</button>
+)}
+<button onClick={reset} className="ml-auto text-xs px-3 py-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg underline-offset-2">Clear all</button>
+</FilterBar>
 
 {/* The action for whatever is ticked, named. One deal is a confirmation; several for
     the same client are one invoice. Same button position either way, so the bar reads

@@ -29,7 +29,10 @@ const config: Config = {
           fg: rgb('--mav-fg'),
         },
       },
-      fontFamily: { sans: ['Montserrat', 'system-ui', 'sans-serif'] },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+      },
     },
   },
   plugins: [],

@@ -16,8 +16,8 @@ export type Unit = 'all' | 'lp-hub' | 'web'
 
 export const UNITS: { id: Unit; label: string; hint: string }[] = [
   { id: 'all',    label: 'All',     hint: 'Every department' },
-  { id: 'lp-hub', label: 'LP/Hub',  hint: 'LP and HUB' },
-  { id: 'web',    label: 'Web',     hint: 'WEB-AU, WEB-UK, WEB-US and AI & Automation' },
+  { id: 'lp-hub', label: 'LP/HUB',  hint: 'LP and HUB' },
+  { id: 'web',    label: 'WEB',     hint: 'WEB-AU, WEB-UK, WEB-US and AI & Automation' },
 ]
 
 /**

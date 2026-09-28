@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { Palette } from 'lucide-react'
-import { THEMES, themeById, isTheme } from '@/lib/themes'
+import { THEMES, themeById, isTheme, DEFAULT_THEME } from '@/lib/themes'
 
 // Picking a theme.
 //
@@ -16,8 +16,11 @@ import { THEMES, themeById, isTheme } from '@/lib/themes'
 // what the pre-paint script reads. A newly-changed default therefore reaches somebody on
 // their second load, not their first, which is the right trade for never flashing.
 
-export const THEME_KEY = 'mav-theme'          // this person's pick
-export const TEAM_THEME_KEY = 'mav-theme-team' // last known team default
+// Versioned. Studio became the team default on 28 Sep 2026, and a default only reaches
+// people with no saved pick — so the keys moved on, and every browser starts once on
+// Studio. Anybody who wants Charcoal back picks it again and it sticks from then on.
+export const THEME_KEY = 'mav-theme-v2'          // this person's pick
+export const TEAM_THEME_KEY = 'mav-theme-team-v2' // last known team default
 
 export function applyTheme(id: string) {
   const t = themeById(id) || THEMES[0]
@@ -47,7 +50,7 @@ export function useTheme() {
   // swatch as selected for a frame on every load is worse than painting nothing.
   const [theme, setTheme] = useState<string | null>(null)
   useEffect(() => {
-    const read = () => setTheme(document.documentElement.getAttribute('data-theme') || 'dark')
+    const read = () => setTheme(document.documentElement.getAttribute('data-theme') || DEFAULT_THEME)
     read()
     window.addEventListener('mav-theme-change', read)
     return () => window.removeEventListener('mav-theme-change', read)
@@ -65,7 +68,7 @@ export default function ThemeToggle() {
 
   return (
     <button onClick={() => setMyTheme(next.id)}
-      title={`${current.name} — click for ${next.name}. All five are in Settings.`}
+      title={`${current.name} — click for ${next.name}. All of them are in Settings.`}
       className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm text-mav-muted hover:text-mav-fg hover:bg-mav-panel transition-colors">
       <Palette size={16} />
       <span className="truncate">{current.name}</span>
@@ -84,12 +87,12 @@ export default function ThemeToggle() {
  * Without it the browser paints the built-in dark, then React mounts and switches — a
  * flash on every load for anybody not on Charcoal. An inline blocking script in <head> is
  * the only place that can be prevented. Falls back through: my pick, the cached team
- * default, then Charcoal.
+ * default, then Studio.
  */
 export const themeScript = `(function(){try{
 var F={${THEMES.map(t => `'${t.id}':'${t.family}'`).join(',')}};
 var t=localStorage.getItem('${THEME_KEY}')||localStorage.getItem('${TEAM_THEME_KEY}');
-if(!F[t])t='dark';
+if(!F[t])t='${DEFAULT_THEME}';
 document.documentElement.setAttribute('data-theme',t);
 document.documentElement.setAttribute('data-family',F[t]);
-}catch(e){document.documentElement.setAttribute('data-theme','dark');document.documentElement.setAttribute('data-family','dark')}})()`
+}catch(e){document.documentElement.setAttribute('data-theme','${DEFAULT_THEME}');document.documentElement.setAttribute('data-family','light')}})()`

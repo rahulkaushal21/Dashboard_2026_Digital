@@ -19,7 +19,15 @@ export interface Theme {
   swatch: [string, string, string, string]
 }
 
+// First in the list is the fallback for anybody with no pick and no team default.
+export const DEFAULT_THEME = 'studio'
+
 export const THEMES: Theme[] = [
+  {
+    id: 'studio', name: 'Studio', family: 'light',
+    blurb: 'Cream page, white cards, dark rail — the Web PM look. The team default.',
+    swatch: ['#F4F2ED', '#FFFFFF', '#E6E2D9', '#1A1A1A'],
+  },
   {
     id: 'dark', name: 'Charcoal', family: 'dark',
     blurb: 'The original. Near-black, high contrast, what the team has been using.',

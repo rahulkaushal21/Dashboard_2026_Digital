@@ -2,7 +2,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import ClientLink from '@/components/ClientLink'
 import GreetingBar from '@/components/GreetingBar'
-import UnitToggle from '@/components/UnitToggle'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 import KPICard from '@/components/KPICard'
@@ -404,10 +403,8 @@ export default function Dashboard() {
       {/* The greeting replaces the page header here: "Dashboard / Revenue, clients and
           pipeline at a glance" told a returning user nothing they did not know. The name
           and their client region's holidays do. */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <GreetingBar />
-        <UnitToggle className="mt-1" />
-      </div>
+      {/* The department switch that sat beside it moved to the sidebar, with every page's. */}
+      <GreetingBar />
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5 text-xs">
         <span className="uppercase tracking-wide text-mav-muted">Last sync</span>

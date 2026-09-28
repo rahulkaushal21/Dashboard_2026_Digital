@@ -6,7 +6,8 @@ import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Spark
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
-import { hueFor } from '@/lib/section-hue'
+import { useUnit } from './BusinessUnitProvider'
+import { UNITS } from '@/lib/business-unit'
 import { NAV_EVENT } from '@/lib/use-close-on-nav'
 
 // A nav entry is either a link or a group of links. Groups exist so the reporting pages
@@ -98,7 +99,7 @@ export default function Sidebar() {
           <Menu size={20} />
         </button>
         <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
-        <span className="font-semibold tracking-tight truncate">Web Digital Dashboard</span>
+        <span className="font-bold tracking-[0.08em] uppercase truncate">Web Digital</span>
       </div>
 
       {/* Scrim. Only rendered when open so it can never swallow taps on desktop. */}
@@ -111,13 +112,14 @@ export default function Sidebar() {
           className="lg:hidden absolute top-3 right-3 p-2 rounded-md text-mav-muted hover:text-mav-fg hover:bg-mav-panel">
           <X size={18} />
         </button>
-      {/* The rail is 240px, and the longer name no longer fits on one line at this
-          weight. Allowed to wrap rather than truncated — "Web Digital Dash…" in the one
-          place that says what the product is would be worse than two lines. */}
-      <div className="flex items-start gap-2 px-2 py-3 mb-4">
-        <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow shrink-0 mt-1" />
-        <span className="font-semibold tracking-tight leading-tight min-w-0">Web Digital Dashboard</span>
+      {/* One line, in capitals, as Web PM sets its own name. "Dashboard" was dropped to
+          get there: on a 240px rail the three words wrapped, and the page itself already
+          says it is a dashboard. */}
+      <div className="flex items-center gap-2 px-2 py-3 mb-3">
+        <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow shrink-0" />
+        <span className="font-bold tracking-[0.08em] uppercase whitespace-nowrap">Web Digital</span>
       </div>
+      <DepartmentSwitch />
       <nav className="space-y-1">
         {items.map(entry => isGroup(entry)
           ? <NavGroup key={entry.label} group={entry} path={path} />
@@ -147,27 +149,24 @@ const trim = (p?: string | null) => { const v = (p || '/').split(/[?#]/)[0]; ret
 const samePath = (path: string | null, href: string) =>
   trim(path) === trim(href) || (href !== '/' && trim(path).startsWith(trim(href) + '/'))
 
-// The active item is filled with ITS OWN section colour rather than the one brand yellow:
-// the nav is where you learn what each section's colour is, so every page's heading rule
-// and card edges are already familiar by the time you get there. White text on these,
-// since they are all dark enough to carry it in both themes.
 // items-start, not items-center: the longest label now wraps to two lines on a 240px
 // rail, and centring would float the icon into the middle of them.
+// Capitals with a little tracking, and the active item filled brand yellow with dark
+// text — Web PM's rail, so the two tools feel like one. The per-section hues this used
+// to fill with are gone from the rail: one accent reads faster than fifteen.
 const linkCls = (active: boolean, indent = false) =>
-  `flex items-start gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-sm leading-snug transition-colors
-   ${active ? 'text-white font-medium' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
+  `flex items-start gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-[12.5px] font-medium uppercase tracking-[0.06em] leading-snug transition-colors
+   ${active ? 'bg-mav-fill text-black font-semibold' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
 
 function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
   const { href, label, icon: Icon } = leaf
   const active = samePath(path, href)
-  const hue = hueFor(href)
   return (
     // Announce the click so any open drawer closes itself. Needed because clicking the
     // section you are ALREADY on is a navigation to the same route: nothing re-renders,
     // so a drawer left open would stay open and the link would look broken.
     <Link href={href} onClick={() => window.dispatchEvent(new Event(NAV_EVENT))}
-      className={linkCls(active, indent)}
-      style={active ? { background: `var(--nav-${hue.name}, ${hue.dark})` } : undefined}>
+      className={linkCls(active, indent)}>
       <Icon size={16} className="shrink-0 mt-0.5" /> <span className="min-w-0">{label}</span>
     </Link>
   )
@@ -194,6 +193,35 @@ function NavGroup({ group, path }: { group: Group; path: string }) {
           {children.map(c => <NavLink key={c.href} leaf={c} path={path} indent />)}
         </div>
       )}
+    </div>
+  )
+}
+
+// The department the whole board is read for — All, LP/HUB or WEB.
+//
+// It lives in the rail, under the product name, because it is not a property of any one
+// page: every total, card and table on every page follows it, and it stays put as you
+// move between them. It used to sit in each page's header, where it looked like a filter
+// for that page alone. Admins only, as before; everyone else reads All.
+function DepartmentSwitch() {
+  const { unit, setUnit, canSwitch } = useUnit()
+  if (!canSwitch) return null
+  return (
+    <div className="px-2 mb-5">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-mav-muted mb-1.5">Department</div>
+      <div className="grid grid-cols-3 gap-0.5 rounded-lg border border-mav-line bg-mav-panel p-0.5"
+        role="group" aria-label="Department">
+        {UNITS.map(u => {
+          const on = u.id === unit
+          return (
+            <button key={u.id} onClick={() => setUnit(u.id)} title={u.hint} aria-pressed={on}
+              className={`py-1.5 text-[11px] font-semibold uppercase tracking-wide rounded-md transition-colors ${
+                on ? 'bg-mav-fill text-black' : 'text-mav-muted hover:text-mav-fg'}`}>
+              {u.label}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

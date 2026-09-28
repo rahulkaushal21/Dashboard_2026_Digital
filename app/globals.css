@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+/* Inter for words, JetBrains Mono for figures, labels and column headings — the same
+   pairing as Web PM, so the two tools read as one family side by side. */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -60,6 +62,26 @@
   --chart-tip:  #FAF7F1;
   --chart-fg:   #1B1B1B;
   --chart-hover: rgba(0,0,0,0.05);
+}
+
+/* Studio — the team default since 28 Sep 2026.
+   ----------------------------------------------
+   Web PM's look: a cream page, white cards, hairline warm-grey borders, a near-black rail
+   and the brand yellow as the one accent. Chosen so the dashboard and Web PM read as one
+   product when both are open. White cards here, unlike Warm Paper, because the page
+   around them is tinted enough that they sit on it rather than glare. */
+:root[data-theme='studio'] {
+  --mav-bg:    244 242 237;   /* #F4F2ED cream page */
+  --mav-panel: 255 255 255;   /* #FFFFFF cards */
+  --mav-line:  230 226 217;   /* #E6E2D9 */
+  --mav-muted: 110 106 99;    /* #6E6A63 */
+  --mav-fg:    26 26 26;      /* #1A1A1A */
+  --mav-yellow: 176 128 0;    /* #B08000 — yellow as TEXT; filled chips use bg-mav-fill */
+  --chart-grid: #E6E2D9;
+  --chart-axis: #6E6A63;
+  --chart-tip:  #FFFFFF;
+  --chart-fg:   #1A1A1A;
+  --chart-hover: rgba(0,0,0,0.04);
 }
 
 /* Midnight — deep navy instead of grey.
@@ -131,6 +153,9 @@
    invisible on near-black — so there are two, and CSS picks. */
 :root, :root[data-family='dark'] { --section: var(--section-dark, #FBBF24); }
 :root[data-family='light']      { --section: var(--section-light, #B45309); }
+/* Studio drops the per-section hues for the one brand yellow, as Web PM does: the rail
+   and the page title already say where you are. */
+:root[data-theme='studio']      { --section: #F5C400; }
 
 
 /* The nav's filled active item, one colour per section.
@@ -420,3 +445,23 @@ html, body {
 :root[data-family='light'] [class*='bg-lime-400/'] { background-color: var(--t-lime-bg); }
 :root[data-family='light'] [class*='border-lime-500/'],
 :root[data-family='light'] [class*='border-lime-400/'] { border-color: var(--t-lime-bd); }
+
+/* Tables, everywhere, one look.
+   Column headings in small spaced mono capitals, as Web PM sets them. Done here rather
+   than page by page because there are thirty-odd tables across the dashboard and each
+   page styled its own heading row a little differently — which is most of why moving
+   between pages felt like moving between tools. Cells are left alone. */
+table thead th {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+:root[data-theme='studio'] table thead { background: rgb(var(--mav-bg) / 0.55); }
+:root[data-theme='studio'] table tbody tr:hover { background: rgb(var(--mav-bg) / 0.6); }
+
+/* Form controls on Studio: white, with the yellow focus ring Web PM uses. */
+:root[data-theme='studio'] input:not([type='checkbox']):not([type='radio']),
+:root[data-theme='studio'] select,
+:root[data-theme='studio'] textarea { background-color: #FFFFFF; }
