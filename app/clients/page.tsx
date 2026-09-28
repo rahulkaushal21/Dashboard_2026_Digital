@@ -21,6 +21,33 @@ import { AUTOMATION_PLAYS, UNIVERSAL_PLAYS, PLAY_TYPE_TONE, type PlayType } from
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { useAuth } from '@/components/AuthProvider'
 import ClientQbrPanel from '@/components/ClientQbrPanel'
+import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
+
+// Both lists open on the columns that answer "who, whose, how healthy, how much"; the
+// rest stay one tick away in Columns, so nothing scrolls sideways on a laptop.
+const REV_COLS: ColumnDef[] = [
+  { key: 'dot', label: 'Health dot', locked: true },
+  { key: 'client', label: 'Client', locked: true },
+  { key: 'industry', label: 'Industry' },
+  { key: 'geo', label: 'GEO' },
+  { key: 'owner', label: 'Owner', default: true },
+  { key: 'health', label: 'Health', default: true },
+  { key: 'activity', label: 'Last activity', default: true },
+  { key: 'escal', label: 'Escalations', default: true },
+  { key: 'convos', label: 'Conversations', default: true },
+  { key: 'ltv', label: 'LTV', default: true },
+]
+const DIR_COLS: ColumnDef[] = [
+  { key: 'client', label: 'Client', locked: true },
+  { key: 'industry', label: 'Industry', default: true },
+  { key: 'ai', label: 'AI stance' },
+  { key: 'bu', label: 'BU', default: true },
+  { key: 'geo', label: 'GEO', default: true },
+  { key: 'owner', label: 'Owner', default: true },
+  { key: 'head', label: 'Head' },
+  { key: 'type', label: 'Type', default: true },
+  { key: 'tech', label: 'Technology' },
+]
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -363,6 +390,14 @@ export default function Clients() {
   // of them into the DOM on every keystroke of the search box.
   const PAGE_SIZE = 50
   const [page, setPage] = useState(1)
+  const revCols = useColumns('clients', REV_COLS)
+  const dirCols = useColumns('clients-directory', DIR_COLS)
+  // The filters nobody reaches for first sit behind "More filters". It opens by itself
+  // whenever one of them is set, so a filtered table always shows why.
+  const [moreFilters, setMoreFilters] = useState(false)
+  useEffect(() => {
+    if (from || to || aiOnly || dipOnly || recentOnly || (mode === 'directory' && (bu.length || linked || aiStance))) setMoreFilters(true)
+  }, [from, to, aiOnly, dipOnly, recentOnly, mode, bu, linked, aiStance])
   useEffect(() => {
     // Arriving from a deal on Opportunities: ?client=Acme opens straight onto that
     // record. Matched on the name because that is what the two tables share — there is
@@ -879,15 +914,19 @@ export default function Clients() {
   // The health rule, word for word. It was a paragraph above the table that everybody
   // scrolled past; it now sits behind the ⓘ on the list heading, one hover away.
   const healthInfo = (
-    <><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">📉 revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">⚑ Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</>
+    <><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</>
   )
-  // A health card is a shortcut to the same filter as the Health dropdown. It lands on the
-  // revenue list, because health is only worked out for booked clients.
-  const pickStat = (s: string) => { setMode('clients'); setStat(v => v === s ? '' : s) }
   // Quick-view pills, the reference page's style: tinted when on.
   const pill = (on: boolean, onCls = 'bg-mav-fill text-black border-mav-yellow font-medium') =>
     `text-xs px-3 py-1.5 rounded-full border transition-colors ${on ? onCls : 'border-mav-line text-mav-muted hover:text-mav-fg'}`
   const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
+  const hiddenN = (mode === 'directory' ? (bu.length ? 1 : 0) + (linked ? 1 : 0) + (aiStance ? 1 : 0) : 0)
+    + (from || to ? 1 : 0) + (aiOnly ? 1 : 0) + (dipOnly ? 1 : 0) + (recentOnly ? 1 : 0)
+  const anyFilter = hiddenN > 0 || !!q || ind.length > 0 || owner.length > 0 || geo.length > 0 || !!stat || bu.length > 0 || !!linked || !!aiStance
+  const clearAll = () => {
+    setQ(''); setInd([]); setOwner([]); setGeo([]); setStat(''); setBu([]); setLinked(''); setAiStance('')
+    setFrom(''); setTo(''); setAiOnly(false); setDipOnly(false); setRecentOnly(false)
+  }
 
   return (
     <div>
@@ -896,24 +935,20 @@ export default function Clients() {
         chip={from || to ? `Activity ${from || '…'} → ${to || 'today'}` : undefined} />
       <UnplacedNote n={unplaced} noun="clients" className="-mt-3 mb-4" />
 
-      {/* Cards first, as on every page. Each one is a shortcut to its rows — the counts are
-          the same ones the Health dropdown and the dip toggle carry. */}
+      {/* Cards first, as on every page. Display-only — the counts are the same ones the
+          Health dropdown and the dip toggle carry, and those are the controls. */}
       <KPIRow cols={5}>
         <KPICard tone="accent" label="Revenue clients" value={clients.length.toLocaleString()}
           sub={`${dir.length.toLocaleString()} in the full directory`}
           info="The client list comes only from booking data. The full directory is every company on the Client-Backup sheet, booked or not — a directory row that matches a booked client is flagged, never counted twice."
-          onClick={() => { setMode('clients'); setStat(''); setDipOnly(false) }} active={mode === 'clients' && !stat && !dipOnly} />
+          />
         <KPICard tone="red" label="At risk" value={statCount('At risk').toLocaleString()} sub="live, worked out here"
-          info=">2 escalations in a month or a major escalation in the last 2 months. A client whose latest sentiment event is positive feedback after their last escalation counts as recovered instead."
-          onClick={() => pickStat('At risk')} active={stat === 'At risk'} />
+          info=">2 escalations in a month or a major escalation in the last 2 months. A client whose latest sentiment event is positive feedback after their last escalation counts as recovered instead." />
         <KPICard tone="amber" label="Watch" value={statCount('Watch').toLocaleString()} sub="live, worked out here"
-          info="Email-sensed frustration, an older escalation, a contract winding down (no recent booking), an escalation marked Unresolved, or a revenue dip."
-          onClick={() => pickStat('Watch')} active={stat === 'Watch'} />
-        <KPICard tone="green" label="Positive" value={statCount('Positive').toLocaleString()} sub="recovered or praised"
-          onClick={() => pickStat('Positive')} active={stat === 'Positive'} />
+          info="Email-sensed frustration, an older escalation, a contract winding down (no recent booking), an escalation marked Unresolved, or a revenue dip." />
+        <KPICard tone="green" label="Positive" value={statCount('Positive').toLocaleString()} sub="recovered or praised" />
         <KPICard tone="yellow" label="Revenue dip" value={dipCount.toLocaleString()} sub={dipWindow}
-          info={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`}
-          onClick={() => { setMode('clients'); setDipOnly(v => !v) }} active={dipOnly} />
+          info={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} />
       </KPIRow>
 
       {/* Opens CLOSED: a reference chart, not the reason anybody comes to this page. */}
@@ -968,57 +1003,69 @@ export default function Clients() {
           reason="carry no department (the sheet's BU column is Digital / MarTech, not LP/HUB / Web); booked ones follow their client's department" />
       )}
 
-      {/* Every filter in one box: what the client IS on the first row, then when something
-          last happened on it, then the quick views. */}
-      <FilterBar right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{mode === 'clients' ? rows.length : dirRows.length} shown</span>}>
+      {/* Every filter in one box. Row 1 is what gets used: search, industry, owner, GEO and
+          health. The directory-only fields, the activity dates and the quick views sit
+          behind "More filters" — nothing removed, only regrouped. */}
+      <FilterBar right={<>
+        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{mode === 'clients' ? rows.length : dirRows.length} shown</span>
+        {anyFilter && <button onClick={clearAll} className="text-xs text-mav-muted hover:text-mav-fg">✕ Clear all</button>}
+      </>}>
         {mine.canScope && (
           <MineFilter on={justMine} onChange={setJustMine} label="My clients"
             hidden={allClients.filter(c => !mine.ownsClient(c.company_name)).length} />
         )}
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-52`} />
-        <MultiSelect label="All industries" options={mode === 'clients' ? industries : dirIndustries} selected={ind} onChange={setInd} className="w-44" />
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients…" className={`${sel} w-64`} />
+        <MultiSelect label="All industries" options={mode === 'clients' ? industries : dirIndustries} selected={ind} onChange={setInd} className="w-40" />
         <MultiSelect label="All owners" options={owners} selected={owner} onChange={setOwner} className="w-40" />
-        <MultiSelect label="All GEOs" options={mode === 'clients' ? geos : dirGeos} selected={geo} onChange={setGeo} className="w-36" />
-        {mode === 'directory' && <MultiSelect label="All BUs" options={dirBus} selected={bu} onChange={setBu} className="w-36" />}
-        {mode === 'directory' && <select value={linked} onChange={e => setLinked(e.target.value as '' | 'yes' | 'no')} className={sel}><option value="">Booked &amp; not booked</option><option value="yes">Booked revenue</option><option value="no">No revenue yet</option></select>}
-        {mode === 'directory' && <select value={aiStance} onChange={e => setAiStance(e.target.value as '' | 'native' | 'adjacent')} title="Classified from each company's own site title and meta description, already cached on the directory row" className={sel}><option value="">Any AI stance</option><option value="native">AI-native ({dirAi.native})</option><option value="adjacent">AI/automation positioning ({dirAi.adjacent})</option></select>}
-        <select value={stat} onChange={e => setStat(e.target.value)} title="Two things sit in one list. “Live” is computed here and now from escalations, email tone and booking gaps. “Recorded” is the sentiment stored on the client record by the nightly sentiment pass — a client can carry an at-risk sentiment without anything live against them today." className={sel}>
+        <MultiSelect label="All GEOs" options={mode === 'clients' ? geos : dirGeos} selected={geo} onChange={setGeo} className="w-40" />
+        <select value={stat} onChange={e => setStat(e.target.value)} title="Two things sit in one list. “Live” is computed here and now from escalations, email tone and booking gaps. “Recorded” is the sentiment stored on the client record by the nightly sentiment pass — a client can carry an at-risk sentiment without anything live against them today." className={`${sel} w-40`}>
           <option value="">All health</option>
-          <option value="At risk">🔴 At risk — live ({statCount('At risk')})</option>
-          <option value="Watch">🟠 Watch — live ({statCount('Watch')})</option>
-          <option value="Negative">🔴 At risk — recorded ({statCount('Negative')})</option>
-          <option value="Positive">🟢 Positive ({statCount('Positive')})</option>
-          <option value="Neutral">🟡 Neutral ({statCount('Neutral')})</option>
+          <option value="At risk">At risk — live ({statCount('At risk')})</option>
+          <option value="Watch">Watch — live ({statCount('Watch')})</option>
+          <option value="Negative">At risk — recorded ({statCount('Negative')})</option>
+          <option value="Positive">Positive ({statCount('Positive')})</option>
+          <option value="Neutral">Neutral ({statCount('Neutral')})</option>
         </select>
-        <div className="basis-full h-0" />
-        <span className={lbl}>Activity</span>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="Activity from" />
-        <span className="text-xs text-mav-muted">→</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="Activity to" />
-        {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear dates</button>}
-        <span className={`${lbl} ml-2`}>Quick views</span>
-        <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={pill(aiOnly)}>⚡ AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
-        <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={pill(dipOnly, 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium')}>📉 Revenue dip{dipCount ? ` (${dipCount})` : ''}</button>
-        <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={pill(recentOnly)}>🔥 Active discussions <span className="opacity-60">(14d)</span></button>
+        <button onClick={() => setMoreFilters(v => !v)} aria-expanded={moreFilters}
+          className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+          {moreFilters ? 'Fewer filters' : 'More filters'}{hiddenN > 0 ? ` (${hiddenN})` : ''}
+        </button>
+        {moreFilters && <>
+          <div className="basis-full h-0" />
+          {mode === 'directory' && <MultiSelect label="All BUs" options={dirBus} selected={bu} onChange={setBu} className="w-40" />}
+          {mode === 'directory' && <select value={linked} onChange={e => setLinked(e.target.value as '' | 'yes' | 'no')} className={`${sel} w-40`}><option value="">Booked &amp; not booked</option><option value="yes">Booked revenue</option><option value="no">No revenue yet</option></select>}
+          {mode === 'directory' && <select value={aiStance} onChange={e => setAiStance(e.target.value as '' | 'native' | 'adjacent')} title="Classified from each company's own site title and meta description, already cached on the directory row" className={`${sel} w-40`}><option value="">Any AI stance</option><option value="native">AI-native ({dirAi.native})</option><option value="adjacent">AI/automation positioning ({dirAi.adjacent})</option></select>}
+          <span className={lbl}>Activity</span>
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={sel} aria-label="Activity from" />
+          <span className="text-xs text-mav-muted">→</span>
+          <input type="date" value={to} onChange={e => setTo(e.target.value)} className={sel} aria-label="Activity to" />
+          {(from || to) && <button onClick={() => { setFrom(''); setTo('') }} className="text-xs text-mav-muted hover:text-mav-fg">✕ clear dates</button>}
+          <span className={`${lbl} ml-2`}>Quick views</span>
+          <button onClick={() => setAiOnly(v => !v)} title="Booked clients whose OWN business is AI (accessiBe, Sensen.ai, Omniscient Neurotechnology…). This describes the client — it is not our automation pipeline. For that, see 'Automation opportunities by industry' below the table." className={pill(aiOnly)}>AI-native clients{aiCount ? ` (${aiCount})` : ''}</button>
+          <button onClick={() => setDipOnly(v => !v)} title={`Billing at least $2,000 across ${dipWindow.split(' vs ')[1]}, then halved or worse across ${dipWindow.split(' vs ')[0]}. The month still billing is excluded. A happy client can appear here — that is the point: it is a spend signal, not a sentiment one.`} className={pill(dipOnly, 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium')}>Revenue dip{dipCount ? ` (${dipCount})` : ''}</button>
+          <button onClick={() => setRecentOnly(v => !v)} title="Clients with a logged email conversation, an escalation or an open quote dated in the last 14 days. It filters the table to accounts something has actually happened on recently — the quiet ones drop out." className={pill(recentOnly)}>Active discussions <span className="opacity-60">(14d)</span></button>
+        </>}
       </FilterBar>
 
       {mode === 'clients' ? (
       <Panel flush title="Revenue clients"
-        right={<span className="text-xs text-mav-muted">💬 email · ⚠ escalation · 💰 quote — sorted by latest action</span>}>
+        right={<div className="flex items-center gap-3"><span className="text-xs text-mav-muted">sorted by latest action</span><ColumnPicker cols={revCols} /></div>}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[980px]">
+          <table className="w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-              {['',
-                <button key="client" onClick={() => handleSort('name')} className="hover:text-mav-fg cursor-pointer">Client{getSortIndicator('name')}</button>,
-                'Industry',
-                <button key="geo" onClick={() => handleSort('geo')} className="hover:text-mav-fg cursor-pointer">GEO{getSortIndicator('geo')}</button>,
-                <button key="owner" onClick={() => handleSort('owner')} className="hover:text-mav-fg cursor-pointer">Owner{getSortIndicator('owner')}</button>,
-                'Health',
-                <button key="activity" onClick={() => handleSort('activity')} className="hover:text-mav-fg cursor-pointer">Last activity{getSortIndicator('activity')}</button>,
-                'Escal.',
-                'Convos',
-                <button key="ltv" onClick={() => handleSort('ltv')} title={`All-time billed revenue for this client${ltvWindow ? ` — every booking we hold, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)} (${ltvWindow.months} months)` : ''}. Not a rolling 12 months and not a forecast.`} className="hover:text-mav-fg cursor-pointer">LTV{getSortIndicator('ltv')}</button>
-              ].map((h, i) => <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>)}
+              {/* Only the chosen columns; the rest are one tick away in Columns. */}
+              {([
+                ['dot', ''],
+                ['client', <button key="client" onClick={() => handleSort('name')} className="hover:text-mav-fg cursor-pointer">Client{getSortIndicator('name')}</button>],
+                ['industry', 'Industry'],
+                ['geo', <button key="geo" onClick={() => handleSort('geo')} className="hover:text-mav-fg cursor-pointer">GEO{getSortIndicator('geo')}</button>],
+                ['owner', <button key="owner" onClick={() => handleSort('owner')} className="hover:text-mav-fg cursor-pointer">Owner{getSortIndicator('owner')}</button>],
+                ['health', 'Health'],
+                ['activity', <button key="activity" onClick={() => handleSort('activity')} className="hover:text-mav-fg cursor-pointer">Last activity{getSortIndicator('activity')}</button>],
+                ['escal', 'Escal.'],
+                ['convos', 'Convos'],
+                ['ltv', <button key="ltv" onClick={() => handleSort('ltv')} title={`All-time billed revenue for this client${ltvWindow ? ` — every booking we hold, ${monLabel(ltvWindow.lo)} to ${monLabel(ltvWindow.hi)} (${ltvWindow.months} months)` : ''}. Not a rolling 12 months and not a forecast.`} className="hover:text-mav-fg cursor-pointer">LTV{getSortIndicator('ltv')}</button>],
+              ] as [string, React.ReactNode][]).filter(([k]) => revCols.on(k)).map(([k, h]) => <th key={k} className="px-3 py-2.5 font-medium whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody>
               {pageRows.map(c => {
@@ -1029,11 +1076,11 @@ export default function Clients() {
                 const rowBg = r.unresolved ? 'bg-amber-500/10' : r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
                 return (
                   <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
-                    <td className="px-4 py-3"><span className={`inline-block w-2 h-2 rounded-full ${r.unresolved ? 'bg-amber-400' : dotCls(st)}`} title={r.unresolved ? 'Escalation marked Unresolved on Critical Escalations' : undefined} /></td>
-                    <td className="px-4 py-3">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="Someone looked at this client's escalation and it is still broken">⚑ Unresolved</span>}{r.dip && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-semibold whitespace-nowrap" title={`${fmtUsd(r.dip.prior)} → ${fmtUsd(r.dip.last)} (${dipWindow})`}>📉 {r.dip.stopped ? 'Billing stopped' : `Revenue −${r.dip.dropPct}%`}</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">⚡ AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
-                    <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>
-                    <td className="px-4 py-3 text-mav-muted">{c.geo}</td>
-                    <td className="px-4 py-3 text-mav-muted">
+                    <td className="px-3 py-2.5"><span className={`inline-block w-2 h-2 rounded-full ${r.unresolved ? 'bg-amber-400' : dotCls(st)}`} title={r.unresolved ? 'Escalation marked Unresolved on Critical Escalations' : undefined} /></td>
+                    <td className="px-3 py-2.5">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="Someone looked at this client's escalation and it is still broken">Unresolved</span>}{r.dip && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-semibold whitespace-nowrap" title={`${fmtUsd(r.dip.prior)} → ${fmtUsd(r.dip.last)} (${dipWindow})`}>{r.dip.stopped ? 'Billing stopped' : `Revenue −${r.dip.dropPct}%`}</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                    {revCols.on('industry') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>}
+                    {revCols.on('geo') && <td className="px-3 py-2.5 text-mav-muted">{c.geo}</td>}
+                    {revCols.on('owner') && <td className="px-3 py-2.5 text-mav-muted">
                       {(() => {
                         const os = ownersOf(c.company_name)
                         if (!os.length) return c.pc_sme || '—'
@@ -1041,14 +1088,14 @@ export default function Clients() {
                         // tooltip rather than wrapped over three lines in a table cell.
                         return <span title={os.join(', ')}>{os[0]}{os.length > 1 && <span className="text-mav-yellow/80"> +{os.length - 1}</span>}</span>
                       })()}
-                    </td>
-                    <td className="px-4 py-3"><button onClick={e => { e.stopPropagation(); setStat(b => b === st ? '' : st) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${tone(st)}`}>{st || '—'}</button></td>
-                    <td className="px-4 py-3 whitespace-nowrap">{act.last
-                      ? <span className="inline-flex items-center gap-1.5"><span className={isRecent ? 'text-mav-fg' : 'text-mav-muted'}>{act.last}</span><span className="text-[11px] tracking-tight">{act.convo ? '💬' : ''}{act.esc ? '⚠' : ''}{act.quote ? '💰' : ''}</span>{isRecent && <span className="inline-block w-1.5 h-1.5 rounded-full bg-mav-yellow" title="active in the last 14 days" />}</span>
-                      : <span className="text-xs text-mav-muted">—</span>}</td>
-                    <td className="px-4 py-3">{r.escs.length ? <span className="text-xs px-2 py-1 rounded-full bg-red-500/15 text-red-400 font-medium">⚠ {r.escs.length}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-                    <td className="px-4 py-3">{nc ? <span className="text-xs px-2 py-1 rounded-full bg-blue-500/15 text-blue-400 font-medium">💬 {nc}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-                    <td className="px-4 py-3">{c.ltv_usd ? fmtUsd(c.ltv_usd) : '—'}</td>
+                    </td>}
+                    {revCols.on('health') && <td className="px-3 py-2.5"><button onClick={e => { e.stopPropagation(); setStat(b => b === st ? '' : st) }} className={`text-xs px-2 py-1 rounded-full hover:ring-1 hover:ring-mav-yellow/50 ${tone(st)}`}>{st || '—'}</button></td>}
+                    {revCols.on('activity') && <td className="px-3 py-2.5 whitespace-nowrap">{act.last
+                      ? <span className="inline-flex items-center gap-1.5"><span className={isRecent ? 'text-mav-fg' : 'text-mav-muted'}>{act.last}</span><span className="text-[11px] text-mav-muted">{[act.convo && 'email', act.esc && 'escal.', act.quote && 'quote'].filter(Boolean).join(' · ')}</span>{isRecent && <span className="inline-block w-1.5 h-1.5 rounded-full bg-mav-yellow" title="active in the last 14 days" />}</span>
+                      : <span className="text-xs text-mav-muted">—</span>}</td>}
+                    {revCols.on('escal') && <td className="px-3 py-2.5">{r.escs.length ? <span className="text-xs px-2 py-1 rounded-full bg-red-500/15 text-red-400 font-medium">{r.escs.length}</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
+                    {revCols.on('convos') && <td className="px-3 py-2.5">{nc ? <span className="text-xs px-2 py-1 rounded-full bg-blue-500/15 text-blue-400 font-medium">{nc}</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
+                    {revCols.on('ltv') && <td className="px-3 py-2.5 whitespace-nowrap">{c.ltv_usd ? fmtUsd(c.ltv_usd) : '—'}</td>}
                   </tr>
                 )
               })}
@@ -1058,7 +1105,7 @@ export default function Clients() {
         <Pager />
       </Panel>
       ) : (
-      <Panel flush title="Full directory">
+      <Panel flush title="Full directory" right={<ColumnPicker cols={dirCols} />}>
         {/* Legend for the marks in the Industry column. These were previously explained
             only on hover, which meant nobody knew the tick was there to be hovered. */}
         <div className="px-4 py-3 border-b border-mav-line flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
@@ -1069,45 +1116,45 @@ export default function Clients() {
           <span className="text-mav-muted">Smaller grey text under the group name is the granular industry it was merged from.</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[980px]">
+          <table className="w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-              {['Client', 'Industry', 'AI stance', 'BU', 'GEO', 'Owner', 'Head', 'Type', 'Technology'].map((h, i) => (
-                <th key={i} className="px-4 py-3 font-medium whitespace-nowrap">{h}</th>
+              {DIR_COLS.filter(c => dirCols.on(c.key)).map(c => (
+                <th key={c.key} className="px-3 py-2.5 font-medium whitespace-nowrap">{c.label}</th>
               ))}
             </tr></thead>
             <tbody>
               {pageDirRows.map(d => (
                 <tr key={d.id} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 ${d.is_revenue_client ? 'bg-mav-yellow/5' : ''}`}>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span>{d.company_name}</span>
                       {d.is_revenue_client && <span title={`Booked revenue as "${d.matched_client}"`} className="text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">£ booked</span>}
                     </div>
                     {d.domain && <div className="text-xs text-mav-muted">{d.domain}</div>}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  {dirCols.on('industry') && <td className="px-3 py-2.5 whitespace-nowrap">
                     <span className={d.industry ? '' : 'text-mav-muted'}>{d.industry || '—'}</span>
                     {d.industry_source === 'website' && <span title={d.industry_confidence === 'low' ? 'Read from the website, but the page was thin — worth a check' : 'Confirmed by reading the company website'} className="ml-2 text-[11px] text-mav-muted">{d.industry_confidence === 'low' ? '◌' : '✓'}</span>}
                     {d.industry_detail && d.industry_detail !== d.industry && <div className="text-xs text-mav-muted">{d.industry_detail}</div>}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
+                  </td>}
+                  {dirCols.on('ai') && <td className="px-3 py-2.5 whitespace-nowrap">
                     {d.ai_stance === 'native' ? <span title={d.ai_evidence ? `Matched on: “${d.ai_evidence}”` : ''} className="text-[11px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400 font-medium">AI-native</span>
                       : d.ai_stance === 'adjacent' ? <span title={d.ai_evidence ? `Matched on: “${d.ai_evidence}”` : ''} className="text-[11px] px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">AI/automation</span>
                       : d.ai_stance === 'none' ? <span className="text-mav-muted text-xs">—</span>
                       : <span title="No site text was captured for this company, so its stance is unknown rather than no" className="text-mav-muted text-xs">?</span>}
-                  </td>
-                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.bu || '—'}</td>
-                  <td className="px-4 py-3 text-mav-muted">{d.geo || '—'}</td>
+                  </td>}
+                  {dirCols.on('bu') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{d.bu || '—'}</td>}
+                  {dirCols.on('geo') && <td className="px-3 py-2.5 text-mav-muted">{d.geo || '—'}</td>}
                   {/* One header cannot be right for both, so it reads "Owner" and the row
                       says which kind. NBD open the account; AMs work one we already have. */}
-                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">
+                  {dirCols.on('owner') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">
                     {d.am_name
                       ? <>{d.am_name}{isNbdOwner(d.am_name) && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 align-middle" title="New business development — opened this account">NBD</span>}</>
                       : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{d.head || '—'}</td>
-                  <td className="px-4 py-3 text-mav-muted">{d.direct_agency || '—'}</td>
-                  <td className="px-4 py-3 text-mav-muted text-xs max-w-[16rem] truncate" title={d.technology || ''}>{d.technology || '—'}</td>
+                  </td>}
+                  {dirCols.on('head') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{d.head || '—'}</td>}
+                  {dirCols.on('type') && <td className="px-3 py-2.5 text-mav-muted">{d.direct_agency || '—'}</td>}
+                  {dirCols.on('tech') && <td className="px-3 py-2.5 text-mav-muted text-xs max-w-[16rem] truncate" title={d.technology || ''}>{d.technology || '—'}</td>}
                 </tr>
               ))}
             </tbody>
@@ -1139,13 +1186,13 @@ export default function Clients() {
             </div>
           }>
           <button onClick={() => setShowAuto(v => !v)} className="inline-flex items-center gap-1.5 uppercase hover:text-mav-fg transition-colors">
-            <span>{showAuto ? '▾' : '▸'}</span>⚡ Automation opportunities by industry
+            <span>{showAuto ? '▾' : '▸'}</span>Automation opportunities by industry
           </button>
         </SectionTitle>
         {showAuto && <>
 
         {/* The numbers that size this, from widest to warmest. The AI-native one is the
-            trap: ⚡ AI-native counts clients whose OWN business is AI — it is not the
+            trap: AI-native counts clients whose OWN business is AI — it is not the
             opportunity, and reading it as such understates the list by two orders of
             magnitude. The last card is what the service line has actually billed. */}
         <KPIRow cols={aiBook.count > 0 ? 5 : 4}>
@@ -1285,15 +1332,15 @@ export default function Clients() {
               <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap"><span className={`inline-block w-2.5 h-2.5 rounded-full ${dotCls(r.level || (r.recovered ? 'Positive' : sentBucket(selC.sentiment)))}`} /><h2 className="text-xl font-semibold">{displayName(selC.company_name)}</h2></div>
-                  {selC.ai_focus && <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">⚡ AI &amp; Automation</span>}
+                  {selC.ai_focus && <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold">AI &amp; Automation</span>}
                   {selC.website && <div className="text-xs text-mav-muted mt-1">{selC.website}</div>}
                 </div>
                 <button onClick={() => setSelC(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
               </div>
 
-              {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.unresolved ? 'border-amber-500/50 bg-amber-500/10 text-amber-300' : r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.unresolved ? '⚑ Unresolved' : r.level === 'At risk' ? '🔴 At risk' : '🟠 Watch'}:</span> {r.reasons.join(' · ')}</div>}
+              {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.unresolved ? 'border-amber-500/50 bg-amber-500/10 text-amber-300' : r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.unresolved ? 'Unresolved' : r.level === 'At risk' ? 'At risk' : 'Watch'}:</span> {r.reasons.join(' · ')}</div>}
 
-              {!r.level && r.recovered && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 px-3 py-2 text-sm"><span className="font-semibold">🟢 Recovered:</span> {r.recoveryNote}</div>}
+              {!r.level && r.recovered && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 px-3 py-2 text-sm"><span className="font-semibold">Recovered:</span> {r.recoveryNote}</div>}
 
               <div className="flex flex-wrap gap-2 mb-5">
                 {selC.sentiment && <span className={`text-xs px-2 py-1 rounded-full ${tone(sentBucket(selC.sentiment))}`}>Sentiment: {selC.sentiment}</span>}

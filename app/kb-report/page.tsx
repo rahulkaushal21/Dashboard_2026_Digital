@@ -312,6 +312,11 @@ export default function Reports() {
     setFrom(ranges.thisMonth.from); setTo(ranges.thisMonth.to)
     setFAm([]); setFPm([]); setFEng([]); setFTech([]); setFGeo([]); setFAgency([]); setFDept([])
   }
+  // The fields reached for less often sit behind "More filters", which opens by itself
+  // whenever one of them is set so a narrowed page always shows why.
+  const hiddenN = [fAm, fEng, fTech, fGeo, fAgency].filter(x => x.length > 0).length + (lastSameDayOn ? 1 : 0)
+  const [moreFilters, setMoreFilters] = useState(false)
+  useEffect(() => { if (hiddenN > 0) setMoreFilters(true) }, [hiddenN])
 
   // The window in words, for the header chip.
   const rangeChip = useMemo(() => {
@@ -372,45 +377,49 @@ export default function Reports() {
         // for the dropdowns, so picking a range left no way back but a page reload.
         (anyFilter || datesChanged) && (
           <button onClick={reset} className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
-            ✕ Clear filters
+            ✕ Clear all
           </button>
         )}>
-        <span className={label}>Start date</span>
-        <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} className={`${sel} [color-scheme:dark]`} />
-        <span className={label}>to</span>
-        <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} className={`${sel} [color-scheme:dark]`} />
-
         {/* A month is the unit people ask in, and typing two dates to get one is work. */}
         <select value={monthValue} onChange={e => {
           if (!e.target.value) return
           const d = new Date(e.target.value + '-01T00:00:00')
           setFrom(ymd(monthStart(d))); setTo(ymd(monthEnd(d)))
-        }} className={sel} aria-label="Start date month">
+        }} className={`${sel} w-40`} aria-label="Start date month">
           <option value="">Month…</option>
           {months.map(m => <option key={m} value={m}>{monLabel(m)}</option>)}
         </select>
 
-        {/* The range people ask for most after "this month": the month before, stopped on
-            today's date, so the two are the same number of days. It toggles — clicking it
-            again goes back to this month, so it is never a one-way door. */}
-        <button onClick={() => {
-          const r = lastSameDayOn ? ranges.thisMonth : ranges.lastSameDay
-          setFrom(r.from); setTo(r.to)
-        }} className={`text-xs px-3 py-2 rounded-md border transition-colors ${lastSameDayOn
-          ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium'
-          : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
-          Last month, same day
-        </button>
-
-        <div className="basis-full h-0" />
+        <span className={label}>Start date</span>
+        <input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} className={`${sel} [color-scheme:dark]`} />
+        <span className={label}>to</span>
+        <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} className={`${sel} [color-scheme:dark]`} />
 
         <MultiSelect label="All services" options={unitDepts} selected={fDept} onChange={setFDept} className="w-40" />
-        <MultiSelect label="All AMs" options={ams} selected={fAm} onChange={setFAm} className="w-40" />
         <MultiSelect label="All PMs" options={pms} selected={fPm} onChange={setFPm} className="w-40" />
-        <MultiSelect label="P2P &amp; Dedicated" options={['Dedicated', 'P2P']} selected={fEng} onChange={setFEng} className="w-44" />
-        <MultiSelect label="All technologies" options={techs} selected={fTech} onChange={setFTech} className="w-44" />
-        <MultiSelect label="All geos" options={geos} selected={fGeo} onChange={setFGeo} className="w-40" />
-        <MultiSelect label="All agencies" options={agencies} selected={fAgency} onChange={setFAgency} className="w-52" />
+        <button onClick={() => setMoreFilters(v => !v)} aria-expanded={moreFilters}
+          className="rounded-full border border-mav-line text-mav-muted hover:text-mav-fg px-3 py-1.5 text-xs">
+          {moreFilters ? 'Fewer filters' : 'More filters'}{hiddenN > 0 ? ` (${hiddenN})` : ''}
+        </button>
+        {moreFilters && <>
+          <div className="basis-full h-0" />
+          {/* The range people ask for most after "this month": the month before, stopped on
+              today's date, so the two are the same number of days. It toggles — clicking it
+              again goes back to this month, so it is never a one-way door. */}
+          <button onClick={() => {
+            const r = lastSameDayOn ? ranges.thisMonth : ranges.lastSameDay
+            setFrom(r.from); setTo(r.to)
+          }} className={`text-xs px-3 py-2 rounded-md border transition-colors ${lastSameDayOn
+            ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium'
+            : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
+            Last month, same day
+          </button>
+          <MultiSelect label="All AMs" options={ams} selected={fAm} onChange={setFAm} className="w-40" />
+          <MultiSelect label="P2P &amp; Dedicated" options={['Dedicated', 'P2P']} selected={fEng} onChange={setFEng} className="w-40" />
+          <MultiSelect label="All technologies" options={techs} selected={fTech} onChange={setFTech} className="w-40" />
+          <MultiSelect label="All geos" options={geos} selected={fGeo} onChange={setFGeo} className="w-40" />
+          <MultiSelect label="All agencies" options={agencies} selected={fAgency} onChange={setFAgency} className="w-40" />
+        </>}
       </FilterBar>
 
       {!loading && (

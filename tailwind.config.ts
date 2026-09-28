@@ -30,8 +30,12 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        // Brand pairing from mavlers.com. `mono` is deliberately Montserrat too: the
+        // labels that used a monospace for the Web PM look now follow the brand, and
+        // pointing the class here moved every one of them at once.
+        sans: ['Montserrat', 'system-ui', 'sans-serif'],
+        mono: ['Montserrat', 'system-ui', 'sans-serif'],
+        body: ['Lato', 'system-ui', 'sans-serif'],
       },
     },
   },

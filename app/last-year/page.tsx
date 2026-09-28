@@ -8,6 +8,7 @@ import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { getBookingsFull, type BookingRow } from '@/lib/supabase'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
+import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 
 // Who a booking belongs to, with the same known-wrong SME cells corrected as on
 // the PM pages — otherwise the two screens name a different owner for the same
@@ -65,7 +66,20 @@ type Row = {
 // An empty selection means "all", exactly as the old "All …" option did.
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 
+// The two quarters being compared are always on; every other quarter is one tick away,
+// so the table fits a laptop without scrolling sideways.
+const COLS: ColumnDef[] = [
+  { key: 'client', label: 'Client', locked: true },
+  { key: 'pm', label: 'PM', default: true },
+  { key: 'fyLast', label: 'Last FY', default: true },
+  { key: 'fyTd', label: 'This FY to date', default: true },
+  { key: 'quarters', label: 'Other quarters' },
+  { key: 'delta', label: 'QoQ Δ', default: true },
+  { key: 'trend', label: 'Qtr trend', default: true },
+]
+
 export default function LastYearReview() {
+  const cols = useColumns('last-year', COLS)
   const [rowsAll, setRows] = useState<BookingRow[]>([])
   // ── Business unit ───────────────────────────────────────────────────────────
   // Scoped at the source: every count, total and chart below reads the filtered rows,
@@ -79,6 +93,9 @@ export default function LastYearReview() {
   const [fGeo, setFGeo] = useState<string[]>([]); const [fService, setFService] = useState<string[]>([]); const [fPm, setFPm] = useState<string[]>([])
   const [qCur, setQCur] = useState(DEF_CUR)     // index of the quarter being compared
   const [qBase, setQBase] = useState(DEF_BASE)  // index of the quarter compared against
+  // A quarter column shows when it is one of the pair being compared, or when every
+  // quarter has been asked for.
+  const showQ = (i: number) => i === qCur || i === qBase || cols.on('quarters')
   useEffect(() => { getBookingsFull().then(setRows) }, [])
 
   const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -208,18 +225,18 @@ export default function LastYearReview() {
 
       <Panel flush title="Clients by quarter"
         info={<><span className="font-semibold">PM</span> is whoever is on the client&rsquo;s most recent booking; a <span className="font-semibold">+n</span> beside it means the account changed hands during the period — hover to see everyone who held it. Filtering by PM narrows every figure on the page to that PM&rsquo;s bookings only.</>}
-        right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">scroll right for all quarters →</span>}>
+        right={<ColumnPicker cols={cols} />}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[860px]">
+          <table className="w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-5 py-3 font-medium sticky left-0 bg-mav-panel">Client</th>
-                <th className="px-4 py-3 font-medium whitespace-nowrap">PM</th>
-                <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(lyStart).slice(2)}-{String(tyStart).slice(2)}</th>
-                <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(tyStart).slice(2)} TD</th>
-                {QS.map((f, i) => <th key={i} className={`px-4 py-3 font-medium text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow' : i === qBase ? 'text-mav-fg' : ''}`}>{qLabel(f)}{i === qCur ? ' (compare)' : i === qBase ? ' (vs)' : ''}</th>)}
-                <th className="px-4 py-3 font-medium text-right whitespace-nowrap">QoQ Δ</th>
-                <th className="px-5 py-3 font-medium">Qtr trend</th>
+                {cols.on('pm') && <th className="px-4 py-3 font-medium whitespace-nowrap">PM</th>}
+                {cols.on('fyLast') && <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(lyStart).slice(2)}-{String(tyStart).slice(2)}</th>}
+                {cols.on('fyTd') && <th className="px-4 py-3 font-medium text-right whitespace-nowrap">FY {String(tyStart).slice(2)} TD</th>}
+                {QS.map((f, i) => showQ(i) && <th key={i} className={`px-4 py-3 font-medium text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow' : i === qBase ? 'text-mav-fg' : ''}`}>{qLabel(f)}{i === qCur ? ' (compare)' : i === qBase ? ' (vs)' : ''}</th>)}
+                {cols.on('delta') && <th className="px-4 py-3 font-medium text-right whitespace-nowrap">QoQ Δ</th>}
+                {cols.on('trend') && <th className="px-5 py-3 font-medium">Qtr trend</th>}
               </tr>
             </thead>
             <tbody>
@@ -228,7 +245,7 @@ export default function LastYearReview() {
                 return (
                   <tr key={r.client} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
                     <td className="px-5 py-3 font-medium whitespace-nowrap sticky left-0 bg-mav-panel"><ClientLink name={r.client} /></td>
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    {cols.on('pm') && <td className="px-4 py-3 whitespace-nowrap">
                       {r.pm
                         ? <>
                             <span>{r.pm}</span>
@@ -239,14 +256,14 @@ export default function LastYearReview() {
                             )}
                           </>
                         : <span className="text-mav-muted">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right text-mav-muted">{r.fyLast ? money(r.fyLast) : '—'}</td>
-                    <td className="px-4 py-3 text-right">{r.fyTd ? money(r.fyTd) : '—'}</td>
-                    {r.qv.map((v, i) => <td key={i} className={`px-4 py-3 text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow font-medium' : i === qBase ? '' : 'text-mav-muted'}`}>{v ? money(v) : '—'}</td>)}
-                    <td className={`px-4 py-3 text-right font-medium whitespace-nowrap ${d > 0 ? 'text-green-400' : d < 0 ? 'text-red-400' : 'text-mav-muted'}`}>
+                    </td>}
+                    {cols.on('fyLast') && <td className="px-4 py-3 text-right text-mav-muted">{r.fyLast ? money(r.fyLast) : '—'}</td>}
+                    {cols.on('fyTd') && <td className="px-4 py-3 text-right">{r.fyTd ? money(r.fyTd) : '—'}</td>}
+                    {r.qv.map((v, i) => showQ(i) && <td key={i} className={`px-4 py-3 text-right whitespace-nowrap ${i === qCur ? 'text-mav-yellow font-medium' : i === qBase ? '' : 'text-mav-muted'}`}>{v ? money(v) : '—'}</td>)}
+                    {cols.on('delta') && <td className={`px-4 py-3 text-right font-medium whitespace-nowrap ${d > 0 ? 'text-green-400' : d < 0 ? 'text-red-400' : 'text-mav-muted'}`}>
                       {d === 0 ? '—' : (d > 0 ? '+' : '') + money(d)}{p != null && <span className="text-xs text-mav-muted ml-1">({p >= 0 ? '+' : ''}{p}%)</span>}
-                    </td>
-                    <td className="px-5 py-3"><span className={`text-xs px-2 py-1 rounded-full ${badge(st)}`}>{st}</span></td>
+                    </td>}
+                    {cols.on('trend') && <td className="px-5 py-3"><span className={`text-xs px-2 py-1 rounded-full ${badge(st)}`}>{st}</span></td>}
                   </tr>
                 )
               })}

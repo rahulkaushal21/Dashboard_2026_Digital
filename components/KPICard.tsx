@@ -32,11 +32,14 @@ export default function KPICard({ label, value, change, changeLabel = 'vs last m
   onClick?: () => void
   active?: boolean
 }) {
+  // onClick/active are accepted and IGNORED. A card is a figure, not a control: the
+  // tabs and the filter box are what change the rows, and a card that sometimes filters
+  // and sometimes does nothing taught people to click numbers and wonder why nothing
+  // happened (Pratik, 28 Sep 2026). Kept in the signature so callers still compile.
+  void onClick; void active
   const up = (change ?? 0) >= 0
-  const Tag = onClick ? 'button' : 'div'
   return (
-    <Tag onClick={onClick}
-      className={`text-left border rounded-xl p-4 min-w-0 ${TONES[tone]} ${onClick ? 'hover:shadow-md transition-shadow cursor-pointer' : ''} ${active ? 'ring-2 ring-mav-fill' : ''}`}>
+    <div className={`text-left border rounded-xl p-4 min-w-0 ${TONES[tone]}`}>
       <div className="flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-muted">
         <span className="truncate" title={label}>{label}</span>
         {info && <InfoTip text={info} />}
@@ -50,6 +53,6 @@ export default function KPICard({ label, value, change, changeLabel = 'vs last m
         </div>
       )}
       {note && <div className="text-[11px] text-mav-muted mt-1 leading-snug line-clamp-2" title={note}>{note}</div>}
-    </Tag>
+    </div>
   )
 }

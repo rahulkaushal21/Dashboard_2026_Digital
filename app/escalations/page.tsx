@@ -9,6 +9,7 @@ import { inUnit, unitOf } from '@/lib/business-unit'
 import MultiSelect from '@/components/MultiSelect'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
+import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import KPICard from '@/components/KPICard'
 import { KPIRow, FilterBar, Panel } from '@/components/PageParts'
 import { getEscalations, getEscalationDepts, type Escalation } from '@/lib/supabase'
@@ -22,7 +23,20 @@ type SortField = 'date' | 'company' | 'type'
 // An empty selection means "all", exactly as the old "All GEOs" option did.
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 
+// The log opens on when, who, what kind and how bad; GEO is one tick away in Columns.
+// The long free-text cells are truncated with the full text on hover.
+const COLS: ColumnDef[] = [
+  { key: 'date', label: 'Date', default: true },
+  { key: 'company', label: 'Company', locked: true },
+  { key: 'type', label: 'Type', default: true },
+  { key: 'situation', label: 'Situation', default: true },
+  { key: 'impact', label: 'Impact', default: true },
+  { key: 'geo', label: 'GEO' },
+  { key: 'subject', label: 'Subject', default: true },
+]
+
 export default function Escalations() {
+  const cols = useColumns('escalations', COLS)
   const [all, setAll] = useState<Escalation[]>([])
   // ── Business unit ───────────────────────────────────────────────────────────
   // Escalations carry no department and no PM: service_type says 'Managed' on 782 of
@@ -150,31 +164,31 @@ export default function Escalations() {
 
       <Panel flush title="Escalations"
         info={`Click a row for the full record and the email insight. Click Date, Company or Type to sort.${e.length > 400 ? ' The table shows the first 400 rows; narrow the filters to see the rest.' : ''}`}
-        right={<span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{Math.min(e.length, 400)} of {e.length} shown</span>}>
+        right={<div className="flex items-center gap-3"><span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{Math.min(e.length, 400)} of {e.length} shown</span><ColumnPicker cols={cols} /></div>}>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[720px]">
+        <table className="w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
-              {[
-                <button key="date" onClick={() => handleSort('date')} className="hover:text-mav-fg cursor-pointer">Date{getSortIndicator('date')}</button>,
-                <button key="company" onClick={() => handleSort('company')} className="hover:text-mav-fg cursor-pointer">Company{getSortIndicator('company')}</button>,
-                <button key="type" onClick={() => handleSort('type')} className="hover:text-mav-fg cursor-pointer">Type{getSortIndicator('type')}</button>,
-                'Situation',
-                'Impact',
-                'GEO',
-                'Subject'
-              ].map((h, i) => <th key={i} className="px-4 py-3 font-medium">{h}</th>)}
+              {([
+                ['date', <button key="date" onClick={() => handleSort('date')} className="hover:text-mav-fg cursor-pointer">Date{getSortIndicator('date')}</button>],
+                ['company', <button key="company" onClick={() => handleSort('company')} className="hover:text-mav-fg cursor-pointer">Company{getSortIndicator('company')}</button>],
+                ['type', <button key="type" onClick={() => handleSort('type')} className="hover:text-mav-fg cursor-pointer">Type{getSortIndicator('type')}</button>],
+                ['situation', 'Situation'],
+                ['impact', 'Impact'],
+                ['geo', 'GEO'],
+                ['subject', 'Subject'],
+              ] as [string, React.ReactNode][]).filter(([k]) => cols.on(k)).map(([k, h]) => <th key={k} className="px-3 py-2.5 font-medium whitespace-nowrap">{h}</th>)}
             </tr>
           </thead>
           <tbody>{e.slice(0, 400).map(x => (
             <tr key={x.id} onClick={() => setSel(x)} className="border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer">
-              <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.tracking_date || x.month || '—'}</td>
-              <td className="px-4 py-3"><ClientLink name={x.company_name} /></td>
-              <td className="px-4 py-3"><span className={`text-xs ${isMajor(x) ? 'text-red-400' : 'text-mav-muted'}`}>{x.escalation_type || '—'}</span></td>
-              <td className="px-4 py-3 text-mav-muted">{x.situation_type}</td>
-              <td className="px-4 py-3 text-mav-muted">{x.business_impact}</td>
-              <td className="px-4 py-3 text-mav-muted">{x.geo}</td>
-              <td className="px-4 py-3 text-mav-muted truncate max-w-xs">{x.email_subject}</td>
+              {cols.on('date') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{x.tracking_date || x.month || '—'}</td>}
+              <td className="px-3 py-2.5"><ClientLink name={x.company_name} /></td>
+              {cols.on('type') && <td className="px-3 py-2.5"><span className={`text-xs ${isMajor(x) ? 'text-red-400' : 'text-mav-muted'}`}>{x.escalation_type || '—'}</span></td>}
+              {cols.on('situation') && <td className="px-3 py-2.5 text-mav-muted max-w-[14rem] truncate" title={x.situation_type || ''}>{x.situation_type}</td>}
+              {cols.on('impact') && <td className="px-3 py-2.5 text-mav-muted max-w-[12rem] truncate" title={x.business_impact || ''}>{x.business_impact}</td>}
+              {cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted">{x.geo}</td>}
+              {cols.on('subject') && <td className="px-3 py-2.5 text-mav-muted truncate max-w-xs" title={x.email_subject || ''}>{x.email_subject}</td>}
             </tr>
           ))}</tbody>
         </table>

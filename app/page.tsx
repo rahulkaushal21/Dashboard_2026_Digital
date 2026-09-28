@@ -444,7 +444,7 @@ export default function Dashboard() {
           <span className="text-mav-muted">Email reviewed</span>
           <span className="font-medium">{ago(mail?.last_reviewed ?? syncOpp, nowMs)}</span>
           {syncOppFailed
-            ? <span className="text-red-400 font-medium">· ⚠ the last review failed — capture may be stalled</span>
+            ? <span className="text-red-400 font-medium">· the last review failed — capture may be stalled</span>
             : <span className="text-mav-muted">· by hand</span>}
           {/* CONVERSATIONS, not messages. "618 unread" is true and useless — it is mostly
               alerts and calendar invites, and a number nobody can act on gets ignored,

@@ -69,8 +69,8 @@ export default function ThemeToggle() {
   return (
     <button onClick={() => setMyTheme(next.id)}
       title={`${current.name} — click for ${next.name}. All of them are in Settings.`}
-      className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm text-mav-muted hover:text-mav-fg hover:bg-mav-panel transition-colors">
-      <Palette size={16} />
+      className="flex items-center gap-3 w-full px-3 py-2 rounded-md text-[12px] font-semibold uppercase tracking-[0.04em] text-left text-mav-muted hover:text-mav-fg hover:bg-mav-panel transition-colors">
+      <Palette size={16} className="shrink-0" />
       <span className="truncate">{current.name}</span>
       <span className="ml-auto flex gap-0.5 shrink-0">
         {next.swatch.slice(0, 3).map((c, k) => (

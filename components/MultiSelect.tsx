@@ -46,7 +46,7 @@ export default function MultiSelect({ label, options, selected, onChange, classN
     <div className={`relative ${className}`} ref={box}>
       <button type="button" onClick={() => setOpen(v => !v)}
         title={selected.length ? selected.join(', ') : label}
-        className={`w-full text-left text-sm rounded-md border px-2 py-2 transition-colors inline-flex items-center gap-1.5 ${selected.length
+        className={`ms-btn w-full text-left text-sm rounded-md border px-2 py-2 transition-colors inline-flex items-center gap-1.5 ${selected.length
           ? 'bg-mav-yellow/15 border-mav-yellow/50 text-mav-fg'
           : 'bg-mav-panel border-mav-line text-mav-muted hover:text-mav-fg'}`}>
         <span className="truncate">{text}</span>

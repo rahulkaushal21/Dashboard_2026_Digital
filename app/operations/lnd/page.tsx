@@ -279,8 +279,6 @@ export default function LndPage() {
     </div>
   )
 
-  const toggleOnly = (v: typeof only) => setOnly(only === v ? '' : v)
-
   return (
     <div>
       <Header
@@ -332,14 +330,13 @@ export default function LndPage() {
           tone={courseStats.done === 0 ? 'red' : 'default'}
           sub={`excl. entry assessment (${courseStats.gateDone}/${courseStats.gateAssigned} passed)`} />
         <KPICard label="Never started" value={String(k.zero)} tone={k.zero ? 'red' : 'green'}
-          sub={k.zero ? 'no module opened at all' : 'everyone has begun'}
-          onClick={() => toggleOnly('zero')} active={only === 'zero'} />
+          sub={k.zero ? 'no module opened at all' : 'everyone has begun'} />
       </KPIRow>
       <KPIRow cols={3}>
         <KPICard label={`Stalled ${STALL_DAYS}+ days`} value={String(k.stalled)} tone={k.stalled ? 'amber' : 'default'}
-          sub="started, then went quiet" onClick={() => toggleOnly('stalled')} active={only === 'stalled'} />
+          sub="started, then went quiet" />
         <KPICard label="Finished the track" value={String(k.complete)} tone={k.complete ? 'green' : 'default'}
-          sub="all assigned modules complete" onClick={() => toggleOnly('done')} active={only === 'done'} />
+          sub="all assigned modules complete" />
         <KPICard label="Only the entry assessment" value={String(courseStats.peopleWithNoCourse)}
           tone={courseStats.peopleWithNoCourse ? 'red' : 'green'}
           info="Nothing but the entry assessment: passed the gate, finished no course."

@@ -130,7 +130,7 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
                   {/* A directory row for an address that cannot sign in is inert: the person
                       can be NAMED as an owner but can never confirm anything themselves. */}
                   {!isAllowedDomain(r.email) && (
-                    <span className="ml-2 text-xs text-amber-300" title={`Sign-in is limited to ${ALLOWED_DOMAINS.join(' and ')}`}>⚠ cannot sign in</span>
+                    <span className="ml-2 text-xs text-amber-300" title={`Sign-in is limited to ${ALLOWED_DOMAINS.join(' and ')}`}>cannot sign in</span>
                   )}
                 </td>
                 <td className="px-4 py-3">{r.team
@@ -171,13 +171,13 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
           </p>
           {collisions.length > 0 && (
             <p className="text-xs text-amber-300">
-              ⚠ &ldquo;{collisions.join('", "')}&rdquo; already belongs to somebody else here. Two people sharing a spelling
+              &ldquo;{collisions.join('", "')}&rdquo; already belongs to somebody else here. Two people sharing a spelling
               means whoever is matched first gets the other&rsquo;s deals — and the right to confirm them. Use the full name instead.
             </p>
           )}
           {nEmail.trim() && !isAllowedDomain(nEmail) && (
             <p className="text-xs text-amber-300">
-              ⚠ {nEmail.trim()} is not on a domain that can sign in ({ALLOWED_DOMAINS.join(', ')}). They can be named as an
+              {nEmail.trim()} is not on a domain that can sign in ({ALLOWED_DOMAINS.join(', ')}). They can be named as an
               owner, but they will not be able to confirm anything themselves until that changes.
             </p>
           )}

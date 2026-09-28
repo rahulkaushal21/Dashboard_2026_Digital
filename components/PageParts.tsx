@@ -50,7 +50,7 @@ export function Segments<T extends string>({ items, value, onChange, className =
 /** Every filter for the table below, in one white box — search first, then fields. */
 export function FilterBar({ children, right, className = '' }: { children: React.ReactNode; right?: React.ReactNode; className?: string }) {
   return (
-    <div className={`bg-mav-panel border border-mav-line rounded-xl p-3 mb-4 ${className}`}>
+    <div className={`filterbar bg-mav-panel border border-mav-line rounded-xl p-3 mb-4 ${className}`}>
       <div className="flex flex-wrap items-center gap-2">
         {children}
         {right && <div className="ml-auto flex flex-wrap items-center gap-2">{right}</div>}

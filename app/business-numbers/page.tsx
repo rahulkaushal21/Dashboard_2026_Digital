@@ -191,7 +191,7 @@ export default function BusinessNumbers() {
       {mismatch.length > 0 && (
         <div className="mb-4 text-xs rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
-            ⚠ {mismatch.length === 1 ? 'One row has' : `${mismatch.length} rows have`} a Month column and a Start Date in
+            {mismatch.length === 1 ? 'One row has' : `${mismatch.length} rows have`} a Month column and a Start Date in
             different months, worth {fmtUsd(mismatch.reduce((a, r) => a + (Number(r.amount_usd) || 0), 0))} — fix them in the sheet
             <InfoTip text="Whole months are counted by the Month column and shorter ranges by the Start Date, so these rows change the answer depending on the dates you pick." />
           </div>

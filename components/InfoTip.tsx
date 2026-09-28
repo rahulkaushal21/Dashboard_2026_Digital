@@ -19,7 +19,7 @@ export default function InfoTip({ text, className = '', align = 'left' }: { text
       </button>
       <span role="tooltip"
         className={`pointer-events-none absolute top-full mt-2 z-50 w-72 sm:w-80 rounded-lg border border-mav-line bg-mav-panel
-          px-3 py-2 text-xs font-normal normal-case tracking-normal leading-relaxed text-mav-fg shadow-lg
+          px-3 py-2 font-body text-[13px] font-normal normal-case tracking-normal leading-relaxed text-mav-fg shadow-lg
           opacity-0 translate-y-1 transition group-hover:opacity-100 group-hover:translate-y-0
           group-focus-within:opacity-100 group-focus-within:translate-y-0 ${align === 'right' ? 'right-0' : 'left-0'}`}>
         {text}

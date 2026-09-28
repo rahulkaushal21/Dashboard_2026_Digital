@@ -1,6 +1,7 @@
-/* Inter for words, JetBrains Mono for figures, labels and column headings — the same
-   pairing as Web PM, so the two tools read as one family side by side. */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* Straight off mavlers.com: Montserrat for everything the eye scans — headings, labels,
+   figures, the nav — and Lato for running explanation text, exactly as the brand site
+   pairs them. No monospace: the brand has none, so labels are spaced Montserrat caps. */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Lato:wght@400;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -66,21 +67,21 @@
 
 /* Studio — the team default since 28 Sep 2026.
    ----------------------------------------------
-   Web PM's look: a cream page, white cards, hairline warm-grey borders, a near-black rail
-   and the brand yellow as the one accent. Chosen so the dashboard and Web PM read as one
-   product when both are open. White cards here, unlike Warm Paper, because the page
-   around them is tinted enough that they sit on it rather than glare. */
+   The brand palette from mavlers.com, colour for colour: #F4F4F4 page, white cards,
+   #E5E5E5 hairlines, #1B1B1B ink, #676767 secondary grey, and #FFDB2D as the one accent
+   (as a fill — as text it is darkened, since #FFDB2D on white is unreadable). The rail
+   is the brand near-black. */
 :root[data-theme='studio'] {
-  --mav-bg:    244 242 237;   /* #F4F2ED cream page */
-  --mav-panel: 255 255 255;   /* #FFFFFF cards */
-  --mav-line:  230 226 217;   /* #E6E2D9 */
-  --mav-muted: 110 106 99;    /* #6E6A63 */
-  --mav-fg:    26 26 26;      /* #1A1A1A */
+  --mav-bg:    244 244 244;   /* #F4F4F4 brand light grey */
+  --mav-panel: 255 255 255;   /* #FFFFFF */
+  --mav-line:  229 229 229;   /* #E5E5E5 */
+  --mav-muted: 103 103 103;   /* #676767 brand grey */
+  --mav-fg:    27 27 27;      /* #1B1B1B brand near-black */
   --mav-yellow: 176 128 0;    /* #B08000 — yellow as TEXT; filled chips use bg-mav-fill */
-  --chart-grid: #E6E2D9;
-  --chart-axis: #6E6A63;
+  --chart-grid: #E5E5E5;
+  --chart-axis: #676767;
   --chart-tip:  #FFFFFF;
-  --chart-fg:   #1A1A1A;
+  --chart-fg:   #1B1B1B;
   --chart-hover: rgba(0,0,0,0.04);
 }
 
@@ -155,7 +156,7 @@
 :root[data-family='light']      { --section: var(--section-light, #B45309); }
 /* Studio drops the per-section hues for the one brand yellow, as Web PM does: the rail
    and the page title already say where you are. */
-:root[data-theme='studio']      { --section: #F5C400; }
+:root[data-theme='studio']      { --section: #FFDB2D; }
 
 
 /* The nav's filled active item, one colour per section.
@@ -452,9 +453,9 @@ html, body {
    page styled its own heading row a little differently — which is most of why moving
    between pages felt like moving between tools. Cells are left alone. */
 table thead th {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'Montserrat', system-ui, sans-serif;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -465,3 +466,28 @@ table thead th {
 :root[data-theme='studio'] input:not([type='checkbox']):not([type='radio']),
 :root[data-theme='studio'] select,
 :root[data-theme='studio'] textarea { background-color: #FFFFFF; }
+
+/* Filter controls, one height.
+   A native select, a date input and the MultiSelect button each brought their own
+   padding, so a filter row was three heights with the baselines wandering. Inside a
+   FilterBar every control is 36px and 13px text, whatever it is. */
+.filterbar select,
+.filterbar input:not([type='checkbox']):not([type='radio']),
+.filterbar .ms-btn {
+  height: 36px;
+  font-size: 13px;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-radius: 8px;
+}
+
+/* The action column: pinned to the right edge of a scrolling table so Edit / Confirm is
+   always in reach, however many columns somebody has switched on. */
+.sticky-action {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: rgb(var(--mav-panel));
+  box-shadow: -8px 0 8px -8px rgb(0 0 0 / 0.12);
+}
+thead .sticky-action { background: inherit; }

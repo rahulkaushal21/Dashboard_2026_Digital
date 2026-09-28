@@ -416,7 +416,7 @@ export default function BusinessTrendPage() {
         <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="Projected total (12 mo)" value={fmtUsd(fy26Analysis.projected)}
           sub={`${fy26Analysis.projectedPercent}% of ${FY_TARGET_LABEL}`}
           info="(Actual revenue to date) + (Average monthly × remaining months)." />
-        <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="FY status" value={fy26Analysis.onTrack ? '✓ On Track' : '✗ Off Track'}
+        <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="FY status" value={fy26Analysis.onTrack ? 'On Track' : 'Off Track'}
           sub={`Target ${FY_TARGET_LABEL}`} />
         <KPICard tone="amber" label="Remaining months" value={fy26Analysis.monthsRemaining.toString()} />
       </KPIRow>
@@ -552,7 +552,7 @@ export default function BusinessTrendPage() {
         <KPICard tone="red" label="Uplift required" value={`+${fmtUsd(plan.upliftPerMonth)}`} />
       </KPIRow>
 
-      <Panel className="mb-5" title="🤖 AI insights"
+      <Panel className="mb-5" title="AI insights"
         info="Read straight off the revenue and pipeline on this page — each line is a fact and the action it points to, not a forecast.">
         <div className="grid gap-3 md:grid-cols-2">
           {insights.map((i, n) => (

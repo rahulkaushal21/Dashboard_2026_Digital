@@ -25,8 +25,8 @@ export const DEFAULT_THEME = 'studio'
 export const THEMES: Theme[] = [
   {
     id: 'studio', name: 'Studio', family: 'light',
-    blurb: 'Cream page, white cards, dark rail — the Web PM look. The team default.',
-    swatch: ['#F4F2ED', '#FFFFFF', '#E6E2D9', '#1A1A1A'],
+    blurb: 'The mavlers.com palette — light grey page, white cards, near-black rail, brand yellow. The team default.',
+    swatch: ['#F4F4F4', '#FFFFFF', '#E5E5E5', '#1B1B1B'],
   },
   {
     id: 'dark', name: 'Charcoal', family: 'dark',

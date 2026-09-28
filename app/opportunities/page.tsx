@@ -10,7 +10,9 @@ import Link from 'next/link'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
 import { readDeepLink, clearDeepLink } from '@/lib/deep-link'
 import KPICard from '@/components/KPICard'
-import { KPIRow, Segments, FilterBar, SectionTitle } from '@/components/PageParts'
+import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
+import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import InfoTip from '@/components/InfoTip'
 import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
@@ -142,6 +144,16 @@ const COLS: { key: SortKey; label: string }[] = [
 { key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'intent', label: 'Intent' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
 { key: 'type', label: 'Type' }, { key: 'owner', label: 'Owner / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
 { key: 'date', label: 'Date' }, { key: 'flag', label: 'Review' },
+]
+// What the table shows before anybody picks. Identity, money, where it stands, who owns
+// it, when, and whether it needs a look — enough to work the list without scrolling
+// sideways. Win %, Source, Type, GEO and Tech are one tick away in "Columns". Pick and
+// Action are locked: they are how a row is worked, not a field about it.
+const DEFAULT_COLS: SortKey[] = ['company', 'value', 'intent', 'status', 'owner', 'date', 'flag']
+const TABLE_COLS: ColumnDef[] = [
+{ key: 'pick', label: 'Pick', locked: true },
+...COLS.map(c => ({ key: c.key, label: c.label, locked: c.key === 'company', default: DEFAULT_COLS.includes(c.key) })),
+{ key: 'action', label: 'Action', locked: true },
 ]
 // Type label from the Quotes tab Business Type (col P). A booked client can send
 // fresh work — that's "New + Repeat", legitimate repeat business, not a data error.
@@ -318,6 +330,13 @@ const [sel, setSel] = useState<Opportunity | null>(null)
 // already on, which is not a route change and so re-renders nothing by itself.
 useCloseOnNav(useCallback(() => setSel(null), []))
 const [page, setPage] = useState(0); const [perPage, setPerPage] = useState(50)
+// Which table columns this person has chosen (see TABLE_COLS for the defaults).
+const cols = useColumns('opportunities', TABLE_COLS)
+// The three pipeline breakdowns are a leadership view, looked at now and then — closed by
+// default so the table is not pushed below the fold on every visit.
+const [whereOpen, setWhereOpen] = useState(false)
+// The second filter row: dates, value bands, the less-used dropdowns and the quick views.
+const [moreOpen, setMoreOpen] = useState(false)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
 useEffect(() => {
@@ -608,6 +627,16 @@ window.alert('Could not save that — please try again.')
 
 const reset = () => { setSearch(''); setFType(''); setFGeo([]); setFAM([]); setFPM([]); setFStatus(''); setFSvc([]); setFTech([]); setFDept([]); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setCommittedOnly(false); setMisTagOnly(false); setFAge(''); setVMin(''); setVMax('') }
 
+// Filters that live behind "More filters", counted so the toggle can say how many are on.
+// The date range counts only once it has moved off its default (FY start → today).
+const hiddenActive = [
+  !!fType, fSvc.length > 0, fTech.length > 0, from !== '2026-04-01', !!(to && today && to !== today),
+  !!fAge, bandOn, flagOnly, unlikelyOnly, misTagOnly, lagOnly, committedOnly, markedOnly,
+].filter(Boolean).length
+// A hidden filter that is on must never be invisible — the lag alert's "Show them", a
+// click on a breakdown row, a deep link. Opens the row; closing it again is the user's call.
+useEffect(() => { if (hiddenActive > 0) setMoreOpen(true) }, [hiddenActive])
+
 // Pagination — reset to first page whenever the filtered/sorted set changes.
 useEffect(() => { setPage(0) }, [unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort, perPage])
 const pageCount = Math.max(1, Math.ceil(o.length / perPage))
@@ -789,7 +818,7 @@ of which <span className="text-orange-300 font-semibold">{money(m.unlikelyValue)
 const pickIn = (cur: string[], k: string) =>
 k === '—' ? [] : cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k]
 
-const Panel = ({ title, rows, active, onPick }: { title: string; rows: [string, { count: number; value: number }][]; active: string[]; onPick: (k: string) => void }) => (
+const BreakdownPanel = ({ title, rows, active, onPick }: { title: string; rows: [string, { count: number; value: number }][]; active: string[]; onPick: (k: string) => void }) => (
 <div className="bg-mav-panel border border-mav-line rounded-xl p-4">
 <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted mb-3">{title}</div>
 <div className="space-y-1.5 max-h-64 overflow-y-auto">{rows.map(([k, v]) => (
@@ -841,7 +870,7 @@ return (
 <div className="mb-5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
 <div className="flex flex-wrap items-center justify-between gap-3">
 <div>
-<div className="flex items-center gap-2 text-sm font-semibold text-amber-300">⚠ {lagRows.length} deal{lagRows.length > 1 ? 's' : ''} already decided or invoiced {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet
+<div className="flex items-center gap-2 text-sm font-semibold text-amber-300">{lagRows.length} deal{lagRows.length > 1 ? 's' : ''} already decided or invoiced {lagRows.length > 1 ? 'are' : 'is'} still Open in the Quotes sheet
 <InfoTip text="The sheet is the master record, so nothing books or drops out of pipeline until you update it there. This alert clears itself on the next sync." /></div>
 </div>
 <button onClick={() => { setLagOnly(true); setFStatus(''); setFlagOnly(false); setUnlikelyOnly(false); setMarkedOnly(false); setSearch('') }}
@@ -853,7 +882,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 <div className="flex flex-wrap gap-1.5">
 {lagWon.slice(0, 12).map(x => (
 <button key={x.id} onClick={() => setSel(x)} className="text-xs px-2 py-1 rounded-md bg-green-500/15 text-green-200 hover:bg-green-500/25 transition-colors">
-✓ {x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
+{x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
 </button>
 ))}
 {lagWon.length > 12 && <span className="text-xs text-mav-muted self-center">+{lagWon.length - 12} more</span>}
@@ -866,7 +895,7 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 <div className="flex flex-wrap gap-1.5">
 {lagLost.slice(0, 12).map(x => (
 <button key={x.id} onClick={() => setSel(x)} className="text-xs px-2 py-1 rounded-md bg-red-500/15 text-red-200 hover:bg-red-500/25 transition-colors">
-✗ {x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
+{x.company_name}{x.value ? ` · ${money(x.value)}` : ''}
 </button>
 ))}
 {lagLost.length > 12 && <span className="text-xs text-mav-muted self-center">+{lagLost.length - 12} more</span>}
@@ -885,19 +914,17 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
     This hides it, it does not protect it — the data still loads with the anon key. It
     is a tidier page for PMs, not a permission boundary.
 
-    Cards first, as on every page: the four numbers, each one a shortcut to its rows. */}
+    Cards first, as on every page: the four numbers. Display only — the status tabs
+    below are the control. */}
 {iAmAdmin && (
 <KPIRow cols={4}>
 <KPICard tone="accent" label="Open pipeline" value={money(openValue)}
   sub={<>{open.length} open{unlikelyOpen.length ? <> · {money(likelyValue)} likely</> : null}</>}
-  info={<>Open deals quoted in {from || '…'} → {to || 'today'}, excluding On Hold. {unlikelyOpen.length ? `${money(unlikelyValue)} of it is flagged "might not come".` : ''} The month cards below count Open and On Hold together as pending — {money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}.</>}
-  onClick={() => setFStatus('Open')} active={fStatus === 'Open'} />
-<KPICard tone="yellow" label="On hold" value={money(onHoldValue)} sub={`${onHold.length} paused`}
-  onClick={() => setFStatus('On Hold')} active={fStatus === 'On Hold'} />
+  info={<>Open deals quoted in {from || '…'} → {to || 'today'}, excluding On Hold. {unlikelyOpen.length ? `${money(unlikelyValue)} of it is flagged "might not come".` : ''} The month cards below count Open and On Hold together as pending — {money(openValue)} + {money(onHoldValue)} = {money(pendingValue)}.</>} />
+<KPICard tone="yellow" label="On hold" value={money(onHoldValue)} sub={`${onHold.length} paused`} />
 <KPICard tone="amber" label="Still undecided" value={money(pendingValue)} sub="open + on hold"
   info="Everything not yet won or lost in the date range. This is what the month cards call Pending." />
-<KPICard tone="green" label="Won" value={money(wonValue)} sub={`${won.length} deals won`}
-  onClick={() => setFStatus('Won')} active={fStatus === 'Won'} />
+<KPICard tone="green" label="Won" value={money(wonValue)} sub={`${won.length} deals won`} />
 </KPIRow>
 )}
 
@@ -908,14 +935,28 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
 </div>
 )}
 
-{iAmAdmin && (<>
-<SectionTitle info="Open pipeline in the date range. Click a row to filter the table to it.">Where the open pipeline sits</SectionTitle>
-<div className="grid md:grid-cols-3 gap-3 mb-5">
-<Panel title="By GEO" rows={byGeo} active={fGeo} onPick={k => { setFStatus('Open'); setFGeo(pickIn(fGeo, k)) }} />
-<Panel title="By Service" rows={bySvc} active={fSvc} onPick={k => { setFStatus('Open'); setFSvc(pickIn(fSvc, k)) }} />
-<Panel title="By Technology" rows={byTech} active={fTech} onPick={k => { setFStatus('Open'); setFTech(pickIn(fTech, k)) }} />
+{/* An accordion, closed by default: the header row is the whole control. The ⓘ sits
+    outside the button so hovering it does not toggle the section. */}
+{iAmAdmin && (
+<div className="mb-5">
+<div className="flex items-center gap-2 mb-2.5 mt-1">
+<button type="button" onClick={() => setWhereOpen(v => !v)} aria-expanded={whereOpen}
+  className="flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-mav-muted hover:text-mav-fg">
+  {whereOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+  Where the open pipeline sits
+  <span className="font-normal normal-case tracking-normal text-mav-muted/80">· by GEO, service and technology</span>
+</button>
+<InfoTip text="Open pipeline in the date range. Click a row to filter the table to it." />
 </div>
-</>)}
+{whereOpen && (
+<div className="grid md:grid-cols-3 gap-3">
+<BreakdownPanel title="By GEO" rows={byGeo} active={fGeo} onPick={k => { setFStatus('Open'); setFGeo(pickIn(fGeo, k)) }} />
+<BreakdownPanel title="By Service" rows={bySvc} active={fSvc} onPick={k => { setFStatus('Open'); setFSvc(pickIn(fSvc, k)) }} />
+<BreakdownPanel title="By Technology" rows={byTech} active={fTech} onPick={k => { setFStatus('Open'); setFTech(pickIn(fTech, k)) }} />
+</div>
+)}
+</div>
+)}
 
 {/* Status is the page's main split, so it is tabs with counts rather than one dropdown
     among twelve. Each count is what that tab would show under every OTHER filter. */}
@@ -930,27 +971,34 @@ className="shrink-0 text-xs px-3 py-1.5 rounded-md border border-amber-500/50 te
     { id: '', label: 'All', count: statusCounts[''] },
   ]} />
 
-{/* Every per-field filter in one box, in three rows by kind: what the deal IS, when and
-    how big, and the saved shortcuts. The row count sits at the end of the first. */}
-<FilterBar right={
-  <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">
+{/* Every per-field filter in one box. Row 1 is what gets used every day — search, the
+    people, department, GEO — with the row count and Clear all at its end. Everything
+    else (dates, value, the rarer dropdowns, the quick views) sits behind "More filters",
+    which opens by itself whenever one of those is on so a filter is never on unseen. */}
+<FilterBar>
+<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, quote, PM, subject…" title="Client, contact, subject, quote or invoice number, PM, AM, technology, value" className={`${selCls} w-64`} />
+<MultiSelect label="PM" className="w-40" options={uniqNames(all.map(x => x.pm_owner))} selected={fPM} onChange={v => { pmTouched.current = true; setFPM(v) }} />
+<MultiSelect label="AM / NBD" className="w-40" options={uniqNames(all.map(x => x.sales_person))} selected={fAM} onChange={setFAM} />
+<MultiSelect label="Department" className="w-40" options={uniq(all.map(deptOfOpp))} selected={fDept} onChange={setFDept} />
+<MultiSelect label="GEO" className="w-40" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} />
+<button type="button" onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen}
+  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs transition-colors ${hiddenActive ? 'border-mav-yellow/60 text-mav-fg' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
+  {moreOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+  More filters{hiddenActive ? <span className="ml-0.5 rounded-md bg-mav-fill px-1.5 text-[11px] font-semibold text-black">{hiddenActive}</span> : null}
+</button>
+<div className="ml-auto flex items-center gap-3">
+  <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted whitespace-nowrap">
     {o.length} shown · {money(o.reduce((s, x) => s + (x.value || 0), 0))}
     {hiddenNoValue > 0 && <span className="text-amber-300/80 normal-case" title="These match every other filter but carry no quoted figure, so a value band cannot place them. Clear the band to see them."> · {hiddenNoValue} hidden (no value)</span>}
-  </span>}>
-<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, quote, PM, subject…" title="Client, contact, subject, quote or invoice number, PM, AM, technology, value" className={`${selCls} w-64`} />
-<select value={fType} onChange={e => setFType(e.target.value)} className={selCls}><option value="">Business type</option><option value="New">New (NBD)</option><option value="Repeat">Repeat</option></select>
-<MultiSelect label="Department" className="w-40" options={uniq(all.map(deptOfOpp))} selected={fDept} onChange={setFDept} />
-<MultiSelect label="GEO" className="w-32" options={uniq(all.map(x => x.geo))} selected={fGeo} onChange={setFGeo} />
+  </span>
+  <button onClick={reset} className="text-xs px-3 py-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg">Clear all</button>
+</div>
+{moreOpen && (<>
+<div className="basis-full h-0" />
+<select value={fType} onChange={e => setFType(e.target.value)} className={`${selCls} w-40`}><option value="">Business type</option><option value="New">New (NBD)</option><option value="Repeat">Repeat</option></select>
 <MultiSelect label="Service" className="w-40" options={uniq(all.map(svcOf))} selected={fSvc} onChange={setFSvc} />
 <MultiSelect label="Technology" className="w-40" options={uniq(all.map(x => x.technology))} selected={fTech} onChange={setFTech} />
-<MultiSelect label="AM / NBD" className="w-36" options={uniqNames(all.map(x => x.sales_person))} selected={fAM} onChange={setFAM} />
-<MultiSelect label="PM" className="w-36" options={uniqNames(all.map(x => x.pm_owner))} selected={fPM} onChange={v => { pmTouched.current = true; setFPM(v) }} />
-<div className="basis-full h-0" />
-<span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted">Date</span>
-<input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} aria-label="From" />
-<span className="text-xs text-mav-muted">→</span>
-<input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} aria-label="To" />
-<select value={fAge} onChange={e => setFAge(e.target.value)} className={selCls} title="How long ago the quote was raised. Use it to work the backlog down — pick a band, then mark each row Confirmed or Cancelled.">
+<select value={fAge} onChange={e => setFAge(e.target.value)} className={`${selCls} w-40`} title="How long ago the quote was raised. Use it to work the backlog down — pick a band, then mark each row Confirmed or Cancelled.">
 <option value="">Quote age</option>
 {AGE_BANDS.map(b => {
 // Count under the status filter that is actually applied, so the number in the
@@ -961,7 +1009,12 @@ const n = all.filter(x => fStatus ? oppStatus(x) === fStatus
 return <option key={b.label} value={b.label}>{b.label}{n ? ` (${n})` : ''}</option>
 })}
 </select>
-<span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted ml-2" title="Quoted value in USD. Deals with no quoted figure drop out while a band is set.">Value $</span>
+<span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted ml-2">Date</span>
+<input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} aria-label="From" />
+<span className="text-xs text-mav-muted">→</span>
+<input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} aria-label="To" />
+<div className="basis-full h-0" />
+<span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted" title="Quoted value in USD. Deals with no quoted figure drop out while a band is set.">Value $</span>
 <input type="number" min="0" step="100" inputMode="numeric" value={vMin} onChange={e => setVMin(e.target.value)} placeholder="min" aria-label="Minimum quoted value" className={`${selCls} w-24`} />
 <span className="text-xs text-mav-muted">–</span>
 <input type="number" min="0" step="100" inputMode="numeric" value={vMax} onChange={e => setVMax(e.target.value)} placeholder="max" aria-label="Maximum quoted value" className={`${selCls} w-24`} />
@@ -980,21 +1033,21 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 {bandOn && <button onClick={() => { setVMin(''); setVMax('') }} className="text-xs px-2 py-1 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">clear</button>}
 <div className="basis-full h-0" />
 <span className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted">Quick views</span>
-<button onClick={() => setFlagOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Needs review{flagged ? ` (${flagged})` : ''}</button>
-<button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>🚫 Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
+<button onClick={() => setFlagOnly(v => !v)} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${flagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>Needs review{flagged ? ` (${flagged})` : ''}</button>
+<button onClick={() => setUnlikelyOnly(v => !v)} title="Deals someone flagged as unlikely to convert" className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${unlikelyOnly ? 'bg-orange-500/20 text-orange-300 border-orange-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>Might not come{unlikelyOpen.length ? ` (${unlikelyOpen.length})` : ''}</button>
 {misTagged.length > 0 && (
-<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Quotes-sheet rows tagged "New" in Business Type (col P) whose owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. Each one is fixable in the sheet; they read as Repeat until it is. Email-only deals are not listed: they have no Business Type cell to correct.`} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Tagged New, not NBD ({misTagged.length})</button>
+<button onClick={() => { setMisTagOnly(v => !v); setFStatus('') }} title={`Quotes-sheet rows tagged "New" in Business Type (col P) whose owner is not on the NBD team — ${NBD_TEAM.map(m => m.name).join(', ')}. Each one is fixable in the sheet; they read as Repeat until it is. Email-only deals are not listed: they have no Business Type cell to correct.`} className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${misTagOnly ? 'bg-red-500/20 text-red-300 border-red-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>Tagged New, not NBD ({misTagged.length})</button>
 )}
 {lagRows.length > 0 && (
-<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>⚠ Sheet not updated ({lagRows.length})</button>
+<button onClick={() => { setLagOnly(v => !v); setFStatus('') }} title="Decided Won or Lost on the dashboard, but the Quotes sheet still shows the deal Open" className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${lagOnly ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>Sheet not updated ({lagRows.length})</button>
 )}
 {committedRows.length > 0 && (
-<button onClick={() => { setCommittedOnly(v => !v); setFStatus('') }} title="Still Open in the Quotes sheet, but the client has already said approved / please proceed, or has started discussing the invoice. Threads like these confirmed 96% of the time — these are most likely wins nobody has logged yet." className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${committedOnly ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✍ Client said yes ({committedRows.length})</button>
+<button onClick={() => { setCommittedOnly(v => !v); setFStatus('') }} title="Still Open in the Quotes sheet, but the client has already said approved / please proceed, or has started discussing the invoice. Threads like these confirmed 96% of the time — these are most likely wins nobody has logged yet." className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${committedOnly ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>Client said yes ({committedRows.length})</button>
 )}
 {markedRows.length > 0 && (
-<button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>✎ Marked by hand ({markedRows.length})</button>
+<button onClick={() => { setMarkedOnly(v => !v); setFStatus('') }} title="Every deal someone marked by hand — Confirmed, Lost or 'might not come'. Open one to change or undo the call." className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${markedOnly ? 'bg-mav-yellow/20 text-mav-yellow border-mav-yellow/50 font-medium' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>Marked by hand ({markedRows.length})</button>
 )}
-<button onClick={reset} className="ml-auto text-xs px-3 py-1.5 rounded-full border border-mav-line text-mav-muted hover:text-mav-fg underline-offset-2">Clear all</button>
+</>)}
 </FilterBar>
 
 {/* The action for whatever is ticked, named. One deal is a confirmation; several for
@@ -1023,31 +1076,34 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 </div>
 )}
 
-<div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
+<Panel flush title={<>{o.length} {o.length === 1 ? 'deal' : 'deals'}</>} right={<ColumnPicker cols={cols} />}>
 <div className="overflow-x-auto">
-<table className="w-full text-sm min-w-[1180px]">
+<table className="w-full text-sm">
 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
 <th className="px-3 py-3 w-10 font-medium text-[11px] uppercase tracking-wide"
   title="Tick one deal to confirm it, or several ad-hoc jobs for the same client to put them on one invoice.">Pick</th>
-{COLS.map(c => (
-<th key={c.key} onClick={() => toggleSort(c.key)} className="px-4 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-mav-fg">
+{COLS.filter(c => cols.on(c.key)).map(c => (
+<th key={c.key} onClick={() => toggleSort(c.key)} className="px-3 py-3 font-medium whitespace-nowrap cursor-pointer select-none hover:text-mav-fg">
 {c.label}<span className="ml-1 text-[10px]">{sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span>
 </th>
-))}</tr></thead>
+))}
+<th className="sticky-action px-3 py-3 font-medium whitespace-nowrap text-right">Action</th>
+</tr></thead>
 <tbody>{pageRows.map(x => {
 const st = oppStatus(x)
 return (
 <tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.unlikely ? 'bg-orange-500/[0.07]' : x.flag ? 'bg-amber-500/5' : ''}`}>
 {/* One cell, four states, none of them ambiguous: tick it (yours to confirm),
-    a green ✓ (already booked), an arrow (billed under another deal), or nothing
-    at all (somebody else's). A box that always bounces is worse than no box —
+    a ticked-and-locked box (already booked), "billed" (billed under another deal), or
+    nothing at all (somebody else's). A box that always bounces is worse than no box —
     the confirm rule is enforced in the database and this only mirrors it.
     stopPropagation because the row itself opens the drawer. */}
-<td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+<td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
 {x.won || x.email_won ? (
-  <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-green-500/60 bg-green-500/25 text-green-300 text-xs" title="Already confirmed">✓</span>
+  <input type="checkbox" checked readOnly disabled aria-label="Already confirmed" title="Already confirmed"
+    className="w-4 h-4 accent-green-500 align-middle" />
 ) : x.rolled_into ? (
-  <span className="text-[11px] text-mav-muted" title={`Billed as part of deal #${x.rolled_into}`}>⇢</span>
+  <span className="text-[11px] text-mav-muted" title={`Billed as part of deal #${x.rolled_into}`}>billed</span>
 ) : canPick(x) ? (
   <input type="checkbox" checked={picked.has(x.id)} onChange={() => togglePick(x.id)}
     aria-label={`Select ${x.company_name || 'this deal'}`}
@@ -1057,27 +1113,49 @@ return (
   <span className="inline-block w-4 h-4 align-middle" title={`${x.pm_owner || 'Nobody'} owns this deal`} />
 )}
 </td>
-<td className="px-4 py-3">{x.unlikely && <span className="mr-1.5 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>🚫</span>}{x.email_won && <span className="mr-1.5 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>✓</span>}<ClientLink name={x.company_name} />{x.summary && <div className="text-xs text-mav-muted">{x.summary.slice(0, 80)}</div>}</td>
-<td className={`px-4 py-3 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>
-<td className="px-4 py-3">{x.win_probability != null ? <span className={`text-xs font-semibold px-2 py-1 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>
-<td className="px-4 py-3">{x.intent_score != null && x.intent_tier ? (
-<span title={intentWhy(x)} className={`inline-flex items-baseline gap-1 text-xs font-semibold px-2 py-1 rounded ${TIER_STYLE[x.intent_tier]}`}>
+<td className="px-3 py-2.5 max-w-[260px]">
+<div className="flex items-center gap-1.5 min-w-0">
+{x.unlikely && <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-300" title={x.unlikely_reason ? `Might not come — ${x.unlikely_reason}` : 'Flagged: might not come'}>Unlikely</span>}
+{x.email_won && <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400" title={x.email_won_reason ? `Confirmed here — ${x.email_won_reason}` : 'Confirmed on the dashboard'}>Confirmed</span>}
+<span className="truncate"><ClientLink name={x.company_name} /></span>
+</div>
+{x.summary && <div className="text-xs text-mav-muted truncate" title={x.summary}>{x.summary.slice(0, 80)}</div>}
+</td>
+{cols.on('value') && <td className={`px-3 py-2.5 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>}
+{cols.on('win') && <td className="px-3 py-2.5">{x.win_probability != null ? <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
+{cols.on('intent') && <td className="px-3 py-2.5 whitespace-nowrap">{x.intent_score != null && x.intent_tier ? (<>
+<span title={intentWhy(x)} className={`inline-flex items-baseline gap-1 text-xs font-semibold px-2 py-0.5 rounded ${TIER_STYLE[x.intent_tier]}`}>
 <span>{x.intent_tier}</span><span className="font-normal tabular-nums opacity-80">{x.intent_score}</span>
-{x.flag_stale && <span title="Past 60 days — beyond the 95th-percentile close time of 25 days. Needs a chase or a Cancelled." className="opacity-70">⏳</span>}
-{x.flag_committed_in_email && <span title="The client has already said approved / please proceed, or discussed the invoice, while the Quotes sheet still reads Open. Threads like these confirmed 96% of the time. Most likely a win nobody has logged yet.">✍</span>}
-{x.flag_no_agency && <span title="No Agency recorded. Quotes with a blank Agency confirm at 13.5% against 80% when it is filled in — and that holds independently of price." className="opacity-70">⚑</span>}
 </span>
-) : <span className="text-xs text-mav-muted">—</span>}</td>
-<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (bookedLag(x) ? '✓ Booked · sheet open' : confirmLag(x) ? '✓ Won · sheet open' : `✓ Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? '✗ Lost · sheet open' : '✗ Lost') : st}</span></td>
-<td className="px-4 py-3 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>
-<td className="px-4 py-3"><span className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span>{x.mis_tagged_new && <span className="ml-1 text-xs text-red-400" title={`Sheet says New, but ${x.sales_person || 'no owner'} is not on the NBD team — counted as Repeat.`}>⚠</span>}</td>
-<td className="px-4 py-3 text-mav-muted">{x.sales_person ? <span title={x.nbd_owner ? 'New Business Development — opened this account' : 'Account Manager — works an account we already have'}>{ownerRole(x)}: {x.sales_person}</span> : <span className="text-mav-muted">Owner: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5" title="Project Manager">PM: {x.pm_owner}</div>}</td>
-<td className="px-4 py-3 text-mav-muted">{x.geo}</td>
-<td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.technology || '—'}</td>
-<td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>
+{/* The three warning flags, as short words rather than glyphs nobody could decode. */}
+{x.flag_stale && <span title="Past 60 days — beyond the 95th-percentile close time of 25 days. Needs a chase or a Cancelled." className="ml-1 text-[10px] font-semibold text-amber-300">stale</span>}
+{x.flag_committed_in_email && <span title="The client has already said approved / please proceed, or discussed the invoice, while the Quotes sheet still reads Open. Threads like these confirmed 96% of the time. Most likely a win nobody has logged yet." className="ml-1 text-[10px] font-semibold text-emerald-300">said yes</span>}
+{x.flag_no_agency && <span title="No Agency recorded. Quotes with a blank Agency confirm at 13.5% against 80% when it is filled in — and that holds independently of price." className="ml-1 text-[10px] font-semibold text-orange-300">no agency</span>}
+</>) : <span className="text-xs text-mav-muted">—</span>}</td>}
+{cols.on('status') && <td className="px-3 py-2.5"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (bookedLag(x) ? 'Booked · sheet open' : confirmLag(x) ? 'Won · sheet open' : `Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? 'Lost · sheet open' : 'Lost') : st}</span></td>}
+{cols.on('source') && <td className="px-3 py-2.5 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>}
+{cols.on('type') && <td className="px-3 py-2.5 whitespace-nowrap"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span>{x.mis_tagged_new && <span className="ml-1 text-[10px] font-semibold text-red-400" title={`Sheet says New, but ${x.sales_person || 'no owner'} is not on the NBD team — counted as Repeat.`}>mis-tagged</span>}</td>}
+{cols.on('owner') && <td className="px-3 py-2.5 text-mav-muted max-w-[200px]">{x.sales_person ? <div className="truncate" title={`${x.nbd_owner ? 'New Business Development — opened this account' : 'Account Manager — works an account we already have'}: ${x.sales_person}`}>{ownerRole(x)}: {x.sales_person}</div> : <span className="text-mav-muted">Owner: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5 truncate" title={`Project Manager: ${x.pm_owner}`}>PM: {x.pm_owner}</div>}</td>}
+{cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted">{x.geo}</td>}
+{cols.on('tech') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap max-w-[160px] truncate" title={x.technology || ''}>{x.technology || '—'}</td>}
+{cols.on('date') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{(x.source_date || x.first_date || '').slice(0, 10)}</td>}
 {/* lostLag is checked directly, not just via x.flag: flag comes from the last data
     load, so a deal marked Lost in this session must still show the alert instantly. */}
-<td className="px-4 py-3">{(x.flag || sheetLag(x)) ? <span className={`text-xs px-2 py-1 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={bookedLag(x) ? 'Already invoiced in the revenue sheet — the Quotes sheet still shows it Open. Set that row to Confirmed.' : confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? '⚠ Update sheet' : '⚠ Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>
+{cols.on('flag') && <td className="px-3 py-2.5">{(x.flag || sheetLag(x)) ? <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={bookedLag(x) ? 'Already invoiced in the revenue sheet — the Quotes sheet still shows it Open. Set that row to Confirmed.' : confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? 'Update sheet' : 'Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
+{/* The row's action, pinned to the right edge so it is there however many columns are
+    on. Confirm is the same single-deal path as the bar above (ConfirmDealDialog), and
+    appears only on deals this person may confirm — the rule canPick already mirrors. */}
+<td className="sticky-action px-3 py-2.5 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+<div className="inline-flex items-center gap-1.5">
+{canPick(x) && (
+  <button type="button" onClick={() => { setAlsoBilling([]); setConfirming(x) }}
+    title="Fill in the revenue-sheet details and book it"
+    className="rounded-full bg-mav-fill text-black text-xs font-semibold px-3 py-1 hover:brightness-95">Confirm</button>
+)}
+<button type="button" onClick={() => setSel(x)}
+  className="rounded-full bg-mav-fill text-black text-xs font-semibold px-3 py-1 hover:brightness-95">Open</button>
+</div>
+</td>
 </tr>
 )
 })}</tbody>
@@ -1099,7 +1177,7 @@ return (
 </select>
 </div>
 )}
-</div>
+</Panel>
 
 {sel && (
 <div className="fixed inset-0 lg:left-60 z-40" onClick={() => setSel(null)}>
@@ -1140,9 +1218,9 @@ return (
 {(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || markedByHand(sel)) && (
 <div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.email_won ? 'border-green-500/40 bg-green-500/10' : sel.email_lost ? 'border-red-500/40 bg-red-500/10' : sel.unlikely ? 'border-orange-500/40 bg-orange-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
 <div className="text-sm font-medium mb-0.5">
-{sel.email_won ? <span className="text-green-300">✓ Confirmed — Won</span>
- : sel.email_lost ? <span className="text-red-300">✗ Marked Lost</span>
- : sel.unlikely ? <span className="text-orange-300">🚫 Flagged: might not come</span>
+{sel.email_won ? <span className="text-green-300">Confirmed — Won</span>
+ : sel.email_lost ? <span className="text-red-300">Marked Lost</span>
+ : sel.unlikely ? <span className="text-orange-300">Flagged: might not come</span>
  : 'Your call on this deal'}
 </div>
 <div className="text-xs text-mav-muted mb-2.5">
@@ -1172,13 +1250,13 @@ className="text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted 
 )}
 <button disabled={savingLost} onClick={() => toggleLost(sel)}
 className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.email_lost ? 'border-mav-line text-mav-muted hover:text-mav-fg' : 'border-red-500/50 text-red-300 hover:bg-red-500/15'}`}>
-{savingLost ? 'Saving…' : sel.email_lost ? 'Undo Lost' : '✗ Mark Lost'}
+{savingLost ? 'Saving…' : sel.email_lost ? 'Undo Lost' : 'Mark Lost'}
 </button>
 {/* "Might not come" is a pipeline-confidence call, so it only applies while the deal is still live. */}
 {(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || sel.unlikely) && (
 <button disabled={savingUnlikely} onClick={() => toggleUnlikely(sel)}
 className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opacity-50 ${sel.unlikely ? 'border-mav-line text-mav-muted hover:text-mav-fg' : 'border-orange-500/50 text-orange-300 hover:bg-orange-500/15'}`}>
-{savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo unlikely' : '🚫 Might not come'}
+{savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo unlikely' : 'Might not come'}
 </button>
 )}
 </div>
@@ -1202,7 +1280,7 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 )}
 {sheetLag(sel) && (
 <div className="mt-2.5 pt-2 border-t border-amber-500/30 text-xs text-amber-300">
-⚠ The Quotes sheet still shows this Open — set that row to <span className="font-semibold">{confirmLag(sel) || bookedLag(sel) ? 'Confirmed' : 'Cancelled'}</span>.
+The Quotes sheet still shows this Open — set that row to <span className="font-semibold">{confirmLag(sel) || bookedLag(sel) ? 'Confirmed' : 'Cancelled'}</span>.
 {bookedLag(sel) ? ` It is already invoiced in the revenue sheet (${money(sel.booked_amount)}${sel.booked_month ? ' · ' + sel.booked_month.slice(0, 7) : ''}), so until you do it is counted twice — once as revenue, once as live pipeline.`
 : confirmLag(sel) ? ' Until you do, it will not book as revenue.' : ' Until you do, it keeps counting as live pipeline in every sheet-driven report.'}
 </div>
@@ -1210,9 +1288,9 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
 </div>
 )}
 
-{sel.flag && !sheetLag(sel) && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">⚠ Possible data issue:</span> {sel.flag}</div>}
-{oppStatus(sel) === 'Won' && !sel.email_won && !bookedLag(sel) && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">✓ Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
-{oppStatus(sel) === 'Lost' && !sel.email_lost && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">✗ Lost — cancelled in the Quotes sheet. Won always overrides if the client later books.</div>}
+{sel.flag && !sheetLag(sel) && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">Possible data issue:</span> {sel.flag}</div>}
+{oppStatus(sel) === 'Won' && !sel.email_won && !bookedLag(sel) && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
+{oppStatus(sel) === 'Lost' && !sel.email_lost && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">Lost — cancelled in the Quotes sheet. Won always overrides if the client later books.</div>}
 
 {/* WHAT THEY WANT COMES FIRST. This used to open on the close-likelihood bar and a
     scoring panel — a forecast about a request the reader had not read yet. The order
@@ -1269,7 +1347,7 @@ className={`text-xs px-3 py-1.5 rounded-md border transition-colors disabled:opa
     note, not an action — and the two names were previously in a grid far below it. */}
 {(sel.next_step || sel.pm_owner || sel.sales_person) && (
 <div className="mb-5 rounded-lg border border-mav-yellow/30 bg-mav-yellow/5 px-3 py-2">
-  <div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">▶ Next step</div>
+  <div className="text-xs uppercase tracking-wide text-mav-yellow mb-1">Next step</div>
   {sel.next_step
     ? <p className="text-sm leading-relaxed">{sel.next_step}</p>
     : <p className="text-sm leading-relaxed text-mav-muted">Nothing recorded — the next review will fill this in from the thread.</p>}
@@ -1378,13 +1456,13 @@ Of the <span className="tabular-nums">{cohort.n}</span> quotes decided since Apr
 <p className="mt-2 text-xs text-mav-muted">Recency is from the sheet&apos;s own date — no email found for this deal. The sheet is logged more than a week late on 22% of rows, so this deal may be fresher than it looks.</p>
 )}
 {sel.flag_committed_in_email && (
-<p className="mt-2 text-xs text-emerald-300">✍ The client has already committed in writing — {sel.signal_label}. Threads like these confirmed 96% of the time. The Quotes sheet still reads Open, so this is most likely a win nobody has logged.</p>
+<p className="mt-2 text-xs text-emerald-300"><span className="font-semibold">Client said yes.</span> The client has already committed in writing — {sel.signal_label}. Threads like these confirmed 96% of the time. The Quotes sheet still reads Open, so this is most likely a win nobody has logged.</p>
 )}
 {sel.signal_label === 'no commitment signal in the thread' && (
 <p className="mt-2 text-xs text-mav-muted">No approval, invoice, access or kickoff signal anywhere in the client&apos;s replies. Threads like that confirm 71% of the time against 96% when one is present.</p>
 )}
-{sel.flag_stale && <p className="mt-2 text-xs text-amber-300">⏳ Past 60 days. 95% of quotes that convert do so within 25 — this needs a chase or a Cancelled.</p>}
-{sel.flag_no_agency && <p className="mt-2 text-xs text-amber-300">⚑ No Agency recorded. Blank-Agency quotes confirm at 13.5% against 80% when filled in, independently of price.</p>}
+{sel.flag_stale && <p className="mt-2 text-xs text-amber-300"><span className="font-semibold">Stale.</span> Past 60 days. 95% of quotes that convert do so within 25 — this needs a chase or a Cancelled.</p>}
+{sel.flag_no_agency && <p className="mt-2 text-xs text-amber-300"><span className="font-semibold">No agency.</span> No Agency recorded. Blank-Agency quotes confirm at 13.5% against 80% when filled in, independently of price.</p>}
 </div>
 )}
 

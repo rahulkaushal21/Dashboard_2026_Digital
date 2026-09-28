@@ -79,14 +79,12 @@ export default function NeedsInput() {
       <Header title="Needs input" subtitle="The only two things the system cannot work out for itself — a value nobody has written down, and a decision nobody has made." />
       <UnplacedNote n={unplaced} noun="deals" className="-mt-3 mb-4" />
 
-      {/* One card per reason, each a shortcut to its rows — the reason filter that used
-          to be a row of small buttons. Counts are across everyone, as they always were. */}
+      {/* One card per reason. Counts are across everyone, as they always were. The reason
+          filter itself is the second row of pills below — the cards are display-only. */}
       <KPIRow cols={4}>
-        <KPICard tone="accent" label="Waiting" value={String(rows.length)} sub="all reasons"
-          onClick={() => setReason('')} active={reason === ''} />
+        <KPICard tone="accent" label="Waiting" value={String(rows.length)} sub="all reasons" />
         {REASONS.map(r => (
-          <KPICard key={r.key} tone={r.card} label={r.label} value={String(rows.filter(x => x.reason === r.key).length)}
-            onClick={() => setReason(reason === r.key ? '' : r.key)} active={reason === r.key} />
+          <KPICard key={r.key} tone={r.card} label={r.label} value={String(rows.filter(x => x.reason === r.key).length)} />
         ))}
       </KPIRow>
 
@@ -96,6 +94,14 @@ export default function NeedsInput() {
         items={[
           { id: 'mine', label: 'Mine', count: mineCount },
           { id: 'all', label: 'Everyone', count: rows.length },
+        ]} />
+
+      <Segments<NeedsReason | 'any'>
+        value={reason || 'any'}
+        onChange={v => setReason(v === 'any' ? '' : v)}
+        items={[
+          { id: 'any', label: 'All reasons', count: rows.length },
+          ...REASONS.map(r => ({ id: r.key, label: r.label, count: rows.filter(x => x.reason === r.key).length })),
         ]} />
 
       {/* An unowned deal cannot be confirmed by any PM — only an admin — so it is called

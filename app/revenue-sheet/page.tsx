@@ -9,6 +9,7 @@ import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { NotSplitNote } from '@/components/UnitToggle'
 import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
+import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import Link from 'next/link'
 import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
@@ -48,12 +49,13 @@ const keeps = (picked: string[], v?: string | null) => picked.length === 0 || pi
 // pm_owner, "Agency" is company_name — and using the dashboard's names here would have
 // made the two impossible to compare side by side, which is the whole job this page does.
 //
-// `compact` marks the handful worth seeing when the job is the monthly move rather than
-// reconciliation. Thirty-five columns is right for checking a month against the sheet and
-// far too many for ticking retainers.
+// `default` marks the handful the table opens on, `locked` the one that is always there
+// (Agency: the row's name). Thirty-five columns is right for checking a month against the
+// sheet and far too many for ticking retainers, so the rest sit behind the Columns picker
+// — every one still there, one tick away, and "Show all columns" brings back the full sheet.
 type EditKind = 'text' | 'number' | 'date'
 type Col = {
-  key: string; label: string; compact?: boolean; right?: boolean
+  key: string; label: string; default?: boolean; locked?: boolean; right?: boolean
   get: (r: LedgerRow) => string
   // What this column sorts ON. Without it a date column would sort as the string it is
   // printed as, and Optimization would sort "9%" above "12%".
@@ -79,39 +81,47 @@ const optimisation = (r: LedgerRow) => {
 const COLUMNS: Col[] = [
   { key: 'project_id', label: 'Project Id', get: r => dash(r.project_id), edit: 'project_id', kind: 'text' },
   { key: 'quote_id', label: 'Quote ID', get: r => dash(r.quote_id), edit: 'quote_id', kind: 'text' },
-  { key: 'dept', label: 'Service Department', compact: true, get: r => dash(r.service_dept) },
-  { key: 'project', label: 'Project Name', compact: true, get: r => dash(r.project_name) },
-  { key: 'ptype', label: 'Project Type', compact: true, get: r => dash(r.engagement_model) },
-  { key: 'tech', label: 'Technology', compact: true, get: r => dash(r.technology) },
+  { key: 'dept', label: 'Service Department', get: r => dash(r.service_dept) },
+  { key: 'project', label: 'Project Name', default: true, get: r => dash(r.project_name) },
+  { key: 'ptype', label: 'Project Type', default: true, get: r => dash(r.engagement_model) },
+  { key: 'tech', label: 'Technology', get: r => dash(r.technology) },
   { key: 'conf', label: 'Confirmation Date', get: r => d10(r.confirmed_at), sort: r => r.confirmed_at || '' },
-  { key: 'start', label: 'Start Date', get: r => d10(r.start_date), sort: r => r.start_date || '', edit: 'start_date', kind: 'date' },
+  { key: 'start', label: 'Start Date', default: true, get: r => d10(r.start_date), sort: r => r.start_date || '', edit: 'start_date', kind: 'date' },
   { key: 'delivery', label: 'Delivery Date', get: r => d10(r.delivery_date), sort: r => r.delivery_date || '', edit: 'delivery_date', kind: 'date' },
   { key: 'intdel', label: 'Internal Delivery', get: r => d10(r.internal_delivery), sort: r => r.internal_delivery || '', edit: 'internal_delivery', kind: 'date' },
   { key: 'inthrs', label: 'Internal hrs', right: true, get: r => num(r.internal_hrs), sort: r => r.internal_hrs ?? -1, edit: 'internal_hrs', kind: 'number' },
   { key: 'acthrs', label: 'Actual hrs', right: true, get: r => num(r.actual_hrs), sort: r => r.actual_hrs ?? -1, edit: 'actual_hrs', kind: 'number' },
   { key: 'opt', label: 'Optimization', right: true, get: optimisation, sort: r => (r.internal_hrs && r.internal_hrs > 0 && r.actual_hrs != null) ? (r.internal_hrs - r.actual_hrs) / r.internal_hrs : -999 },
-  { key: 'status', label: 'Project Status', get: r => dash(r.delivery_status), edit: 'delivery_status', kind: 'text' },
+  { key: 'status', label: 'Project Status', default: true, get: r => dash(r.delivery_status), edit: 'delivery_status', kind: 'text' },
   { key: 'stype', label: 'Service Type', get: r => dash(r.service_type) },
   { key: 'dtype', label: 'Delivery Type', get: r => dash(r.delivery_type) },
-  { key: 'sme', label: 'PC/SME', compact: true, get: r => dash(r.pm_owner) },
+  { key: 'sme', label: 'PC/SME', default: true, get: r => dash(r.pm_owner) },
   { key: 'expert', label: 'Expert', get: r => dash(r.expert), edit: 'expert', kind: 'text' },
   { key: 'integration', label: 'Integration', get: r => dash(r.integration), edit: 'integration', kind: 'text' },
-  { key: 'agency', label: 'Agency', compact: true, get: r => dash(r.company_name) },
+  { key: 'agency', label: 'Agency', locked: true, get: r => dash(r.company_name) },
   { key: 'cname', label: 'Client Name', get: r => dash(r.client_name) },
   { key: 'cemail', label: 'Client Email', get: r => dash(r.contact_email) },
   { key: 'ctype', label: 'Client Type', get: r => dash(r.client_type) },
-  { key: 'geo', label: 'Geo', compact: true, get: r => dash(r.geo) },
+  { key: 'geo', label: 'Geo', get: r => dash(r.geo) },
   { key: 'cur', label: 'Currency Type', get: r => dash(r.currency) },
   { key: 'qprice', label: 'Quote Price', right: true, get: r => num(r.quote_price), sort: r => r.quote_price ?? -1 },
   { key: 'cprice', label: 'Confirmed Price', right: true, get: r => num(r.local_value), sort: r => r.local_value ?? -1 },
-  { key: 'usd', label: 'USD Conversion', compact: true, right: true, get: r => num(r.amount_usd), sort: r => r.amount_usd ?? -1 },
+  { key: 'usd', label: 'USD Conversion', default: true, right: true, get: r => num(r.amount_usd), sort: r => r.amount_usd ?? -1 },
   { key: 'btype', label: 'Business Type', get: r => dash(r.business_type) },
-  { key: 'am', label: 'Account/Sales Person', compact: true, get: r => dash(r.sales_person) },
+  { key: 'am', label: 'Account/Sales Person', get: r => dash(r.sales_person) },
   { key: 'outsrc', label: 'Outsource Price', right: true, get: r => num(r.outsource_price), sort: r => r.outsource_price ?? -1, edit: 'outsource_price', kind: 'number' },
   { key: 'invno', label: 'Invoice No', get: r => dash(r.invoice_no), edit: 'invoice_no', kind: 'text' },
   { key: 'invcur', label: 'Invoice Currency', get: r => dash(r.invoice_currency), edit: 'invoice_currency', kind: 'text' },
   { key: 'invamt', label: 'Invoice Amount', right: true, get: r => num(r.invoice_amount), sort: r => r.invoice_amount ?? -1, edit: 'invoice_amount', kind: 'number' },
-  { key: 'month', label: 'Month-Year', compact: true, get: r => ym(r.booking_month) },
+  { key: 'month', label: 'Month-Year', get: r => ym(r.booking_month) },
+]
+
+// What the Columns picker offers: every sheet column above, plus the dashboard's own
+// "In sheet" flag. The Action column is locked on the right and never offered.
+const PICKER_COLS: ColumnDef[] = [
+  ...COLUMNS.map(c => ({ key: c.key, label: c.label, default: c.default, locked: c.locked })),
+  { key: 'insheet', label: 'In sheet', default: true },
+  { key: 'action', label: 'Action', locked: true },
 ]
 
 // WHICH DATE A LINE BELONGS TO — Start Date.
@@ -171,8 +181,13 @@ export default function ProjectLedger() {
 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   // Thirty-five columns is right for reconciling a month against the spreadsheet and far
-  // too many for ticking retainers, which is the other thing this page is for.
-  const [sheetView, setSheetView] = useState(true)
+  // too many for ticking retainers, which is the other thing this page is for. The table
+  // opens on the essentials; the Columns picker (remembered per person) holds the rest,
+  // and "Show all columns" is the old full-sheet view in one click.
+  const colPick = useColumns('revenue-sheet', PICKER_COLS)
+  const allColsOn = colPick.allOn
+  // Filters past the first row sit behind "More filters", closed unless one is in force.
+  const [moreOpen, setMoreOpen] = useState(false)
   const [editing, setEditing] = useState<LedgerRow | null>(null)
 
   const [target, setTarget] = useState(nextMonth)
@@ -373,6 +388,11 @@ export default function ProjectLedger() {
   }, [dupes, rowsAll, unit])
 
   const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFSource(''); setFFrom(''); setFTo('') }
+  // The filters behind "More filters" that are in force. A From/To that is one month is
+  // what the page opens on and what the Month picker already shows, so it does not count;
+  // a real span does.
+  const hiddenActive = (fGeo.length ? 1 : 0) + (fAm.length ? 1 : 0) + (fFrom !== fTo ? 1 : 0)
+  useEffect(() => { if (hiddenActive > 0) setMoreOpen(true) }, [hiddenActive])
   const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || [fDept, fModel, fGeo, fPm, fAm].some(x => x.length > 0)
 
   const toggle = (k: string) => setPicked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })
@@ -441,11 +461,11 @@ export default function ProjectLedger() {
   }
 
   const exportCsv = () => {
-    // Exports what is on screen, under the sheet's own headers, so a paste into the
-    // spreadsheet lands in the right columns.
-    const head = [...cols.map(c => c.label), 'In sheet']
+    // Exports the filtered lines under EVERY sheet column and header, whatever the
+    // Columns picker is showing, so a paste into the spreadsheet lands in the right columns.
+    const head = [...COLUMNS.map(c => c.label), 'In sheet']
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const body = shown.map(r => [...cols.map(c => { const v = c.get(r); return v === '—' ? '' : v }), r.in_sheet ? 'yes' : 'no'].map(esc).join(','))
+    const body = shown.map(r => [...COLUMNS.map(c => { const v = c.get(r); return v === '—' ? '' : v }), r.in_sheet ? 'yes' : 'no'].map(esc).join(','))
     const blob = new Blob([[head.map(esc).join(','), ...body].join('\n')], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -461,11 +481,12 @@ export default function ProjectLedger() {
     return Array.from(new Set(out))
   }, [])
 
-  const cols = useMemo(() => sheetView ? COLUMNS : COLUMNS.filter(c => c.compact), [sheetView])
+  const cols = COLUMNS.filter(c => colPick.on(c.key))
+  const showInSheet = colPick.on('insheet')
 
   const sel = 'bg-mav-panel border border-mav-line rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
-  const th = 'px-3 py-2 font-medium whitespace-nowrap'
-  const td = 'px-3 py-2 whitespace-nowrap'
+  const th = 'px-3 py-2.5 font-medium whitespace-nowrap'
+  const td = 'px-3 py-2.5 whitespace-nowrap'
 
   // What the page is and how to read it. Was a paragraph under the table; it sits behind
   // the ⓘ on the table now, word for word, so the numbers are above the fold.
@@ -480,7 +501,7 @@ export default function ProjectLedger() {
       never stored, not an empty one; those values are in the source spreadsheet.
       <br /><br />
       <b>Double-click a cell to fill it in</b> &mdash; Project Id, Quote ID, Expert, dates,
-      hours, invoice &mdash; or use Edit at the start of the row for the lot. Only the row&rsquo;s own PC/SME can change it
+      hours, invoice &mdash; or use Edit on the right of the row for the lot. Only the row&rsquo;s own PC/SME can change it
       {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
       the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
     </>
@@ -494,18 +515,13 @@ export default function ProjectLedger() {
         subtitle="The Web, Hub & LP tab: every booked line, plus everything confirmed in the dashboard. Filter, tick, and move to the next month."
         chip={periodLabel || undefined}
         actions={<>
-          {/* Thirty-five columns for reconciling against the sheet; the compact few for
-              ticking retainers. */}
-          <button onClick={() => setSheetView(v => !v)} className={secBtn}>
-            {sheetView ? 'Compact view' : 'All sheet columns'}
-          </button>
-          <button onClick={exportCsv} className={secBtn} title="Exports what is on screen, under the sheet's own headers">Export CSV</button>
+          <button onClick={exportCsv} className={secBtn} title="Exports the filtered lines under every sheet column and header, whatever the table is showing">Export CSV</button>
         </>} />
 
       {unitDupes.length > 0 && (
         <div className="mb-4 rounded-xl border border-red-500/50 bg-red-500/10 px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-red-300 mb-2">
-            ⚠ {unitDupes.length} job{unitDupes.length > 1 ? 's' : ''} may be booked twice — confirmed here AND typed into the sheet
+            {unitDupes.length} job{unitDupes.length > 1 ? 's' : ''} may be booked twice — confirmed here AND typed into the sheet
             <InfoTip text="Same client, same amount, same month, one from each side. If it is one job, remove whichever line is the duplicate; if they are genuinely two jobs, leave them and this will keep showing until the amounts differ." />
           </div>
           <ul className="space-y-1">
@@ -532,8 +548,7 @@ export default function ProjectLedger() {
           sub={`${pageClients} client${pageClients === 1 ? '' : 's'}`} />
         <KPICard tone="amber" label="Not in the sheet yet" value={loading ? '…' : String(notInSheet.length)}
           sub="confirmed here, pending"
-          info="Confirmed in the dashboard and not yet carried into the sheet by the hourly writer. Click to show only these."
-          onClick={() => setFSource(fSource === 'dashboard' ? '' : 'dashboard')} active={fSource === 'dashboard'} />
+          info="Confirmed in the dashboard and not yet carried into the sheet by the hourly writer. The 'Confirmed here only' tab shows only these." />
         <KPICard tone="yellow" label="Awaiting information" value={loading ? '…' : money(pageAwaitingTotal)}
           sub={`${mAwaiting.length} line${mAwaiting.length === 1 ? '' : 's'} · not counted`}
           info="The work is not agreed yet, so the figure is a quote, not money. Kept out of Revenue; still listed below." />
@@ -550,20 +565,18 @@ export default function ProjectLedger() {
           { id: 'dashboard', label: 'Confirmed here only', count: sourceCounts.dashboard },
         ]} />
 
-      <FilterBar right={
+      {/* Row 1: search, the month and the three filters reached for most. Everything else
+          (GEO, AM, a From/To range, quick views) is behind "More filters" — regrouped,
+          nothing removed — and that row opens by itself whenever one of them is set. */}
+      <FilterBar right={<>
         <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">
           {loading ? 'Loading…' : `${pageRows.length.toLocaleString()} shown`}
-        </span>}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-56`} />
-        <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
-        <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
-        <MultiSelect label="All GEOs" options={opts.geo} selected={fGeo} onChange={setFGeo} className="w-40" />
-        <MultiSelect label="All PMs" options={opts.pm} selected={fPm} onChange={v => { filtersTouched.current = true; setFPm(v) }} className="w-40" />
-        <MultiSelect label="All AMs" options={opts.am} selected={fAm} onChange={setFAm} className="w-40" />
-        <div className="basis-full h-0" />
+        </span>
+        {anyFilter && <button onClick={clearAll} className={secBtn}>Clear all</button>}
+      </>}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-64`} />
         {/* The month sits with the filters, not under the table. It is the control people
             reach for most, and it was the one you had to scroll past everything to find. */}
-        <span className={lbl}>Month</span>
         <select value={rangeMode ? RANGE : pageMonth}
           onChange={e => {
             // Picking a month ends the range — that is the "either" half of either/or.
@@ -571,26 +584,35 @@ export default function ProjectLedger() {
             setFFrom(''); setFTo('')
             setPage(Math.max(0, monthPagesAll.indexOf(e.target.value)))
           }}
-          className={`${sel} max-h-60`} size={1} aria-label="Month" title="Month — newest first, back to April 2025. Setting a From/To range replaces this.">
-          {rangeMode && <option value={RANGE}>{rangeLabel} (range)</option>}
+          className={`${sel} w-40`} size={1} aria-label="Month" title="Month — newest first, back to April 2025. Setting a From/To range (More filters) replaces this.">
+          {rangeMode && <option value={RANGE}>{rangeLabel}{fFrom !== fTo ? ' (range)' : ''}</option>}
           {monthPagesAll.map(m => <option key={m} value={m}>{m === '—' ? 'No month' : monLabel(m)}</option>)}
         </select>
-        <span className={`${lbl} ml-2`} title="A From/To range replaces the month picker. On Start Date.">Range</span>
-        <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={sel} title="From month — on Start Date" aria-label="From month" />
-        <span className="text-xs text-mav-muted">→</span>
-        <input type="month" value={fTo} onChange={e => { filtersTouched.current = true; setFTo(e.target.value) }} className={sel} title="To month — on Start Date" aria-label="To month" />
-        <div className="basis-full h-0" />
-        <span className={lbl}>Quick views</span>
-        {/* Partial Dedicated is dedicated work — a shared resource rather than a whole one,
-            but billed and planned the same way. Left out, this shortcut quietly hid six
-            lines and $15,005 in September alone. Everywhere else that splits P2P from
-            Dedicated tests for the word, so it already counted these; only this button
-            matched the exact string. */}
-        <button onClick={() => { filtersTouched.current = true; setFModel(['Dedicated', 'Partial Dedicated']); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
-          className="text-xs px-3 py-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
-          This month&rsquo;s Dedicated
+        <MultiSelect label="All PMs" options={opts.pm} selected={fPm} onChange={v => { filtersTouched.current = true; setFPm(v) }} className="w-40" />
+        <MultiSelect label="All models" options={opts.model} selected={fModel} onChange={setFModel} className="w-40" />
+        <MultiSelect label="All depts" options={opts.dept} selected={fDept} onChange={setFDept} className="w-40" />
+        <button onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen} className={secBtn}>
+          More filters{hiddenActive > 0 ? ` · ${hiddenActive}` : ''}
         </button>
-        {anyFilter && <button onClick={clearAll} className={`ml-auto ${secBtn}`}>Clear all</button>}
+        {moreOpen && <>
+          <div className="basis-full h-0" />
+          <MultiSelect label="All GEOs" options={opts.geo} selected={fGeo} onChange={setFGeo} className="w-40" />
+          <MultiSelect label="All AMs" options={opts.am} selected={fAm} onChange={setFAm} className="w-40" />
+          <span className={`${lbl} ml-2`} title="A From/To range replaces the month picker. On Start Date.">Range</span>
+          <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={`${sel} w-40`} title="From month — on Start Date" aria-label="From month" />
+          <span className="text-xs text-mav-muted">→</span>
+          <input type="month" value={fTo} onChange={e => { filtersTouched.current = true; setFTo(e.target.value) }} className={`${sel} w-40`} title="To month — on Start Date" aria-label="To month" />
+          <span className={`${lbl} ml-2`}>Quick views</span>
+          {/* Partial Dedicated is dedicated work — a shared resource rather than a whole one,
+              but billed and planned the same way. Left out, this shortcut quietly hid six
+              lines and $15,005 in September alone. Everywhere else that splits P2P from
+              Dedicated tests for the word, so it already counted these; only this button
+              matched the exact string. */}
+          <button onClick={() => { filtersTouched.current = true; setFModel(['Dedicated', 'Partial Dedicated']); setFFrom(monthKey(new Date())); setFTo(monthKey(new Date())) }}
+            className="text-xs px-3 py-1.5 rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/15 transition-colors">
+            This month&rsquo;s Dedicated
+          </button>
+        </>}
       </FilterBar>
 
       {/* The action bar only exists once something is ticked, so it never sits there as
@@ -619,16 +641,20 @@ export default function ProjectLedger() {
       )}
 
       <Panel flush title={<>Lines · {periodLabel || '…'}</>} info={aboutLines}
-        right={<span className="text-[11px] text-mav-muted">Double-click a cell to fill it in</span>}>
+        right={<div className="flex items-center gap-2">
+          <span className="text-[11px] text-mav-muted hidden md:inline">Double-click a cell to fill it in</span>
+          {/* The old "All sheet columns" view, now one click on top of the picker. */}
+          <button onClick={() => allColsOn ? colPick.reset() : colPick.showAll()} className={secBtn}
+            title={allColsOn ? 'Back to the default columns' : 'Every column of the Web, Hub & LP tab'}>
+            {allColsOn ? 'Default columns' : 'Show all columns'}
+          </button>
+          <ColumnPicker cols={colPick} />
+        </div>}>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="text-left text-mav-fg/70 border-b border-mav-line">
             <tr>
               <th className="px-3 py-2 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label="Select all filtered" /></th>
-              {/* Edit leads the row. It was at the far right, past twenty columns of
-                  sheet data, so on any screen narrower than the table you had to scroll
-                  the whole way across to reach the one control you came for. */}
-              <th className={th}>Edit</th>
               {/* Click to sort, click again to reverse, a third time to go back to
                   newest-entry-first. Month grouping is never overridden — the pager
                   moves a month at a time, so a sort that crossed months would page
@@ -643,33 +669,17 @@ export default function ProjectLedger() {
                   </button>
                 </th>
               ))}
-              <th className={th}>In sheet</th>
+              {showInSheet && <th className={th}>In sheet</th>}
+              {/* Edit is pinned to the right edge. It used to sit past twenty columns of
+                  sheet data, then at the start of the row; pinned, it is in reach on any
+                  screen however many columns are showing. */}
+              <th className={`${th} sticky-action text-right`}>Action</th>
             </tr>
           </thead>
           <tbody>
             {pageRows.map(r => (
               <tr key={r.row_key} className={`border-b border-mav-line/60 ${picked.has(r.row_key) ? 'bg-mav-yellow/5' : ''}`}>
-                <td className="px-3 py-2"><input type="checkbox" checked={picked.has(r.row_key)} onChange={() => toggle(r.row_key)} aria-label={`Select ${r.company_name}`} /></td>
-                <td className={td}>
-                  {/* Every row is editable now, sheet lines included — their answers go
-                      into an overlay beside the sheet rather than into it. Offered only
-                      to the row's own PC/SME, which is the rule both RPCs enforce. */}
-                  <span className="inline-flex items-center gap-2">
-                    {canEditLedgerRow(r, me, isAdmin)
-                      ? <button onClick={() => setEditing(r)} className="text-xs text-mav-yellow hover:underline">Edit</button>
-                      : <span className="text-xs text-mav-fg/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
-                    {/* Admins only, and gated again in the database. A PM may edit the
-                        fields on their own row; taking a line out of the revenue figures
-                        is a different kind of act. */}
-                    {isAdmin && (
-                      <button onClick={() => removeRow(r)} disabled={removing === r.row_key}
-                        title="Remove this line from the ledger (admin)"
-                        className="text-xs text-mav-fg/30 hover:text-red-400 disabled:opacity-40 transition-colors">
-                        {removing === r.row_key ? '…' : '✕'}
-                      </button>
-                    )}
-                  </span>
-                </td>
+                <td className="px-3 py-2.5"><input type="checkbox" checked={picked.has(r.row_key)} onChange={() => toggle(r.row_key)} aria-label={`Select ${r.company_name}`} /></td>
                 {cols.map(c => {
                   const v = c.get(r)
                   const mine = canEditLedgerRow(r, me, isAdmin)
@@ -678,7 +688,7 @@ export default function ProjectLedger() {
                   return (
                     <td key={c.key}
                       onDoubleClick={editable ? () => setCell({ rowKey: r.row_key, col: c.key, value: rawOf(r, c) }) : undefined}
-                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-mav-fg/25' : 'text-mav-fg/80'} ${open ? '' : 'max-w-[16rem] truncate'} ${editable && !open ? 'cursor-text hover:bg-mav-fg/5' : ''}`}
+                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-mav-fg/25' : 'text-mav-fg/80'} ${open ? '' : 'max-w-[14rem] truncate'} ${editable && !open ? 'cursor-text hover:bg-mav-fg/5' : ''}`}
                       title={open ? '' : editable ? `${v === '—' ? 'Empty' : v} — double-click to edit` : (v === '—' ? '' : v)}>
                       {open ? (
                         <input autoFocus disabled={cellBusy}
@@ -703,15 +713,37 @@ export default function ProjectLedger() {
                     </td>
                   )
                 })}
-                <td className={td}>
-                  {r.in_sheet
-                    ? <span className="text-xs text-mav-fg/50">yes</span>
-                    : <span className="text-xs px-2 py-0.5 rounded-full border border-amber-500/50 text-amber-300">pending</span>}
+                {showInSheet && (
+                  <td className={td}>
+                    {r.in_sheet
+                      ? <span className="text-xs text-mav-fg/50">yes</span>
+                      : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300">pending</span>}
+                  </td>
+                )}
+                <td className={`${td} sticky-action text-right`}>
+                  {/* Every row is editable now, sheet lines included — their answers go
+                      into an overlay beside the sheet rather than into it. Offered only
+                      to the row's own PC/SME, which is the rule both RPCs enforce. */}
+                  <span className="inline-flex items-center gap-2">
+                    {canEditLedgerRow(r, me, isAdmin)
+                      ? <button onClick={() => setEditing(r)} className="rounded-full bg-mav-fill text-black text-xs font-semibold px-3 py-1 hover:brightness-95 transition">Edit</button>
+                      : <span className="text-xs text-mav-fg/25" title={`${r.pm_owner || 'Nobody'} owns this row`}>{r.pm_owner ? r.pm_owner.split(' ')[0] + "'s" : 'admin'}</span>}
+                    {/* Admins only, and gated again in the database. A PM may edit the
+                        fields on their own row; taking a line out of the revenue figures
+                        is a different kind of act. */}
+                    {isAdmin && (
+                      <button onClick={() => removeRow(r)} disabled={removing === r.row_key}
+                        title="Remove this line from the ledger (admin)"
+                        className="text-xs text-mav-fg/30 hover:text-red-400 disabled:opacity-40 transition-colors">
+                        {removing === r.row_key ? '…' : '✕'}
+                      </button>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
             {!loading && pageRows.length === 0 && (
-              <tr><td colSpan={cols.length + 3} className="px-3 py-6 text-center text-mav-muted">
+              <tr><td colSpan={cols.length + (showInSheet ? 3 : 2)} className="px-3 py-6 text-center text-mav-muted">
                 {shown.length === 0
                   ? 'Nothing matches those filters.'
                   : `Nothing in ${periodLabel} matches those filters${rangeMode ? '.' : ` — ${shown.length.toLocaleString()} line${shown.length === 1 ? '' : 's'} in other months do.`}`}

@@ -8,6 +8,7 @@ import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
 import { useUnit } from './BusinessUnitProvider'
 import { UNITS } from '@/lib/business-unit'
+import { MavlersMark } from './MavlersLogo'
 import { NAV_EVENT } from '@/lib/use-close-on-nav'
 
 // A nav entry is either a link or a group of links. Groups exist so the reporting pages
@@ -30,7 +31,6 @@ const nav: Entry[] = [
   // items meant scanning the whole rail to find the two or three anybody opens daily.
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
-  { href: '/revenue-sheet', label: 'Project sheet', icon: Table2 },
   // The page has always held the feedback sheet plus manually added praise; 'Delights'
   // described the best of it rather than the thing itself. The URL stays /delights so
   // existing links and bookmarks still resolve.
@@ -38,7 +38,10 @@ const nav: Entry[] = [
   // Critical Escalations only. Major Process Gap is the standing log, which is read to
   // find patterns rather than to act today, so it sits with the reports.
   { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
+  // Order agreed with Pratik, 28 Sep 2026: the two client-voice pages straight after the
+  // pipeline, then the client view, then the ledger.
   { href: '/clients', label: 'Client 360', icon: Users },
+  { href: '/revenue-sheet', label: 'Project sheet', icon: Table2 },
   { href: '/pm-team', label: 'PM Team', icon: UserCog },
   { href: '/kb-report', label: 'KB report', icon: PieChart },
 
@@ -98,8 +101,8 @@ export default function Sidebar() {
           className="p-2 -ml-2 rounded-md text-mav-muted hover:text-mav-fg hover:bg-mav-panel">
           <Menu size={20} />
         </button>
-        <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow" />
-        <span className="font-bold tracking-[0.08em] uppercase truncate">Web Digital</span>
+        <MavlersMark className="h-4 w-auto text-mav-fill shrink-0" />
+        <span className="font-bold tracking-[0.08em] uppercase truncate text-white">Web Digital</span>
       </div>
 
       {/* Scrim. Only rendered when open so it can never swallow taps on desktop. */}
@@ -115,9 +118,12 @@ export default function Sidebar() {
       {/* One line, in capitals, as Web PM sets its own name. "Dashboard" was dropped to
           get there: on a 240px rail the three words wrapped, and the page itself already
           says it is a dashboard. */}
-      <div className="flex items-center gap-2 px-2 py-3 mb-3">
-        <span className="inline-block w-3 h-3 rounded-sm bg-mav-yellow shrink-0" />
-        <span className="font-bold tracking-[0.08em] uppercase whitespace-nowrap">Web Digital</span>
+      {/* White set explicitly. The rail redefines the colour tokens, but text that only
+          INHERITS its colour got it from <body>, computed against the page's near-black —
+          which is how the name vanished on the dark rail. */}
+      <div className="flex items-center gap-2.5 px-3 py-3 mb-3">
+        <MavlersMark className="h-5 w-auto text-mav-fill shrink-0" />
+        <span className="text-[15px] font-bold tracking-[0.08em] uppercase whitespace-nowrap text-white">Web Digital</span>
       </div>
       <DepartmentSwitch />
       <nav className="space-y-1">
@@ -127,7 +133,7 @@ export default function Sidebar() {
       </nav>
       <div className="mt-auto pt-4 border-t border-mav-line">
         {/* Light or dark, remembered per browser. Dark stays the default. */}
-        <div className="px-3 mb-2 -mx-0"><ThemeToggle /></div>
+        <div className="mb-2"><ThemeToggle /></div>
       </div>
       <div className="pt-3 border-t border-mav-line px-3">
         {email && <p className="text-xs text-mav-muted truncate mb-2" title={email}>{email}</p>}
@@ -155,7 +161,7 @@ const samePath = (path: string | null, href: string) =>
 // text — Web PM's rail, so the two tools feel like one. The per-section hues this used
 // to fill with are gone from the rail: one accent reads faster than fifteen.
 const linkCls = (active: boolean, indent = false) =>
-  `flex items-start gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-[12.5px] font-medium uppercase tracking-[0.06em] leading-snug transition-colors
+  `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-[12px] font-semibold uppercase tracking-[0.04em] leading-snug whitespace-nowrap transition-colors
    ${active ? 'bg-mav-fill text-black font-semibold' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
 
 function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
@@ -167,7 +173,7 @@ function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: bo
     // so a drawer left open would stay open and the link would look broken.
     <Link href={href} onClick={() => window.dispatchEvent(new Event(NAV_EVENT))}
       className={linkCls(active, indent)}>
-      <Icon size={16} className="shrink-0 mt-0.5" /> <span className="min-w-0">{label}</span>
+      <Icon size={16} className="shrink-0" /> <span className="min-w-0 truncate" title={label}>{label}</span>
     </Link>
   )
 }
@@ -183,9 +189,9 @@ function NavGroup({ group, path }: { group: Group; path: string }) {
       <button
         onClick={() => setOpen(o => !o)}
         aria-expanded={expanded}
-        className={`w-full ${linkCls(false)} justify-between ${hasActive ? 'text-mav-fg' : ''}`}
+        className={`w-full ${linkCls(false)} justify-between text-left ${hasActive ? 'text-mav-fg' : ''}`}
       >
-        <span className="flex items-center gap-3"><Icon size={16} className="shrink-0 mt-0.5" /> <span className="min-w-0">{label}</span></span>
+        <span className="flex items-center gap-3 min-w-0"><Icon size={16} className="shrink-0" /> <span className="min-w-0 truncate">{label}</span></span>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
       {expanded && (
