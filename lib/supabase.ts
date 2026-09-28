@@ -2514,6 +2514,12 @@ export interface InvoiceRecon {
   project_names?: string | null
   /** The app's _N partial/instalment counter — a recurring engagement billed monthly. */
   is_instalment: boolean
+  /** Dated after today: a scheduled instalment of a live contract. Its absence from the
+   *  sheet is not a gap — the sheet books a month when it happens. */
+  is_future: boolean
+  /** Which of the three routes found the sheet row: 'project id', 'invoice no',
+   *  'client + month + value', or null for genuinely absent. */
+  matched_by?: string | null
   in_sheet: boolean
 }
 

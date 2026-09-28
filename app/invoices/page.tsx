@@ -123,8 +123,12 @@ export default function Invoices() {
   const cnt = (rows: ProjectInvoiceStatus[], s: string) => rows.filter(x => x.status === s).length
 
   // ── reconciliation side: per invoice, from the app inwards ──────────────────
+  // Future-dated invoices are excluded from the gap, not filtered out of the page: they
+  // are scheduled instalments of live contracts and the sheet books a month when it
+  // happens, so their absence is not a discrepancy. Counting them was the single largest
+  // error in the first version of this reconciliation.
   const gap = useMemo(() => recon
-    .filter(x => !x.in_sheet)
+    .filter(x => !x.in_sheet && !x.is_future)
     .filter(x => (x.client || '').toLowerCase().includes(search.toLowerCase())
               || (x.project_names || '').toLowerCase().includes(search.toLowerCase())
               || x.invoice_no.toLowerCase().includes(search.toLowerCase()))
@@ -137,6 +141,8 @@ export default function Invoices() {
   const gapUsd = gap.reduce((n, x) => n + (x.our_usd || 0), 0)
   const gapInstal = gap.filter(x => x.is_instalment)
   const inScope = recon.filter(x => inRange(x.invoice_date))
+  const future = inScope.filter(x => x.is_future && !x.in_sheet)
+  const futureUsd = future.reduce((n, x) => n + (x.our_usd || 0), 0)
   const inScopeUsd = inScope.reduce((n, x) => n + (x.our_usd || 0), 0)
 
   // Per month, both directions at once — this is the table that explains a variance.
@@ -286,19 +292,20 @@ export default function Invoices() {
             <KPICard label="Invoiced (app)" value={usd(inScopeUsd)} sub={`${inScope.length.toLocaleString()} invoices`} />
             <KPICard label="Not in the revenue sheet" tone="red" value={usd(gapUsd)}
               sub={`${gap.length.toLocaleString()} invoices`} />
-            <KPICard label="Of which recurring" tone="amber"
-              value={usd(gapInstal.reduce((n, x) => n + (x.our_usd || 0), 0))}
-              sub={`${gapInstal.length} invoices`}
-              info="The sheet books a dedicated or retainer engagement once, at contract. The invoice app raises one invoice per month against it. So each month the app holds revenue the sheet has never seen." />
+            <KPICard label="Scheduled, not due yet" value={usd(futureUsd)}
+              sub={`${future.length} invoices`}
+              info="Invoices the app has already raised with a date in the future — instalments of live recurring contracts. The sheet books a month when it happens, so these are not missing rows and are excluded from the gap." />
             <KPICard label="Gap as % of invoiced"
-              value={inScopeUsd ? `${(100 * gapUsd / inScopeUsd).toFixed(1)}%` : '—'} />
+              value={inScopeUsd ? `${(100 * gapUsd / inScopeUsd).toFixed(1)}%` : '—'}
+              sub={`${gapInstal.length} of the ${gap.length} are recurring`} />
           </KPIRow>
           {/* Why the two systems disagree, stated once rather than left to be rediscovered. */}
           <p className="text-[11px] text-mav-muted/80 mb-4 max-w-3xl">
-            The revenue sheet is not a superset of the invoice app. Roughly half of this gap is
-            recurring engagements: the sheet books a dedicated contract <em>once</em>, the app raises
-            one invoice per month against it, so each month the app holds revenue the sheet has never
-            seen. The rest are invoices whose project id never reached the sheet.
+            A sheet row is matched to an invoice three ways, in order: the normalised project id, the
+            sheet&rsquo;s own invoice number, then client&nbsp;+&nbsp;month&nbsp;+&nbsp;value. All
+            three are needed because the project id is <em>re-issued</em> when a recurring contract
+            renews, so the sheet and the app legitimately hold different ids for the same engagement.
+            Matching on the id alone reported a gap four times larger than the real one.
           </p>
 
           <div className="grid lg:grid-cols-[320px_1fr] gap-4">
@@ -320,7 +327,7 @@ export default function Invoices() {
               </table>
             </Panel>
 
-            <Panel title="Invoices the revenue sheet does not have" flush>
+            <Panel title={`Invoices the revenue sheet does not have (${gap.length})`} flush>
               <div className="overflow-x-auto"><table className="w-full text-sm min-w-[900px]">
                 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
                   {['Invoice', 'Project id', 'Date', 'Client', 'Project', 'Service', 'USD', 'Status'].map(h =>
