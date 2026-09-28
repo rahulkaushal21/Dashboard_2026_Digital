@@ -2399,8 +2399,10 @@ export interface ProjectInvoiceStatus {
 export async function getProjectInvoiceStatus(): Promise<Map<string, ProjectInvoiceStatus>> {
   const m = new Map<string, ProjectInvoiceStatus>()
   if (!supabase) return m
-  const { data } = await supabase.from('web_project_invoice_status').select('*')
-  for (const r of (data as ProjectInvoiceStatus[]) || []) m.set(r.project_id, r)
+  // read() paginates. 3,099 rows, and an unbounded PostgREST select stops at 1,000 —
+  // which would have quietly hidden two thirds of the sheet.
+  const rows = await read<ProjectInvoiceStatus>('project_invoice_status_mv', '*', 'row_key')
+  for (const r of rows || []) m.set(r.project_id, r)
   return m
 }
 
@@ -2459,8 +2461,54 @@ export interface DealLifecycle {
  */
 export async function getDealLifecycle(opts: { ours?: boolean } = {}): Promise<DealLifecycle[]> {
   if (!supabase) return []
-  let q = supabase.from('web_deal_lifecycle').select('*')
-  if (opts.ours) q = q.eq('is_our_service', true)
-  const { data } = await q
-  return (data as DealLifecycle[]) || []
+  // Paginated by hand rather than through read(), because read() takes no filter and the
+  // unfiltered view is 12,416 rows — most of them other business units' deals, which
+  // this page never shows. `deal_key` is unique, so the page order is stable.
+  const out: DealLifecycle[] = []
+  const PAGE = 1000
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase.from('deal_lifecycle_mv').select('*')
+      .order('deal_key', { ascending: true }).range(from, from + PAGE - 1)
+    if (opts.ours) q = q.eq('is_our_service', true)
+    const { data, error } = await q
+    if (error || !data?.length) break
+    out.push(...(data as DealLifecycle[]))
+    if (data.length < PAGE) break
+  }
+  return out
+}
+
+/**
+ * One row per invoice in our scope, with whether the revenue sheet knows about it.
+ *
+ * Reads the materialised copy: the view behind it joins the invoice mirrors to
+ * web_project_ledger, which parses sheet_raw column by column, and ran in seconds.
+ */
+export interface InvoiceRecon {
+  invoice_no: string
+  project_id?: string | null
+  client?: string | null
+  status: string
+  invoice_date?: string | null
+  due_date?: string | null
+  paid_date?: string | null
+  sales_person?: string | null
+  pc?: string | null
+  geo?: string | null
+  invoice_pattern?: string | null
+  payment_term?: string | null
+  our_usd?: number | null
+  invoice_total_usd?: number | null
+  services?: string | null
+  project_names?: string | null
+  /** The app's _N partial/instalment counter — a recurring engagement billed monthly. */
+  is_instalment: boolean
+  in_sheet: boolean
+}
+
+export async function getInvoiceRecon(): Promise<InvoiceRecon[]> {
+  // read() paginates on a stable key. PostgREST caps an unbounded select at 1,000 and
+  // there are ~3,500 invoices — taking the first page would have made the reconciliation
+  // gap look a third of its real size.
+  return (await read<InvoiceRecon>('invoice_reconciliation_mv', '*', 'invoice_no')) || []
 }

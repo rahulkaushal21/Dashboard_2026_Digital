@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator, Receipt } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
@@ -54,6 +54,7 @@ const nav: Entry[] = [
   // rather than shown, so nobody sees a header that opens onto nothing.
   {
     label: 'Business Reports', icon: BarChart3, children: [
+      { href: '/invoices', label: 'Invoices & Reconciliation', icon: Receipt },
       { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
       { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
       { href: '/last-year', label: 'Quarter over Quarter', icon: History },

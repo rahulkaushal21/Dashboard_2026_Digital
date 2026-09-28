@@ -47,6 +47,7 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/critical-escalations', label: 'Critical Escalations' },
   { href: '/delights', label: 'Feedback' },
   { href: '/sql-leads', label: 'SQL / Leads' },
+  { href: '/invoices', label: 'Invoices & Reconciliation' },
   { href: '/business-numbers', label: 'Business Numbers' },
   // Forecast is no longer offered on its own — it is a tab inside Business Trend. The
   // route stays in this list so an old bookmark still resolves rather than bouncing

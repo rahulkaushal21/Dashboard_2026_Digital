@@ -35,6 +35,9 @@ const HUES: [string, Hue][] = [
   ['/pm-team',                    { name: 'fuchsia',light: '#A21CAF', dark: '#E879F9' }],
   ['/operations/revenue-history', { name: 'stone',  light: '#57534E', dark: '#D6D3D1' }],
   ['/operations/lnd',             { name: 'emerald',light: '#065F46', dark: '#6EE7B7' }],
+  // Rose, not red: this page is about money that is late, which is a problem but not
+  // the same kind of problem as a client escalation. Red stays with the escalations.
+  ['/invoices',                   { name: 'rose',   light: '#BE123C', dark: '#FB7185' }],
   ['/needs-input',                { name: 'amber',  light: '#B45309', dark: '#FCD34D' }],
   ['/admin',                      { name: 'slate',  light: '#475569', dark: '#94A3B8' }],
   ['/',                           { name: 'amber',  light: '#B45309', dark: '#FBBF24' }],
