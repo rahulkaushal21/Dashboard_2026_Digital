@@ -123,12 +123,18 @@ export default function Invoices() {
   const cnt = (rows: ProjectInvoiceStatus[], s: string) => rows.filter(x => x.status === s).length
 
   // ── reconciliation side: per invoice, from the app inwards ──────────────────
-  // Future-dated invoices are excluded from the gap, not filtered out of the page: they
-  // are scheduled instalments of live contracts and the sheet books a month when it
-  // happens, so their absence is not a discrepancy. Counting them was the single largest
-  // error in the first version of this reconciliation.
+  // Two kinds of invoice are excluded from the gap because their absence from the sheet is
+  // CORRECT, not a discrepancy:
+  //
+  //   future-dated — scheduled instalments of live contracts; the sheet books a month when
+  //                  it happens. Counting these was the largest error in the first version.
+  //   Void         — the invoice was cancelled, so there is no revenue to book. Irixs
+  //                  showed why this matters: PRJ310326221639 was voided in March and
+  //                  re-raised as PRJ220726200047 in July. Once the sheet was repointed at
+  //                  the live one, the voided one fell into the gap and looked like a new
+  //                  problem. It is the opposite of one.
   const gap = useMemo(() => recon
-    .filter(x => !x.in_sheet && !x.is_future)
+    .filter(x => !x.in_sheet && !x.is_future && x.status !== 'Void')
     .filter(x => (x.client || '').toLowerCase().includes(search.toLowerCase())
               || (x.project_names || '').toLowerCase().includes(search.toLowerCase())
               || x.invoice_no.toLowerCase().includes(search.toLowerCase()))
@@ -143,6 +149,7 @@ export default function Invoices() {
   const inScope = recon.filter(x => inRange(x.invoice_date))
   const future = inScope.filter(x => x.is_future && !x.in_sheet)
   const futureUsd = future.reduce((n, x) => n + (x.our_usd || 0), 0)
+  const voided = inScope.filter(x => !x.in_sheet && !x.is_future && x.status === 'Void')
   const inScopeUsd = inScope.reduce((n, x) => n + (x.our_usd || 0), 0)
 
   // Per month, both directions at once — this is the table that explains a variance.
@@ -297,7 +304,9 @@ export default function Invoices() {
               info="Invoices the app has already raised with a date in the future — instalments of live recurring contracts. The sheet books a month when it happens, so these are not missing rows and are excluded from the gap." />
             <KPICard label="Gap as % of invoiced"
               value={inScopeUsd ? `${(100 * gapUsd / inScopeUsd).toFixed(1)}%` : '—'}
-              sub={`${gapInstal.length} of the ${gap.length} are recurring`} />
+              sub={voided.length
+                ? `${gapInstal.length} recurring · ${voided.length} void excluded`
+                : `${gapInstal.length} of the ${gap.length} are recurring`} />
           </KPIRow>
           {/* Why the two systems disagree, stated once rather than left to be rediscovered. */}
           <p className="text-[11px] text-mav-muted/80 mb-4 max-w-3xl">

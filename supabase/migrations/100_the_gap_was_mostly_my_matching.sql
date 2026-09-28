@@ -111,3 +111,19 @@ begin
   refresh materialized view concurrently invoice_reconciliation_mv;
 end $$;
 revoke execute on function refresh_invoice_sources() from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- VOID INVOICES ARE NOT A GAP EITHER (added 29 Sep 2026)
+--
+-- Irixs showed why. PRJ310326221639 / INV310326221639 was raised 31 Mar for $9,900 and
+-- VOIDED; the work was re-invoiced in July as PRJ220726200047 / INV220726200047 for
+-- $10,705.82, Paid. The sheet still pointed at the voided one, which is why the live
+-- invoice read as absent.
+--
+-- Once the sheet was repointed at the live invoice, the VOIDED one fell into the gap and
+-- looked like a brand new problem. It is the opposite of one: a cancelled invoice has no
+-- revenue and must never have a sheet row. Void is excluded from the gap in the page for
+-- the same reason future-dated rows are — their absence is correct.
+--
+-- Gap since April after both exclusions: 34 invoices, $36,906 — 2.4% of invoiced value.
+-- ---------------------------------------------------------------------------
