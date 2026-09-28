@@ -2351,3 +2351,108 @@ export async function getUpcomingHolidays(regions: string[], days = 21): Promise
   const soon = rows.filter(h => h.on_date <= cutoff)
   return { soon, next: soon.length ? undefined : rows[0] }
 }
+
+// ---------------------------------------------------------------------------
+// INVOICE AND DEAL STATE, from the Custom Dashboard API (see migration 093)
+//
+// Mirrored server-side by the quote-sync edge function. The API's shared token never
+// reaches here: this bundle is a static export, so anything in it is public.
+// ---------------------------------------------------------------------------
+
+/** The six states the API stores, plus the one it cannot know. */
+export type InvoiceStatus =
+  | 'Draft' | 'Sent' | 'Paid' | 'Partially Paid' | 'Overdue' | 'Void'
+  | 'Not raised'
+
+export interface ProjectInvoiceStatus {
+  project_id: string
+  row_key: string
+  company_name?: string
+  project_name?: string
+  booking_month?: string
+  ledger_usd?: number
+  invoice_count: number
+  invoiced_usd: number
+  paid_usd: number
+  statuses?: string[] | null
+  earliest_due_at?: string | null
+  last_paid_at?: string | null
+  status: InvoiceStatus
+}
+
+/**
+ * project_id -> invoice state, for the Project sheet.
+ *
+ * 'Not raised' is a real answer, not a missing one: it means delivered work nobody has
+ * billed. Keyed on project_id because that is the only identifier the API and the ledger
+ * share — the sheet's invoice_no is typed by hand weeks later and covers barely half the
+ * rows, so matching on it would report most invoices as absent.
+ */
+export async function getProjectInvoiceStatus(): Promise<Map<string, ProjectInvoiceStatus>> {
+  const m = new Map<string, ProjectInvoiceStatus>()
+  if (!supabase) return m
+  const { data } = await supabase.from('web_project_invoice_status').select('*')
+  for (const r of (data as ProjectInvoiceStatus[]) || []) m.set(r.project_id, r)
+  return m
+}
+
+export interface DealLifecycle {
+  deal_key: string
+  company_name?: string
+  project_name?: string
+  service?: string
+  bu_type?: string
+  geo?: string
+  am?: string
+  pc?: string
+  value_usd?: number
+  opportunity_no?: string
+  opportunity_raised: boolean
+  opportunity_at?: string | null
+  stage?: string
+  final_stage?: string
+  deal_close_on?: string | null
+  // Two independent facts, not two steps: 16 of 225 live opportunities have an RFQ with
+  // no pipeline date, and 4 are marked won with neither. Never infer one from the other.
+  pipeline_raised: boolean
+  pipeline_at?: string | null
+  rfq_raised: boolean
+  rfq_no?: string
+  rfq_at?: string | null
+  rfq_cancelled_at?: string | null
+  quote_no?: string
+  quote_raised: boolean
+  quote_at?: string | null
+  quote_approved_at?: string | null
+  quote_declined_at?: string | null
+  quote_status?: string
+  invoice_raised: boolean
+  invoice_count: number
+  invoice_nos?: string[] | null
+  project_ids?: string[] | null
+  invoice_status?: string | null
+  first_invoice_at?: string | null
+  earliest_due_at?: string | null
+  last_paid_at?: string | null
+  invoiced_usd?: number | null
+  paid_usd?: number | null
+  any_overdue: boolean
+  any_draft: boolean
+  any_void: boolean
+  is_our_service?: boolean
+}
+
+/**
+ * One row per deal: opportunity → pipeline → RFQ → quote → invoice, each with its date.
+ *
+ * `ours` filters on Service, NOT on BUType. 'Digital BU' is the whole digital group —
+ * Email, SEM and SEO outnumber our work inside it, and filtering on it made the
+ * project-id match rate look like 23% when it is 85%.
+ */
+export async function getDealLifecycle(opts: { ours?: boolean } = {}): Promise<DealLifecycle[]> {
+  if (!supabase) return []
+  let q = supabase.from('web_deal_lifecycle').select('*')
+  if (opts.ours) q = q.eq('is_our_service', true)
+  const { data } = await q
+  return (data as DealLifecycle[]) || []
+}
