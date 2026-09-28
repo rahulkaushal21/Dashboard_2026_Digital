@@ -64,6 +64,46 @@ const daysLate = (due?: string | null) => {
 type Tab = 'money' | 'recon'
 type Who = 'all' | 'contractor' | 'inhouse'
 
+/**
+ * A sortable table head.
+ *
+ * `num` right-aligns and sorts numerically. Every column states its unit in the header —
+ * "Sheet USD" and "Cost" and "Invoiced" sitting side by side told you nothing about which
+ * system each came from or what currency it was in (Pratik's note, 29 Sep 2026).
+ */
+type SortDir = 'asc' | 'desc'
+function Th<K extends string>({ id, label, hint, num, sort, dir, onSort }: {
+  id: K; label: string; hint?: string; num?: boolean
+  sort: K | null; dir: SortDir; onSort: (k: K) => void
+}) {
+  const on = sort === id
+  return (
+    <th className={`px-4 py-3 font-medium whitespace-nowrap ${num ? 'text-right' : 'text-left'}`}>
+      <button onClick={() => onSort(id)} title={hint}
+        className={`inline-flex items-center gap-1 hover:text-mav-fg ${on ? 'text-mav-fg' : ''}`}>
+        {label}
+        <span className={`text-[9px] ${on ? 'opacity-100' : 'opacity-25'}`}>
+          {on && dir === 'asc' ? '▲' : '▼'}
+        </span>
+      </button>
+    </th>
+  )
+}
+
+/** Sort by a key, nulls always last whichever direction — a blank is not a small number. */
+function sortRows<T>(rows: T[], get: (r: T) => string | number | null | undefined, dir: SortDir): T[] {
+  return rows.slice().sort((a, b) => {
+    const x = get(a), y = get(b)
+    const ax = x === null || x === undefined || x === '', ay = y === null || y === undefined || y === ''
+    if (ax && ay) return 0
+    if (ax) return 1
+    if (ay) return -1
+    const c = typeof x === 'number' && typeof y === 'number'
+      ? x - y : String(x).localeCompare(String(y))
+    return dir === 'asc' ? c : -c
+  })
+}
+
 // The invoice app only became the reference in April 2026. Everything before that is
 // present in the tables but is not shown, because the sheet and the app were maintained
 // independently until then and every earlier month reconciles badly for reasons nobody is
@@ -93,6 +133,14 @@ export default function Invoices() {
   const [from, setFrom] = useState(FLOOR)
   const [to, setTo] = useState('')
   const [who, setWho] = useState<Who>('all')
+  const [mSort, setMSort] = useState<string | null>('ledger_usd')
+  const [mDir, setMDir] = useState<SortDir>('desc')
+  const [gSort, setGSort] = useState<string | null>('our_usd')
+  const [gDir, setGDir] = useState<SortDir>('desc')
+  // Clicking the active column flips direction; a new column starts descending, which is
+  // what you want on every money column and harmless on the rest.
+  const clickM = (k: string) => { if (k === mSort) setMDir(d => d === 'asc' ? 'desc' : 'asc'); else { setMSort(k); setMDir('desc') } }
+  const clickG = (k: string) => { if (k === gSort) setGDir(d => d === 'asc' ? 'desc' : 'asc'); else { setGSort(k); setGDir('desc') } }
   const reset = () => { setSearch(''); setFStatus([]); setFPc([]); setFrom(FLOOR); setTo(''); setWho('all') }
 
   // The FLOOR is applied on top of the date box, so clearing the box cannot drag
@@ -114,9 +162,24 @@ export default function Invoices() {
               || (x.project_name || '').toLowerCase().includes(search.toLowerCase()))
     .filter(x => keeps(fStatus, x.status))
     .filter(x => inRange(x.booking_month))
-    .filter(keepsWho)
-    .sort((a, b) => (b.ledger_usd || 0) - (a.ledger_usd || 0)),
+    .filter(keepsWho),
     [status, search, fStatus, from, to, who])
+
+  const moneySorted = useMemo(() => sortRows(money, r => {
+    switch (mSort) {
+      case 'status': return r.status
+      case 'company_name': return r.company_name
+      case 'project_name': return r.project_name
+      case 'project_key': return r.project_key || r.project_id
+      case 'who': return r.is_contractor ? 'Contractor' : (r.expert || '')
+      case 'booking_month': return r.booking_month
+      case 'outsource_usd': return r.outsource_usd ?? null
+      case 'invoiced_usd': return r.invoice_count ? (r.invoiced_usd ?? 0) : null
+      case 'paid_usd': return r.paid_usd ?? null
+      case 'earliest_due_at': return r.earliest_due_at
+      default: return r.ledger_usd ?? null
+    }
+  }, mDir), [money, mSort, mDir])
 
   const tot = (rows: ProjectInvoiceStatus[], s: string) =>
     rows.filter(x => x.status === s).reduce((n, x) => n + (x.ledger_usd || 0), 0)
@@ -143,6 +206,19 @@ export default function Invoices() {
     .filter(x => inRange(x.invoice_date))
     .sort((a, b) => (b.our_usd || 0) - (a.our_usd || 0)),
     [recon, search, fStatus, fPc, from, to])
+
+  const gapSorted = useMemo(() => sortRows(gap, r => {
+    switch (gSort) {
+      case 'invoice_no': return r.invoice_no
+      case 'project_id': return r.project_id
+      case 'invoice_date': return r.invoice_date
+      case 'client': return r.client
+      case 'project_names': return r.project_names
+      case 'services': return r.services
+      case 'status': return r.status
+      default: return r.our_usd ?? null
+    }
+  }, gDir), [gap, gSort, gDir])
 
   const gapUsd = gap.reduce((n, x) => n + (x.our_usd || 0), 0)
   const gapInstal = gap.filter(x => x.is_instalment)
@@ -250,11 +326,23 @@ export default function Invoices() {
           )}
           <Panel flush>
             <div className="overflow-x-auto"><table className="w-full text-sm min-w-[1040px]">
-              <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-                {['Status', 'Client', 'Project', 'Project id', 'By', 'Booked', 'Sheet USD', 'Cost', 'Invoiced', 'Paid', 'Due', 'Late'].map(h =>
-                  <th key={h} className="px-4 py-3 font-medium">{h}</th>)}
+              {/* Every header names its SOURCE and its unit. 'Sheet USD / Cost / Invoiced
+                  / Paid' side by side said nothing about which system each came from. */}
+              <thead className="text-mav-muted border-b border-mav-line"><tr>
+                <Th id="status" label="Invoice status" hint="The status the invoice app holds, or 'Not raised' / 'No project id' where this dashboard cannot find one" sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="company_name" label="Client" sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="project_name" label="Project" sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="project_key" label="Project ID" hint="As entered in the revenue sheet, normalised to a bare PRJ id" sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="who" label="Delivered by" hint="The sheet's Expert column. 'Contractor' means outsourced." sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="booking_month" label="Booked month" hint="The month the revenue sheet books this row against" sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="ledger_usd" label="Sheet value USD" hint="Revenue as the sheet records it, in USD" num sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="outsource_usd" label="Contractor cost USD" hint="Outsource spend. Held in INR in the sheet and converted at the stored FX rate; hover a figure for the rupee amount." num sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="invoiced_usd" label="Invoiced USD" hint="Total the invoice app has raised against this project id" num sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="paid_usd" label="Paid USD" hint="Of that, the part the app records as Paid" num sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="earliest_due_at" label="Due date" hint="Earliest due date across this project's invoices" sort={mSort} dir={mDir} onSort={clickM} />
+                <Th id="late" label="Days late" num sort={mSort} dir={mDir} onSort={clickM} />
               </tr></thead>
-              <tbody>{money.slice(0, 500).map(x => {
+              <tbody>{moneySorted.slice(0, 500).map(x => {
                 const late = x.status === 'Overdue' ? daysLate(x.earliest_due_at?.slice(0, 10)) : null
                 return (
                   <tr key={x.row_key} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
@@ -269,17 +357,17 @@ export default function Invoices() {
                         : <span className="text-mav-muted text-xs">{x.expert || '—'}</span>}
                     </td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.booking_month || '').slice(0, 7) || '—'}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{usd(x.ledger_usd)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{usd(x.ledger_usd)}</td>
                     {/* Outsource spend. INR in the sheet, converted here; the rupee figure
                         is in the tooltip for anyone reconciling against the sheet itself. */}
-                    <td className="px-4 py-3 text-mav-muted whitespace-nowrap"
+                    <td className="px-4 py-3 text-mav-muted text-right tabular-nums whitespace-nowrap"
                         title={x.outsource_local ? `${Math.round(x.outsource_local).toLocaleString()} ${x.outsource_currency || 'INR'}` : ''}>
                       {x.outsource_usd ? usd(x.outsource_usd) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.invoice_count ? usd(x.invoiced_usd) : '—'}</td>
-                    <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.paid_usd ? usd(x.paid_usd) : '—'}</td>
+                    <td className="px-4 py-3 text-mav-muted text-right tabular-nums whitespace-nowrap">{x.invoice_count ? usd(x.invoiced_usd) : '—'}</td>
+                    <td className="px-4 py-3 text-mav-muted text-right tabular-nums whitespace-nowrap">{x.paid_usd ? usd(x.paid_usd) : '—'}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.earliest_due_at?.slice(0, 10) || '—'}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{late ? <span className="text-red-400">{late}d</span> : '—'}</td>
+                    <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{late ? <span className="text-red-400">{late}</span> : '—'}</td>
                   </tr>
                 )
               })}</tbody>
@@ -338,11 +426,17 @@ export default function Invoices() {
 
             <Panel title={`Invoices the revenue sheet does not have (${gap.length})`} flush>
               <div className="overflow-x-auto"><table className="w-full text-sm min-w-[900px]">
-                <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-                  {['Invoice', 'Project id', 'Date', 'Client', 'Project', 'Service', 'USD', 'Status'].map(h =>
-                    <th key={h} className="px-4 py-3 font-medium">{h}</th>)}
+                <thead className="text-mav-muted border-b border-mav-line"><tr>
+                  <Th id="invoice_no" label="Invoice no (app)" sort={gSort} dir={gDir} onSort={clickG} />
+                  <Th id="project_id" label="Project ID (app)" hint="The id the invoice app raised this against. Paste it into the sheet to close the row." sort={gSort} dir={gDir} onSort={clickG} />
+                  <Th id="invoice_date" label="Invoice date" sort={gSort} dir={gDir} onSort={clickG} />
+                  <Th id="client" label="Client (app)" sort={gSort} dir={gDir} onSort={clickG} />
+                  <Th id="project_names" label="Project" sort={gSort} dir={gDir} onSort={clickG} />
+                  <Th id="services" label="Service" sort={gSort} dir={gDir} onSort={clickG} />
+                  <Th id="our_usd" label="Invoiced USD" hint="Our Web-service lines on this invoice, not the invoice total" num sort={gSort} dir={gDir} onSort={clickG} />
+                  <Th id="status" label="Invoice status" sort={gSort} dir={gDir} onSort={clickG} />
                 </tr></thead>
-                <tbody>{gap.slice(0, 500).map(x => (
+                <tbody>{gapSorted.slice(0, 500).map(x => (
                   <tr key={x.invoice_no} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
                     <td className="px-4 py-3 whitespace-nowrap font-mono text-[12px]">
                       {x.invoice_no}
@@ -358,7 +452,7 @@ export default function Invoices() {
                     <td className="px-4 py-3">{x.client || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted max-w-[200px] truncate" title={x.project_names || ''}>{x.project_names || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted max-w-[150px] truncate" title={x.services || ''}>{x.services || '—'}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">{usd(x.our_usd)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{usd(x.our_usd)}</td>
                     <td className="px-4 py-3"><Pill s={x.status} /></td>
                   </tr>
                 ))}</tbody>
