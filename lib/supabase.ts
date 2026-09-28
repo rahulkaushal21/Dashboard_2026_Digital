@@ -2371,6 +2371,17 @@ export interface ProjectInvoiceStatus {
   project_id: string
   /** The ledger id normalised to a bare PRJ id — see migration 095. */
   project_key?: string | null
+  pm_owner?: string | null
+  /** The assigned delivery owner. The literal string 'Contractor' is how the sheet marks
+   *  outsourced work — `contractor_name` is filled on one row in a thousand. */
+  expert?: string | null
+  contractor_name?: string | null
+  /** Outsource spend as the sheet holds it: INR, confirmed with the business. */
+  outsource_local?: number | null
+  outsource_currency?: string | null
+  outsource_usd?: number | null
+  is_contractor?: boolean | null
+  invoice_nos?: string[] | null
   row_key: string
   company_name?: string
   project_name?: string

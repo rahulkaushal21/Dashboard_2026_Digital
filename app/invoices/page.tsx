@@ -62,6 +62,13 @@ const daysLate = (due?: string | null) => {
 }
 
 type Tab = 'money' | 'recon'
+type Who = 'all' | 'contractor' | 'inhouse'
+
+// The invoice app only became the reference in April 2026. Everything before that is
+// present in the tables but is not shown, because the sheet and the app were maintained
+// independently until then and every earlier month reconciles badly for reasons nobody is
+// going to chase now. Kept as a constant so it is one line to move, not a rewrite.
+const FLOOR = '2026-04-01'
 
 export default function Invoices() {
   const [recon, setRecon] = useState<InvoiceRecon[]>([])
@@ -83,16 +90,23 @@ export default function Invoices() {
   const [search, setSearch] = useState('')
   const [fStatus, setFStatus] = useState<string[]>([])
   const [fPc, setFPc] = useState<string[]>([])
-  const [from, setFrom] = useState('')
+  const [from, setFrom] = useState(FLOOR)
   const [to, setTo] = useState('')
-  const reset = () => { setSearch(''); setFStatus([]); setFPc([]); setFrom(''); setTo('') }
+  const [who, setWho] = useState<Who>('all')
+  const reset = () => { setSearch(''); setFStatus([]); setFPc([]); setFrom(FLOOR); setTo(''); setWho('all') }
 
+  // The FLOOR is applied on top of the date box, so clearing the box cannot drag
+  // pre-April rows back in — the page would otherwise silently start reporting months
+  // that were never reconciled.
   const inRange = (d?: string | null) => {
-    if (!d) return !from && !to
+    if (!d) return false
+    if (d < FLOOR) return false
     if (from && d < from) return false
     if (to && d > to) return false
     return true
   }
+  const keepsWho = (x: { is_contractor?: boolean | null }) =>
+    who === 'all' ? true : who === 'contractor' ? !!x.is_contractor : !x.is_contractor
 
   // ── money side: per project, from the ledger outwards ───────────────────────
   const money = useMemo(() => status
@@ -100,8 +114,9 @@ export default function Invoices() {
               || (x.project_name || '').toLowerCase().includes(search.toLowerCase()))
     .filter(x => keeps(fStatus, x.status))
     .filter(x => inRange(x.booking_month))
+    .filter(keepsWho)
     .sort((a, b) => (b.ledger_usd || 0) - (a.ledger_usd || 0)),
-    [status, search, fStatus, from, to])
+    [status, search, fStatus, from, to, who])
 
   const tot = (rows: ProjectInvoiceStatus[], s: string) =>
     rows.filter(x => x.status === s).reduce((n, x) => n + (x.ledger_usd || 0), 0)
@@ -148,7 +163,7 @@ export default function Invoices() {
   return (
     <div>
       <Header title="Invoices & Reconciliation"
-        subtitle="What has been invoiced, what has been paid, and what the revenue sheet does not know about" />
+        subtitle="What has been invoiced, what has been paid, and what the revenue sheet does not know about — from April 2026" />
       {/* The invoice app has no department column we can trust — scope is defined by
           Service, which is already applied server-side to our four Web services. */}
       <NotSplitNote what="Invoices" reason="are already scoped to the Web services" className="-mt-3 mb-4" />
@@ -157,7 +172,20 @@ export default function Invoices() {
         { id: 'money', label: 'Money', count: money.length, title: 'Per project: invoiced, paid, overdue, never raised' },
         { id: 'recon', label: 'Reconciliation', count: gap.length, title: 'Invoices the revenue sheet does not have' },
       ]} />
-      <FilterBar right={<button onClick={reset} className="text-sm px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Clear all</button>}>
+      <FilterBar right={<>
+          {/* Contractor spend is INR in the sheet and converted here, so 'Contractor'
+              shows both what we billed and what the work cost us. */}
+          <div className="inline-flex rounded-md border border-mav-line overflow-hidden">
+            {([['all', 'All'], ['contractor', 'Contractor'], ['inhouse', 'In-house']] as [Who, string][]).map(([k, label]) => (
+              <button key={k} onClick={() => setWho(k)}
+                className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  who === k ? 'bg-mav-fill text-black' : 'text-mav-muted hover:text-mav-fg'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <button onClick={reset} className="text-sm px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Clear all</button>
+        </>}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, project, invoice…" className={`${selCls} w-56`} />
         <MultiSelect label="All statuses"
           options={tab === 'money' ? uniq(status.map(x => x.status)) : uniq(recon.map(x => x.status))}
@@ -195,10 +223,22 @@ export default function Invoices() {
             <KPICard label="Paid" tone="green" value={usd(tot(money, 'Paid'))}
               sub={`${cnt(money, 'Paid')} projects`} />
           </KPIRow>
+          {/* Only when the filter is on contractors: billed against cost, which is the
+              question "we outsourced this — did we invoice it, and did it pay for itself". */}
+          {who === 'contractor' && (
+            <KPIRow cols={3}>
+              <KPICard label="Contractor projects" value={String(money.length)}
+                sub={`${money.filter(x => x.invoice_count).length} invoiced`} />
+              <KPICard label="Billed" value={usd(money.reduce((n, x) => n + (x.ledger_usd || 0), 0))} />
+              <KPICard label="Outsource cost" tone="amber"
+                value={usd(money.reduce((n, x) => n + (x.outsource_usd || 0), 0))}
+                info="The sheet records this in INR; converted here at the project's stored rate. Rows with no figure are contractor work whose cost was never entered." />
+            </KPIRow>
+          )}
           <Panel flush>
-            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[860px]">
+            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[1040px]">
               <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-                {['Status', 'Client', 'Project', 'Booked', 'Sheet USD', 'Invoiced', 'Paid', 'Due', 'Late'].map(h =>
+                {['Status', 'Client', 'Project', 'Project id', 'By', 'Booked', 'Sheet USD', 'Cost', 'Invoiced', 'Paid', 'Due', 'Late'].map(h =>
                   <th key={h} className="px-4 py-3 font-medium">{h}</th>)}
               </tr></thead>
               <tbody>{money.slice(0, 500).map(x => {
@@ -207,9 +247,22 @@ export default function Invoices() {
                   <tr key={x.row_key} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
                     <td className="px-4 py-3"><Pill s={x.status} /></td>
                     <td className="px-4 py-3">{x.company_name || '—'}</td>
-                    <td className="px-4 py-3 text-mav-muted max-w-[260px] truncate" title={x.project_name || ''}>{x.project_name || '—'}</td>
+                    <td className="px-4 py-3 text-mav-muted max-w-[220px] truncate" title={x.project_name || ''}>{x.project_name || '—'}</td>
+                    <td className="px-4 py-3 font-mono text-[11px] text-mav-muted whitespace-nowrap">{x.project_key || x.project_id || '—'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {x.is_contractor
+                        ? <span className="text-[11px] px-2 py-0.5 rounded-full border border-sky-500/40 text-sky-400"
+                            title={x.contractor_name || x.expert || 'Contractor'}>Contractor</span>
+                        : <span className="text-mav-muted text-xs">{x.expert || '—'}</span>}
+                    </td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.booking_month || '').slice(0, 7) || '—'}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{usd(x.ledger_usd)}</td>
+                    {/* Outsource spend. INR in the sheet, converted here; the rupee figure
+                        is in the tooltip for anyone reconciling against the sheet itself. */}
+                    <td className="px-4 py-3 text-mav-muted whitespace-nowrap"
+                        title={x.outsource_local ? `${Math.round(x.outsource_local).toLocaleString()} ${x.outsource_currency || 'INR'}` : ''}>
+                      {x.outsource_usd ? usd(x.outsource_usd) : '—'}
+                    </td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.invoice_count ? usd(x.invoiced_usd) : '—'}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.paid_usd ? usd(x.paid_usd) : '—'}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.earliest_due_at?.slice(0, 10) || '—'}</td>
@@ -268,9 +321,9 @@ export default function Invoices() {
             </Panel>
 
             <Panel title="Invoices the revenue sheet does not have" flush>
-              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[820px]">
+              <div className="overflow-x-auto"><table className="w-full text-sm min-w-[900px]">
                 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
-                  {['Invoice', 'Date', 'Client', 'Project', 'Service', 'PC', 'USD', 'Status'].map(h =>
+                  {['Invoice', 'Project id', 'Date', 'Client', 'Project', 'Service', 'USD', 'Status'].map(h =>
                     <th key={h} className="px-4 py-3 font-medium">{h}</th>)}
                 </tr></thead>
                 <tbody>{gap.slice(0, 500).map(x => (
@@ -281,11 +334,14 @@ export default function Invoices() {
                         <span className="ml-1 text-[10px] text-mav-muted/70" title="Recurring instalment — the sheet books the contract once">rec</span>
                       )}
                     </td>
+                    {/* The project id is the reason this row is here: the invoice app raised
+                        it against this id and no sheet row carries it. Shown, not hidden in
+                        a tooltip, so it can be pasted straight into the sheet. */}
+                    <td className="px-4 py-3 font-mono text-[11px] whitespace-nowrap">{x.project_id || '—'}</td>
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.invoice_date || '—'}</td>
                     <td className="px-4 py-3">{x.client || '—'}</td>
-                    <td className="px-4 py-3 text-mav-muted max-w-[220px] truncate" title={x.project_names || ''}>{x.project_names || '—'}</td>
-                    <td className="px-4 py-3 text-mav-muted max-w-[160px] truncate" title={x.services || ''}>{x.services || '—'}</td>
-                    <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.pc || '—'}</td>
+                    <td className="px-4 py-3 text-mav-muted max-w-[200px] truncate" title={x.project_names || ''}>{x.project_names || '—'}</td>
+                    <td className="px-4 py-3 text-mav-muted max-w-[150px] truncate" title={x.services || ''}>{x.services || '—'}</td>
                     <td className="px-4 py-3 whitespace-nowrap">{usd(x.our_usd)}</td>
                     <td className="px-4 py-3"><Pill s={x.status} /></td>
                   </tr>
