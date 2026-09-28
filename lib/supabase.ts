@@ -2362,10 +2362,15 @@ export async function getUpcomingHolidays(regions: string[], days = 21): Promise
 /** The six states the API stores, plus the one it cannot know. */
 export type InvoiceStatus =
   | 'Draft' | 'Sent' | 'Paid' | 'Partially Paid' | 'Overdue' | 'Void'
-  | 'Not raised'
+  // Ours, not the API's. 'Not raised' is delivered work nobody has billed;
+  // 'No project id' is a blank cell in the sheet. Merging them would report a
+  // data-entry gap as missing money.
+  | 'Not raised' | 'No project id'
 
 export interface ProjectInvoiceStatus {
   project_id: string
+  /** The ledger id normalised to a bare PRJ id — see migration 095. */
+  project_key?: string | null
   row_key: string
   company_name?: string
   project_name?: string
@@ -2387,6 +2392,9 @@ export interface ProjectInvoiceStatus {
  * billed. Keyed on project_id because that is the only identifier the API and the ledger
  * share — the sheet's invoice_no is typed by hand weeks later and covers barely half the
  * rows, so matching on it would report most invoices as absent.
+ *
+ * The map is keyed on the RAW ledger project_id, so a caller holding a ledger row can
+ * look it up directly; the view does the normalising (PRJ…_3 -> PRJ…) internally.
  */
 export async function getProjectInvoiceStatus(): Promise<Map<string, ProjectInvoiceStatus>> {
   const m = new Map<string, ProjectInvoiceStatus>()

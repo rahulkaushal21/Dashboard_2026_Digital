@@ -181,21 +181,36 @@ const mapQuote = (x: Record<string, unknown>) => ({
   synced_at: new Date().toISOString(),
 });
 
-const mapInv = (x: Record<string, unknown>) => ({
+// ---------------------------------------------------------------------------
+// AN INVOICE IS NOT A ROW
+//
+// GetInvoices returns ONE ROW PER LINE ITEM, with every invoice-level field repeated on
+// each line. September: 577 rows, 489 invoices, one of them carrying 11 lines.
+//
+// Checked over six months (4,382 rows): Status, TotalInvoiceAmountInUSD, ProjectId,
+// DueDate, PaidDate, QuoteNumber, BUType and Currency NEVER vary within one
+// InvoiceNumber, so they are safe as header fields. Service, ServiceAmount,
+// ServiceAmountInUSD, ProjectName, UniqueId and StartDate differ per line.
+//
+// Getting this wrong costs money in two directions:
+//   - summing the repeated invoice total doubles it ($1,953,497 vs a true $963,211)
+//   - 29 of 58 multi-line invoices mix one of our services with another, so our share is
+//     the sum of OUR LINES ($1,294,168) and not the invoice totals ($1,659,764) — a 28%
+//     overstatement over six months.
+// ---------------------------------------------------------------------------
+
+const mapInvHeader = (x: Record<string, unknown>) => ({
   invoice_no: s(x.InvoiceNumber),
   project_id: s(x.ProjectId),
   order_project_id: s(x.OrderProjectID),
   quote_no: s(x.QuoteNumber),
   // The invoice record has no CompanyName field at all — only the two CRM-side names.
   company_name: s(x.HSCompany) ?? s(x.ZohoCompany),
-  project_name: s(x.ProjectName),
   client_email: s(x.ZohoEmailId),
-  service: s(x.Service),
   bu_type: s(x.BUType),
   geo: s(x.GEO),
   sales_person: s(x.SalesPerson),
   pc: s(x.PC),
-  technology: s(x.Technology),
   engagement_model: s(x.EngagementModel),
   zoho_company: s(x.ZohoCompany),
   zoho_invoice_no: s(x.ZohoInvoiceNumber),
@@ -203,7 +218,6 @@ const mapInv = (x: Record<string, unknown>) => ({
   currency: s(x.Currency),
   conversion_rate: n(x.ConversionRate),
   total_usd: n(x.TotalInvoiceAmountInUSD),
-  service_amount_usd: n(x.ServiceAmountInUSD),
   partially_paid_usd: n(x.PartiallyPaidAmountUSD),
   write_off_usd: n(x.WriteOffAmountUSD),
   is_partial: b(x.IsPartialInvoice),
@@ -218,11 +232,56 @@ const mapInv = (x: Record<string, unknown>) => ({
   void_at: ts(x.VoidDate),
   refund_at: ts(x.RefundDate),
   archived_at: ts(x.ArchieveDate),
+  payload: x,
+  synced_at: new Date().toISOString(),
+});
+
+const mapInvLine = (x: Record<string, unknown>, line_key: string) => ({
+  line_key,
+  invoice_no: s(x.InvoiceNumber),
+  unique_id: s(x.UniqueId),
+  service: s(x.Service),
+  project_name: s(x.ProjectName),
+  technology: s(x.Technology),
+  type_of_work: s(x.Typeofwork),
+  amount: n(x.ServiceAmount),
+  amount_usd: n(x.ServiceAmountInUSD),
+  outsource_amount: n(x.OutSourceAmount),
+  execution_type: s(x.ExecutionType),
+  frequency: s(x.FrequencyPeriod),
   start_at: dt(x.StartDate),
   end_at: dt(x.EndDate),
   payload: x,
   synced_at: new Date().toISOString(),
 });
+
+/**
+ * invoice | uniqueId | service, plus an ordinal.
+ *
+ * UniqueId is '<lineId>_<invoiceId>' and is ALMOST unique — the exceptions are lines
+ * carrying line id 0, where only Service tells them apart (a $105 'Paypal Fee' beside a
+ * $3,000 'Wallet'). Adding Service resolves all but one case in six months: two distinct
+ * 'Reimbursement for MacBook Display' lines of $865.52 each on one invoice. Both are real
+ * money, so they cannot be deduped away — hence the ordinal, assigned after sorting the
+ * group by its serialised body so the same pull always yields the same keys no matter
+ * what order the API returns them in.
+ */
+function lineKeys(rows: Record<string, unknown>[]): [Record<string, unknown>, string][] {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const r of rows) {
+    const k = `${s(r.InvoiceNumber)}|${s(r.UniqueId) ?? ""}|${s(r.Service) ?? ""}`;
+    let g = groups.get(k);
+    if (!g) { g = []; groups.set(k, g); }
+    g.push(r);
+  }
+  const out: [Record<string, unknown>, string][] = [];
+  for (const [k, g] of groups) {
+    if (g.length === 1) { out.push([g[0], k]); continue; }
+    g.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    g.forEach((r, i) => out.push([r, `${k}|${i}`]));
+  }
+  return out;
+}
 
 /** Last write wins within a batch — the API can return the same key twice. */
 function dedupe<T extends Record<string, unknown>>(rows: T[], key: string): T[] {
@@ -293,7 +352,7 @@ Deno.serve(async (req) => {
       opportunities: opps.length,
       rfqs: rfqs.length,
       quotes: quotes.length,
-      invoices: invs.length,
+      invoice_lines: invs.length,
     };
 
     out.opportunities = await upsert(
@@ -312,17 +371,25 @@ Deno.serve(async (req) => {
       dedupe(quotes.map(mapQuote).filter((r) => r.quote_no), "quote_no"),
       "quote_no",
     );
+    // Header first — the lines carry a foreign key to it.
     out.invoices = await upsert(
       db, "quote_api_invoices",
-      dedupe(invs.map(mapInv).filter((r) => r.invoice_no), "invoice_no"),
+      dedupe(invs.map(mapInvHeader).filter((r) => r.invoice_no), "invoice_no"),
       "invoice_no",
+    );
+    out.invoice_lines = await upsert(
+      db, "quote_api_invoice_lines",
+      lineKeys(invs.filter((x) => s(x.InvoiceNumber)))
+        .map(([x, k]) => mapInvLine(x, k)),
+      "line_key",
     );
 
     await db.from("sync_runs").insert({
       source: "quote-sync",
       ok: true,
       rows_upserted: (out.opportunities as number) + (out.rfqs as number) +
-        (out.quotes as number) + (out.invoices as number),
+        (out.quotes as number) + (out.invoices as number) +
+        (out.invoice_lines as number),
       message: JSON.stringify(out).slice(0, 2000),
     });
     out.ok = true;
