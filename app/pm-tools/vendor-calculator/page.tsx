@@ -1,12 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import Header from '@/components/Header'
-import { Panel } from '@/components/PageParts'
-import DateCell from '@/components/DateCell'
-import { useAuth } from '@/components/AuthProvider'
-import {
-  saveVendorCalculation, getVendorCalculations, deleteVendorCalculation, type VendorCalculation,
-} from '@/lib/supabase'
 
 // The Vendor Calculator, ported from the owner's standalone tool (calculator.js) so PMs
 // price a vendor quote without leaving the dashboard. The engine below is that file's
@@ -223,12 +217,8 @@ const TONE: Record<Tone, string> = {
 
 const field = 'bg-mav-panel border border-mav-line rounded-md px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
 const label = 'font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted'
-const round2 = (n: number) => Math.round(n * 100) / 100
 
 export default function VendorCalculatorPage() {
-  const { profile, email } = useAuth()
-  const isAdmin = !!profile?.is_admin
-
   const [f, setF] = useState<Fields>(INIT_FIELDS)
   const [o, setO] = useState<Out>(INIT_OUT)
   const [convPlaceholder, setConvPlaceholder] = useState('—')
@@ -302,51 +292,10 @@ export default function VendorCalculatorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /* ── save ── */
-  const [meta, setMeta] = useState({ project: '', client: '', vendor: '', note: '' })
-  const [saving, setSaving] = useState(false)
-  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const [saved, setSaved] = useState<VendorCalculation[] | null>(null)
-  const [rowErr, setRowErr] = useState<string | null>(null)
-
-  useEffect(() => { getVendorCalculations().then(setSaved) }, [])
-
-  const vINR = parse(f.vendor)
-  const conv = parse(f.conv)
-  const cUSD = (() => { const v = parseFloat(f.client); return !isNaN(v) && v > 0 ? v : null })()
-  const audRate = parse(f.aud)
-  const canSave = vINR !== null && conv !== null && conv > 0 && cUSD !== null && !saving
-
-  const save = async () => {
-    if (!canSave || vINR === null || conv === null || cUSD === null) return
-    const hasAUD = audRate !== null && audRate > 0
-    const vendorUSD = vINR / conv
-    const clientINR = cUSD * conv
-    const t = (s: string) => s.trim() || null
-    setSaving(true); setSaveMsg(null)
-    const r = await saveVendorCalculation({
-      project: t(meta.project), client: t(meta.client), vendor: t(meta.vendor), note: t(meta.note),
-      vendor_inr: vINR, usd_inr: conv, aud_rate: hasAUD ? audRate : null,
-      vendor_usd: round2(vendorUSD), vendor_aud: hasAUD ? round2(vendorUSD * (audRate as number)) : null,
-      client_usd: cUSD, client_aud: hasAUD ? round2(cUSD * (audRate as number)) : null,
-      margin_pct: round2(((clientINR - vINR) / clientINR) * 100), margin_inr: Math.round(clientINR - vINR),
-    })
-    setSaving(false)
-    if (r.error || !r.row) { setSaveMsg({ ok: false, text: r.error || 'Could not save' }); return }
-    setSaved(s => [r.row as VendorCalculation, ...(s || [])])
-    setMeta({ project: '', client: '', vendor: '', note: '' })
-    setSaveMsg({ ok: true, text: 'Saved' })
-  }
-
-  const remove = async (row: VendorCalculation) => {
-    if (!window.confirm(`Remove this saved calculation${row.project ? ` for ${row.project}` : ''}?`)) return
-    setRowErr(null)
-    const r = await deleteVendorCalculation(row.id)
-    if (!r.ok) { setRowErr(r.error || 'Could not remove'); return }
-    setSaved(s => (s || []).filter(x => x.id !== row.id))
-  }
-  const canRemove = (row: VendorCalculation) =>
-    isAdmin || (!!email && (row.created_by || '').toLowerCase() === email.toLowerCase())
+  // A one-off pricing tool: nothing is saved (Pratik, 28 Sep 2026). Reset clears the
+  // figures for the next quote and keeps the exchange rates, which are the same all day.
+  const reset = () => apply(calcFromLeft({ ...INIT_FIELDS, conv: f.conv, aud: f.aud }, INIT_OUT, false, false))
+  const dirty = f.vendor !== '' || f.client !== '' || f.pct !== ''
 
   const chip = 'rounded-lg border border-mav-line bg-mav-dark px-3 py-2 text-lg font-bold tabular-nums text-mav-fg'
   const noAud = <p className="text-xs text-mav-muted leading-snug">Add AUD rate above<br />to see AUD value</p>
@@ -359,7 +308,13 @@ export default function VendorCalculatorPage() {
       <style>{`@keyframes vcflash{0%{opacity:1}30%{opacity:.3}100%{opacity:1}}.vc-flash{animation:vcflash .3s ease}`}</style>
 
       <Header title="Vendor Calculator"
-        subtitle="Price a vendor quote: type the vendor's cost in rupees and the client price fills in at a 65% margin. Type your own client price to see the margin it gives, or type a margin % to get the client price that hits it." />
+        subtitle="Price a vendor quote: type the vendor's cost in rupees and the client price fills in at a 65% margin. Type your own client price to see the margin it gives, or type a margin % to get the client price that hits it. Nothing is saved — Reset clears it for the next quote."
+        actions={
+          <button type="button" onClick={reset} disabled={!dirty}
+            className="rounded-full border border-mav-yellow/50 text-mav-yellow px-4 py-2 text-sm font-semibold hover:bg-mav-yellow/10 disabled:opacity-40 disabled:cursor-not-allowed">
+            Reset
+          </button>
+        } />
 
       {/* Rates */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-3 text-sm">
@@ -468,89 +423,6 @@ export default function VendorCalculatorPage() {
         <span className="h-1.5 w-1.5 rounded-full bg-green-400" />Live — values update instantly as you type
       </p>
 
-      {/* Save */}
-      <Panel className="mb-6" title="Save calculation"
-        info={'Keeps this calculation — every input and the result, with the exchange rate it was worked out at. Saved calculations are also written to a hidden "Vendor Calculator" tab in the output spreadsheet each hour.'}>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-          {(['project', 'client', 'vendor'] as const).map(k => (
-            <label key={k} className="block">
-              <span className={`block ${label} mb-1`}>{k === 'vendor' ? 'Vendor name' : k[0].toUpperCase() + k.slice(1)}</span>
-              <input value={meta[k]} onChange={e => setMeta(m => ({ ...m, [k]: e.target.value }))}
-                placeholder="Optional" className={`${field} w-full`} />
-            </label>
-          ))}
-        </div>
-        <label className="block mb-3">
-          <span className={`block ${label} mb-1`}>Note</span>
-          <input value={meta.note} onChange={e => setMeta(m => ({ ...m, note: e.target.value }))}
-            placeholder="Optional" className={`${field} w-full`} />
-        </label>
-        <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={save} disabled={!canSave}
-            title={canSave ? undefined : 'Enter the vendor cost, the USD rate and a client price first'}
-            className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm hover:brightness-95 disabled:opacity-40 disabled:cursor-not-allowed">
-            {saving ? 'Saving…' : 'Save calculation'}
-          </button>
-          {saveMsg && <span className={`text-sm ${saveMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{saveMsg.text}</span>}
-        </div>
-      </Panel>
-
-      {/* Saved */}
-      <Panel flush title={<>Saved calculations <span className="normal-case tracking-normal">· {saved ? saved.length : '…'}</span></>}
-        info={'Newest first. Anyone signed in can see them; the person who saved one, or an admin, can remove it. Also written to a hidden "Vendor Calculator" tab in the output spreadsheet each hour.'}
-        right={rowErr ? <span className="text-xs text-red-400">{rowErr}</span> : undefined}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left">
-                <th className="px-3 py-2.5">Date</th>
-                <th className="px-3 py-2.5">Project</th>
-                <th className="px-3 py-2.5">Client</th>
-                <th className="px-3 py-2.5">Vendor</th>
-                <th className="px-3 py-2.5 text-right">Vendor ₹</th>
-                <th className="px-3 py-2.5 text-right">Rate</th>
-                <th className="px-3 py-2.5 text-right">Client $</th>
-                <th className="px-3 py-2.5 text-right">Margin %</th>
-                <th className="px-3 py-2.5 text-right">Margin ₹</th>
-                <th className="px-3 py-2.5">By</th>
-                <th className="px-3 py-2.5 sticky-action">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {saved === null && <tr><td colSpan={11} className="px-3 py-6 text-center text-mav-muted">Loading…</td></tr>}
-              {saved && saved.length === 0 && <tr><td colSpan={11} className="px-3 py-6 text-center text-mav-muted">No saved calculations yet</td></tr>}
-              {saved?.map(r => {
-                const m = r.margin_pct
-                return (
-                  <tr key={r.id} className="border-t border-mav-line/60">
-                    <td className="px-3 py-2.5"><DateCell d={r.created_at} /></td>
-                    <td className="px-3 py-2.5 max-w-[180px] truncate" title={r.note ? `${r.project || ''}\nNote: ${r.note}` : r.project || undefined}>
-                      {r.project || <span className="text-mav-muted">—</span>}
-                      {r.note && <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wide text-mav-muted">Note</span>}
-                    </td>
-                    <td className="px-3 py-2.5 max-w-[160px] truncate" title={r.client || undefined}>{r.client || <span className="text-mav-muted">—</span>}</td>
-                    <td className="px-3 py-2.5 max-w-[160px] truncate" title={r.vendor || undefined}>{r.vendor || <span className="text-mav-muted">—</span>}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{inr(Number(r.vendor_inr))}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{Number(r.usd_inr).toFixed(2)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{usd(Number(r.client_usd))}</td>
-                    <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${m == null ? 'text-mav-muted' : m < 65 ? 'text-red-400' : 'text-green-400'}`}>
-                      {m == null ? '—' : `${Math.round(Number(m))}%`}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{r.margin_inr == null ? '—' : inr(Number(r.margin_inr))}</td>
-                    <td className="px-3 py-2.5 max-w-[160px] truncate text-mav-muted" title={r.created_by || undefined}>{(r.created_by || '—').split('@')[0]}</td>
-                    <td className="px-3 py-2.5 sticky-action">
-                      {canRemove(r) && (
-                        <button type="button" onClick={() => remove(r)}
-                          className="rounded-full border border-red-500/50 text-red-400 px-3 py-1 text-xs hover:bg-red-500/10">Remove</button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
     </div>
   )
 }

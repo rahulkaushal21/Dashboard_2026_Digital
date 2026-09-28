@@ -3,6 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
+import {
+  QUIET_DAYS, PROJECT_BUCKETS, BUCKETS, localToday, dayDiff, day, isOpenProject, dealDate, quietDays,
+  personMatcher, defaultPerson, scopeLedger, scopeDeals, projectBuckets, quoteBuckets, bucketCounts, totalOf,
+  announceActionsChanged, type Bucket, type ProjectBucket, type QuoteBucket,
+} from '@/lib/actions'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import { fmtDay, type CardDetails, type DetailCol } from '@/components/CardDetail'
@@ -14,7 +19,7 @@ import { askReason } from '@/lib/ask'
 import { getStoredProfile, currentEmail } from '@/lib/access'
 import {
   getProjectLedger, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getOpportunities, getOpportunityDepts,
-  setOpportunityUnlikely, setOpportunityLost, canConfirmLocally, ownerMatches, clearReadCache,
+  setOpportunityUnlikely, setOpportunityLost, canConfirmLocally, clearReadCache,
   type LedgerRow, type Opportunity, type DirectoryMember, type SheetRowEdits,
 } from '@/lib/supabase'
 
@@ -27,46 +32,11 @@ import {
 // clients already said yes — and the write paths are the same ones the Project sheet and
 // Opportunities use, so an action here is the same act as the one there.
 
-// Lines started before April 2026 are the old sheet's backlog; a missing Project ID there
-// is history, not a task. The overdue and quiet lists are NOT cut at this date: anything
-// still open is still somebody's to close, however old it is.
-const FROM = '2026-04-01'
-const QUIET_DAYS = 14
-
-type Bucket = 'today' | 'week' | 'past' | 'noid' | 'quiet' | 'yes'
-const PROJECT_BUCKETS: Bucket[] = ['today', 'week', 'past', 'noid']
+// The bucket rules themselves live in lib/actions.ts, shared with the sidebar's count, so
+// the number beside "Actions" and the headline here can never disagree.
 
 const money = (n?: number | null) => n == null ? '—' : `$${Math.round(Number(n) || 0).toLocaleString('en-US')}`
-
-const localToday = () => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-// Whole calendar days from a to b, both YYYY-MM-DD. Parsed as UTC so a clock change
-// never turns one day into 0.96 of one.
-const dayDiff = (a: string, b: string) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000)
-const day = (d?: string | null) => { const v = (d || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '' }
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
-
-// A project is open until it is Delivered or Cancelled. On Hold stays in: a held job with
-// a date in the past is exactly the one nobody is looking at.
-const isOpenProject = (r: LedgerRow) => !/^(delivered|cancel)/i.test((r.delivery_status || '').trim())
-
-// Same verdict the Opportunities page reaches, kept to the open case: anything won,
-// booked, lost or on hold is not a quote waiting on anybody.
-const isOpenDeal = (x: Opportunity) => {
-  if (x.won || x.email_won || x.booked_month || x.email_lost || x.rolled_into) return false
-  const s = (x.status || '').toLowerCase()
-  return !(s.includes('cancel') || s === 'lost' || s.includes('hold') || s.includes('won') || s.includes('confirm'))
-}
-const dealDate = (x: Opportunity) => day(x.source_date || x.first_date)
-// days_since_touch comes from email where it exists, which is the better answer; the
-// quote's own date is the fallback.
-const quietDays = (x: Opportunity, today: string): number | null => {
-  if (x.days_since_touch != null && Number.isFinite(Number(x.days_since_touch))) return Number(x.days_since_touch)
-  const d = dealDate(x)
-  return d ? Math.max(0, dayDiff(d, today)) : null
-}
 
 // One cell can name several people ("Malav Modi / Kalgi Shah") — the same separators
 // lib/supabase's ownerMatches splits on, so the dropdown lists people, not cells.
@@ -82,8 +52,7 @@ const TONE = {
 const BUCKET_META: Record<Bucket, { label: string; info: string }> = {
   today: { label: 'Delivering today', info: 'Open projects whose delivery date is today.' },
   week: { label: 'Due this week', info: 'Open projects due in the next 1 to 7 days.' },
-  past: { label: 'Past undelivered', info: 'Delivery date has passed and the project is still not Delivered or Cancelled (On Hold included). Not limited to April 2026 — anything still open is still somebody’s to close.' },
-  noid: { label: 'Project ID to add', info: 'Lines started on or after 01-Apr-2026, not Cancelled, with no Project ID yet.' },
+  past: { label: 'Past undelivered', info: 'Delivery date has passed and the project is still not Delivered or Cancelled (On Hold included). Not cut at any date — anything still open is still somebody’s to close.' },
   quiet: { label: 'Quiet quotes', info: `Open quotes with no touch for ${QUIET_DAYS}+ days (from email where there is any, else the quote date). Quotes already marked “might not come” are left out.` },
   yes: { label: 'Client said yes', info: 'Still Open in the Quotes sheet, but the client has committed in writing. Confirm them on Opportunities so they count as won.' },
 }
@@ -102,7 +71,7 @@ const PCOLS: ColumnDef[] = [
   { key: 'project', label: 'Project', locked: true },
   { key: 'agency', label: 'Agency', default: true },
   { key: 'pm', label: 'PC/SME', default: true },
-  { key: 'date', label: 'Delivery / start date', default: true },
+  { key: 'date', label: 'Delivery date', default: true },
   { key: 'status', label: 'Status', default: true },
   { key: 'amount', label: 'Amount' },
   { key: 'geo', label: 'GEO' },
@@ -143,8 +112,14 @@ export default function ActionsPage() {
   const [moreOpen, setMoreOpen] = useState(false)
   // Per-row inline work: which row is busy, what it is typing, and what went wrong.
   const [busy, setBusy] = useState<string | null>(null)
-  const [editing, setEditing] = useState<{ key: string; kind: 'date' | 'pid'; value: string } | null>(null)
+  const [editing, setEditing] = useState<{ key: string; value: string } | null>(null)
   const [rowErr, setRowErr] = useState<Record<string, string>>({})
+  // Bulk: ticked rows (row_key for projects, q<id> for quotes), the run in progress, the
+  // shared date for "Move to date…", and the one-line result once a run has finished.
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null)
+  const [bulkDate, setBulkDate] = useState<string | null>(null)
+  const [bulkNote, setBulkNote] = useState('')
   const today = localToday()
 
   const load = useCallback(async (fresh = false) => {
@@ -165,7 +140,8 @@ export default function ActionsPage() {
       setMe(m)
       // A PM opens this page for their own list; an admin for everybody's. Only if nobody
       // has picked yet, so a deliberate choice is never overwritten.
-      if (m?.name && !admin) setPerson(p => (p === '' && !personTouched.current ? m.name : p))
+      const d = defaultPerson(m, admin)
+      if (d) setPerson(p => (p === '' && !personTouched.current ? d : p))
     })
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,12 +151,7 @@ export default function ActionsPage() {
 
   // Does a cell name the chosen person? For the signed-in PM, their directory aliases
   // count too — the sheet spells people several ways.
-  const isPerson = useCallback((cell?: string) => {
-    if (!person) return true
-    const names = [person.toLowerCase()]
-    if (me && me.name === person) names.push(...me.aliases)
-    return ownerMatches(cell, names)
-  }, [person, me])
+  const isPerson = useMemo(() => personMatcher(person, me), [person, me])
 
   const personOptions = useMemo(() => {
     const s = new Set<string>()
@@ -192,60 +163,27 @@ export default function ActionsPage() {
 
   // ── The buckets: department + person only. Cards and segment counts use these, so the
   // headline never moves with the search box.
-  const scopedLedger = useMemo(() => ledger.filter(r => inUnit(r.service_dept, unit) && isPerson(r.pm_owner)), [ledger, unit, isPerson])
-  const scopedDeals = useMemo(() => deals.filter(x => inUnit(dealDept(x), unit) && isPerson(x.pm_owner)), [deals, unit, dealDept, isPerson])
+  const scope = useMemo(() => ({ unit, isPerson, deptById }), [unit, isPerson, deptById])
+  const scopedLedger = useMemo(() => scopeLedger(ledger, scope), [ledger, scope])
+  const scopedDeals = useMemo(() => scopeDeals(deals, scope), [deals, scope])
+  const pb = useMemo(() => projectBuckets(scopedLedger, today), [scopedLedger, today])
+  const qb = useMemo(() => quoteBuckets(scopedDeals, today), [scopedDeals, today])
+  const counts = bucketCounts(pb, qb)
+  const total = totalOf(counts)
 
-  const pb = useMemo(() => {
-    const out: Record<'today' | 'week' | 'past' | 'noid', LedgerRow[]> = { today: [], week: [], past: [], noid: [] }
-    for (const r of scopedLedger) {
-      const dd = day(r.delivery_date)
-      if (isOpenProject(r) && dd) {
-        const n = dayDiff(today, dd)
-        if (n === 0) out.today.push(r)
-        else if (n >= 1 && n <= 7) out.week.push(r)
-        else if (n < 0) out.past.push(r)
-      }
-      if (!(r.project_id || '').trim() && !/^cancel/i.test(r.delivery_status || '') && day(r.start_date) >= FROM) out.noid.push(r)
-    }
-    out.week.sort((a, b) => day(a.delivery_date).localeCompare(day(b.delivery_date)))
-    out.past.sort((a, b) => day(a.delivery_date).localeCompare(day(b.delivery_date)))   // longest overdue first
-    out.noid.sort((a, b) => day(a.start_date).localeCompare(day(b.start_date)))
-    return out
-  }, [scopedLedger, today])
-
-  const qb = useMemo(() => {
-    const quiet: Opportunity[] = [], yes: Opportunity[] = []
-    for (const x of scopedDeals) {
-      if (!isOpenDeal(x)) continue
-      if (x.flag_committed_in_email) yes.push(x)
-      const q = quietDays(x, today)
-      if (!x.unlikely && q != null && q >= QUIET_DAYS) quiet.push(x)
-    }
-    quiet.sort((a, b) => (quietDays(b, today) ?? 0) - (quietDays(a, today) ?? 0))
-    yes.sort((a, b) => dealDate(b).localeCompare(dealDate(a)))
-    return { quiet, yes }
-  }, [scopedDeals, today])
-
-  const counts: Record<Bucket, number> = {
-    today: pb.today.length, week: pb.week.length, past: pb.past.length, noid: pb.noid.length,
-    quiet: qb.quiet.length, yes: qb.yes.length,
-  }
-  const total = Object.values(counts).reduce((s, n) => s + n, 0)
+  // A selection belongs to one list; switching lists starts clean.
+  useEffect(() => { setPicked(new Set()); setBulkDate(null); setBulkNote('') }, [bucket])
 
   // Open on the first bucket that has something in it, unless someone has chosen.
   useEffect(() => {
     if (bucketTouched || loading) return
-    const first = (Object.keys(counts) as Bucket[]).find(b => counts[b] > 0)
+    const first = BUCKETS.find(b => counts[b] > 0)
     if (first) setBucket(first)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, bucketTouched, total])
 
   // ── The WHEN cell: what makes each row worth acting on, in words and a colour.
-  const projectWhen = (r: LedgerRow, b: Bucket): { text: string; tone: keyof typeof TONE } => {
-    if (b === 'noid') {
-      const n = Math.max(0, dayDiff(day(r.start_date), today))
-      return { text: n === 0 ? 'Started today' : `Started ${plural(n, 'day')} ago`, tone: 'amber' }
-    }
+  const projectWhen = (r: LedgerRow): { text: string; tone: keyof typeof TONE } => {
     const n = dayDiff(today, day(r.delivery_date))
     if (n === 0) return { text: 'Delivering today', tone: 'amber' }
     if (n > 0) return { text: `Due in ${plural(n, 'day')}`, tone: 'sky' }
@@ -258,10 +196,10 @@ export default function ActionsPage() {
   }
 
   // ── Card side panels: exactly the rows each card counts.
-  const projectDetails = (b: 'today' | 'week' | 'past' | 'noid'): CardDetails<LedgerRow> => {
+  const projectDetails = (b: ProjectBucket): CardDetails<LedgerRow> => {
     const cols: DetailCol<LedgerRow>[] = [
-      { key: 'when', label: 'When', value: r => { const w = projectWhen(r, b); return <span className={TONE[w.tone]}>{w.text}</span> },
-        sort: r => b === 'noid' ? day(r.start_date) : day(r.delivery_date) },
+      { key: 'when', label: 'When', value: r => { const w = projectWhen(r); return <span className={TONE[w.tone]}>{w.text}</span> },
+        sort: r => day(r.delivery_date) },
       { key: 'project', label: 'Project / agency', wide: true, value: r => r.project_name || r.company_name || '—', sort: r => r.project_name || r.company_name || '' },
       { key: 'agency', label: 'Agency', wide: true, value: r => r.company_name || '—', sort: r => r.company_name || '' },
       { key: 'amount', label: 'Amount', align: 'right', value: r => money(r.amount_usd), sort: r => r.amount_usd || 0,
@@ -280,7 +218,7 @@ export default function ActionsPage() {
       columns: cols,
     }
   }
-  const dealDetails = (b: 'quiet' | 'yes'): CardDetails<Opportunity> => ({
+  const dealDetails = (b: QuoteBucket): CardDetails<Opportunity> => ({
     subtitle: BUCKET_META[b].info,
     rows: qb[b],
     groupBy: x => x.geo || 'No GEO',
@@ -301,13 +239,13 @@ export default function ActionsPage() {
   // ── Table: the chosen bucket, narrowed by the filter box.
   const isProject = PROJECT_BUCKETS.includes(bucket)
   const q = search.trim().toLowerCase()
-  const projRows = useMemo(() => !isProject ? [] : (pb[bucket as 'today'] || []).filter(r =>
+  const projRows = useMemo(() => !isProject ? [] : (pb[bucket as ProjectBucket] || []).filter(r =>
     (!q || [r.project_name, r.company_name, r.pm_owner, r.project_id, r.client_name].some(v => (v || '').toLowerCase().includes(q)))
     && (!fGeo.length || fGeo.includes(r.geo || ''))
     && (!fDept.length || fDept.includes(r.service_dept || ''))
     && (!fStatus.length || fStatus.includes(r.delivery_status || ''))
   ), [isProject, pb, bucket, q, fGeo, fDept, fStatus])
-  const dealRows = useMemo(() => isProject ? [] : qb[bucket as 'quiet'].filter(x =>
+  const dealRows = useMemo(() => isProject ? [] : qb[bucket as QuoteBucket].filter(x =>
     (!q || [x.company_name, x.source_subject, x.summary, x.pm_owner, x.sales_person].some(v => (v || '').toLowerCase().includes(q)))
     && (!fGeo.length || fGeo.includes(x.geo || ''))
     && (!fDept.length || fDept.includes(dealDept(x)))
@@ -342,6 +280,7 @@ export default function ActionsPage() {
       return false
     }
     setEditing(null)
+    announceActionsChanged()
     return true
   }
   const markUnlikely = async (x: Opportunity) => {
@@ -353,6 +292,7 @@ export default function ActionsPage() {
     const ok = await setOpportunityUnlikely(x.id, true, { actor: currentEmail() || undefined, reason: reason || undefined })
     setBusy(null)
     if (!ok) { setDeals(prev => prev.map(r => r.id === x.id ? x : r)); setErr(key, 'Could not save that flag.') }
+    else announceActionsChanged()
   }
   const markLost = async (x: Opportunity) => {
     const reason = askReason({ question: `Mark "${x.company_name || 'this quote'}" as Lost?\n\nThis records the loss here immediately. The Quotes sheet is not edited — the deal stays flagged until its sheet row is set to Cancelled.\n\nWhy was it lost? (optional)` })
@@ -363,6 +303,85 @@ export default function ActionsPage() {
     const ok = await setOpportunityLost(x.id, true, { actor: currentEmail() || undefined, reason: reason || undefined })
     setBusy(null)
     if (!ok) { setDeals(prev => prev.map(r => r.id === x.id ? x : r)); setErr(key, 'Could not mark it Lost.') }
+    else announceActionsChanged()
+  }
+
+  // ── Bulk. The same writes as the row buttons, one after another so a refusal is
+  // pinned to its own row and the count on screen is honest. Every ticked row changes at
+  // once; each failure is put back and says why, on the row, as a single write would.
+  const canBulk = bucket !== 'yes'   // confirming needs the per-deal dialog on Opportunities
+  const actionableProj = useMemo(() => projRows.filter(r => canEditLedgerRow(r, me, isAdmin)), [projRows, me, isAdmin])
+  const pickableKeys = isProject ? actionableProj.map(r => r.row_key) : canBulk ? dealRows.map(x => `q${x.id}`) : []
+  const pickedProj = isProject ? actionableProj.filter(r => picked.has(r.row_key)) : []
+  const pickedDeals = !isProject && canBulk ? dealRows.filter(x => picked.has(`q${x.id}`)) : []
+  const pickedN = isProject ? pickedProj.length : pickedDeals.length
+  const allPicked = pickableKeys.length > 0 && pickableKeys.every(k => picked.has(k))
+  const somePicked = pickableKeys.some(k => picked.has(k))
+  const togglePick = (key: string) => setPicked(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    return next
+  })
+  const toggleAll = () => setPicked(prev => {
+    const next = new Set(prev)
+    if (allPicked) pickableKeys.forEach(k => next.delete(k)); else pickableKeys.forEach(k => next.add(k))
+    return next
+  })
+
+  const runBulk = async <T,>(items: T[], keyOf: (t: T) => string, one: (t: T) => Promise<string | null>) => {
+    setBulkNote('')
+    let failed = 0
+    for (let i = 0; i < items.length; i++) {
+      setBulk({ done: i + 1, total: items.length })
+      const k = keyOf(items[i])
+      setErr(k)
+      const err = await one(items[i]).catch((e: any) => e?.message || 'Could not save.')
+      if (err) { failed++; setErr(k, err) }
+    }
+    setBulk(null); setPicked(new Set()); setBulkDate(null); setEditing(null)
+    setBulkNote(failed
+      ? `${items.length - failed} of ${items.length} saved · ${failed} failed — the reason is on each row.`
+      : `${plural(items.length, 'row')} saved.`)
+    announceActionsChanged()
+  }
+
+  const bulkProjects = async (f: SheetRowEdits) => {
+    const rows = pickedProj
+    if (!rows.length) return
+    const keys = new Set(rows.map(r => r.row_key))
+    setLedger(prev => prev.map(x => keys.has(x.row_key) ? { ...x, ...f } as LedgerRow : x))
+    await runBulk(rows, r => r.row_key, async r => {
+      const res = await saveLedgerRow(r, f)
+      if (res.ok) return null
+      setLedger(prev => prev.map(x => x.row_key === r.row_key ? r : x))
+      return res.error || 'Could not save.'
+    })
+  }
+  const bulkUnlikely = async () => {
+    const rows = pickedDeals
+    if (!rows.length) return
+    const reason = askReason({ question: `Might these ${plural(rows.length, 'quote')} not come?\n\nThey stay Open; they are discounted from the realistic view.\n\nWhy? (optional — one reason for all of them)` })
+    if (reason === null) return
+    const ids = new Set(rows.map(x => x.id))
+    setDeals(prev => prev.map(r => ids.has(r.id) ? { ...r, unlikely: true, unlikely_reason: reason || undefined } : r))
+    await runBulk(rows, x => `q${x.id}`, async x => {
+      if (await setOpportunityUnlikely(x.id, true, { actor: currentEmail() || undefined, reason: reason || undefined })) return null
+      setDeals(prev => prev.map(r => r.id === x.id ? x : r))
+      return 'Could not save that flag.'
+    })
+  }
+  const bulkLost = async () => {
+    const rows = pickedDeals
+    if (!rows.length) return
+    const reason = askReason({ question: `Mark ${plural(rows.length, 'quote')} as Lost?\n\nThis records the loss here immediately. The Quotes sheet is not edited — each deal stays flagged until its sheet row is set to Cancelled.\n\nWhy were they lost? (optional — one reason for all of them)` })
+    if (reason === null) return
+    const ids = new Set(rows.map(x => x.id))
+    setDeals(prev => prev.map(r => ids.has(r.id) ? { ...r, email_lost: true, email_lost_reason: reason || undefined, unlikely: false } : r))
+    await runBulk(rows, x => `q${x.id}`, async x => {
+      if (await setOpportunityLost(x.id, true, { actor: currentEmail() || undefined, reason: reason || undefined })) return null
+      setDeals(prev => prev.map(r => r.id === x.id ? x : r))
+      return 'Could not mark it Lost.'
+    })
   }
 
   // ── Styles (REVAMP-SPEC round 4)
@@ -383,35 +402,31 @@ export default function ActionsPage() {
 
   const projectAction = (r: LedgerRow) => {
     if (!canEditLedgerRow(r, me, isAdmin)) return ownerNote(r.pm_owner)
-    const b = busy === r.row_key
+    const b = busy === r.row_key || !!bulk
     const ed = editing?.key === r.row_key ? editing : null
     if (ed) {
       const commit = () => {
         const v = ed.value.trim()
-        if (!v) { setErr(r.row_key, ed.kind === 'pid' ? 'Type the Project ID first.' : 'Pick a date first.'); return }
-        saveProject(r, ed.kind === 'pid' ? { project_id: v } : { delivery_date: v })
+        if (!v) { setErr(r.row_key, 'Pick a date first.'); return }
+        saveProject(r, { delivery_date: v })
       }
       return (
         <span className="inline-flex items-center gap-1.5">
-          <input autoFocus type={ed.kind === 'date' ? 'date' : 'text'} value={ed.value} disabled={b}
-            placeholder={ed.kind === 'pid' ? 'Project ID' : undefined}
+          <input autoFocus type="date" value={ed.value} disabled={b}
             onChange={e => setEditing({ ...ed, value: e.target.value })}
             onKeyDown={e => {
               if (e.key === 'Enter') { e.preventDefault(); commit() }
               if (e.key === 'Escape') { e.preventDefault(); setEditing(null); setErr(r.row_key) }
             }}
-            className={`${inlineInput} ${ed.kind === 'pid' ? 'w-28' : 'w-36'}`} aria-label={ed.kind === 'pid' ? 'Project ID' : 'New delivery date'} />
+            className={`${inlineInput} w-36`} aria-label="New delivery date" />
           <button onClick={commit} disabled={b} className={primary}>{b ? 'Saving…' : 'Save'}</button>
           <button onClick={() => { setEditing(null); setErr(r.row_key) }} disabled={b} className={secondary}>Cancel</button>
         </span>
       )
     }
-    if (bucket === 'noid') {
-      return <button onClick={() => setEditing({ key: r.row_key, kind: 'pid', value: '' })} className={primary}>Add Project ID</button>
-    }
     return (
       <span className="inline-flex items-center gap-1.5">
-        <button onClick={() => setEditing({ key: r.row_key, kind: 'date', value: day(r.delivery_date) || today })} disabled={b} className={secondary}>Move date</button>
+        <button onClick={() => setEditing({ key: r.row_key, value: day(r.delivery_date) || today })} disabled={b} className={secondary}>Move date</button>
         <button onClick={() => saveProject(r, { delivery_status: 'Delivered' })} disabled={b} className={primary}>{b ? 'Saving…' : 'Mark delivered'}</button>
       </span>
     )
@@ -419,7 +434,7 @@ export default function ActionsPage() {
 
   const dealAction = (x: Opportunity) => {
     const key = `q${x.id}`
-    const b = busy === key
+    const b = busy === key || !!bulk
     const href = `/opportunities?deal=${encodeURIComponent(String(x.id))}`
     if (bucket === 'yes') {
       return canConfirmLocally(x, me, isAdmin)
@@ -437,13 +452,29 @@ export default function ActionsPage() {
 
   const shownCount = isProject ? projRows.length : dealRows.length
   const cols = isProject ? pcols : qcols
-  const colSpan = cols.columns.filter(c => cols.on(c.key)).length + 1
+  const colSpan = cols.columns.filter(c => cols.on(c.key)).length + 1 + (canBulk ? 1 : 0)
+  const check = 'w-4 h-4 accent-mav-yellow align-middle disabled:opacity-30'
+  const headCheck = canBulk && (
+    <th className={`${th} w-10`}>
+      <input type="checkbox" checked={allPicked} disabled={!pickableKeys.length || !!bulk}
+        ref={el => { if (el) el.indeterminate = somePicked && !allPicked }}
+        onChange={toggleAll} className={check}
+        aria-label="Select every row shown that you can act on"
+        title={pickableKeys.length ? 'Select every row shown that you can act on' : 'Nothing shown here that you can act on'} />
+    </th>
+  )
+  const rowCheck = (key: string, can: boolean, name: string, owner?: string) => canBulk && (
+    <td className={`${td} w-10`}>
+      <input type="checkbox" checked={can && picked.has(key)} disabled={!can || !!bulk} onChange={() => togglePick(key)}
+        className={check} aria-label={`Select ${name}`}
+        title={can ? `Select ${name}` : `${owner || 'Nobody'} owns this row — only they or an admin can act on it`} />
+    </td>
+  )
 
   return (
     <div>
       <Header title="Actions"
-        subtitle="What needs somebody today: projects to deliver or re-date, Project IDs to add, and quotes that have gone quiet or that the client already said yes to. Every button writes through the same path as the Project sheet or Opportunities."
-        chip="From 01-Apr-2026"
+        subtitle="What needs somebody today: projects to deliver or re-date, and quotes that have gone quiet or that the client already said yes to. Every button writes through the same path as the Project sheet or Opportunities."
         actions={<>
           <select value={person} onChange={e => { personTouched.current = true; setPerson(e.target.value) }}
             className={`${sel} w-52`} aria-label="PC/SME" title="Whose actions to show">
@@ -461,15 +492,13 @@ export default function ActionsPage() {
       <SectionTitle info="Each card opens the rows behind its number. The tabs below switch the table to that list.">
         What needs you today — {loading ? '…' : `${total.toLocaleString()} thing${total === 1 ? '' : 's'} worth acting on`}
       </SectionTitle>
-      <KPIRow cols={6}>
+      <KPIRow cols={5}>
         <KPICard label="Delivering today" value={String(counts.today)} tone="amber" info={BUCKET_META.today.info}
           sub={money(pb.today.reduce((s, r) => s + (r.amount_usd || 0), 0))} details={projectDetails('today')} />
         <KPICard label="Due this week" value={String(counts.week)} tone="blue" info={BUCKET_META.week.info}
           sub={money(pb.week.reduce((s, r) => s + (r.amount_usd || 0), 0))} details={projectDetails('week')} />
         <KPICard label="Past undelivered" value={String(counts.past)} tone="red" info={BUCKET_META.past.info}
           sub={money(pb.past.reduce((s, r) => s + (r.amount_usd || 0), 0))} details={projectDetails('past')} />
-        <KPICard label="Project ID to add" value={String(counts.noid)} tone="yellow" info={BUCKET_META.noid.info}
-          sub="since 01-Apr-2026" details={projectDetails('noid')} />
         <KPICard label="Quiet quotes" value={String(counts.quiet)} tone="amber" info={BUCKET_META.quiet.info}
           sub={money(qb.quiet.reduce((s, x) => s + (x.est_value || 0), 0))} details={dealDetails('quiet')} />
         <KPICard label="Client said yes" value={String(counts.yes)} tone="green" info={BUCKET_META.yes.info}
@@ -477,7 +506,7 @@ export default function ActionsPage() {
       </KPIRow>
 
       <Segments<Bucket> value={bucket} onChange={b => { setBucketTouched(true); setBucket(b); setEditing(null) }}
-        items={(Object.keys(BUCKET_META) as Bucket[]).map(b => ({ id: b, label: BUCKET_META[b].label, count: counts[b], title: BUCKET_META[b].info }))} />
+        items={BUCKETS.map(b => ({ id: b, label: BUCKET_META[b].label, count: counts[b], title: BUCKET_META[b].info }))} />
 
       <FilterBar right={<>
         <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">
@@ -499,6 +528,39 @@ export default function ActionsPage() {
         </>}
       </FilterBar>
 
+      {/* The action for whatever is ticked — the same bar Opportunities uses. */}
+      {canBulk && (pickedN > 0 || bulk || bulkNote) && (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-mav-yellow/40 bg-mav-yellow/10 px-4 py-2.5 text-sm">
+          {bulk ? (
+            <span className="font-medium">Saving {bulk.done} of {bulk.total}…</span>
+          ) : pickedN === 0 ? (<>
+            <span className={bulkNote.includes('failed') ? 'text-red-400' : 'text-mav-fg'}>{bulkNote}</span>
+            <button onClick={() => setBulkNote('')} className={`ml-auto ${secondary}`}>✕ dismiss</button>
+          </>) : (<>
+            <span className="font-medium">{plural(pickedN, isProject ? 'project' : 'quote')} selected</span>
+            <span className="text-mav-muted">
+              {money(isProject ? pickedProj.reduce((t, r) => t + (r.amount_usd || 0), 0) : pickedDeals.reduce((t, x) => t + (x.est_value || 0), 0))}
+            </span>
+            <span className="ml-auto inline-flex flex-wrap items-center gap-2">
+              {isProject ? (bulkDate != null ? (<>
+                <input type="date" autoFocus value={bulkDate} onChange={e => setBulkDate(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Escape') setBulkDate(null); if (e.key === 'Enter' && bulkDate) bulkProjects({ delivery_date: bulkDate }) }}
+                  className={`${inlineInput} w-36`} aria-label="New delivery date for every selected project" />
+                <button onClick={() => bulkProjects({ delivery_date: bulkDate })} disabled={!bulkDate} className={primary}>Move {pickedN}</button>
+                <button onClick={() => setBulkDate(null)} className={secondary}>Cancel</button>
+              </>) : (<>
+                <button onClick={() => setBulkDate(today)} className={secondary}>Move {pickedN} to date…</button>
+                <button onClick={() => bulkProjects({ delivery_status: 'Delivered' })} className={primary}>Mark {pickedN} delivered</button>
+              </>)) : (<>
+                <button onClick={bulkUnlikely} className={secondary}>Might not come ({pickedN})</button>
+                <button onClick={bulkLost} className={destructive}>Mark {pickedN} lost</button>
+              </>)}
+              <button onClick={() => { setPicked(new Set()); setBulkDate(null) }} className={secondary}>✕ clear</button>
+            </span>
+          </>)}
+        </div>
+      )}
+
       <Panel flush title={<>{BUCKET_META[bucket].label} · {shownCount.toLocaleString()}</>} info={BUCKET_META[bucket].info}
         right={<ColumnPicker cols={cols} />}>
         <div className="overflow-x-auto">
@@ -506,11 +568,12 @@ export default function ActionsPage() {
             <thead className="text-left text-mav-fg/70 border-b border-mav-line">
               {isProject ? (
                 <tr>
+                  {headCheck}
                   <th className={th}>When</th>
                   <th className={th}>Project</th>
                   {pcols.on('agency') && <th className={th}>Agency</th>}
                   {pcols.on('pm') && <th className={th}>PC/SME</th>}
-                  {pcols.on('date') && <th className={th}>{bucket === 'noid' ? 'Start date' : 'Delivery date'}</th>}
+                  {pcols.on('date') && <th className={th}>Delivery date</th>}
                   {pcols.on('status') && <th className={th}>Status</th>}
                   {pcols.on('amount') && <th className={`${th} text-right`}>Amount</th>}
                   {pcols.on('geo') && <th className={th}>GEO</th>}
@@ -521,6 +584,7 @@ export default function ActionsPage() {
                 </tr>
               ) : (
                 <tr>
+                  {headCheck}
                   <th className={th}>When</th>
                   <th className={th}>Quote</th>
                   {qcols.on('agency') && <th className={th}>Agency</th>}
@@ -537,10 +601,11 @@ export default function ActionsPage() {
             </thead>
             <tbody>
               {isProject && projRows.map(r => {
-                const w = projectWhen(r, bucket)
+                const w = projectWhen(r)
                 const err = rowErr[r.row_key]
                 return (
-                  <tr key={r.row_key} className="border-b border-mav-line/60">
+                  <tr key={r.row_key} className={`border-b border-mav-line/60 ${picked.has(r.row_key) ? 'bg-mav-yellow/5' : ''}`}>
+                    {rowCheck(r.row_key, canEditLedgerRow(r, me, isAdmin), r.project_name || r.company_name || 'this project', r.pm_owner)}
                     <td className={`${td} font-semibold ${TONE[w.tone]}`}>{w.text}</td>
                     <td className={`${td} max-w-[16rem] truncate text-mav-fg`} title={r.project_name || ''}>{r.project_name || <span className="text-mav-muted">—</span>}</td>
                     {pcols.on('agency') && (
@@ -551,7 +616,7 @@ export default function ActionsPage() {
                       </td>
                     )}
                     {pcols.on('pm') && <td className={`${td} max-w-[10rem] truncate text-mav-fg/80`} title={r.pm_owner || ''}>{r.pm_owner || '—'}</td>}
-                    {pcols.on('date') && <td className={td}><DateCell d={bucket === 'noid' ? r.start_date : r.delivery_date} /></td>}
+                    {pcols.on('date') && <td className={td}><DateCell d={r.delivery_date} /></td>}
                     {pcols.on('status') && (
                       <td className={td}>
                         {r.delivery_status
@@ -576,7 +641,8 @@ export default function ActionsPage() {
                 const err = rowErr[`q${x.id}`]
                 const subject = x.source_subject || x.summary || x.gist || ''
                 return (
-                  <tr key={x.id} className="border-b border-mav-line/60">
+                  <tr key={x.id} className={`border-b border-mav-line/60 ${picked.has(`q${x.id}`) ? 'bg-mav-yellow/5' : ''}`}>
+                    {rowCheck(`q${x.id}`, true, x.company_name || 'this quote', x.pm_owner)}
                     <td className={`${td} font-semibold ${TONE[w.tone]}`}>{w.text}</td>
                     <td className={`${td} max-w-[18rem] truncate text-mav-fg`} title={subject}>{subject || <span className="text-mav-muted">—</span>}</td>
                     {qcols.on('agency') && (

@@ -10,6 +10,7 @@ import { useUnit } from './BusinessUnitProvider'
 import { UNITS } from '@/lib/business-unit'
 import { MavlersMark } from './MavlersLogo'
 import { NAV_EVENT } from '@/lib/use-close-on-nav'
+import { useActionCount } from '@/lib/use-action-count'
 
 // A nav entry is either a link or a group of links. Groups exist so the reporting pages
 // can sit together without crowding the eight the business is run from; access is still
@@ -30,9 +31,6 @@ const nav: Entry[] = [
   // read to EXPLAIN something afterwards went into the group below. Thirteen top-level
   // items meant scanning the whole rail to find the two or three anybody opens daily.
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  // What needs a PM today, across projects and deals, each with the button that clears
-  // it. Second, because it is the page a PM opens to START the day.
-  { href: '/actions', label: 'Actions', icon: Zap },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
   // The page has always held the feedback sheet plus manually added praise; 'Delights'
   // described the best of it rather than the thing itself. The URL stays /delights so
@@ -46,6 +44,9 @@ const nav: Entry[] = [
   { href: '/clients', label: 'Client 360', icon: Users },
   { href: '/revenue-sheet', label: 'Project sheet', icon: Table2 },
   { href: '/pm-team', label: 'PM Team', icon: UserCog },
+  // What needs a PM today, across projects and deals, each with the button that clears
+  // it. Straight under PM Team (owner's call, 28 Sep 2026), with its open count beside it.
+  { href: '/actions', label: 'Actions', icon: Zap },
   { href: '/kb-report', label: 'KB report', icon: PieChart },
 
   // ── Everything read to explain the numbers, not to act on them ───────────────
@@ -95,6 +96,8 @@ export default function Sidebar() {
     return () => { document.body.style.overflow = '' }
   }, [open])
   // Drop any group the viewer can see no children of, so an empty header never shows.
+  // Worked out after mount and cached — the rail never waits on it.
+  const actionCount = useActionCount(canSee(profile, '/actions'))
   const items: Entry[] = []
   for (const e of nav) {
     if (isGroup(e)) {
@@ -140,7 +143,7 @@ export default function Sidebar() {
       <nav className="space-y-1">
         {items.map(entry => isGroup(entry)
           ? <NavGroup key={entry.label} group={entry} path={path} />
-          : <NavLink key={entry.href} leaf={entry} path={path} />)}
+          : <NavLink key={entry.href} leaf={entry} path={path} count={entry.href === '/actions' ? actionCount : null} />)}
       </nav>
       <div className="mt-auto pt-4 border-t border-mav-line">
         {/* Light or dark, remembered per browser. Dark stays the default. */}
@@ -175,7 +178,7 @@ const linkCls = (active: boolean, indent = false) =>
   `flex items-center gap-3 ${indent ? 'pl-9 pr-3' : 'px-3'} py-2 rounded-md text-[12px] font-semibold uppercase tracking-[0.04em] leading-snug whitespace-nowrap transition-colors
    ${active ? 'bg-mav-fill text-black font-semibold' : 'text-mav-muted hover:text-mav-fg hover:bg-mav-panel'}`
 
-function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: boolean }) {
+function NavLink({ leaf, path, indent, count }: { leaf: Leaf; path: string; indent?: boolean; count?: number | null }) {
   const { href, label, icon: Icon } = leaf
   const active = samePath(path, href)
   return (
@@ -185,6 +188,8 @@ function NavLink({ leaf, path, indent }: { leaf: Leaf; path: string; indent?: bo
     <Link href={href} onClick={() => window.dispatchEvent(new Event(NAV_EVENT))}
       className={linkCls(active, indent)}>
       <Icon size={16} className="shrink-0" /> <span className="min-w-0 truncate" title={label}>{label}</span>
+      {/* Its own span so the label still truncates and the count never does. */}
+      {count != null && <span className="-ml-2 shrink-0 font-normal opacity-60 tabular-nums">({count.toLocaleString()})</span>}
     </Link>
   )
 }
