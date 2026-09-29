@@ -435,9 +435,10 @@ export default function Invoices() {
             </KPIRow>
           )}
           <Panel flush>
-            {/* Bounded box, scrolling both ways: the header sticks to the top of THIS
-                container, so titles stay put while the rows move under them. */}
-            <div className="overflow-auto max-h-[70vh]"><table className="w-full text-sm min-w-[1040px]">
+            {/* No box of its own to scroll: the rows scroll with the page and the sticky
+                header holds at the top of it. Only below xl, where the table is wider than
+                the screen, does it scroll sideways (and the header then scrolls with it). */}
+            <div className="max-xl:overflow-x-auto"><table className="w-full text-sm max-xl:min-w-[1040px]">
               {/* Every header names its SOURCE and its unit. 'Sheet USD / Cost / Invoiced
                   / Paid' side by side said nothing about which system each came from. */}
               <thead className="text-mav-muted"><tr>
@@ -567,7 +568,7 @@ export default function Invoices() {
 
           <div className="grid lg:grid-cols-[320px_1fr] gap-4">
             <Panel title="By month" flush>
-              <div className="overflow-auto max-h-[70vh]"><table className="w-full text-sm">
+              <div className="max-xl:overflow-x-auto"><table className="w-full text-sm">
                 <thead className="text-left text-mav-muted"><tr>
                   {['Month', 'App', 'Gap'].map(h =>
                     <th key={h} className="sticky top-0 z-10 bg-mav-panel px-4 py-2 font-medium border-b border-mav-line">{h}</th>)}
@@ -586,7 +587,7 @@ export default function Invoices() {
             </Panel>
 
             <Panel title={`Invoices the revenue sheet does not have (${gap.length})`} flush>
-              <div className="overflow-auto max-h-[70vh]"><table className="w-full text-sm min-w-[900px]">
+              <div className="max-xl:overflow-x-auto"><table className="w-full text-sm max-xl:min-w-[900px]">
                 <thead className="text-mav-muted"><tr>
                   {gCols.on('invoice_no') && (
 <Th id="invoice_no" label="Invoice no (app)" sort={gSort} dir={gDir} onSort={clickG} />

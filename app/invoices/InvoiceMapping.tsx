@@ -263,7 +263,7 @@ export default function InvoiceMapping() {
         <div className="max-md:overflow-x-auto">
         <table className="w-full table-fixed text-sm max-md:min-w-[900px]">
           <colgroup>
-            <col className="w-[112px]" /><col /><col className="w-[130px]" /><col className="w-[96px]" />
+            <col className="w-[124px]" /><col /><col className="w-[130px]" /><col className="w-[96px]" />
             <col className="w-[132px]" /><col className="w-[96px]" />
             <col className="w-[90px]" /><col className="w-[132px]" />
           </colgroup>

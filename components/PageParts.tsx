@@ -73,7 +73,7 @@ export function Panel({ title, info, right, children, flush, className = '' }: {
   className?: string
 }) {
   return (
-    <section className={`bg-mav-panel border border-mav-line rounded-xl ${flush ? 'overflow-hidden' : 'p-4'} ${className}`}>
+    <section className={`bg-mav-panel border border-mav-line rounded-xl ${flush ? 'overflow-clip' : 'p-4'} ${className}`}>
       {(title || right) && (
         <div className={`flex flex-wrap items-center justify-between gap-2 ${flush ? 'px-4 py-3 border-b border-mav-line' : 'mb-3'}`}>
           <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">

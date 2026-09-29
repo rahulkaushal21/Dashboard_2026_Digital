@@ -17,9 +17,9 @@ export default function DateCell({ d }: { d?: string | null }) {
   if (!d) return <span className="text-mav-muted">—</span>
   const today = isToday(d)
   return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap tabular-nums ${today ? 'font-semibold text-mav-fg' : ''}`}>
-      {fmtDay(d)}
-      {today && <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-mav-yellow/15 text-mav-yellow border border-mav-yellow/40">Today</span>}
+    <span className={`inline-flex flex-wrap items-center gap-x-1.5 gap-y-1 tabular-nums ${today ? 'font-semibold text-mav-fg' : ''}`}>
+      <span className="whitespace-nowrap">{fmtDay(d)}</span>
+      {today && <span className="text-[10px] leading-none font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-mav-yellow/15 text-mav-yellow border border-mav-yellow/40">Today</span>}
     </span>
   )
 }
