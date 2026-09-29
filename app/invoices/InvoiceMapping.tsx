@@ -7,7 +7,6 @@ import DateCell from '@/components/DateCell'
 import { fmtDay } from '@/components/CardDetail'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
-import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import { inUnit, unitOf } from '@/lib/business-unit'
 import { getInvoiceMapping, refreshInvoiceData, type InvoiceMappingRow, type MappingState } from '@/lib/supabase'
 
@@ -61,22 +60,27 @@ const invoicedShare = (r: InvoiceMappingRow) => {
   return g > 0 ? (r.invoice_usd * (r.sheet_usd || 0)) / g : r.invoice_usd
 }
 
-const COLS: ColumnDef[] = [
-  { key: 'date', label: 'Date', locked: true },
-  { key: 'client', label: 'Client', locked: true },
-  { key: 'project', label: 'Project', default: true },
-  { key: 'pc', label: 'PC/SME', default: true },
-  { key: 'am', label: 'AM', default: true },
-  { key: 'sheet', label: 'Sheet $', default: true },
-  { key: 'invoice', label: 'Invoice', default: true },
-  { key: 'invusd', label: 'Invoice $', default: true },
-  { key: 'state', label: 'State', locked: true },
-  { key: 'how', label: 'Matched on' },
-  { key: 'dept', label: 'Department' },
-  { key: 'pid', label: 'Project ID' },
-  { key: 'status', label: 'Delivery status' },
-  { key: 'services', label: 'Invoice service' },
-]
+const SEG_TITLE: Record<Seg, string> = {
+  raise: 'Invoices to raise', check: 'Invoiced, not for the sheet amount', done: 'Invoiced',
+  orphan: 'Invoices with no sheet row this month', all: 'Sheet vs invoices',
+}
+
+// What is still owed an invoice on this row: the sheet amount less its share of the invoice.
+// An invoice with no sheet row counts the other way (negative) — raised, but not booked.
+const gapOf = (r: InvoiceMappingRow) =>
+  r.row_type === 'invoice' ? -(r.invoice_usd || 0) : (r.sheet_usd || 0) - invoicedShare(r)
+
+// The detail that used to be columns, on hover instead.
+const rowHover = (r: InvoiceMappingRow) => [
+  r.pm_owner && `PC/SME: ${r.pm_owner}`,
+  `Project ID: ${r.project_id || 'none in the sheet'}`,
+  r.sheet_invoice_no && `Invoice no in sheet: ${r.sheet_invoice_no}`,
+  r.matched_by && `Matched on: ${r.matched_by}`,
+  r.invoice_services && `Invoice service: ${r.invoice_services}`,
+  r.service_dept && `Department: ${r.service_dept}`,
+  r.delivery_status && `Delivery: ${r.delivery_status}`,
+  r.note && `Note: ${r.note}`,
+].filter(Boolean).join('\n')
 
 export default function InvoiceMapping() {
   const { unit } = useUnit()
@@ -93,7 +97,6 @@ export default function InvoiceMapping() {
   const [fAm, setFAm] = useState<string[]>([])
   const [fPc, setFPc] = useState<string[]>([])
   const [copied, setCopied] = useState('')
-  const cols = useColumns('invoice-mapping', COLS)
 
   const load = useCallback(async (m: string) => {
     setRows(null); setError('')
@@ -160,6 +163,8 @@ export default function InvoiceMapping() {
     }
     return Array.from(m.entries()).sort((a, b) => b[1].usd - a[1].usd)
   }, [toRaise])
+
+  const amOptions = uniq(inDept.flatMap(r => splitNames(r.sales_person)))
 
   const monthLabel = months.find(m => m.v === month)?.label || month
   const copyFor = async (am: string, list: InvoiceMappingRow[]) => {
@@ -232,107 +237,104 @@ export default function InvoiceMapping() {
         { id: 'all', label: 'All', count: inDept.length },
       ]} />
 
-      <div className="grid gap-4 xl:grid-cols-[300px_1fr] items-start">
-        {/* Per AM: what they have to raise, and the list ready to paste into a message. */}
-        <Panel flush title="To raise, by AM" info="Click a name to filter the table. Copy puts that AM's list on the clipboard, ready to paste into Slack or email.">
-          {loading ? <p className="px-4 py-6 text-sm text-mav-muted">Loading…</p>
-          : byAm.length === 0 ? <p className="px-4 py-6 text-sm text-green-400">Nothing to raise for {monthLabel}.</p>
-          : (
-            <ul className="divide-y divide-mav-line/60">
-              {byAm.map(([am, e]) => {
-                const on = fAm.length === 1 && fAm[0] === am
-                return (
-                  <li key={am} className={`flex items-center gap-2 px-4 py-2.5 ${on ? 'bg-mav-yellow/10' : ''}`}>
-                    <button onClick={() => { setSeg('raise'); setFAm(on ? [] : [am]) }} className="min-w-0 flex-1 text-left">
-                      <div className="text-sm font-medium truncate">{am}</div>
-                      <div className="text-xs text-mav-muted">{e.n} to raise · {usd(e.usd)}</div>
-                    </button>
-                    <button onClick={() => copyFor(am, e.rows)} className={secondary} title={`Copy ${am}'s list`}>
-                      {copied === am ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+      <FilterBar right={<>
+        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{shown.length} shown</span>
+        {seg === 'raise' && shown.length > 0 &&
+          <button onClick={() => copyFor(fAm.length === 1 ? fAm[0] : '', shown)} className={secondary}
+            title="Copies the rows shown (client, project, amount, project ID, PC) ready to paste to the AM">
+            {copied === (fAm.length === 1 ? fAm[0] : '') ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy list for AM</>}
+          </button>}
+        {(search || fAm.length > 0 || fPc.length > 0) &&
+          <button onClick={() => { setSearch(''); setFAm([]); setFPc([]) }} className={secondary}>Clear all</button>}
+      </>}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, project, invoice…" className={`${selCls} w-60`} />
+        <MultiSelect label={seg === 'raise' && byAm.length ? `AM (${byAm.length})` : 'AM'} className="w-44" options={amOptions} selected={fAm} onChange={setFAm} />
+        <MultiSelect label="PC/SME" className="w-40" options={uniq(inDept.flatMap(r => splitNames(r.pm_owner)))} selected={fPc} onChange={setFPc} />
+      </FilterBar>
+
+      {/* One table, no sideways scroll: the sheet's side on the left, the invoice app's on the
+          right, and the gap between them. Everything else (PC, project ID, how it matched,
+          the note) is one hover away on the row, not another column. */}
+      <Panel flush title={<>{SEG_TITLE[seg]} · {monthLabel}</>}
+        info={seg === 'orphan'
+          ? 'Invoices dated this month that no sheet row of this month maps to — usually work booked in another month, or a line the sheet is missing (the Reconciliation tab follows those up).'
+          : 'Each sheet row is matched to an invoice by the invoice number in the sheet, then the project ID (for monthly retainers, the instalment within a month of the booking), then client and value within 2%. Values are checked per invoice, so an invoice covering several lines is compared with their sum. Hover a row for its PC, project ID and how it matched.'}>
+        {/* Phones only: a desk-width screen fits it whole. */}
+        <div className="max-md:overflow-x-auto">
+        <table className="w-full table-fixed text-sm max-md:min-w-[900px]">
+          <colgroup>
+            <col className="w-[112px]" /><col /><col className="w-[130px]" /><col className="w-[96px]" />
+            <col className="w-[132px]" /><col className="w-[96px]" />
+            <col className="w-[90px]" /><col className="w-[132px]" />
+          </colgroup>
+          <thead>
+            <tr className="text-[10px]">
+              <th colSpan={4} className="!py-1.5 text-mav-muted">Central sheet</th>
+              <th colSpan={2} className="!py-1.5 border-l border-mav-line bg-sky-500/[0.06] text-sky-400">Invoice app</th>
+              <th colSpan={2} className="!py-1.5 border-l border-mav-line text-mav-muted">Match</th>
+            </tr>
+            <tr className="text-left">
+              <th className="px-3 py-2.5">Date</th>
+              <th className="px-3 py-2.5">Client · project</th>
+              <th className="px-3 py-2.5">AM</th>
+              <th className="px-3 py-2.5 text-right">Sheet $</th>
+              <th className="px-3 py-2.5 border-l border-mav-line bg-sky-500/[0.06]">Invoice</th>
+              <th className="px-3 py-2.5 text-right bg-sky-500/[0.06]">Invoice $</th>
+              <th className="px-3 py-2.5 border-l border-mav-line text-right">Gap</th>
+              <th className="px-3 py-2.5">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={8} className="px-3 py-8 text-center text-mav-muted">Loading…</td></tr>}
+            {!loading && shown.length === 0 && <tr><td colSpan={8} className="px-3 py-8 text-center text-mav-muted">Nothing here for {monthLabel}.</td></tr>}
+            {shown.map(r => {
+              const g = gapOf(r)
+              return (
+                <tr key={r.row_type + r.row_key} className="border-b border-mav-line/60 hover:bg-mav-fg/[0.03]" title={rowHover(r)}>
+                  <td className="px-3 py-2 whitespace-nowrap"><DateCell d={r.start_date || r.invoice_date} /></td>
+                  <td className="px-3 py-2 min-w-0">
+                    <div className="truncate font-medium">{r.company_name || '—'}</div>
+                    <div className="truncate text-xs text-mav-muted">{r.project_name || (r.row_type === 'invoice' ? 'No sheet row this month' : '—')}</div>
+                  </td>
+                  <td className="px-3 py-2 truncate">{r.sales_person || <span className="text-mav-muted">—</span>}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.row_type === 'sheet' ? usd(r.sheet_usd) : <span className="text-mav-muted">—</span>}</td>
+                  <td className="px-3 py-2 border-l border-mav-line bg-sky-500/[0.04] whitespace-nowrap">
+                    {r.invoice_no ? <>
+                      <div className="truncate tabular-nums">{r.invoice_no}</div>
+                      <div className="text-[11px] text-mav-muted">{fmtDay(r.invoice_date)}</div>
+                    </> : <span className="text-mav-muted">Not raised</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums bg-sky-500/[0.04]">
+                    {r.invoice_no ? usd(r.invoice_usd) : <span className="text-mav-muted">—</span>}
+                    {r.group_sheet_usd != null && r.sheet_usd != null && Math.abs(r.group_sheet_usd - r.sheet_usd) > 1 &&
+                      <div className="text-[11px] text-mav-muted" title={`This invoice covers ${usd(r.group_sheet_usd)} of sheet lines this month`}>shared</div>}
+                  </td>
+                  <td className={`px-3 py-2 border-l border-mav-line text-right tabular-nums font-semibold ${g > 1 ? 'text-red-400' : g < -1 ? 'text-sky-400' : 'text-mav-muted font-normal'}`}>
+                    {Math.abs(g) <= 1 ? '—' : `${g < 0 ? '+' : ''}${usd(Math.abs(g))}`}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-1.5"><Badge s={r.state} />{r.note && <span className="text-mav-yellow text-xs" aria-label={r.note}>•</span>}</div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          {!loading && shown.length > 1 && (
+            <tfoot>
+              <tr className="font-semibold">
+                <td className="px-3 py-2.5 text-mav-muted text-xs uppercase tracking-wide" colSpan={2}>Total · {shown.length} rows</td>
+                <td />
+                <td className="px-3 py-2.5 text-right tabular-nums">{usd(shown.reduce((s, r) => s + (r.row_type === 'sheet' ? r.sheet_usd || 0 : 0), 0))}</td>
+                <td className="px-3 py-2.5 border-l border-mav-line bg-sky-500/[0.06] text-xs text-mav-muted">invoiced</td>
+                <td className="px-3 py-2.5 text-right tabular-nums bg-sky-500/[0.06]">{usd(shown.reduce((s, r) => s + (r.row_type === 'sheet' ? invoicedShare(r) : r.invoice_usd || 0), 0))}</td>
+                <td className="px-3 py-2.5 border-l border-mav-line text-right tabular-nums text-red-400">{usd(Math.max(0, shown.reduce((s, r) => s + gapOf(r), 0)))}</td>
+                <td />
+              </tr>
+            </tfoot>
           )}
-        </Panel>
-
-        <div className="min-w-0">
-          <FilterBar right={<>
-            <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{shown.length} shown</span>
-            {seg === 'raise' && shown.length > 0 &&
-              <button onClick={() => copyFor(fAm.length === 1 ? fAm[0] : '', shown)} className={secondary}>
-                {copied === (fAm.length === 1 ? fAm[0] : '') ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy list</>}
-              </button>}
-            {(search || fAm.length > 0 || fPc.length > 0) &&
-              <button onClick={() => { setSearch(''); setFAm([]); setFPc([]) }} className={secondary}>Clear all</button>}
-          </>}>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project, invoice or project ID…" className={`${selCls} w-64`} />
-            <MultiSelect label="AM" className="w-40" options={uniq(inDept.flatMap(r => splitNames(r.sales_person)))} selected={fAm} onChange={setFAm} />
-            <MultiSelect label="PC/SME" className="w-40" options={uniq(inDept.flatMap(r => splitNames(r.pm_owner)))} selected={fPc} onChange={setFPc} />
-          </FilterBar>
-
-          <Panel flush title={<>{seg === 'raise' ? 'Invoices to raise' : seg === 'check' ? 'Invoiced, not for the sheet amount' : seg === 'done' ? 'Invoiced' : seg === 'orphan' ? 'Invoices with no sheet row this month' : 'Everything'} · {monthLabel}</>}
-            info={seg === 'orphan'
-              ? 'Invoices dated this month that no sheet row of this month maps to — usually work booked in another month, or a line the sheet is missing (the Reconciliation tab follows those up).'
-              : 'Each sheet row is matched to an invoice by the invoice number in the sheet, then the project ID (for monthly retainers, the instalment within a month of the booking), then client and value within 2%. Values are checked per invoice, so an invoice covering several lines is compared with their sum.'}
-            right={<ColumnPicker cols={cols} />}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-mav-muted border-b border-mav-line">
-                  <tr>
-                    <th className="px-3 py-2.5">Date</th>
-                    <th className="px-3 py-2.5">Client</th>
-                    {cols.on('project') && <th className="px-3 py-2.5">Project</th>}
-                    {cols.on('pc') && <th className="px-3 py-2.5">PC/SME</th>}
-                    {cols.on('am') && <th className="px-3 py-2.5">AM</th>}
-                    {cols.on('sheet') && <th className="px-3 py-2.5 text-right">Sheet $</th>}
-                    {cols.on('invoice') && <th className="px-3 py-2.5">Invoice</th>}
-                    {cols.on('invusd') && <th className="px-3 py-2.5 text-right">Invoice $</th>}
-                    {cols.on('how') && <th className="px-3 py-2.5">Matched on</th>}
-                    {cols.on('dept') && <th className="px-3 py-2.5">Department</th>}
-                    {cols.on('pid') && <th className="px-3 py-2.5">Project ID</th>}
-                    {cols.on('status') && <th className="px-3 py-2.5">Delivery status</th>}
-                    {cols.on('services') && <th className="px-3 py-2.5">Invoice service</th>}
-                    <th className="px-3 py-2.5">State</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && <tr><td colSpan={14} className="px-3 py-8 text-center text-mav-muted">Loading…</td></tr>}
-                  {!loading && shown.length === 0 && <tr><td colSpan={14} className="px-3 py-8 text-center text-mav-muted">Nothing here for {monthLabel}.</td></tr>}
-                  {shown.map(r => (
-                    <tr key={r.row_type + r.row_key} className="border-b border-mav-line/60 align-top">
-                      <td className="px-3 py-2.5"><DateCell d={r.start_date || r.invoice_date} /></td>
-                      <td className="px-3 py-2.5 max-w-[12rem] truncate font-medium" title={r.company_name || ''}>{r.company_name || '—'}</td>
-                      {cols.on('project') && <td className="px-3 py-2.5 max-w-[16rem] truncate" title={r.project_name || ''}>{r.project_name || <span className="text-mav-muted">—</span>}</td>}
-                      {cols.on('pc') && <td className="px-3 py-2.5 whitespace-nowrap">{r.pm_owner || <span className="text-mav-muted">—</span>}</td>}
-                      {cols.on('am') && <td className="px-3 py-2.5 whitespace-nowrap">{r.sales_person || <span className="text-mav-muted">—</span>}</td>}
-                      {cols.on('sheet') && <td className="px-3 py-2.5 text-right tabular-nums">{usd(r.sheet_usd)}</td>}
-                      {cols.on('invoice') && <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">
-                        {r.invoice_no ? <>{r.invoice_no}<div className="text-[11px] text-mav-muted">{fmtDay(r.invoice_date)}{r.invoice_status ? ` · ${r.invoice_status}` : ''}</div></> : <span className="text-mav-muted">—</span>}
-                      </td>}
-                      {cols.on('invusd') && <td className="px-3 py-2.5 text-right tabular-nums">
-                        {usd(r.invoice_usd)}
-                        {r.group_sheet_usd != null && r.sheet_usd != null && Math.abs(r.group_sheet_usd - r.sheet_usd) > 1 &&
-                          <div className="text-[11px] text-mav-muted" title="This invoice also covers other sheet lines this month">shared · lines {usd(r.group_sheet_usd)}</div>}
-                      </td>}
-                      {cols.on('how') && <td className="px-3 py-2.5 whitespace-nowrap text-mav-muted">{r.matched_by || '—'}</td>}
-                      {cols.on('dept') && <td className="px-3 py-2.5 whitespace-nowrap">{r.service_dept || '—'}</td>}
-                      {cols.on('pid') && <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">{r.project_id || <span className="text-mav-muted">—</span>}</td>}
-                      {cols.on('status') && <td className="px-3 py-2.5 whitespace-nowrap">{r.delivery_status || '—'}</td>}
-                      {cols.on('services') && <td className="px-3 py-2.5 max-w-[12rem] truncate" title={r.invoice_services || ''}>{r.invoice_services || '—'}</td>}
-                      <td className="px-3 py-2.5">
-                        <Badge s={r.state} />
-                        {r.note && <div className="text-[11px] text-mav-muted mt-1 max-w-[16rem]">{r.note}</div>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
+        </table>
         </div>
-      </div>
+      </Panel>
     </div>
   )
 }
