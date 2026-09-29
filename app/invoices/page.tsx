@@ -25,6 +25,24 @@ import {
 // that showed only the first question would report those as perfectly reconciled.
 
 const selCls = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
+const secBtn = 'text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg'
+const toggleBtn = 'text-xs px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg'
+const lbl = 'font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted'
+
+/**
+ * Search across every field a person might type.
+ *
+ * The first version searched company and project only, while the placeholder promised
+ * "client, project, invoice" — so typing an invoice number or a project id returned
+ * nothing and the box looked broken. It was not broken; it was lying about its scope.
+ */
+const hit = (q: string, ...fields: (string | null | undefined | string[])[]) => {
+  const n = q.trim().toLowerCase()
+  if (!n) return true
+  return fields.some(f =>
+    Array.isArray(f) ? f.some(v => (v || '').toLowerCase().includes(n))
+                     : (f || '').toLowerCase().includes(n))
+}
 const usd = (n?: number | null) =>
   n == null ? '—' : `$${Math.round(n).toLocaleString()}`
 const uniq = (a: (string | null | undefined)[]) =>
@@ -131,6 +149,9 @@ export default function Invoices() {
   const [search, setSearch] = useState('')
   const [fStatus, setFStatus] = useState<string[]>([])
   const [fPc, setFPc] = useState<string[]>([])
+  const [fPm, setFPm] = useState<string[]>([])
+  const [fGeo, setFGeo] = useState<string[]>([])
+  const [moreOpen, setMoreOpen] = useState(false)
   const [from, setFrom] = useState(FLOOR)
   const [to, setTo] = useState('')
   const [who, setWho] = useState<Who>('all')
@@ -142,7 +163,14 @@ export default function Invoices() {
   // what you want on every money column and harmless on the rest.
   const clickM = (k: string) => { if (k === mSort) setMDir(d => d === 'asc' ? 'desc' : 'asc'); else { setMSort(k); setMDir('desc') } }
   const clickG = (k: string) => { if (k === gSort) setGDir(d => d === 'asc' ? 'desc' : 'asc'); else { setGSort(k); setGDir('desc') } }
-  const reset = () => { setSearch(''); setFStatus([]); setFPc([]); setFrom(FLOOR); setTo(''); setWho('all') }
+  const reset = () => {
+    setSearch(''); setFStatus([]); setFPc([]); setFPm([]); setFGeo([])
+    setFrom(FLOOR); setTo(''); setWho('all')
+  }
+  // 'Clear all' only appears once there is something to clear, the way the Project sheet
+  // does it — a permanently visible Clear reads as a control with no object.
+  const anyFilter = !!search || fStatus.length > 0 || fPc.length > 0 || fPm.length > 0
+    || fGeo.length > 0 || from !== FLOOR || !!to || who !== 'all'
 
   // The FLOOR is applied on top of the date box, so clearing the box cannot drag
   // pre-April rows back in — the page would otherwise silently start reporting months
@@ -159,12 +187,13 @@ export default function Invoices() {
 
   // ── money side: per project, from the ledger outwards ───────────────────────
   const money = useMemo(() => status
-    .filter(x => (x.company_name || '').toLowerCase().includes(search.toLowerCase())
-              || (x.project_name || '').toLowerCase().includes(search.toLowerCase()))
+    .filter(x => hit(search, x.company_name, x.project_name, x.project_id, x.project_key,
+                     x.expert, x.contractor_name, x.pm_owner, x.invoice_nos))
     .filter(x => keeps(fStatus, x.status))
+    .filter(x => keeps(fPm, x.pm_owner))
     .filter(x => inRange(x.booking_month))
     .filter(keepsWho),
-    [status, search, fStatus, from, to, who])
+    [status, search, fStatus, fPm, from, to, who])
 
   const moneySorted = useMemo(() => sortRows(money, r => {
     switch (mSort) {
@@ -199,14 +228,14 @@ export default function Invoices() {
   //                  problem. It is the opposite of one.
   const gap = useMemo(() => recon
     .filter(x => !x.in_sheet && !x.is_future && x.status !== 'Void')
-    .filter(x => (x.client || '').toLowerCase().includes(search.toLowerCase())
-              || (x.project_names || '').toLowerCase().includes(search.toLowerCase())
-              || x.invoice_no.toLowerCase().includes(search.toLowerCase()))
+    .filter(x => hit(search, x.client, x.project_names, x.invoice_no, x.project_id,
+                     x.services, x.pc, x.sales_person))
     .filter(x => keeps(fStatus, x.status))
     .filter(x => keeps(fPc, x.pc))
+    .filter(x => keeps(fGeo, x.geo))
     .filter(x => inRange(x.invoice_date))
     .sort((a, b) => (b.our_usd || 0) - (a.our_usd || 0)),
-    [recon, search, fStatus, fPc, from, to])
+    [recon, search, fStatus, fPc, fGeo, from, to])
 
   const gapSorted = useMemo(() => sortRows(gap, r => {
     switch (gSort) {
@@ -263,30 +292,56 @@ export default function Invoices() {
         { id: 'recon', label: 'Reconciliation', count: gap.length, title: 'Invoices the revenue sheet does not have' },
       ]} />
       <FilterBar right={<>
-          {/* Contractor spend is INR in the sheet and converted here, so 'Contractor'
-              shows both what we billed and what the work cost us. */}
-          <div className="inline-flex rounded-md border border-mav-line overflow-hidden">
-            {([['all', 'All'], ['contractor', 'Contractor'], ['inhouse', 'In-house']] as [Who, string][]).map(([k, label]) => (
-              <button key={k} onClick={() => setWho(k)}
-                className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  who === k ? 'bg-mav-fill text-black' : 'text-mav-muted hover:text-mav-fg'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <button onClick={reset} className="text-sm px-3 py-1.5 rounded-md border border-mav-line text-mav-muted hover:text-mav-fg">Clear all</button>
-        </>}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search client, project, invoice…" className={`${selCls} w-56`} />
+        {/* Row count first, the way the Project sheet does it: the number of things you
+            are looking at is the single most useful thing a filter bar can tell you. */}
+        <span className={lbl}>
+          {loading ? 'Loading…' : `${(tab === 'money' ? money.length : gap.length).toLocaleString()} shown`}
+        </span>
+        {anyFilter && <button onClick={reset} className={secBtn}>Clear all</button>}
+      </>}>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Client, project, project ID or invoice no…" className={`${selCls} w-64`} />
+        {/* Contractor spend is INR in the sheet and converted here, so 'Contractor' shows
+            both what we billed and what the work cost us. */}
+        <div className="inline-flex rounded-md border border-mav-line overflow-hidden">
+          {([['all', 'All'], ['contractor', 'Contractor'], ['inhouse', 'In-house']] as [Who, string][]).map(([k, label]) => (
+            <button key={k} onClick={() => setWho(k)} title={
+              k === 'contractor' ? "Rows the sheet marks as outsourced — Expert = 'Contractor', or a non-zero outsource price"
+              : k === 'inhouse' ? 'Everything delivered by the team' : 'Both'}
+              className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                who === k ? 'bg-mav-fill text-black' : 'text-mav-muted hover:text-mav-fg'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
         <MultiSelect label="All statuses"
           options={tab === 'money' ? uniq(status.map(x => x.status)) : uniq(recon.map(x => x.status))}
           selected={fStatus} onChange={setFStatus} className="w-44" />
-        {tab === 'recon' && (
-          <MultiSelect label="All PCs" options={uniq(recon.map(x => x.pc))} selected={fPc} onChange={setFPc} className="w-40" />
-        )}
-        <span className="text-xs text-mav-muted ml-1">From</span>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)} className={selCls} />
-        <span className="text-xs text-mav-muted">To</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)} className={selCls} />
+        {tab === 'money'
+          ? <MultiSelect label="All PMs" options={uniq(status.map(x => x.pm_owner))} selected={fPm} onChange={setFPm} className="w-40" />
+          : <MultiSelect label="All PCs" options={uniq(recon.map(x => x.pc))} selected={fPc} onChange={setFPc} className="w-40" />}
+        <button onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen} className={toggleBtn}>
+          More filters{(fGeo.length || from !== FLOOR || to) ? ` · ${[fGeo.length && 'geo', from !== FLOOR && 'from', to && 'to'].filter(Boolean).length}` : ''}
+        </button>
+        {moreOpen && <>
+          <div className="basis-full h-0" />
+          {tab === 'recon' && (
+            <MultiSelect label="All GEOs" options={uniq(recon.map(x => x.geo))} selected={fGeo} onChange={setFGeo} className="w-40" />
+          )}
+          <span className={`${lbl} ml-2`} title={`Never earlier than ${FLOOR} — the invoice app only became the reference then`}>Range</span>
+          <input type="date" value={from} min={FLOOR} onChange={e => setFrom(e.target.value)} className={selCls} aria-label="From date" />
+          <span className="text-xs text-mav-muted">&rarr;</span>
+          <input type="date" value={to} min={FLOOR} onChange={e => setTo(e.target.value)} className={selCls} aria-label="To date" />
+          <span className={`${lbl} ml-2`}>Quick views</span>
+          <button onClick={() => { setFStatus(['Overdue']); setWho('all') }}
+            className="text-xs px-3 py-1.5 rounded-full border border-rose-500/50 text-rose-400 hover:bg-rose-500/15 transition-colors">
+            Overdue only
+          </button>
+          <button onClick={() => { setFStatus(['Not raised', 'Draft']); setWho('all') }}
+            className="text-xs px-3 py-1.5 rounded-full border border-amber-500/50 text-amber-400 hover:bg-amber-500/15 transition-colors">
+            Never billed or unsent
+          </button>
+        </>}
       </FilterBar>
 
       {loading && <p className="text-sm text-mav-muted">Loading…</p>}
