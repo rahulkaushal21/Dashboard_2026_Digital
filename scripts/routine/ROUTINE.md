@@ -334,6 +334,30 @@ open quotes first if you are time-limited.
    Negative signals this run), and any account whose trajectory clearly shifted
    (warming, cooling, churn-risk, upsell). This is a sense-check for the user, not
    a DB write. If nothing moved, say so plainly ("quiet window, no movement").
+
+   ALWAYS END THE PULSE WITH THE STALE-PIPELINE LIST, for Rahul and Pratik
+   (asked for 29 Sep 2026). Query:
+
+       select company_name, est_value, opened, app_opportunity_no,
+              app_final_stage, app_usd
+       from web_open_opportunity_evidence
+       where evidence in ('app won','app lost')
+       order by est_value desc;
+
+   These are open opportunities the invoice app has already closed — deals still
+   counted as live pipeline that are in fact won or lost. Report them as a short
+   list with company, value and which the app says, and give the total, because
+   the total is the amount by which the pipeline is overstated. NoLie
+   Communications sat there at $8,820 for eleven weeks after the app recorded it
+   Lost.
+
+   Do NOT include the view's third tier, 'client booked'. It fires on 90 of 196
+   open opportunities purely because an agency with one live deal usually has
+   other work running, and a list that long would be skimmed once and then
+   ignored — taking the dozen real ones with it. See migration 102.
+
+   Say "pipeline is clean" when the query returns nothing, rather than omitting
+   the section: silence reads as "not checked".
 1. Call rebuildClients() to refresh the derived clients table (LTV from bookings,
    industry from SQLs, latest sentiment from feedback).
 2. Call markScan(msg, totalRowsWritten) with a one-line summary

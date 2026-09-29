@@ -18,6 +18,7 @@ import InfoTip from '@/components/InfoTip'
 import DateCell from '@/components/DateCell'
 import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
+import StaleOpportunitiesBanner from '@/components/StaleOpportunitiesBanner'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import BillTogetherDialog from '@/components/BillTogetherDialog'
 import MultiSelect from '@/components/MultiSelect'
@@ -903,6 +904,9 @@ return (
     </button>
   )} />
 <UnplacedNote n={unplacedDeals} noun="deals" className="-mt-3 mb-4" />
+{/* Open deals the invoice app has already closed. Renders nothing when there are none,
+    so it prompts when there is something to do and is invisible the rest of the time. */}
+<StaleOpportunitiesBanner onChanged={reload} />
 {showAdd && <AddOpportunityDialog onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); reload() }} />}
 {billing && pickedRows.length > 1 && (
   <BillTogetherDialog deals={pickedRows} onClose={() => setBilling(false)}

@@ -2620,3 +2620,45 @@ export async function getInvoicesAhead(): Promise<InvoiceAhead[]> {
   if (error || !data) return []
   return (data as InvoiceAhead[]).map(r => ({ ...r, usd: Number(r.usd) || 0 }))
 }
+
+// ---------------------------------------------------------------------------
+// OPEN OPPORTUNITIES THE REST OF THE BUSINESS HAS ALREADY CLOSED
+//
+// See migration 102. Evidence is tiered and the tier is carried, because clearing a live
+// deal is a worse error than leaving a dead one on the list.
+// ---------------------------------------------------------------------------
+
+export interface OpenOppEvidence {
+  id: number
+  company_name?: string | null
+  est_value?: number | null
+  opened?: string | null
+  origin?: string | null
+  pm_owner?: string | null
+  sales_person?: string | null
+  app_opportunity_no?: string | null
+  app_final_stage?: string | null
+  app_usd?: number | null
+  app_created?: string | null
+  client_booked_since?: number | null
+  client_booked_rows?: number | null
+  /** 'app won' | 'app lost' | 'client booked' | null */
+  evidence?: string | null
+  /** 1 act on it, 3 look at it. Null = no evidence, genuinely open. */
+  confidence?: number | null
+}
+
+/**
+ * Only the tiers worth acting on — 'app won' and 'app lost'.
+ *
+ * 'client booked' is deliberately NOT returned: 90 of 196 open opportunities trip it,
+ * because an agency with one live deal usually has other work running. It is evidence for
+ * a person reading one row, not grounds for a banner telling them to clear ninety.
+ */
+export async function getStaleOpportunities(): Promise<OpenOppEvidence[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_open_opportunity_evidence')
+    .select('*').in('evidence', ['app won', 'app lost'])
+    .order('est_value', { ascending: false })
+  return (data as OpenOppEvidence[]) || []
+}
