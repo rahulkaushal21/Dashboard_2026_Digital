@@ -6,6 +6,7 @@ import MultiSelect from '@/components/MultiSelect'
 import { NotSplitNote } from '@/components/UnitToggle'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
+import InvoiceMapping from './InvoiceMapping'
 import {
   getInvoiceRecon, getProjectInvoiceStatus,
   type InvoiceRecon, type ProjectInvoiceStatus,
@@ -80,7 +81,7 @@ const daysLate = (due?: string | null) => {
   return d > 0 ? d : null
 }
 
-type Tab = 'money' | 'recon'
+type Tab = 'money' | 'recon' | 'mapping'
 type Who = 'all' | 'contractor' | 'inhouse'
 
 // Twelve columns is wider than a laptop, so the two answering the fewest questions start
@@ -313,6 +314,26 @@ export default function Invoices() {
     </div>
   )
 
+  const tabs = (
+    <Segments<Tab> value={tab} onChange={setTab} items={[
+      { id: 'money', label: 'Money', count: money.length, title: 'Per project: invoiced, paid, overdue, never raised' },
+      { id: 'recon', label: 'Reconciliation', count: gap.length, title: 'Invoices the revenue sheet does not have' },
+      { id: 'mapping', label: 'Invoice mapping', title: "A month's sheet rows against the invoices raised for them — what is still to raise" },
+    ]} />
+  )
+
+  // Invoice mapping is its own view (app/invoices/InvoiceMapping.tsx) with its own month,
+  // filters and refresh, and it DOES follow the department switch — so it skips the
+  // "not split" note and the Money/Reconciliation filter bar below.
+  if (tab === 'mapping') return (
+    <div>
+      <Header title="Invoices & Reconciliation"
+        subtitle="Invoice mapping: a month's revenue-sheet rows against the invoices raised for them, so the ones still to raise can go to the AM. Raised or not — payment is on the Money tab." />
+      {tabs}
+      <InvoiceMapping />
+    </div>
+  )
+
   return (
     <div>
       <Header title="Invoices & Reconciliation"
@@ -321,10 +342,7 @@ export default function Invoices() {
           Service, which is already applied server-side to our four Web services. */}
       <NotSplitNote what="Invoices" reason="are already scoped to the Web services" className="-mt-3 mb-4" />
 
-      <Segments<Tab> value={tab} onChange={setTab} items={[
-        { id: 'money', label: 'Money', count: money.length, title: 'Per project: invoiced, paid, overdue, never raised' },
-        { id: 'recon', label: 'Reconciliation', count: gap.length, title: 'Invoices the revenue sheet does not have' },
-      ]} />
+      {tabs}
       <FilterBar right={<>
         {/* Row count first, the way the Project sheet does it: the number of things you
             are looking at is the single most useful thing a filter bar can tell you. */}

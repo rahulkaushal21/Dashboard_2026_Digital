@@ -2529,3 +2529,83 @@ export async function getInvoiceRecon(): Promise<InvoiceRecon[]> {
   // gap look a third of its real size.
   return (await read<InvoiceRecon>('invoice_reconciliation_mv', '*', 'invoice_no')) || []
 }
+
+// ── Invoice mapping: the month's sheet rows against the invoices raised for them ──────
+//
+// The Reconciliation tab asks which invoices the sheet lacks; this asks the question an
+// AM acts on — which of the month's booked work has not been INVOICED yet. The matching
+// (invoice no → project id → client + value, value checked per invoice) lives in the
+// database function invoice_mapping() — see migration 102 — so there is one definition.
+
+export type MappingState = 'Invoiced' | 'Part invoiced' | 'Value differs' | 'To raise' | 'Awaiting info' | 'Not in sheet'
+
+export interface InvoiceMappingRow {
+  row_type: 'sheet' | 'invoice'
+  row_key: string
+  company_name?: string | null
+  project_name?: string | null
+  service_dept?: string | null
+  pm_owner?: string | null
+  sales_person?: string | null
+  delivery_status?: string | null
+  start_date?: string | null
+  sheet_usd?: number | null
+  project_id?: string | null
+  sheet_invoice_no?: string | null
+  invoice_no?: string | null
+  invoice_date?: string | null
+  invoice_status?: string | null
+  invoice_client?: string | null
+  /** The invoice's total across our services. */
+  invoice_usd?: number | null
+  invoice_services?: string | null
+  /** Every sheet line this month mapped to the same invoice, summed. */
+  group_sheet_usd?: number | null
+  matched_by?: 'invoice no' | 'project id' | 'client + value' | null
+  state: MappingState
+  note?: string | null
+}
+
+/** `month` is YYYY-MM. Not cached: this is the page people refresh to see a change land. */
+export async function getInvoiceMapping(month: string): Promise<{ rows: InvoiceMappingRow[]; error?: string }> {
+  if (!supabase) return { rows: [], error: 'Not connected to the database' }
+  const { data, error } = await supabase.rpc('invoice_mapping', { p_month: `${month}-01` })
+  if (error) return { rows: [], error: error.message }
+  return { rows: ((data || []) as any[]).map(r => ({
+    ...r,
+    sheet_usd: r.sheet_usd == null ? null : Number(r.sheet_usd),
+    invoice_usd: r.invoice_usd == null ? null : Number(r.invoice_usd),
+    group_sheet_usd: r.group_sheet_usd == null ? null : Number(r.group_sheet_usd),
+  })) as InvoiceMappingRow[] }
+}
+
+/**
+ * Pull the invoice app and the revenue sheet now, rather than at the next hourly run.
+ *
+ * The database fires the same two fetches its cron jobs run (so no endpoint or token ever
+ * reaches the browser), then this waits for both to report back in sync_runs and refreshes
+ * the invoice views. `onStep` narrates it, because it takes a minute or two.
+ */
+export async function refreshInvoiceData(onStep?: (s: string) => void): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Not connected to the database' }
+  onStep?.('Asking the invoice app and the sheet for fresh data…')
+  const { data: started, error } = await supabase.rpc('request_invoice_refresh')
+  if (error) return { ok: false, error: error.message }
+  const want = ['quote-sync', 'sheet-raw-revenue']
+  const deadline = Date.now() + 4 * 60 * 1000
+  for (;;) {
+    const { data: runs } = await supabase.from('sync_runs')
+      .select('source, ok, ran_at, message').in('source', want).gt('ran_at', started as string)
+    const done = new Set((runs || []).map((r: any) => r.source))
+    const failed = (runs || []).find((r: any) => r.ok === false)
+    if (failed) return { ok: false, error: `${failed.source} failed: ${failed.message || 'no message'}` }
+    if (want.every(w => done.has(w))) break
+    if (Date.now() > deadline) return { ok: false, error: 'Still waiting after 4 minutes — the hourly run will pick it up.' }
+    onStep?.(`Fetching… ${done.size ? `${Array.from(done).join(' and ')} done, ` : ''}waiting for ${want.filter(w => !done.has(w)).map(w => w === 'quote-sync' ? 'invoices' : 'the sheet').join(' and ')}`)
+    await new Promise(r => setTimeout(r, 5000))
+  }
+  onStep?.('Rebuilding the invoice views…')
+  const { error: e2 } = await supabase.rpc('refresh_invoice_views')
+  if (e2) return { ok: false, error: e2.message }
+  return { ok: true }
+}
