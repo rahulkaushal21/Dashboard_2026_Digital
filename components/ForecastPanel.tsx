@@ -9,8 +9,8 @@ import { KPIRow, Panel } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit, unitLabel } from '@/lib/business-unit'
 import { useThemeInk } from '@/lib/use-theme-ink'
-import { getBookingsFull, getOpportunities, getOpportunityDepts, type BookingRow, type Opportunity } from '@/lib/supabase'
-import { buildForecast, churnDrag, chooseModel, runRateAt, MODEL_LABEL, type Forecast } from '@/lib/forecast'
+import { getBookingsFull, getOpportunities, getOpportunityDepts, getInvoicesAhead, type BookingRow, type Opportunity, type InvoiceAhead } from '@/lib/supabase'
+import { buildForecast, churnDrag, chooseModel, runRateAt, nowcast, MODEL_LABEL, type Forecast } from '@/lib/forecast'
 import { FY_TARGET } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
 import { RefreshCw } from 'lucide-react'
@@ -38,6 +38,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   const [bookingsAll, setBookings] = useState<BookingRow[]>([])
   const [oppsAll, setOpps] = useState<Opportunity[]>([])
   const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
+  const [aheadAll, setAhead] = useState<InvoiceAhead[]>([])
   const [loading, setLoading] = useState(true)
   const [showAccounts, setShowAccounts] = useState(false)
   // Set after mount: computing "today" during render makes the static export's
@@ -47,8 +48,8 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   const load = async () => {
     setLoading(true)
     try {
-      const [b, o, od] = await Promise.all([getBookingsFull(), getOpportunities(), getOpportunityDepts()])
-      setBookings(b); setOpps(o); setOppDepts(od); setToday(new Date())
+      const [b, o, od, ah] = await Promise.all([getBookingsFull(), getOpportunities(), getOpportunityDepts(), getInvoicesAhead()])
+      setBookings(b); setOpps(o); setOppDepts(od); setAhead(ah); setToday(new Date())
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
@@ -65,8 +66,18 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   // Each department gets the model that has predicted ITS OWN past best — see
   // chooseModel. LP/HUB is small and lumpy, and the seasonal index was fitting noise.
   const choice = useMemo(() => (today ? chooseModel(bookings, today) : null), [bookings, today])
+  // Two automatic inputs on top of the history, neither typed by anybody:
+  //  • the month in progress read from its own booking dates (nowcast), and
+  //  • invoices already raised in the invoice app for the months ahead — a floor.
+  const nc = useMemo(() => (today && choice ? nowcast(bookings, today, choice.bt) : null), [bookings, today, choice])
+  const ahead = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const r of aheadAll) if (unit === 'all' || r.unit === unit) m.set(r.month, (m.get(r.month) || 0) + r.usd)
+    return m
+  }, [aheadAll, unit])
   const fc: Forecast | null = useMemo(
-    () => (today && choice ? buildForecast(bookings, FY_TARGET, today, choice.model) : null), [bookings, today, choice])
+    () => (today && choice ? buildForecast(bookings, FY_TARGET, today, choice.model, { nowcast: nc, ahead }) : null),
+    [bookings, today, choice, nc, ahead])
   const drag = useMemo(
     () => (today ? churnDrag(bookings, today) : { clients: 0, perMonth: 0, trailing: 0, accounts: [] }),
     [bookings, today])
@@ -406,6 +417,29 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
                   ))}
                 </div>
               )}
+              {(nc || ahead.size > 0) && (() => {
+                const cur = fc.months.find(m => m.partial)
+                const next = fc.months.filter(m => !m.actual && !m.partial && (m.invoiced || 0) > 0)
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                    {nc && cur && (
+                      <div className="rounded-lg border border-mav-yellow/30 bg-mav-yellow/[0.06] p-3 text-xs leading-relaxed">
+                        <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-yellow mb-1">{cur.label} · month in progress, day {nc.day}</div>
+                        Read from its own bookings: {fmtUsd(Math.round(nc.datedSoFar))} dated so far, and by day {nc.day} a month is usually {Math.round(nc.share * 100)}% dated.
+                        Blended {Math.round(nc.weight * 100)}% with the model → <span className="font-semibold text-mav-fg">{fmtUsd(Math.round(cur.value))}</span>.
+                        Replayed on the months above at this same day: <span className="font-semibold text-mav-fg">{nc.mape.toFixed(1)}% miss</span> ({pct(nc.bias, 1)} bias), against {nc.priorMape.toFixed(1)}% before the month started.
+                      </div>
+                    )}
+                    {next.length > 0 && (
+                      <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-3 text-xs leading-relaxed">
+                        <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-muted mb-1">Invoiced already, months ahead</div>
+                        {next.slice(0, 6).map(m => `${m.label} ${usdK(m.invoiced || 0)}`).join(' · ')}.
+                        Raised in advance in the invoice app (mostly retainer instalments), so the forecast never sits below them.
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
                 <Stat label="Average miss" value={`${bt.mape.toFixed(1)}%`}
                   note="Typical absolute error on a single month" />
@@ -572,6 +606,7 @@ function MonthTable({ fc }: { fc: Forecast }) {
             <th className="px-5 py-2.5 font-medium">Month</th>
             <th className="px-3 py-2.5 font-medium text-right">Index</th>
             <th className="px-3 py-2.5 font-medium w-1/3">Shape</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="Already invoiced in the invoice app — the forecast never goes below it">Invoiced already</th>
             <th className="px-3 py-2.5 font-medium text-right">Forecast</th>
             <th className="px-5 py-2.5 font-medium text-right">Range</th>
           </tr>
@@ -598,6 +633,7 @@ function MonthTable({ fc }: { fc: Forecast }) {
                   )}
                 </div>
               </td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-mav-muted whitespace-nowrap">{m.actual || !m.invoiced ? '—' : fmtUsd(Math.round(m.invoiced))}</td>
               <td className="px-3 py-2.5 text-right tabular-nums font-medium whitespace-nowrap">{fmtUsd(Math.round(m.value))}</td>
               <td className="px-5 py-2.5 text-right tabular-nums text-xs text-mav-muted whitespace-nowrap">
                 {m.actual ? '—' : `${fmtUsd(Math.round(Math.max(0, m.low)))} – ${fmtUsd(Math.round(m.high))}`}
@@ -606,7 +642,7 @@ function MonthTable({ fc }: { fc: Forecast }) {
           ))}
           <tr className="bg-mav-dark/30">
             <td className="px-5 py-3 font-semibold">{fc.fyLabel} total</td>
-            <td /><td />
+            <td /><td /><td />
             <td className="px-3 py-3 text-right font-semibold tabular-nums whitespace-nowrap">{usdK(fc.projected)}</td>
             <td className="px-5 py-3 text-right text-xs text-mav-muted tabular-nums whitespace-nowrap">
               {usdK(fc.projectedLow)} – {usdK(fc.projectedHigh)}

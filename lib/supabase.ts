@@ -2609,3 +2609,14 @@ export async function refreshInvoiceData(onStep?: (s: string) => void): Promise<
   if (e2) return { ok: false, error: e2.message }
   return { ok: true }
 }
+
+// Invoices already raised for this month and the months ahead, per unit (migration 103).
+// The forecast's floor: retainer instalments are raised in advance, so that much of each
+// future month is known without anybody typing anything.
+export interface InvoiceAhead { month: string; unit: 'lp-hub' | 'web'; usd: number; invoices: number }
+export async function getInvoicesAhead(): Promise<InvoiceAhead[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('invoices_ahead')
+  if (error || !data) return []
+  return (data as InvoiceAhead[]).map(r => ({ ...r, usd: Number(r.usd) || 0 }))
+}

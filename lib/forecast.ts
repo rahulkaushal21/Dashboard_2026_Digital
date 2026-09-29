@@ -54,6 +54,18 @@ export interface ForecastMonth {
   actual: boolean
   /** True for the month currently in progress — booked so far, not final. */
   partial?: boolean
+  /** Already invoiced in the invoice app for this month (the floor under the forecast). */
+  invoiced?: number
+  /** Month in progress: what is booked in the sheet so far. */
+  booked?: number
+}
+
+/** Automatic inputs beyond the revenue history — nothing typed by anybody. */
+export interface ForecastInputs {
+  /** Month in progress, from its own booking dates (see nowcast()). */
+  nowcast?: Nowcast | null
+  /** Invoices already raised per month 'YYYY-MM' in the invoice app, this unit. */
+  ahead?: Map<string, number>
 }
 
 export interface Forecast {
@@ -206,6 +218,7 @@ export function buildForecast(
   target: number,
   today: Date = new Date(),
   model: ModelId = 'seasonal',
+  inputs: ForecastInputs = {},
 ): Forecast | null {
   // --- 1. monthly totals -----------------------------------------------------
   const curKey = mk(today.getFullYear(), today.getMonth() + 1)
@@ -274,11 +287,18 @@ export function buildForecast(
       // has actually been billed.
       const sofar = seen || 0
       const expected = level * (idx / 100)
-      const est = Math.max(sofar, (sofar + expected) / 2)
+      const inv = inputs.ahead?.get(k) || 0
+      const nc = inputs.nowcast
+      // With a nowcast: blend what this month's own bookings imply with the model, in
+      // the proportion that has tested best at this day of the month. Without one, the
+      // old halfway rule. Either way never below what is booked or already invoiced.
+      const floor = Math.max(sofar, inv)
+      const est = nc ? Math.max(floor, nc.estimate(sofar, expected)) : Math.max(floor, (sofar + expected) / 2)
+      const e = nc ? nc.mape / 100 : 0.16
       months.push({
         key: k, label: label(k), index: idx,
-        value: est, low: Math.max(sofar, expected * 0.84), high: expected * 1.02,
-        actual: false, partial: true,
+        value: est, low: Math.max(floor, est * (1 - e)), high: Math.max(est * (1 + e), floor),
+        actual: false, partial: true, invoiced: inv, booked: sofar,
       })
       bookedToDate += sofar
       projected += est
@@ -286,8 +306,11 @@ export function buildForecast(
       continue
     }
 
-    const v = level * (idx / 100)
-    months.push({ key: k, label: label(k), index: idx, value: v, low: v - sd, high: v + sd, actual: false })
+    // Invoices already raised for a future month are known money: the forecast never
+    // sits below them. For LP/HUB that is the retainer instalments raised in advance.
+    const inv = inputs.ahead?.get(k) || 0
+    const v = Math.max(level * (idx / 100), inv)
+    months.push({ key: k, label: label(k), index: idx, value: v, low: Math.max(v - sd, inv), high: v + sd, actual: false, invoiced: inv })
     projected += v
     futureCount++
   }
@@ -447,4 +470,79 @@ export function runRateAt(bookings: BookingRow[], today: Date = new Date(), back
   const h = readHistory(bookings, curKey)
   const train = h.complete.slice(0, h.complete.length - back)
   return train.length >= 6 ? runRateFit(h, train) : null
+}
+
+/**
+ * The month in progress, read from its own bookings.
+ *
+ * Every sheet row carries a booking date inside its month, and by any given day a
+ * fairly steady share of a month's final revenue is already dated — for LP/HUB by the
+ * 15th it has run between 46% and 84%, 67% on average. So "dated so far ÷ the usual
+ * share by this day" is an estimate of the close that needs nobody to type anything.
+ *
+ * It is noisy on its own, so it is blended with the model's forecast. The blend weight
+ * is not a guess: each of the backtest's held-out months is replayed as if it were
+ * today's day of the month — using only the months before it for the usual share — and
+ * the weight that would have missed least is the one used. Retrained on every load.
+ */
+export interface Nowcast {
+  day: number
+  /** Share of a month usually dated by `day`, from the last 12 complete months. */
+  share: number
+  weight: number
+  mape: number
+  bias: number
+  /** Before-the-month miss on the same months, for comparison. */
+  priorMape: number
+  /** Dated in the month in progress up to today. */
+  datedSoFar: number
+  estimate: (bookedSoFar: number, expected: number) => number
+}
+
+export function nowcast(bookings: BookingRow[], today: Date, bt: Backtest | null): Nowcast | null {
+  if (!bt) return null
+  const day = today.getDate()
+  const curKey = mk(today.getFullYear(), today.getMonth() + 1)
+  const tot = new Map<string, number>(), dated = new Map<string, number>()
+  let datedSoFar = 0
+  for (const b of bookings) {
+    const k = keyOf(b.booking_month)
+    if (!k || k > curKey) continue
+    const a = b.booking_amount || 0
+    // A row without a date inside its own month counts as dated from the 1st.
+    const d = b.booking_date && b.booking_date.slice(0, 7) === k ? Number(b.booking_date.slice(8, 10)) : 1
+    if (k === curKey) { if (d <= day) datedSoFar += a; continue }
+    tot.set(k, (tot.get(k) || 0) + a)
+    if (d <= day) dated.set(k, (dated.get(k) || 0) + a)
+  }
+  const months = [...tot.keys()].filter(k => (tot.get(k) || 0) > 20000).sort()
+  const shareOf = (k: string) => (dated.get(k) || 0) / (tot.get(k) || 1)
+  const avgShare = (ks: string[]) => ks.length ? ks.reduce((s, k) => s + shareOf(k), 0) / ks.length : 0
+
+  const W = [0, 0.25, 0.5, 0.75, 1]
+  let best = { w: 0, mape: Infinity, bias: 0 }
+  for (const w of W) {
+    const errs: number[] = []
+    for (const r of bt.results) {
+      const prior = months.filter(k => k < r.key).slice(-12)
+      if (prior.length < 6) continue
+      const f = avgShare(prior)
+      const d = dated.get(r.key) || 0
+      const raw = f > 0 ? d / f : r.predicted
+      const p = Math.max(d, w * raw + (1 - w) * r.predicted)
+      errs.push(((p - r.actual) / r.actual) * 100)
+    }
+    if (!errs.length) return null
+    const mape = errs.reduce((s, e) => s + Math.abs(e), 0) / errs.length
+    if (mape < best.mape - 0.25) best = { w, mape, bias: errs.reduce((s, e) => s + e, 0) / errs.length }
+  }
+  const share = avgShare(months.slice(-12))
+  const w = best.w
+  return {
+    day, share, weight: w, mape: best.mape, bias: best.bias, priorMape: bt.mape, datedSoFar,
+    estimate: (bookedSoFar, expected) => {
+      const raw = share > 0 ? datedSoFar / share : expected
+      return Math.max(bookedSoFar, w * raw + (1 - w) * expected)
+    },
+  }
 }
