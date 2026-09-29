@@ -5,6 +5,7 @@ import KPICard from '@/components/KPICard'
 import MultiSelect from '@/components/MultiSelect'
 import { NotSplitNote } from '@/components/UnitToggle'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
+import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import {
   getInvoiceRecon, getProjectInvoiceStatus,
   type InvoiceRecon, type ProjectInvoiceStatus,
@@ -82,6 +83,35 @@ const daysLate = (due?: string | null) => {
 type Tab = 'money' | 'recon'
 type Who = 'all' | 'contractor' | 'inhouse'
 
+// Twelve columns is wider than a laptop, so the two answering the fewest questions start
+// hidden: 'Delivered by' is redundant the moment you filter to Contractor, and 'Due date'
+// repeats what 'Days late' already says. Locked columns are the row's identity.
+const MONEY_COLS: ColumnDef[] = [
+  { key: 'status', label: 'Invoice status', locked: true },
+  { key: 'company_name', label: 'Client', locked: true },
+  { key: 'project_name', label: 'Project', default: true },
+  { key: 'project_key', label: 'Project ID', default: true },
+  { key: 'who', label: 'Delivered by' },
+  { key: 'booking_month', label: 'Booked month', default: true },
+  { key: 'ledger_usd', label: 'Sheet value USD', default: true },
+  { key: 'outsource_usd', label: 'Contractor cost USD', default: true },
+  { key: 'invoiced_usd', label: 'Invoiced USD', default: true },
+  { key: 'paid_usd', label: 'Paid USD', default: true },
+  { key: 'earliest_due_at', label: 'Due date' },
+  { key: 'late', label: 'Days late', default: true },
+]
+
+const RECON_COLS: ColumnDef[] = [
+  { key: 'invoice_no', label: 'Invoice no (app)', locked: true },
+  { key: 'project_id', label: 'Project ID (app)', locked: true },
+  { key: 'invoice_date', label: 'Invoice date', default: true },
+  { key: 'client', label: 'Client (app)', default: true },
+  { key: 'project_names', label: 'Project', default: true },
+  { key: 'services', label: 'Service' },
+  { key: 'our_usd', label: 'Invoiced USD', default: true },
+  { key: 'status', label: 'Invoice status', default: true },
+]
+
 /**
  * A sortable table head.
  *
@@ -152,6 +182,10 @@ export default function Invoices() {
   const [fPm, setFPm] = useState<string[]>([])
   const [fGeo, setFGeo] = useState<string[]>([])
   const [moreOpen, setMoreOpen] = useState(false)
+  // Keyed per table, not per page: the two tabs share column NAMES but not meanings, so
+  // hiding 'Invoice status' on one must not hide it on the other.
+  const mCols = useColumns('invoices-money', MONEY_COLS)
+  const gCols = useColumns('invoices-recon', RECON_COLS)
   const [from, setFrom] = useState(FLOOR)
   const [to, setTo] = useState('')
   const [who, setWho] = useState<Who>('all')
@@ -297,6 +331,8 @@ export default function Invoices() {
         <span className={lbl}>
           {loading ? 'Loading…' : `${(tab === 'money' ? money.length : gap.length).toLocaleString()} shown`}
         </span>
+        {/* The picker belongs to whichever table is on screen. */}
+        <ColumnPicker cols={tab === 'money' ? mCols : gCols} />
         {anyFilter && <button onClick={reset} className={secBtn}>Clear all</button>}
       </>}>
         <input value={search} onChange={e => setSearch(e.target.value)}
@@ -387,45 +423,93 @@ export default function Invoices() {
               {/* Every header names its SOURCE and its unit. 'Sheet USD / Cost / Invoiced
                   / Paid' side by side said nothing about which system each came from. */}
               <thead className="text-mav-muted"><tr>
-                <Th id="status" label="Invoice status" hint="The status the invoice app holds, or 'Not raised' / 'No project id' where this dashboard cannot find one" sort={mSort} dir={mDir} onSort={clickM} />
+                {mCols.on('status') && (
+<Th id="status" label="Invoice status" hint="The status the invoice app holds, or 'Not raised' / 'No project id' where this dashboard cannot find one" sort={mSort} dir={mDir} onSort={clickM} />
+)}
+                {mCols.on('company_name') && (
                 <Th id="company_name" label="Client" sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('project_name') && (
                 <Th id="project_name" label="Project" sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('project_key') && (
                 <Th id="project_key" label="Project ID" hint="As entered in the revenue sheet, normalised to a bare PRJ id" sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('who') && (
                 <Th id="who" label="Delivered by" hint="The sheet's Expert column. 'Contractor' means outsourced." sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('booking_month') && (
                 <Th id="booking_month" label="Booked month" hint="The month the revenue sheet books this row against" sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('ledger_usd') && (
                 <Th id="ledger_usd" label="Sheet value USD" hint="Revenue as the sheet records it, in USD" num sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('outsource_usd') && (
                 <Th id="outsource_usd" label="Contractor cost USD" hint="Outsource spend. Held in INR in the sheet and converted at the stored FX rate; hover a figure for the rupee amount." num sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('invoiced_usd') && (
                 <Th id="invoiced_usd" label="Invoiced USD" hint="Total the invoice app has raised against this project id" num sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('paid_usd') && (
                 <Th id="paid_usd" label="Paid USD" hint="Of that, the part the app records as Paid" num sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('earliest_due_at') && (
                 <Th id="earliest_due_at" label="Due date" hint="Earliest due date across this project's invoices" sort={mSort} dir={mDir} onSort={clickM} />
+                )}
+                {mCols.on('late') && (
                 <Th id="late" label="Days late" num sort={mSort} dir={mDir} onSort={clickM} />
+                )}
               </tr></thead>
               <tbody>{moneySorted.slice(0, 500).map(x => {
                 const late = x.status === 'Overdue' ? daysLate(x.earliest_due_at?.slice(0, 10)) : null
                 return (
                   <tr key={x.row_key} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+                    {mCols.on('status') && (
                     <td className="px-4 py-3"><Pill s={x.status} /></td>
+                    )}
+                    {mCols.on('company_name') && (
                     <td className="px-4 py-3">{x.company_name || '—'}</td>
+                    )}
+                    {mCols.on('project_name') && (
                     <td className="px-4 py-3 text-mav-muted max-w-[220px] truncate" title={x.project_name || ''}>{x.project_name || '—'}</td>
+                    )}
+                    {mCols.on('project_key') && (
                     <td className="px-4 py-3 font-mono text-[11px] text-mav-muted whitespace-nowrap">{x.project_key || x.project_id || '—'}</td>
+                    )}
+                    {mCols.on('who') && (
                     <td className="px-4 py-3 whitespace-nowrap">
                       {x.is_contractor
                         ? <span className="text-[11px] px-2 py-0.5 rounded-full border border-sky-500/40 text-sky-400"
                             title={x.contractor_name || x.expert || 'Contractor'}>Contractor</span>
                         : <span className="text-mav-muted text-xs">{x.expert || '—'}</span>}
                     </td>
+                    )}
+                    {mCols.on('booking_month') && (
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{(x.booking_month || '').slice(0, 7) || '—'}</td>
+                    )}
+                    {mCols.on('ledger_usd') && (
                     <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{usd(x.ledger_usd)}</td>
+                    )}
                     {/* Outsource spend. INR in the sheet, converted here; the rupee figure
                         is in the tooltip for anyone reconciling against the sheet itself. */}
+                    {mCols.on('outsource_usd') && (
                     <td className="px-4 py-3 text-mav-muted text-right tabular-nums whitespace-nowrap"
                         title={x.outsource_local ? `${Math.round(x.outsource_local).toLocaleString()} ${x.outsource_currency || 'INR'}` : ''}>
                       {x.outsource_usd ? usd(x.outsource_usd) : '—'}
                     </td>
+                    )}
+                    {mCols.on('invoiced_usd') && (
                     <td className="px-4 py-3 text-mav-muted text-right tabular-nums whitespace-nowrap">{x.invoice_count ? usd(x.invoiced_usd) : '—'}</td>
+                    )}
+                    {mCols.on('paid_usd') && (
                     <td className="px-4 py-3 text-mav-muted text-right tabular-nums whitespace-nowrap">{x.paid_usd ? usd(x.paid_usd) : '—'}</td>
+                    )}
+                    {mCols.on('earliest_due_at') && (
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.earliest_due_at?.slice(0, 10) || '—'}</td>
+                    )}
+                    {mCols.on('late') && (
                     <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{late ? <span className="text-red-400">{late}</span> : '—'}</td>
+                    )}
                   </tr>
                 )
               })}</tbody>
@@ -486,14 +570,30 @@ export default function Invoices() {
             <Panel title={`Invoices the revenue sheet does not have (${gap.length})`} flush>
               <div className="overflow-auto max-h-[70vh]"><table className="w-full text-sm min-w-[900px]">
                 <thead className="text-mav-muted"><tr>
-                  <Th id="invoice_no" label="Invoice no (app)" sort={gSort} dir={gDir} onSort={clickG} />
+                  {gCols.on('invoice_no') && (
+<Th id="invoice_no" label="Invoice no (app)" sort={gSort} dir={gDir} onSort={clickG} />
+)}
+                  {gCols.on('project_id') && (
                   <Th id="project_id" label="Project ID (app)" hint="The id the invoice app raised this against. Paste it into the sheet to close the row." sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
+                  {gCols.on('invoice_date') && (
                   <Th id="invoice_date" label="Invoice date" sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
+                  {gCols.on('client') && (
                   <Th id="client" label="Client (app)" sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
+                  {gCols.on('project_names') && (
                   <Th id="project_names" label="Project" sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
+                  {gCols.on('services') && (
                   <Th id="services" label="Service" sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
+                  {gCols.on('our_usd') && (
                   <Th id="our_usd" label="Invoiced USD" hint="Our Web-service lines on this invoice, not the invoice total" num sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
+                  {gCols.on('status') && (
                   <Th id="status" label="Invoice status" sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
                 </tr></thead>
                 <tbody>{gapSorted.slice(0, 500).map(x => (
                   <tr key={x.invoice_no} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
@@ -506,13 +606,27 @@ export default function Invoices() {
                     {/* The project id is the reason this row is here: the invoice app raised
                         it against this id and no sheet row carries it. Shown, not hidden in
                         a tooltip, so it can be pasted straight into the sheet. */}
+                    {gCols.on('project_id') && (
                     <td className="px-4 py-3 font-mono text-[11px] whitespace-nowrap">{x.project_id || '—'}</td>
+                    )}
+                    {gCols.on('invoice_date') && (
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.invoice_date || '—'}</td>
+                    )}
+                    {gCols.on('client') && (
                     <td className="px-4 py-3">{x.client || '—'}</td>
+                    )}
+                    {gCols.on('project_names') && (
                     <td className="px-4 py-3 text-mav-muted max-w-[200px] truncate" title={x.project_names || ''}>{x.project_names || '—'}</td>
+                    )}
+                    {gCols.on('services') && (
                     <td className="px-4 py-3 text-mav-muted max-w-[150px] truncate" title={x.services || ''}>{x.services || '—'}</td>
+                    )}
+                    {gCols.on('our_usd') && (
                     <td className="px-4 py-3 text-right tabular-nums whitespace-nowrap">{usd(x.our_usd)}</td>
+                    )}
+                    {gCols.on('status') && (
                     <td className="px-4 py-3"><Pill s={x.status} /></td>
+                    )}
                   </tr>
                 ))}</tbody>
               </table></div>
