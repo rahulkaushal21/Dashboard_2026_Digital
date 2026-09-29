@@ -10,7 +10,7 @@ import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit, unitLabel } from '@/lib/business-unit'
 import { useThemeInk } from '@/lib/use-theme-ink'
 import { getBookingsFull, getOpportunities, getOpportunityDepts, type BookingRow, type Opportunity } from '@/lib/supabase'
-import { buildForecast, churnDrag, backtest, type Forecast } from '@/lib/forecast'
+import { buildForecast, churnDrag, chooseModel, runRateAt, MODEL_LABEL, type Forecast } from '@/lib/forecast'
 import { FY_TARGET } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
 import { RefreshCw } from 'lucide-react'
@@ -62,12 +62,16 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   const bookings = useMemo(() => bookingsAll.filter(b => inUnit(b.service_name, unit)), [bookingsAll, unit])
   const opps = useMemo(() => oppsAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [oppsAll, oppDepts, unit])
 
+  // Each department gets the model that has predicted ITS OWN past best — see
+  // chooseModel. LP/HUB is small and lumpy, and the seasonal index was fitting noise.
+  const choice = useMemo(() => (today ? chooseModel(bookings, today) : null), [bookings, today])
   const fc: Forecast | null = useMemo(
-    () => (today ? buildForecast(bookings, FY_TARGET, today) : null), [bookings, today])
+    () => (today && choice ? buildForecast(bookings, FY_TARGET, today, choice.model) : null), [bookings, today, choice])
   const drag = useMemo(
     () => (today ? churnDrag(bookings, today) : { clients: 0, perMonth: 0, trailing: 0, accounts: [] }),
     [bookings, today])
-  const bt = useMemo(() => (today ? backtest(bookings, today) : null), [bookings, today])
+  const bt = choice?.bt || null
+  const seasonal = fc?.model !== 'runrate'
 
   const pipeline = useMemo(() => {
     const open = opps.filter(o => !o.won && !['lost', 'won'].includes((o.status || '').toLowerCase()) && (o.est_value || 0) > 0)
@@ -81,6 +85,65 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
     }
   }, [opps])
 
+  // ── Leading indicators ─────────────────────────────────────────────────────────
+  // What the next months will be made of, measured now — and, for each, whether the
+  // data is good enough for the forecast to lean on it. All from the same bookings and
+  // quotes the page already has, for the selected department.
+  const ind = useMemo((): Ind | null => {
+    if (!fc || !today) return null
+    const keys = fc.history.map(h => h.key)
+    const last3 = keys.slice(-3), prev3 = keys.slice(-6, -3)
+    const mo = (d?: string) => (d || '').slice(0, 7)
+    const byMonth = new Map<string, Map<string, number>>()
+    for (const b of bookings) {
+      const k = mo(b.booking_month); if (!k) continue
+      const c = (b.company_name || '').trim().toLowerCase() || '?'
+      let m = byMonth.get(k); if (!m) { m = new Map(); byMonth.set(k, m) }
+      m.set(c, (m.get(c) || 0) + (b.booking_amount || 0))
+    }
+    const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
+    const active = (ks: string[]) => avg(ks.map(k => [...(byMonth.get(k)?.values() || [])].filter(v => v > 0).length))
+
+    // Concentration: the biggest client's share of the last three months.
+    const tot3 = new Map<string, number>()
+    for (const k of last3) byMonth.get(k)?.forEach((v, c) => tot3.set(c, (tot3.get(c) || 0) + v))
+    const rev3 = [...tot3.values()].reduce((a, b) => a + b, 0)
+    const top = [...tot3.entries()].sort((a, b) => b[1] - a[1])[0]
+    const topName = top ? (bookings.find(b => (b.company_name || '').trim().toLowerCase() === top[0])?.company_name || top[0]) : ''
+
+    // Quote capture: of the ad-hoc revenue booked (everything but retainers), how much
+    // first appeared as a WON quote in the Quotes tab / email that month.
+    const ret = new Set(fc.runrate.retainers.map(r => r.name.trim().toLowerCase()))
+    const adhocIn = (k: string) => [...(byMonth.get(k)?.entries() || [])].reduce((s, [c, v]) => s + (ret.has(c) ? 0 : v), 0)
+    const live = opps.filter(o => o.rolled_into == null)
+    const oMonth = (o: Opportunity) => mo(o.first_date || o.source_date || o.created_at)
+    const wonIn = (k: string) => live.filter(o => o.won && oMonth(o) === k).reduce((s, o) => s + (o.won_amount || o.est_value || 0), 0)
+    const adhoc3 = last3.reduce((s, k) => s + adhocIn(k), 0)
+    const won3 = last3.reduce((s, k) => s + wonIn(k), 0)
+
+    // Win rate on quotes decided in the last 90 days, and quotes left undecided.
+    const now = today.getTime(), DAY = 86400000
+    const age = (o: Opportunity) => (now - new Date(o.first_date || o.source_date || o.created_at || now).getTime()) / DAY
+    const isLost = (o: Opportunity) => !!o.email_lost || /lost/i.test(o.status || '')
+    const recent = live.filter(o => age(o) <= 90)
+    const won90 = recent.filter(o => o.won).length
+    const lost90 = recent.filter(o => !o.won && isLost(o)).length
+    const stale = live.filter(o => !o.won && !isLost(o) && !o.unlikely && age(o) > 30 && age(o) <= 180)
+
+    const then = runRateAt(bookings, today, 6)
+    return {
+      retainer: fc.runrate.retainer, retainers: fc.runrate.retainers, retainerThen: then?.retainer ?? null,
+      level: fc.level,
+      active: active(last3), activePrev: active(prev3),
+      capture: adhoc3 > 0 ? won3 / adhoc3 : null, won3, adhoc3,
+      winRate: won90 + lost90 > 0 ? won90 / (won90 + lost90) : null, decided: won90 + lost90,
+      stale: stale.length, staleValue: stale.reduce((s, o) => s + (o.est_value || 0), 0),
+      topShare: rev3 > 0 && top ? top[1] / rev3 : 0, topName,
+      lumpShare: fc.runrate.adhoc + fc.runrate.capped > 0 ? fc.runrate.capped / (fc.runrate.adhoc + fc.runrate.capped) : 0,
+      cap: fc.runrate.cap,
+    }
+  }, [fc, today, bookings, opps])
+
   // What sits behind the two cards that are made of months. A forecast is a projection,
   // so the rows are the twelve months it adds up (settled, part booked, forecast) and
   // the full months still to come against the pace each one has to hit.
@@ -91,7 +154,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
     const future = fc.months.filter(m => !m.actual && !m.partial)
     return {
       projected: {
-        subtitle: `The twelve months of ${fc.fyLabel}: settled months at their actual, the month in progress at its expected close, the rest at the seasonal forecast`,
+        subtitle: `The twelve months of ${fc.fyLabel}: settled months at their actual, the month in progress at its expected close, the rest at the forecast`,
         rows: fc.months, rowKey: m => m.key, groupBy: basis, defaultSort: 'month',
         groupTotal: rs => usdK(rs.reduce((s, m) => s + m.value, 0)),
         columns: [
@@ -133,7 +196,18 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
 
   // The method and its blind spots, one hover away. They matter when a figure is
   // questioned, not on every read.
-  const method = fc && (
+  const method = fc && (fc.model === 'runrate' ? (
+    <>
+      <p className="mb-2 font-semibold">{MODEL_LABEL.runrate} — picked because it has predicted this department&apos;s past months better than the seasonal model (see How accurate has this been).</p>
+      <ol className="space-y-1.5 list-decimal pl-4">
+        <li>Retainers — clients billed in each of the last three months within 15% — carry forward at their latest amount: <span className="font-semibold tabular-nums">{fmtUsd(Math.round(fc.runrate.retainer))}</span> from {fc.runrate.retainers.length}.</li>
+        <li>Everything else is ad-hoc work, averaged over the last six complete months: <span className="font-semibold tabular-nums">{fmtUsd(Math.round(fc.runrate.adhoc))}</span>. Any one client&apos;s month counts up to {fmtUsd(Math.round(fc.runrate.cap))} (10% of a typical month); one-off lumps above that do not repeat, so they stay out of the run rate.</li>
+        <li>No seasonal index: on this much history it was fitting last year&apos;s noise.</li>
+        <li>Each remaining month is forecast at retainers + run rate: <span className="font-semibold tabular-nums">{fmtUsd(Math.round(fc.level))}</span>, banded by the standard deviation of monthly revenue (<span className="font-semibold tabular-nums">{fmtUsd(Math.round(fc.sd))}</span>).</li>
+      </ol>
+      <p className="mt-2">Nothing here is stored. Every figure, and the choice of model, is recomputed from <span className="font-semibold">web_revenue</span> on each load.</p>
+    </>
+  ) : (
     <>
       <ol className="space-y-1.5 list-decimal pl-4">
         <li>Roll revenue to complete calendar months. The month in progress is never used to fit anything, because revenue books to the month and today&apos;s month is always short.</li>
@@ -144,7 +218,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
       </ol>
       <p className="mt-2">Nothing here is stored. A forecast that stops updating keeps sounding confident while the ground moves, so every figure is recomputed from <span className="font-semibold">web_revenue</span> on each load.</p>
     </>
-  )
+  ))
   const blind = fc && (
     <ul className="space-y-1.5">
       <li>• <span className="font-semibold">Structural change.</span> Winning or losing one major account moves the year by more than every scenario above combined.</li>
@@ -190,7 +264,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
             <KPICard tone="accent" label={`${fc.fyLabel} projected`} value={usdK(fc.projected)}
               sub={`likely ${usdK(fc.projectedLow)}–${usdK(fc.projectedHigh)}`}
               details={monthDetails.projected}
-              info={<>Across {fc.historyMonths} complete months, a typical month is currently worth {fmtUsd(Math.round(fc.level))} once seasonal shape is removed. Carried forward, {fc.fyLabel} lands near {usdK(fc.projected)} (likely {usdK(fc.projectedLow)}–{usdK(fc.projectedHigh)}) against a {usdK(fc.target)} target{fc.gap > 0 && <> — short by {usdK(fc.gap)}</>}.</>} />
+              info={<>Across {fc.historyMonths} complete months, a typical month is currently worth {fmtUsd(Math.round(fc.level))} {seasonal ? 'once seasonal shape is removed' : `(${fmtUsd(Math.round(fc.runrate.retainer))} retainers + ${fmtUsd(Math.round(fc.runrate.adhoc))} ad-hoc run rate)`}. Carried forward, {fc.fyLabel} lands near {usdK(fc.projected)} (likely {usdK(fc.projectedLow)}–{usdK(fc.projectedHigh)}) against a {usdK(fc.target)} target{fc.gap > 0 && <> — short by {usdK(fc.gap)}</>}.</>} />
             <KPICard tone={fc.pctOfTarget >= 100 ? 'green' : 'amber'} label="Against target" value={`${fc.pctOfTarget.toFixed(0)}%`}
               sub={`of ${usdK(fc.target)}`} />
             <KPICard tone={fc.gap > 0 ? 'red' : 'green'} label={fc.gap > 0 ? 'Shortfall' : 'Surplus'} value={usdK(Math.abs(fc.gap))} />
@@ -210,6 +284,9 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
             right={<span className="text-xs text-mav-muted">{fc.historyMonths} months actual · {futureMonths} forecast</span>}>
             <TrendChart fc={fc} />
           </Panel>
+
+          {/* ---------------- leading indicators ---------------- */}
+          {ind && <Indicators ind={ind} />}
 
           {/* ---------------- why it's flat ---------------- */}
           <Panel className="mb-5" title="Why it lands there"
@@ -232,10 +309,10 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
 
           {/* ---------------- month by month ---------------- */}
           <Panel flush className="mb-5" title="Month by month"
-            info={<>Bar = forecast · red line = {usdK(fc.neededPerMonth)} pace needed for {usdK(fc.target)}. Green is settled. Index is the seasonal index: 100 is an average month, so 113 means that month historically runs 13% above one.</>}
+            info={<>Bar = forecast · red line = {usdK(fc.neededPerMonth)} pace needed for {usdK(fc.target)}. Green is settled. Index is the seasonal index: 100 is an average month, so 113 means that month historically runs 13% above one{seasonal ? '' : ' — not applied here, so every forecast month is 100'}.</>}
             right={<span className="text-xs text-mav-muted">red line = {usdK(fc.neededPerMonth)}/mo needed</span>}>
             <MonthTable fc={fc} />
-            {fc.thinSeasonality > 0 && (
+            {seasonal && fc.thinSeasonality > 0 && (
               <p className="px-4 py-2.5 text-[11px] text-mav-muted border-t border-mav-line">
                 {fc.thinSeasonality} of the 12 calendar months rest on a single year of observations — treat the seasonal shape as a reasonable expectation, not an established pattern.
               </p>
@@ -272,7 +349,9 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
                 <Row label="Open pipeline, nominal" value={fmtUsd(Math.round(pipeline.nominal))}
                   note={`${pipeline.count} deals. Worth ${fmtUsd(Math.round(pipeline.weighted))} once each is weighted by the historical win rate for its size band — barely a third of face value.`} />
                 <Row label="Underlying monthly level" value={fmtUsd(Math.round(fc.level))}
-                  note={`Last six complete months with seasonality stripped out. Ordinary month-to-month variation runs ±${fmtUsd(Math.round(fc.sd))}.`} />
+                  note={seasonal
+                    ? `Last six complete months with seasonality stripped out. Ordinary month-to-month variation runs ±${fmtUsd(Math.round(fc.sd))}.`
+                    : `${fmtUsd(Math.round(fc.runrate.retainer))} of retainers carried forward plus a ${fmtUsd(Math.round(fc.runrate.adhoc))} ad-hoc run rate. Ordinary month-to-month variation runs ±${fmtUsd(Math.round(fc.sd))}.`} />
               </dl>
               {drag.accounts.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-mav-line">
@@ -297,17 +376,36 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
           </div>
 
           {/* ---------------- seasonal profile ---------------- */}
-          <Panel className="mb-5" title="Seasonal shape"
+          {!seasonal && choice && (
+            <Panel className="mb-5" title="Seasonal shape — measured, not applied"
+              info="The seasonal index is still computed and shown, but the forecast does not use it for this department: tested month by month, adding it made the forecast worse. It will be picked up automatically once enough years of history make it earn its place.">
+              <p className="text-sm text-mav-muted mb-4">
+                Tested on the same held-out months: seasonal model {choice.tried.find(t => t.model === 'seasonal')?.mape.toFixed(1)}% average miss, {MODEL_LABEL.runrate.toLowerCase()} {choice.tried.find(t => t.model === 'runrate')?.mape.toFixed(1)}%.
+                {fc.thinSeasonality > 0 && <> {fc.thinSeasonality} of the 12 calendar months rest on a single year, so the bars below are last year&apos;s noise as much as a pattern.</>}
+              </p>
+              <SeasonChart seasonal={fc.seasonal} />
+            </Panel>
+          )}
+          {seasonal && <Panel className="mb-5" title="Seasonal shape"
             info={<>Bars run above and below the 100 line, because the index measures a month against a typical one — a March at {fc.seasonal[2] ? fc.seasonal[2].index.toFixed(0) : '—'} bills that much above average, a January at {fc.seasonal[0] ? fc.seasonal[0].index.toFixed(0) : '—'} that much below. Hatched bars rest on a single year of data. A March peak and a January trough fit a client base weighted to the UK and Australia, where the financial year ends in March — but on this much history that is a plausible explanation, not a proven one.</>}
             right={<span className="text-xs text-mav-muted">100 = an average month</span>}>
             <SeasonChart seasonal={fc.seasonal} />
-          </Panel>
+          </Panel>}
 
           {/* ---------------- backtest ---------------- */}
           {bt && (
             <Panel className="mb-5" title="How accurate has this been?"
               info={<>Each month was predicted using only the months before it — the model never saw the answer. It misses a single month by about {bt.mape.toFixed(0)}% on average, but the errors run in both directions ({pct(bt.bias, 1)} bias overall), so they largely cancel across a full year. That is why the annual figure deserves more confidence than any one month on it.</>}
-              right={<span className="text-xs text-mav-muted">Walk-forward test over the last {bt.folds} months</span>}>
+              right={<span className="text-xs text-mav-muted">Walk-forward test over the last {bt.folds} months · model: {MODEL_LABEL[bt.model]}</span>}>
+              {choice && choice.tried.length > 1 && (
+                <div className="flex flex-wrap gap-2 mb-4 text-xs">
+                  {choice.tried.map(t => (
+                    <span key={t.model} className={`rounded-full border px-3 py-1 ${t.model === bt.model ? 'border-mav-yellow/60 bg-mav-yellow/10 text-mav-yellow' : 'border-mav-line text-mav-muted'}`}>
+                      {MODEL_LABEL[t.model]} · {t.mape.toFixed(1)}% miss · {pct(t.bias, 1)} bias{t.model === bt.model ? ' · in use' : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
                 <Stat label="Average miss" value={`${bt.mape.toFixed(1)}%`}
                   note="Typical absolute error on a single month" />
@@ -517,6 +615,76 @@ function MonthTable({ fc }: { fc: Forecast }) {
         </tbody>
       </table>
     </div>
+  )
+}
+
+/* ------------------------------------------------------- leading indicators --- */
+interface Ind {
+  retainer: number; retainers: { name: string; amount: number }[]; retainerThen: number | null; level: number
+  active: number; activePrev: number
+  capture: number | null; won3: number; adhoc3: number
+  winRate: number | null; decided: number
+  stale: number; staleValue: number
+  topShare: number; topName: string
+  lumpShare: number; cap: number
+}
+
+// Six numbers that decide the next months, each with what to do about it. The forecast
+// can only be as good as these: a retainer base nobody grows, a pipeline that misses a
+// third of the work, quotes nobody closes out — none of that shows in a revenue line
+// until the month it lands.
+function Indicators({ ind }: { ind: Ind }) {
+  const p0 = (x: number) => `${Math.round(x * 100)}%`
+  const retDelta = ind.retainerThen != null ? ind.retainer - ind.retainerThen : null
+  const actDelta = ind.activePrev ? (ind.active - ind.activePrev) / ind.activePrev : 0
+  const items: { label: string; value: string; tone: string; note: React.ReactNode; tip?: string }[] = [
+    {
+      label: 'Retainer base', value: `${usdK(ind.retainer)}/mo`,
+      tone: retDelta != null && retDelta < -500 ? 'text-red-400' : 'text-green-400',
+      note: <>{ind.retainers.length} client{ind.retainers.length === 1 ? '' : 's'} · {p0(ind.level ? ind.retainer / ind.level : 0)} of a forecast month
+        {retDelta != null && <> · {retDelta >= 0 ? '+' : '−'}{usdK(Math.abs(retDelta))} vs 6 months ago</>}. The only revenue known in advance — converting a repeat client to a monthly retainer lifts every future month.</>,
+      tip: ind.retainers.map(r => `${r.name}: ${fmtUsd(Math.round(r.amount))}`).join('\n'),
+    },
+    {
+      label: 'Active clients / month', value: ind.active.toFixed(0),
+      tone: actDelta < -0.1 ? 'text-red-400' : actDelta > 0.05 ? 'text-green-400' : 'text-amber-300',
+      note: <>Last 3 months, against {ind.activePrev.toFixed(0)} in the 3 before ({actDelta >= 0 ? '+' : ''}{Math.round(actDelta * 100)}%). Fewer clients billing is the earliest sign of a lower run rate.</>,
+    },
+    {
+      label: 'Quote capture', value: ind.capture == null ? '—' : p0(ind.capture),
+      tone: ind.capture == null ? '' : ind.capture >= 0.8 ? 'text-green-400' : ind.capture >= 0.5 ? 'text-amber-300' : 'text-red-400',
+      note: <>Won quotes ({usdK(ind.won3)}) against ad-hoc revenue booked ({usdK(ind.adhoc3)}), last 3 months. Below ~80%, work is booked that the pipeline never saw, so the pipeline cannot be used to forecast. Log every quote in the Quotes tab and cc the tracked inbox.</>,
+    },
+    {
+      label: 'Win rate, 90 days', value: ind.winRate == null ? '—' : p0(ind.winRate),
+      tone: ind.winRate == null ? '' : ind.winRate >= 0.6 ? 'text-green-400' : ind.winRate >= 0.4 ? 'text-amber-300' : 'text-red-400',
+      note: <>Of {ind.decided} quotes decided in the last 90 days. Only decided quotes count — an open one is neither, which is why the next card matters.</>,
+    },
+    {
+      label: 'Quotes left undecided', value: String(ind.stale),
+      tone: ind.stale > 5 ? 'text-red-400' : ind.stale > 0 ? 'text-amber-300' : 'text-green-400',
+      note: <>Open 30–180 days with no won or lost, worth {usdK(ind.staleValue)}. Each is next month&apos;s revenue or noise in the pipeline — chase to a yes or no (Actions → Quiet quotes).</>,
+    },
+    {
+      label: 'Largest client share', value: p0(ind.topShare),
+      tone: ind.topShare > 0.25 ? 'text-red-400' : ind.topShare > 0.15 ? 'text-amber-300' : 'text-green-400',
+      note: <>{ind.topName || '—'}, last 3 months. One-offs above {usdK(ind.cap)} a client-month made up {p0(ind.lumpShare)} of ad-hoc revenue — kept out of the run rate, so a big win shows as upside, not as the new normal.</>,
+    },
+  ]
+  return (
+    <Panel className="mb-5" title="What drives the next months"
+      info="Leading indicators for the selected department, recomputed on every load. Each card says what it measures and what would move it. Quote capture is also a data-quality check: once it holds above 80% for six months, the won pipeline can feed the forecast directly."
+      right={<span className="text-xs text-mav-muted">last 3 complete months</span>}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {items.map(it => (
+          <div key={it.label} className="bg-mav-dark/50 border border-mav-line rounded-lg p-3" title={it.tip}>
+            <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-muted">{it.label}</div>
+            <div className={`font-mono text-xl font-semibold tabular-nums mt-1 ${it.tone}`}>{it.value}</div>
+            <div className="text-[11px] text-mav-muted mt-1 leading-snug">{it.note}</div>
+          </div>
+        ))}
+      </div>
+    </Panel>
   )
 }
 
