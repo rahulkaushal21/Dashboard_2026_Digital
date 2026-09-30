@@ -8,7 +8,7 @@ import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import InvoiceMapping from './InvoiceMapping'
 import {
-  getInvoiceRecon, getProjectInvoiceStatus, getBookingMonths,
+  getInvoiceRecon, getProjectInvoiceStatus, getBookingMonths, recentFloor, CONTRACTOR_FLOOR,
   type InvoiceRecon, type ProjectInvoiceStatus, type BookingMonth,
 } from '@/lib/supabase'
 
@@ -166,17 +166,27 @@ export default function Invoices() {
   const [status, setStatus] = useState<ProjectInvoiceStatus[]>([])
   const [booked, setBooked] = useState<BookingMonth[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [failed, setFailed] = useState(false)
   const [tab, setTab] = useState<Tab>('money')
 
+  // How far back we have actually fetched. The first paint takes three months — 316
+  // project rows rather than 1,050 — and earlier months arrive only when somebody asks
+  // for them, either by picking an earlier From date or by pressing the button.
+  // Contractor rows are the exception and always come back to January; the getter folds
+  // that into the same request rather than making a second one.
+  const [since, setSince] = useState(() => recentFloor())
+
   useEffect(() => {
-    Promise.all([getInvoiceRecon(), getProjectInvoiceStatus(), getBookingMonths()])
+    const first = since === recentFloor()
+    if (first) setLoading(true); else setLoadingMore(true)
+    Promise.all([getInvoiceRecon(since), getProjectInvoiceStatus(since), getBookingMonths()])
       .then(([r, m, b]) => { setRecon(r); setStatus([...m.values()]); setBooked(b) })
       // A failed read has to say so. Rendering an empty table would read as "nothing
       // is overdue", which is the most expensive possible lie on this page.
       .catch(() => setFailed(true))
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => { setLoading(false); setLoadingMore(false) })
+  }, [since])
 
   // ── filters ────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState('')
@@ -189,7 +199,10 @@ export default function Invoices() {
   // hiding 'Invoice status' on one must not hide it on the other.
   const mCols = useColumns('invoices-money', MONEY_COLS)
   const gCols = useColumns('invoices-recon', RECON_COLS)
-  const [from, setFrom] = useState(FLOOR)
+  // The From box starts where the data starts, so the range shown and the range loaded
+  // always agree — a box reading April over three months of rows would read as a month
+  // with no work in it.
+  const [from, setFrom] = useState(() => recentFloor())
   const [to, setTo] = useState('')
   const [who, setWho] = useState<Who>('all')
   const [mSort, setMSort] = useState<string | null>('ledger_usd')
@@ -202,12 +215,14 @@ export default function Invoices() {
   const clickG = (k: string) => { if (k === gSort) setGDir(d => d === 'asc' ? 'desc' : 'asc'); else { setGSort(k); setGDir('desc') } }
   const reset = () => {
     setSearch(''); setFStatus([]); setFPc([]); setFPm([]); setFGeo([])
-    setFrom(FLOOR); setTo(''); setWho('all')
+    setFrom(since); setTo(''); setWho('all')
   }
+  // Asking for an earlier month IS the request to load it.
+  useEffect(() => { if (from && from < since) setSince(from) }, [from, since])
   // 'Clear all' only appears once there is something to clear, the way the Project sheet
   // does it — a permanently visible Clear reads as a control with no object.
   const anyFilter = !!search || fStatus.length > 0 || fPc.length > 0 || fPm.length > 0
-    || fGeo.length > 0 || from !== FLOOR || !!to || who !== 'all'
+    || fGeo.length > 0 || from !== since || !!to || who !== 'all'
 
   // The FLOOR is applied on top of the date box, so clearing the box cannot drag
   // pre-April rows back in — the page would otherwise silently start reporting months
@@ -381,8 +396,16 @@ export default function Invoices() {
         {tab === 'money'
           ? <MultiSelect label="All PMs" options={uniq(status.map(x => x.pm_owner))} selected={fPm} onChange={setFPm} className="w-40" />
           : <MultiSelect label="All PCs" options={uniq(recon.map(x => x.pc))} selected={fPc} onChange={setFPc} className="w-40" />}
+        {/* What is loaded, said plainly. A page quietly holding three months while its
+            date box implies a year is how a month goes missing without anyone noticing. */}
+        {since > FLOOR && (
+          <button onClick={() => setSince(FLOOR)} disabled={loadingMore} className={toggleBtn}
+            title={`Loaded from ${since}. Contractor rows already reach back to ${CONTRACTOR_FLOOR}.`}>
+            {loadingMore ? 'Loading earlier months…' : `Since ${since.slice(0, 7)} · load from ${FLOOR.slice(0, 7)}`}
+          </button>
+        )}
         <button onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen} className={toggleBtn}>
-          More filters{(fGeo.length || from !== FLOOR || to) ? ` · ${[fGeo.length && 'geo', from !== FLOOR && 'from', to && 'to'].filter(Boolean).length}` : ''}
+          More filters{(fGeo.length || from !== since || to) ? ` · ${[fGeo.length && 'geo', from !== since && 'from', to && 'to'].filter(Boolean).length}` : ''}
         </button>
         {moreOpen && <>
           <div className="basis-full h-0" />

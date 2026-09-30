@@ -170,14 +170,19 @@ const readCache = new Map<string, CacheEntry>()
 /** Drop everything held. Called after any write so nobody reads their own stale data. */
 export function clearReadCache() { readCache.clear() }
 
-/** An optional server-side floor: `gte` on `column`. Rows the page would throw away
- *  should never cross the wire — the Invoices page discards everything before April 2026
- *  and was downloading 3,483 reconciliation rows to keep 996. */
-type Floor = { column: string; gte: string }
+/** A server-side filter, so rows the page would throw away never cross the wire. Either
+ *  a simple floor (`gte` on `column`) or a raw PostgREST `or` expression for the cases
+ *  where one window does not fit every row — contractors are kept back to January while
+ *  everything else loads three months. */
+type ReadFilter = { column: string; gte: string } | { or: string }
+const filterKey = (f?: ReadFilter) =>
+  !f ? '' : 'or' in f ? `or(${f.or})` : `${f.column}>=${f.gte}`
+const applyFilter = <Q extends { gte: (c: string, v: string) => Q; or: (e: string) => Q }>(q: Q, f?: ReadFilter) =>
+  !f ? q : 'or' in f ? q.or(f.or) : q.gte(f.column, f.gte)
 
-async function read<T>(table: string, cols = '*', orderBy?: string, floor?: Floor): Promise<T[] | null> {
+async function read<T>(table: string, cols = '*', orderBy?: string, filter?: ReadFilter): Promise<T[] | null> {
 if (!supabase) return null
-const key = `${table}|${cols}|${orderBy || ''}|${floor ? `${floor.column}>=${floor.gte}` : ''}`
+const key = `${table}|${cols}|${orderBy || ''}|${filterKey(filter)}`
 // A shallow copy per caller: the cached array is shared, and several pages sort what
 // they are handed in place. Without this, one page's sort would silently reorder
 // another's — including the paginated reads that require a stable order.
@@ -192,18 +197,15 @@ if (hit && Date.now() - hit.at < READ_TTL_MS) return copy(hit.rows)
 // rows, making totals slightly off and flaky.
 const PAGE = 1000
 const page = (from: number) => {
-  let q = supabase!.from(table).select(cols).range(from, from + PAGE - 1)
-  if (floor) q = q.gte(floor.column, floor.gte)
+  let q: any = supabase!.from(table).select(cols).range(from, from + PAGE - 1)
+  q = applyFilter(q, filter)
   if (orderBy) q = q.order(orderBy, { ascending: true })
   return q
 }
 // head:true asks PostgREST for the count and NO rows — the body is empty. Counting
 // by re-selecting the first page again would send those 1,000 rows twice.
-const countOnly = () => {
-  let q = supabase!.from(table).select(cols, { count: 'exact', head: true })
-  if (floor) q = q.gte(floor.column, floor.gte)
-  return q
-}
+const countOnly = () => applyFilter(
+  supabase!.from(table).select(cols, { count: 'exact', head: true }) as any, filter)
 
 const run = (async (): Promise<T[] | null> => {
   // NO exact count on the first request. count=exact makes Postgres run the whole
@@ -2418,17 +2420,34 @@ export interface ProjectInvoiceStatus {
  * look it up directly; the view does the normalising (PRJ…_3 -> PRJ…) internally.
  */
 /** The Invoices page shows nothing before this — the invoice app only became the
- *  reference in April 2026. Applied server-side so the earlier rows are never sent.
- *  If a page ever widens its range, widen this with it. */
+ *  reference in April 2026. The hard floor, and what "load everything" means. */
 export const INVOICE_FLOOR = '2026-04-01'
 
-export async function getProjectInvoiceStatus(): Promise<Map<string, ProjectInvoiceStatus>> {
+/** Contractor work is carried back to January: there are earlier contractor rows that
+ *  still need settling, and they are few (120 between January and August). Nothing else
+ *  reaches back that far by default. Rahul, 1 Oct 2026. */
+export const CONTRACTOR_FLOOR = '2026-01-01'
+
+/** The first paint loads three calendar months, this one included — 316 project rows
+ *  instead of 1,050. Everything earlier arrives only when somebody asks for it. */
+export function recentFloor(months = 3, today = new Date()): string {
+  const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - (months - 1), 1))
+  const floor = d.toISOString().slice(0, 10)
+  // Never ask for less than the page can show, and never reach past the hard floor.
+  return floor < INVOICE_FLOOR ? INVOICE_FLOOR : floor
+}
+
+export async function getProjectInvoiceStatus(since = recentFloor()): Promise<Map<string, ProjectInvoiceStatus>> {
   const m = new Map<string, ProjectInvoiceStatus>()
   if (!supabase) return m
   // read() paginates. 3,099 rows, and an unbounded PostgREST select stops at 1,000 —
   // which would have quietly hidden two thirds of the sheet.
+  // Two windows in one request: the recent months, OR any contractor row since January.
+  // Two separate reads would double the round-trips and then have to be de-duplicated.
   const rows = await read<ProjectInvoiceStatus>('project_invoice_status_mv', '*', 'row_key',
-    { column: 'booking_month', gte: INVOICE_FLOOR })
+    since <= CONTRACTOR_FLOOR
+      ? { column: 'booking_month', gte: since }
+      : { or: `booking_month.gte.${since},and(is_contractor.is.true,booking_month.gte.${CONTRACTOR_FLOOR})` })
   for (const r of rows || []) m.set(r.project_id, r)
   return m
 }
@@ -2558,7 +2577,7 @@ export interface InvoiceRecon {
   in_sheet: boolean
 }
 
-export async function getInvoiceRecon(): Promise<InvoiceRecon[]> {
+export async function getInvoiceRecon(since = recentFloor()): Promise<InvoiceRecon[]> {
   // read() paginates on a stable key. PostgREST caps an unbounded select at 1,000 and
   // there are ~3,500 invoices — taking the first page would have made the reconciliation
   // gap look a third of its real size.
@@ -2566,7 +2585,7 @@ export async function getInvoiceRecon(): Promise<InvoiceRecon[]> {
   // no booking date; they come through the invoice_date fallback below rather than being
   // dropped, because a missing date must never silently shrink the gap.
   return (await read<InvoiceRecon>('invoice_reconciliation_mv', '*', 'invoice_no',
-    { column: 'booking_date', gte: INVOICE_FLOOR })) || []
+    { column: 'booking_date', gte: since })) || []
 }
 
 // ── Invoice mapping: the month's sheet rows against the invoices raised for them ──────
