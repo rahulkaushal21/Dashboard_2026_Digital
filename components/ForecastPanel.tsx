@@ -448,7 +448,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
                 <Stat label="Worst miss" value={pct(bt.worst.errPct, 0)} note={bt.worst.label} />
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[420px]">
+                <table className="min-w-full text-sm min-w-[420px]">
                   <thead className="text-left text-mav-muted border-b border-mav-line">
                     <tr>
                       <th className="py-2 pr-4 font-medium">Month</th>
@@ -600,7 +600,7 @@ function MonthTable({ fc }: { fc: Forecast }) {
   const max = Math.max(...fc.months.map(m => m.high), fc.neededPerMonth)
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[640px]">
+      <table className="min-w-full text-sm min-w-[640px]">
         <thead className="text-left text-mav-muted border-b border-mav-line">
           <tr>
             <th className="px-5 py-2.5 font-medium">Month</th>

@@ -301,8 +301,8 @@ export default function InvoiceMapping() {
           ? 'Invoices dated this month that no sheet row of this month maps to — usually work booked in another month, or a line the sheet is missing (the Reconciliation tab follows those up).'
           : 'Each sheet row is matched to an invoice by the invoice number in the sheet, then the project ID (for monthly retainers, the instalment within a month of the booking), then client and value within 2%. Values are checked per invoice, so an invoice covering several lines is compared with their sum. Hover a row for its PC, project ID and how it matched.'}>
         {/* Phones only: a desk-width screen fits it whole. */}
-        <div className="max-md:overflow-x-auto">
-        <table className="w-full table-fixed text-sm max-md:min-w-[900px]">
+        <div className="overflow-x-auto">
+        <table className="min-w-full table-fixed text-sm max-md:min-w-[900px]">
           <colgroup>
             <col className="w-[124px]" /><col /><col className="w-[130px]" /><col className="w-[96px]" />
             <col className="w-[132px]" /><col className="w-[96px]" />

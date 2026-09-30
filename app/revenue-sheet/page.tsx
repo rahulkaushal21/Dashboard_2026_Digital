@@ -691,7 +691,7 @@ export default function ProjectLedger() {
           <ColumnPicker cols={colPick} />
         </div>}>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="min-w-full text-sm">
           <thead className="text-left text-mav-fg/70 border-b border-mav-line">
             <tr>
               <th className="px-3 py-2 w-8"><input type="checkbox" checked={allPicked} onChange={toggleAll} aria-label="Select all filtered" /></th>

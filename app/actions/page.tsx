@@ -564,7 +564,7 @@ export default function ActionsPage() {
       <Panel flush title={<>{BUCKET_META[bucket].label} · {shownCount.toLocaleString()}</>} info={BUCKET_META[bucket].info}
         right={<ColumnPicker cols={cols} />}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="text-left text-mav-fg/70 border-b border-mav-line">
               {isProject ? (
                 <tr>

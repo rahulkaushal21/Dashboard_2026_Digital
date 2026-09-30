@@ -152,7 +152,7 @@ export default function NeedsInput() {
         <Panel flush title={reason ? REASONS.find(x => x.key === reason)?.label : 'Work list'}
           right={<span className="font-mono text-xs text-mav-muted">{shown.length} shown</span>}>
           <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-4 py-2 font-medium">Client</th>

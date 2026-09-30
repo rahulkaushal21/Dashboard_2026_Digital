@@ -92,7 +92,7 @@ export default function PmDirectoryPanel({ canEdit }: { canEdit: boolean }) {
       info={`The PM team, and who may confirm a deal. A person here can confirm the deals they are named on as PM; an admin can confirm anything; everyone else on ${ALLOWED_DOMAINS.join(' or ')} can look but not change. The pod is a label for grouping the team — it does not affect what anyone can confirm.`}
       right={<span className="font-mono text-xs text-mav-muted">{rows.filter(r => r.active).length} active · {rows.length} listed</span>}>
       <div className="border border-mav-line rounded-lg overflow-x-auto mb-4">
-        <table className="w-full text-sm">
+        <table className="min-w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
               <th className="px-4 py-2 font-medium">Name</th>

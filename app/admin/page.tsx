@@ -127,7 +127,7 @@ function AdminsPanel() {
       info={`Admins see every PM’s scorecard and can edit Settings. A PM without admin sees only their own scorecard, and anyone who is neither sees none of it. Everything else in the dashboard is open to all ${ALLOWED_DOMAINS.join(' and ')} accounts. Only the super admin, ${OWNER_EMAIL}, can change this list.`}
       right={<span className="font-mono text-xs text-mav-muted">{rows.length + 1} admins</span>}>
       <div className="border border-mav-line rounded-lg overflow-x-auto mb-4">
-        <table className="w-full text-sm">
+        <table className="min-w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr><th className="px-4 py-2 font-medium">Admin</th><th className="px-4 py-2 font-medium">Why</th><th className="px-4 py-2"></th></tr>
           </thead>

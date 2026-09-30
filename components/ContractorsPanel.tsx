@@ -66,7 +66,7 @@ export default function ContractorsPanel({ canEdit, actor }: { canEdit: boolean;
       <p className="text-xs text-mav-muted mb-3"><span className="text-mav-fg">Any PM or admin can add one</span> &mdash; you do not need to raise a request.</p>
 
       <div className="border border-mav-line rounded-lg overflow-x-auto mb-3">
-        <table className="w-full text-sm">
+        <table className="min-w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
               <th className="px-4 py-2 font-medium">Name</th>

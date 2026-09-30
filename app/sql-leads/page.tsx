@@ -98,7 +98,7 @@ export default function SqlLeads() {
 
       <Panel flush title="Leads" right={<span className="font-mono text-xs text-mav-muted">{s.length} rows</span>}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
+          <table className="min-w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>{['Date', 'Company', 'Industry', 'Persona', 'Venture', 'Region', 'Owner'].map(h => <th key={h} className="px-4 py-3 font-medium">{h}</th>)}</tr></thead>
             <tbody>{s.map(x => (
               <tr key={x.id} className="border-b border-mav-line/60 hover:bg-mav-dark/40">

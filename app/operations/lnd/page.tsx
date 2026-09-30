@@ -434,7 +434,7 @@ export default function LndPage() {
           info="Where the cohort gets stuck. A course with people in progress and nobody finishing is a course problem, not a motivation problem."
           right={<span className="text-xs text-mav-muted">{mods.length} assignments across {byCourse.length} courses</span>}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[720px]">
+            <table className="min-w-full text-sm min-w-[720px]">
               <thead className="text-left border-b border-mav-line">
                 <tr>
                   <th className="px-4 py-2">Course</th>
@@ -501,7 +501,7 @@ export default function LndPage() {
 
       <div className="bg-mav-panel border border-mav-line rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
+          <table className="min-w-full text-sm min-w-[720px]">
             <thead className="text-left border-b border-mav-line">
               <tr>
                 <th className="px-4 py-3">Learner</th>

@@ -1140,7 +1140,7 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 
 <Panel flush title={<>{o.length} {o.length === 1 ? 'deal' : 'deals'}</>} right={<ColumnPicker cols={cols} />}>
 <div className="overflow-x-auto">
-<table className="w-full text-sm">
+<table className="min-w-full text-sm">
 <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
 <th className="px-3 py-3 w-10 font-medium text-[11px] uppercase tracking-wide"
   title="Tick one deal to confirm it, or several ad-hoc jobs for the same client to put them on one invoice.">Pick</th>

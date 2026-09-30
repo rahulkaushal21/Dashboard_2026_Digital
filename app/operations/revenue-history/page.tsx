@@ -539,7 +539,7 @@ export default function RevenueHistory() {
             info="Years marked * do not cover a full Apr–Mar span, so no percentage is shown into or out of them. Model names are reproduced as the source spreadsheet spells them."
             right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-full text-sm">
                 <thead>
                   <tr>
                     <th className="text-left px-4 py-2">Model</th>
@@ -587,7 +587,7 @@ export default function RevenueHistory() {
             info="Top-10 share is the concentration risk: the higher it climbs, the more of the year rests on a handful of accounts, and the harder a single one leaving lands."
             right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[720px]">
+              <table className="min-w-full text-sm min-w-[720px]">
                 <thead>
                   <tr>
                     <th className="text-left px-4 py-2">Year</th>

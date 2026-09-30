@@ -287,7 +287,7 @@ export default function BusinessNumbers() {
           <Panel flush className="mb-6" title="By service" info={basis}
             right={<span className="text-[11px] text-mav-muted">{thisLabel} vs {prevLabel}</span>}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <thead className="text-left text-mav-fg/70 border-b border-mav-line">
                 <tr>
                   <th className={th}>Service</th>
@@ -358,7 +358,7 @@ export default function BusinessNumbers() {
               department; the rows behind it are never fetched, so it cannot be split here. */}
           {unpriced > 0 && <NotSplitNote className="px-4 pt-2" what="The count of unpriced open deals" reason="arrives as a single company-wide number" />}
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <thead className="text-left text-mav-fg/70 border-b border-mav-line">
                 <tr>
                   <th className={th}>Client</th>

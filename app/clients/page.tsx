@@ -1121,7 +1121,7 @@ export default function Clients() {
       <Panel flush title="Revenue clients"
         right={<div className="flex items-center gap-3"><span className="text-xs text-mav-muted">sorted by latest action</span><ColumnPicker cols={revCols} /></div>}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
               {/* Only the chosen columns; the rest are one tick away in Columns. */}
               {([
@@ -1186,7 +1186,7 @@ export default function Clients() {
           <span className="text-mav-muted">Smaller grey text under the group name is the granular industry it was merged from.</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line"><tr>
               {DIR_COLS.filter(c => dirCols.on(c.key)).map(c => (
                 <th key={c.key} className="px-3 py-2.5 font-medium whitespace-nowrap">{c.label}</th>
@@ -1705,7 +1705,7 @@ export default function Clients() {
                         ? <p className="text-sm text-mav-muted">No quotes on record for this client. Only 274 of 405 clients have any &mdash; the older revenue predates the Quotes sheet.</p>
                         : (
                           <div className="overflow-x-auto rounded-lg border border-mav-line">
-                            <table className="w-full text-sm">
+                            <table className="min-w-full text-sm">
                               <thead className="text-left text-mav-fg/70 border-b border-mav-line bg-mav-dark/40">
                                 <tr>
                                   <th className="px-3 py-2 font-medium whitespace-nowrap">Date</th>
@@ -1746,7 +1746,7 @@ export default function Clients() {
                         ? <p className="text-sm text-mav-muted">Nothing delivered on record yet.</p>
                         : (
                           <div className="overflow-x-auto rounded-lg border border-mav-line">
-                            <table className="w-full text-sm">
+                            <table className="min-w-full text-sm">
                               <thead className="text-left text-mav-fg/70 border-b border-mav-line bg-mav-dark/40">
                                 <tr>
                                   <th className="px-3 py-2 font-medium whitespace-nowrap">Month</th>

@@ -288,7 +288,7 @@ export default function PmDetail({ slug }: { slug: string }) {
         }>
         {q2cRows.length === 0 ? <p className="px-5 py-5 text-sm text-mav-muted">No New-development work raised this quarter.</p> : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[740px]">
+            <table className="min-w-full text-sm min-w-[740px]">
               <thead className="text-left text-mav-muted border-b border-mav-line">
                 <tr>{['Raised', 'Confirmed', 'Client', 'Project', 'Value', 'Found in', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
               </thead>
@@ -326,7 +326,7 @@ export default function PmDetail({ slug }: { slug: string }) {
         )}
         {pending.rows.length === 0 ? <p className="px-5 py-5 text-sm text-mav-muted">Nothing open.</p> : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[720px]">
+            <table className="min-w-full text-sm min-w-[720px]">
               <thead className="text-left text-mav-muted border-b border-mav-line">
                 <tr>{['Date', 'Client', 'Subject', 'Value', 'Source', 'Status'].map(h => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr>
               </thead>

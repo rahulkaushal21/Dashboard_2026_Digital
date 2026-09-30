@@ -243,9 +243,9 @@ export default function Invoices() {
                      x.expert, x.contractor_name, x.pm_owner, x.invoice_nos))
     .filter(x => keeps(fStatus, x.status))
     .filter(x => keeps(fPm, x.pm_owner))
-    .filter(x => inRange(x.booking_month))
+    .filter(x => inMoneyRange(x.booking_month))
     .filter(keepsWho),
-    [status, search, fStatus, fPm, from, to, who])
+    [status, search, fStatus, fPm, from, to, who, since])
 
   const moneySorted = useMemo(() => sortRows(money, r => {
     switch (mSort) {
@@ -399,7 +399,7 @@ export default function Invoices() {
         {/* What is loaded, said plainly. A page quietly holding three months while its
             date box implies a year is how a month goes missing without anyone noticing. */}
         {since > FLOOR && (
-          <button onClick={() => setSince(FLOOR)} disabled={loadingMore} className={toggleBtn}
+          <button onClick={() => { setSince(FLOOR); setFrom(FLOOR) }} disabled={loadingMore} className={toggleBtn}
             title={`Loaded from ${since}. Contractor rows already reach back to ${CONTRACTOR_FLOOR}.`}>
             {loadingMore ? 'Loading earlier months…' : `Since ${since.slice(0, 7)} · load from ${FLOOR.slice(0, 7)}`}
           </button>
@@ -430,6 +430,14 @@ export default function Invoices() {
 
       {loading && <p className="text-sm text-mav-muted">Loading…</p>}
 
+      {/* The contractor view reaches further back than the rest of the page. Said out
+          loud, because a total that silently covers a different period is a trap. */}
+      {!loading && tab === 'money' && contractorView && (
+        <p className="text-[11px] text-mav-muted/80 -mt-1 mb-3">
+          Contractor rows are shown from {CONTRACTOR_FLOOR} — further back than the rest of the page,
+          because there are earlier contractor jobs still to settle.
+        </p>
+      )}
       {!loading && tab === 'money' && (
         <>
           {/* The four that cost money, in the order they cost it. Paid is deliberately
@@ -465,10 +473,12 @@ export default function Invoices() {
             </KPIRow>
           )}
           <Panel flush>
-            {/* No box of its own to scroll: the rows scroll with the page and the sticky
-                header holds at the top of it. Only below xl, where the table is wider than
-                the screen, does it scroll sideways (and the header then scrolls with it). */}
-            <div className="max-xl:overflow-x-auto"><table className="w-full text-sm max-xl:min-w-[1040px]">
+            {/* Rows scroll with the PAGE (no inner vertical box) and the sticky header
+                holds at the top of it. Sideways is different: the table sizes to its
+                content, so once the columns are wider than the screen it scrolls
+                horizontally — at any width. It used to be pinned to w-full, which crushed
+                the columns instead of overflowing and left nothing to scroll. */}
+            <div className="overflow-x-auto"><table className="min-w-full text-sm max-xl:min-w-[1040px]">
               {/* Every header names its SOURCE and its unit. 'Sheet USD / Cost / Invoiced
                   / Paid' side by side said nothing about which system each came from. */}
               <thead className="text-mav-muted"><tr>
@@ -607,7 +617,7 @@ export default function Invoices() {
 
           <div className="grid lg:grid-cols-[320px_1fr] gap-4">
             <Panel title="By booking month" flush>
-              <div className="max-xl:overflow-x-auto"><table className="w-full text-sm">
+              <div className="overflow-x-auto"><table className="min-w-full text-sm">
                 <thead className="text-left text-mav-muted"><tr>
                   {['Month', 'Booked', 'App', 'Gap'].map(h =>
                     <th key={h} className="sticky top-0 z-10 bg-mav-panel px-4 py-2 font-medium border-b border-mav-line"
@@ -636,7 +646,7 @@ export default function Invoices() {
             </Panel>
 
             <Panel title={`Invoices the revenue sheet does not have (${gap.length})`} flush>
-              <div className="max-xl:overflow-x-auto"><table className="w-full text-sm max-xl:min-w-[900px]">
+              <div className="overflow-x-auto"><table className="min-w-full text-sm max-xl:min-w-[900px]">
                 <thead className="text-mav-muted"><tr>
                   {gCols.on('invoice_no') && (
 <Th id="invoice_no" label="Invoice no (app)" sort={gSort} dir={gDir} onSort={clickG} />

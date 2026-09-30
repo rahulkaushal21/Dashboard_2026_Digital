@@ -215,7 +215,7 @@ export default function Escalations() {
         info={`Click a row for the full record and the email insight. Click Date, Company or Type to sort.${e.length > 400 ? ' The table shows the first 400 rows; narrow the filters to see the rest.' : ''}`}
         right={<div className="flex items-center gap-3"><span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{Math.min(e.length, 400)} of {e.length} shown</span><ColumnPicker cols={cols} /></div>}>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="min-w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
               {([

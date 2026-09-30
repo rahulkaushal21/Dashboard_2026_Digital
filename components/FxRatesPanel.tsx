@@ -91,7 +91,7 @@ export default function FxRatesPanel({ canEdit, actor }: { canEdit: boolean; act
       </p>
 
       <div className="border border-mav-line rounded-lg overflow-x-auto mb-4">
-        <table className="w-full text-sm">
+        <table className="min-w-full text-sm">
           <thead className="text-left text-mav-muted border-b border-mav-line">
             <tr>
               <th className="px-4 py-2 font-medium">Currency</th>

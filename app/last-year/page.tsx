@@ -283,7 +283,7 @@ export default function LastYearReview() {
         info={<><span className="font-semibold">PM</span> is whoever is on the client&rsquo;s most recent booking; a <span className="font-semibold">+n</span> beside it means the account changed hands during the period — hover to see everyone who held it. Filtering by PM narrows every figure on the page to that PM&rsquo;s bookings only.</>}
         right={<ColumnPicker cols={cols} />}>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-5 py-3 font-medium sticky left-0 bg-mav-panel">Client</th>

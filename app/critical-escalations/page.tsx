@@ -315,7 +315,7 @@ export default function CriticalEscalations() {
         : (
         <Panel flush title={<>Escalated clients · {filtered.length}</>} right={<ColumnPicker cols={cols} />}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <thead className="text-left border-b border-mav-line"><tr>
                 <th className="px-3 py-2.5">Date</th>
                 <th className="px-3 py-2.5">Client</th>

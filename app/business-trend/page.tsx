@@ -561,7 +561,7 @@ export default function BusinessTrendPage() {
 
       <Panel flush className="mb-5" title="Last 6 months analysis">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
+          <table className="min-w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-4 py-3 font-medium">Month</th>
@@ -637,7 +637,7 @@ export default function BusinessTrendPage() {
             </div>
             {fy26Analysis.data.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-full text-sm">
                   <thead className="text-left text-mav-muted border-b border-mav-line">
                     <tr>
                       <th className="px-4 py-3 font-medium">Month</th>
@@ -690,7 +690,7 @@ export default function BusinessTrendPage() {
           info="Open quotes ranked by what they are actually worth — value × the win probability on the deal."
           right={<span className="text-xs text-mav-muted">{fmtUsd(plan.weighted)} weighted of {fmtUsd(plan.pipelineValue)} open</span>}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[720px]">
+            <table className="min-w-full text-sm min-w-[720px]">
               <thead className="text-left text-mav-muted border-b border-mav-line">
                 <tr>
                   <th className="px-4 py-2 font-medium">Client</th>
@@ -730,7 +730,7 @@ export default function BusinessTrendPage() {
           info={<>Accounts that billed materially less in the last three completed months than the three before. &ldquo;Was billing&rdquo; is their old monthly average — what comes back if the account is re-activated, worth {fmtUsd(plan.recoverable)}/month in total. Click a client to see the last business we closed with them.</>}
           right={<span className="text-xs text-mav-muted">{fmtUsd(plan.recoverable)}/mo recoverable · click a row</span>}>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[560px]">
+            <table className="min-w-full text-sm min-w-[560px]">
               <thead className="text-left text-mav-muted border-b border-mav-line">
                 <tr>
                   <th className="px-4 py-2 font-medium">Client</th>
@@ -767,7 +767,7 @@ export default function BusinessTrendPage() {
       </KPIRow>
       <Panel flush title="Monthly details">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[720px]">
+          <table className="min-w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
               <tr>
                 <th className="px-4 py-3 font-medium">Month</th>
@@ -857,7 +857,7 @@ export default function BusinessTrendPage() {
                 </div>
                 <div className="text-xs uppercase tracking-wide text-mav-yellow mb-2">Billing, last {pushDetail.deal.history.length} months</div>
                 <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-full text-sm">
                   <tbody>
                     {pushDetail.deal.history.slice().reverse().map(h => (
                       <tr key={h.month} className="border-b border-mav-line/60">
