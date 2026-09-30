@@ -105,6 +105,7 @@ const MONEY_COLS: ColumnDef[] = [
 const RECON_COLS: ColumnDef[] = [
   { key: 'invoice_no', label: 'Invoice no (app)', locked: true },
   { key: 'project_id', label: 'Project ID (app)', locked: true },
+  { key: 'booking_date', label: 'Booked', default: true },
   { key: 'invoice_date', label: 'Invoice date', default: true },
   { key: 'client', label: 'Client (app)', default: true },
   { key: 'project_names', label: 'Project', default: true },
@@ -268,7 +269,7 @@ export default function Invoices() {
     .filter(x => keeps(fStatus, x.status))
     .filter(x => keeps(fPc, x.pc))
     .filter(x => keeps(fGeo, x.geo))
-    .filter(x => inRange(x.invoice_date))
+    .filter(x => inRange(x.booking_date || x.invoice_date))
     .sort((a, b) => (b.our_usd || 0) - (a.our_usd || 0)),
     [recon, search, fStatus, fPc, fGeo, from, to])
 
@@ -276,6 +277,7 @@ export default function Invoices() {
     switch (gSort) {
       case 'invoice_no': return r.invoice_no
       case 'project_id': return r.project_id
+      case 'booking_date': return r.booking_date
       case 'invoice_date': return r.invoice_date
       case 'client': return r.client
       case 'project_names': return r.project_names
@@ -287,7 +289,7 @@ export default function Invoices() {
 
   const gapUsd = gap.reduce((n, x) => n + (x.our_usd || 0), 0)
   const gapInstal = gap.filter(x => x.is_instalment)
-  const inScope = recon.filter(x => inRange(x.invoice_date))
+  const inScope = recon.filter(x => inRange(x.booking_date || x.invoice_date))
   const future = inScope.filter(x => x.is_future && !x.in_sheet)
   const futureUsd = future.reduce((n, x) => n + (x.our_usd || 0), 0)
   const voided = inScope.filter(x => !x.in_sheet && !x.is_future && x.status === 'Void')
@@ -297,7 +299,7 @@ export default function Invoices() {
   const byMonth = useMemo(() => {
     const m = new Map<string, { app: number; gap: number; n: number; gapN: number }>()
     for (const r of inScope) {
-      const k = monthOf(r.invoice_date); if (!k) continue
+      const k = monthOf(r.booking_date || r.invoice_date); if (!k) continue
       const e = m.get(k) || { app: 0, gap: 0, n: 0, gapN: 0 }
       e.app += r.our_usd || 0; e.n++
       if (!r.in_sheet) { e.gap += r.our_usd || 0; e.gapN++ }
@@ -565,9 +567,18 @@ export default function Invoices() {
             renews, so the sheet and the app legitimately hold different ids for the same engagement.
             Matching on the id alone reported a gap four times larger than the real one.
           </p>
+          {/* The three rules that make this agree with the invoice app's own report,
+              settled against its September export on 1 Oct 2026. Stated on the page so
+              nobody has to ask why a figure here differs from a figure there. */}
+          <p className="text-[11px] text-mav-muted/80 mb-4 max-w-3xl">
+            Months here are <strong>booking months</strong>, not invoice dates — the app books an
+            invoice when the work is booked, so one dated 13 March can belong to September. Draft
+            invoices are excluded because a draft has not been raised, and a voided invoice books a
+            credit in the month it was voided rather than disappearing from the month it was raised.
+          </p>
 
           <div className="grid lg:grid-cols-[320px_1fr] gap-4">
-            <Panel title="By month" flush>
+            <Panel title="By booking month" flush>
               <div className="max-xl:overflow-x-auto"><table className="w-full text-sm">
                 <thead className="text-left text-mav-muted"><tr>
                   {['Month', 'App', 'Gap'].map(h =>
@@ -594,6 +605,9 @@ export default function Invoices() {
 )}
                   {gCols.on('project_id') && (
                   <Th id="project_id" label="Project ID (app)" hint="The id the invoice app raised this against. Paste it into the sheet to close the row." sort={gSort} dir={gDir} onSort={clickG} />
+                  )}
+                  {gCols.on('booking_date') && (
+                  <Th id="booking_date" label="Booked" hint="The month the invoice app reports this in. It is not always the invoice date — an invoice dated 13 March can book in September." sort={gSort} dir={gDir} onSort={clickG} />
                   )}
                   {gCols.on('invoice_date') && (
                   <Th id="invoice_date" label="Invoice date" sort={gSort} dir={gDir} onSort={clickG} />
@@ -627,6 +641,9 @@ export default function Invoices() {
                         a tooltip, so it can be pasted straight into the sheet. */}
                     {gCols.on('project_id') && (
                     <td className="px-4 py-3 font-mono text-[11px] whitespace-nowrap">{x.project_id || '—'}</td>
+                    )}
+                    {gCols.on('booking_date') && (
+                    <td className="px-4 py-3 whitespace-nowrap">{x.booking_date || '—'}</td>
                     )}
                     {gCols.on('invoice_date') && (
                     <td className="px-4 py-3 text-mav-muted whitespace-nowrap">{x.invoice_date || '—'}</td>

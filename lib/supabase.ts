@@ -2501,6 +2501,9 @@ export interface InvoiceRecon {
   client?: string | null
   status: string
   invoice_date?: string | null
+  /** The month the business reports this in — the app's own report is keyed on this, not
+   *  on invoice_date. An invoice dated 13 March can book in September. */
+  booking_date?: string | null
   due_date?: string | null
   paid_date?: string | null
   sales_person?: string | null
