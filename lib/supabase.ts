@@ -2495,6 +2495,22 @@ export async function getDealLifecycle(opts: { ours?: boolean } = {}): Promise<D
  * Reads the materialised copy: the view behind it joins the invoice mirrors to
  * web_project_ledger, which parses sheet_raw column by column, and ran in seconds.
  */
+/** The invoice app's own monthly booking figure — the number its Booking Data report
+ *  prints. September 2026 ties to it exactly, to the cent and by department. */
+export interface BookingMonth {
+  booking_month: string
+  booked_usd: number
+  invoices: number
+  reversals_usd: number
+  /** Amendments recorded by hand from the app's report because GetInvoices cannot report
+   *  them. Retires when the API exposes booking events. */
+  adjustments_usd: number
+}
+
+export async function getBookingMonths(): Promise<BookingMonth[]> {
+  return (await read<BookingMonth>('web_invoice_booking_months', '*', 'booking_month')) || []
+}
+
 export interface InvoiceRecon {
   invoice_no: string
   project_id?: string | null

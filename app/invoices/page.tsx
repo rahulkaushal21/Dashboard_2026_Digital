@@ -8,8 +8,8 @@ import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import InvoiceMapping from './InvoiceMapping'
 import {
-  getInvoiceRecon, getProjectInvoiceStatus,
-  type InvoiceRecon, type ProjectInvoiceStatus,
+  getInvoiceRecon, getProjectInvoiceStatus, getBookingMonths,
+  type InvoiceRecon, type ProjectInvoiceStatus, type BookingMonth,
 } from '@/lib/supabase'
 
 // Invoices & Reconciliation
@@ -164,13 +164,14 @@ const FLOOR = '2026-04-01'
 export default function Invoices() {
   const [recon, setRecon] = useState<InvoiceRecon[]>([])
   const [status, setStatus] = useState<ProjectInvoiceStatus[]>([])
+  const [booked, setBooked] = useState<BookingMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [tab, setTab] = useState<Tab>('money')
 
   useEffect(() => {
-    Promise.all([getInvoiceRecon(), getProjectInvoiceStatus()])
-      .then(([r, m]) => { setRecon(r); setStatus([...m.values()]) })
+    Promise.all([getInvoiceRecon(), getProjectInvoiceStatus(), getBookingMonths()])
+      .then(([r, m, b]) => { setRecon(r); setStatus([...m.values()]); setBooked(b) })
       // A failed read has to say so. Rendering an empty table would read as "nothing
       // is overdue", which is the most expensive possible lie on this page.
       .catch(() => setFailed(true))
@@ -296,6 +297,10 @@ export default function Invoices() {
   const inScopeUsd = inScope.reduce((n, x) => n + (x.our_usd || 0), 0)
 
   // Per month, both directions at once — this is the table that explains a variance.
+  // Keyed the same way byMonth keys itself, so the two line up row for row.
+  const bookedBy = useMemo(() => new Map(
+    booked.map(b => [monthOf(b.booking_month) || '', b] as const)), [booked])
+
   const byMonth = useMemo(() => {
     const m = new Map<string, { app: number; gap: number; n: number; gapN: number }>()
     for (const r of inScope) {
@@ -581,12 +586,22 @@ export default function Invoices() {
             <Panel title="By booking month" flush>
               <div className="max-xl:overflow-x-auto"><table className="w-full text-sm">
                 <thead className="text-left text-mav-muted"><tr>
-                  {['Month', 'App', 'Gap'].map(h =>
-                    <th key={h} className="sticky top-0 z-10 bg-mav-panel px-4 py-2 font-medium border-b border-mav-line">{h}</th>)}
+                  {['Month', 'Booked', 'App', 'Gap'].map(h =>
+                    <th key={h} className="sticky top-0 z-10 bg-mav-panel px-4 py-2 font-medium border-b border-mav-line"
+                        title={h === 'Booked' ? "The invoice app's own booking figure for the month — what its Booking Data report prints" : undefined}>{h}</th>)}
                 </tr></thead>
                 <tbody>{byMonth.map(([k, v]) => (
                   <tr key={k} className="border-b border-mav-line/60">
                     <td className="px-4 py-2 whitespace-nowrap">{k}</td>
+                    {/* The app's own number, on its own basis. Shown beside ours so the two
+                        can be read together rather than reconciled by hand once a month. */}
+                    <td className="px-4 py-2 whitespace-nowrap tabular-nums"
+                        title={bookedBy.get(k)?.adjustments_usd
+                          ? `Includes ${usd(bookedBy.get(k)!.adjustments_usd)} of recorded amendments`
+                          : undefined}>
+                      {bookedBy.has(k) ? usd(bookedBy.get(k)!.booked_usd) : '—'}
+                      {bookedBy.get(k)?.adjustments_usd ? <span className="text-mav-yellow"> *</span> : null}
+                    </td>
                     <td className="px-4 py-2 text-mav-muted whitespace-nowrap">{usd(v.app)}</td>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {v.gap ? <span className="text-amber-400">{usd(v.gap)}</span> : '—'}
