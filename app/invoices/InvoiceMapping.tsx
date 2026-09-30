@@ -35,7 +35,6 @@ const STATE_TONE: Record<MappingState, string> = {
   'Part invoiced': 'bg-amber-500/15 text-amber-400',
   'Value differs': 'bg-orange-500/15 text-orange-400',
   'To raise': 'bg-red-500/15 text-red-400',
-  'Awaiting info': 'bg-mav-fg/10 text-mav-muted',
   'Not in sheet': 'bg-sky-500/15 text-sky-400',
 }
 const Badge = ({ s }: { s: MappingState }) =>
@@ -213,7 +212,7 @@ export default function InvoiceMapping() {
       <KPIRow cols={4}>
         <KPICard tone="accent" label={`Sheet · ${monthLabel}`} value={loading ? '…' : usd(sheetUsd)}
           sub={`${sheet.length} sheet rows`}
-          info="Every line booked in the revenue sheet for this month (Month-Year), in this department. Cancelled lines are left out."
+          info="Every line booked in the revenue sheet for this month (Month-Year), in this department. Cancelled, On Hold and Awaiting Information lines are left out — there is no invoice to raise against work that is stopped or not yet agreed."
           details={loading ? undefined : rowDetails(sheet, 'All sheet rows this month, by AM')} />
         <KPICard tone="green" label="Invoiced against it" value={loading ? '…' : usd(invoicedUsd)}
           sub={`${done.length + check.length} rows have an invoice · ${monthInvoiced.size} invoices`}

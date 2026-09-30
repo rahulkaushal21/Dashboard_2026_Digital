@@ -2537,7 +2537,7 @@ export async function getInvoiceRecon(): Promise<InvoiceRecon[]> {
 // (invoice no → project id → client + value, value checked per invoice) lives in the
 // database function invoice_mapping() — see migration 102 — so there is one definition.
 
-export type MappingState = 'Invoiced' | 'Part invoiced' | 'Value differs' | 'To raise' | 'Awaiting info' | 'Not in sheet'
+export type MappingState = 'Invoiced' | 'Part invoiced' | 'Value differs' | 'To raise' | 'Not in sheet'
 
 export interface InvoiceMappingRow {
   row_type: 'sheet' | 'invoice'
