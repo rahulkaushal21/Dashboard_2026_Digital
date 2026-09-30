@@ -35,8 +35,15 @@ output becomes its next input. Point `TARGET_SHEET_ID` at a new file, always.
    select cron.schedule('sheet-writer', '47 * * * *',
      $$select net.http_get(url:='https://<project>.supabase.co/functions/v1/sheet-writer?token=<TOKEN>')$$);
    ```
-   Live since 21 Sep 2026, hourly at :47 — six minutes after `sheet-raw-revenue` at :41,
-   so the raw copy is always refreshed before it is written out.
+   Live since 21 Sep 2026. Hourly at :47 until 1 Oct 2026, then **half-hourly at :17 and
+   :47**, with `sheet-raw-revenue` moved to :11 and :41 to keep it six minutes ahead. The
+   gap is the point: the raw copy must be refreshed before it is written out, or the :17
+   run publishes a copy 36 minutes old.
+
+   Why half-hourly and not faster: the writer sends only the rows that actually differ, so
+   a quiet half hour costs one read and no writes. Hourly stopped being right the day the
+   dashboard became the record — somebody entering work at 10:05 could not see it in the
+   sheet until 10:47, which reads as the sheet being broken rather than merely late.
 
 ## Never echo a secret's value, whatever the variable is called
 
