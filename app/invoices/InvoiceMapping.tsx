@@ -177,19 +177,40 @@ export default function InvoiceMapping() {
   }
 
   const loading = rows === null
-  const rowDetails = (list: InvoiceMappingRow[], sub: string) => ({
-    subtitle: sub, rows: list, rowKey: (r: InvoiceMappingRow) => r.row_key,
-    groupBy: (r: InvoiceMappingRow) => splitNames(r.sales_person)[0] || 'No AM',
-    groupTotal: (rs: InvoiceMappingRow[]) => usd(rs.reduce((s, r) => s + (r.sheet_usd || r.invoice_usd || 0), 0)),
-    columns: [
-      { key: 'd', label: 'Date', value: (r: InvoiceMappingRow) => fmtDay(r.start_date || r.invoice_date), sort: (r: InvoiceMappingRow) => r.start_date || r.invoice_date || '' },
-      { key: 'c', label: 'Client', value: (r: InvoiceMappingRow) => r.company_name || '—', wide: true },
-      { key: 'p', label: 'Project', value: (r: InvoiceMappingRow) => r.project_name || r.invoice_no || '—', wide: true },
-      { key: 's', label: 'Sheet $', align: 'right' as const, value: (r: InvoiceMappingRow) => usd(r.sheet_usd), sort: (r: InvoiceMappingRow) => r.sheet_usd || 0,
-        total: (rs: InvoiceMappingRow[]) => usd(rs.reduce((s, r) => s + (r.sheet_usd || 0), 0)) },
-      { key: 'i', label: 'Invoice', value: (r: InvoiceMappingRow) => r.invoice_no || '—' },
-    ],
-  })
+  // A drill-down has to add up to the card it opens from. It did not: every card's
+  // breakdown totalled the SHEET amount, so "Invoiced against it — $182,817" opened on
+  // $176,857, the sheet value of the same rows. Two different measures under one heading
+  // is exactly the kind of thing that costs confidence in the whole page, so each card
+  // now says which amount it is counting and totals THAT.
+  //   measure 'sheet'    — booked in the sheet
+  //   measure 'invoiced' — the invoice's share of this row (the card's own figure)
+  //   measure 'gap'      — sheet less invoiced: what is still to raise
+  const AMOUNT: Record<'sheet' | 'invoiced' | 'gap', { label: string; of: (r: InvoiceMappingRow) => number }> = {
+    sheet:    { label: 'Sheet $',    of: r => r.sheet_usd || r.invoice_usd || 0 },
+    invoiced: { label: 'Invoiced $', of: invoicedShare },
+    gap:      { label: 'Still to raise', of: gapOf },
+  }
+  const rowDetails = (list: InvoiceMappingRow[], sub: string, measure: 'sheet' | 'invoiced' | 'gap' = 'sheet') => {
+    const a = AMOUNT[measure]
+    const sum = (rs: InvoiceMappingRow[]) => rs.reduce((s, r) => s + a.of(r), 0)
+    return {
+      subtitle: sub, rows: list, rowKey: (r: InvoiceMappingRow) => r.row_key,
+      groupBy: (r: InvoiceMappingRow) => splitNames(r.sales_person)[0] || 'No AM',
+      groupTotal: (rs: InvoiceMappingRow[]) => usd(sum(rs)),
+      columns: [
+        { key: 'd', label: 'Date', value: (r: InvoiceMappingRow) => fmtDay(r.start_date || r.invoice_date), sort: (r: InvoiceMappingRow) => r.start_date || r.invoice_date || '' },
+        { key: 'c', label: 'Client', value: (r: InvoiceMappingRow) => r.company_name || '—', wide: true },
+        { key: 'p', label: 'Project', value: (r: InvoiceMappingRow) => r.project_name || r.invoice_no || '—', wide: true },
+        // The sheet amount stays visible on every breakdown — it is the number people
+        // recognise — but it is only the TOTAL where the card is about the sheet.
+        ...(measure === 'sheet' ? [] : [{ key: 's', label: 'Sheet $', align: 'right' as const,
+          value: (r: InvoiceMappingRow) => usd(r.sheet_usd), sort: (r: InvoiceMappingRow) => r.sheet_usd || 0 }]),
+        { key: 'a', label: a.label, align: 'right' as const, value: (r: InvoiceMappingRow) => usd(a.of(r)),
+          sort: (r: InvoiceMappingRow) => a.of(r), total: (rs: InvoiceMappingRow[]) => usd(sum(rs)) },
+        { key: 'i', label: 'Invoice', value: (r: InvoiceMappingRow) => r.invoice_no || '—' },
+      ],
+    }
+  }
 
   return (
     <div>
@@ -217,11 +238,11 @@ export default function InvoiceMapping() {
         <KPICard tone="green" label="Invoiced against it" value={loading ? '…' : usd(invoicedUsd)}
           sub={`${done.length + check.length} rows have an invoice · ${monthInvoiced.size} invoices`}
           info="The invoiced value of the sheet rows above. Where one invoice covers several sheet lines it is shared between them in proportion, so nothing is counted twice."
-          details={loading ? undefined : rowDetails([...done, ...check], 'Sheet rows with an invoice')} />
+          details={loading ? undefined : rowDetails([...done, ...check], 'Sheet rows with an invoice — the invoice\u2019s share of each', 'invoiced')} />
         <KPICard tone="red" label="Difference" value={loading ? '…' : usd(sheetUsd - invoicedUsd)}
           sub={`${usd(raiseUsd)} not raised · ${usd(checkGap)} part/different`}
           info="Sheet total minus what has been invoiced against it: the invoices still to raise, plus the shortfall on part-invoiced lines."
-          details={loading ? undefined : rowDetails([...toRaise, ...check], 'Rows behind the difference')} />
+          details={loading ? undefined : rowDetails([...toRaise, ...check], 'Rows behind the difference \u2014 sheet less what was invoiced', 'gap')} />
         <KPICard tone="yellow" label="To raise" value={loading ? '…' : String(toRaise.length)}
           sub={`${usd(raiseUsd)} across ${byAm.length} AM${byAm.length === 1 ? '' : 's'}`}
           info="Sheet rows with no invoice found by invoice number, project ID, or client and value. Take these to the AM."
