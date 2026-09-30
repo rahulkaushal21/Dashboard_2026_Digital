@@ -136,6 +136,10 @@ export default function InvoiceMapping() {
   const raiseUsd = toRaise.reduce((s, r) => s + (r.sheet_usd || 0), 0)
   const checkGap = check.reduce((s, r) => s + ((r.sheet_usd || 0) - invoicedShare(r)), 0)
   const orphanUsd = orphans.reduce((s, r) => s + (r.invoice_usd || 0), 0)
+  // Invoiced against this month's sheet rows, but BOOKED in another month by the app.
+  // Measured, not inferred: the row carries the invoice's booking date.
+  const bookedElsewhere = sheet.reduce((n, r) =>
+    n + ((r.invoice_no && (r.invoice_booked_at || '').slice(0, 7) !== month) ? invoicedShare(r) : 0), 0)
   const monthInvoiced = new Set(inDept.filter(r => r.invoice_no && (r.invoice_date || '').slice(0, 7) === month).map(r => r.invoice_no))
 
   // ── Filters ───────────────────────────────────────────────────────────────────
@@ -237,7 +241,7 @@ export default function InvoiceMapping() {
       {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
       {unplaced > 0 && <p className="text-[11px] text-mav-muted -mt-2 mb-3">{unplaced} row{unplaced === 1 ? '' : 's'} with no department are shown under All.</p>}
 
-      <KPIRow cols={4}>
+      <KPIRow cols={unit === 'all' && bookedThisMonth ? 5 : 4}>
         <KPICard tone="accent" label={`Sheet · ${monthLabel}`} value={loading ? '…' : usd(sheetUsd)}
           sub={`${sheet.length} sheet rows`}
           info="Every line booked in the revenue sheet for this month (Month-Year), in this department. Cancelled, On Hold and Awaiting Information lines are left out — there is no invoice to raise against work that is stopped or not yet agreed."
@@ -250,24 +254,51 @@ export default function InvoiceMapping() {
           sub={`${usd(raiseUsd)} not raised · ${usd(checkGap)} part/different`}
           info="Sheet total minus what has been invoiced against it: the invoices still to raise, plus the shortfall on part-invoiced lines."
           details={loading ? undefined : rowDetails([...toRaise, ...check], 'Rows behind the difference \u2014 sheet less what was invoiced', 'gap')} />
+        {/* The invoice app's own number. It kept being read off the card beside it, which
+            answers a different question — so it gets a card of its own. */}
+        {unit === 'all' && bookedThisMonth && (
+          <KPICard tone="accent" label={`Invoice app · booked ${monthLabel}`}
+            value={usd(bookedThisMonth.booked_usd)}
+            sub={`${bookedThisMonth.invoices} invoices booked`}
+            info="What the invoice app's own booking report prints for this month. It counts invoices BOOKED in the month, whichever month's work they bill — not what was invoiced against this month's sheet rows." />
+        )}
         <KPICard tone="yellow" label="To raise" value={loading ? '…' : String(toRaise.length)}
           sub={`${usd(raiseUsd)} across ${byAm.length} AM${byAm.length === 1 ? '' : 's'}`}
           info="Sheet rows with no invoice found by invoice number, project ID, or client and value. Take these to the AM."
           details={loading ? undefined : rowDetails(toRaise, 'Invoices to raise, by AM')} />
       </KPIRow>
 
-      {/* Two different questions were being read as one number. Said here so nobody has
-          to reconcile them by hand again. */}
-      {bookedThisMonth && (
-        <p className="text-[11px] text-mav-muted/80 -mt-2 mb-4 max-w-3xl">
-          The invoice app booked <strong className="text-mav-fg">{usd(bookedThisMonth.booked_usd)}</strong> in {monthLabel}.
-          That answers a different question from the cards above: it counts invoices <em>booked</em> in the
-          month, whichever month&rsquo;s work they bill, while &ldquo;Invoiced against it&rdquo; counts what was
-          invoiced against {monthLabel}&rsquo;s <em>sheet rows</em>, whenever the invoice was raised.
-          {bookedThisMonth.adjustments_usd
-            ? <> Includes {usd(bookedThisMonth.adjustments_usd)} of recorded amendments.</>
-            : null}
-        </p>
+      {/* The two totals differ for four reasons, and every one of them is measured. A
+          sentence explaining that they answer different questions was not enough — this
+          shows the arithmetic, so the difference can be checked rather than believed. */}
+      {unit === 'all' && bookedThisMonth && !loading && (
+        <details className="mb-4 text-[11px] text-mav-muted/90">
+          <summary className="cursor-pointer select-none hover:text-mav-fg">
+            Why {usd(invoicedUsd)} here and {usd(bookedThisMonth.booked_usd)} in the invoice app
+          </summary>
+          <table className="mt-2 tabular-nums">
+            <tbody>
+              {[
+                ['Invoiced against ' + monthLabel + "'s sheet rows", invoicedUsd, 'The card above'],
+                ['less invoices the app books in another month', -bookedElsewhere, 'Raised against this month\u2019s work, booked elsewhere'],
+                ['plus ' + monthLabel + ' invoices with no sheet row', orphanUsd, 'The "Invoice, no sheet row" list'],
+                ['less invoices voided in ' + monthLabel, bookedThisMonth.reversals_usd, 'A void books a credit in the month it was voided'],
+                ['recorded amendments', bookedThisMonth.adjustments_usd, 'Changes the API cannot report; copied from the app'],
+              ].map(([label, amt, why]) => (
+                <tr key={label as string}>
+                  <td className="pr-3 py-0.5">{label as string}</td>
+                  <td className="pr-3 py-0.5 text-right">{(amt as number) ? usd(amt as number) : '\u2014'}</td>
+                  <td className="py-0.5 text-mav-muted/70">{why as string}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-mav-line">
+                <td className="pr-3 py-0.5 font-medium text-mav-fg">Invoice app, booked in {monthLabel}</td>
+                <td className="pr-3 py-0.5 text-right font-medium text-mav-fg">{usd(bookedThisMonth.booked_usd)}</td>
+                <td />
+              </tr>
+            </tbody>
+          </table>
+        </details>
       )}
 
       <Segments<Seg> value={seg} onChange={setSeg} items={[

@@ -2612,6 +2612,9 @@ export interface InvoiceMappingRow {
   sheet_invoice_no?: string | null
   invoice_no?: string | null
   invoice_date?: string | null
+  /** The month the invoice app BOOKS this invoice in, which is not always the month it
+   *  was raised. The page needs it to explain why its total differs from the app's. */
+  invoice_booked_at?: string | null
   invoice_status?: string | null
   invoice_client?: string | null
   /** The invoice's total across our services. */
