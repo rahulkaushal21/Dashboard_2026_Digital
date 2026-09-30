@@ -107,8 +107,41 @@ const MAP: Record<string, (r: Record<string, string>, i: number, sheetRow: numbe
   }),
 };
 
-async function insertBatches(sb: any, table: string, rows: any[]) {
-  for (let i = 0; i < rows.length; i += 500) { const { error } = await sb.from(table).insert(rows.slice(i, i + 500)); if (error) throw new Error(table + ": " + error.message); }
+// The swap is ONE call to replace_sheet_tab(), which does the delete and the insert inside
+// one transaction with a per-table advisory lock.
+//
+// It used to be delete() then insert() as two separate HTTP round trips, and both halves
+// of that bit through September 2026:
+//   • a timeout between them left the table EMPTY until the next hourly push — every
+//     'Error: feedback: Gateway Timeout' in sync_runs is that;
+//   • two overlapping pushes each deleted and then inserted the same src_row_hash values,
+//     which is the only way a hash ending in its own row index can collide. 13 Sep
+//     12:50:09 and 12:50:19, sql_leads and escalations, nine seconds apart in one run.
+// Now a failed insert rolls the delete back with it, and a second push for the same tab
+// waits its turn instead of racing.
+async function replaceTab(sb: any, table: string, rows: any[]): Promise<number> {
+  const { data, error } = await sb.rpc("replace_sheet_tab", { p_table: table, p_rows: rows });
+  if (error) throw new Error(table + ": " + error.message);
+  return typeof data === "number" ? data : rows.length;
+}
+
+/** Retry the transient ones. A gateway timeout says nothing about whether the work landed,
+ *  but the swap is idempotent now, so asking again is safe. A duplicate key or a bad type
+ *  will fail identically every time and is returned on the first attempt. */
+async function replaceTabWithRetry(sb: any, table: string, rows: any[]): Promise<number> {
+  let last: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await replaceTab(sb, table, rows);
+    } catch (e) {
+      last = e;
+      const msg = String(e);
+      const transient = /timeout|timed out|gateway|502|503|504|ECONNRESET|fetch failed/i.test(msg);
+      if (!transient || attempt === 3) throw e;
+      await new Promise((r) => setTimeout(r, attempt * 1000));
+    }
+  }
+  throw last;
 }
 
 Deno.serve(async (req) => {
@@ -116,9 +149,15 @@ Deno.serve(async (req) => {
   if (url.searchParams.get("token") !== TOKEN) return new Response("unauthorized", { status: 401 });
   if (req.method !== "POST") return new Response("POST only", { status: 405 });
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  // Held outside the try so the failure log can name the tab. It used to log only the
+  // error string under source 'sheet-ingest', which meant a red row said what broke but
+  // not which tab it belonged to, and the per-tab '<tab>-appscript' row simply never
+  // appeared — so the dashboard showed the tab's LAST GOOD push as its status.
+  let tabName = "unknown";
   try {
     const body = await req.json();
     const tab = String(body?.tab || "");
+    tabName = tab || "unknown";
     if (!MAP[tab]) return new Response(JSON.stringify({ ok: false, error: "unknown tab: " + tab }), { status: 400, headers: { "Content-Type": "application/json" } });
     const objs = toObjects(body?.rows || []).filter((x) => KEEP[tab](x.r));
     let mapped = objs.map((x, i) => MAP[tab](x.r, i, x.sheetRow));
@@ -129,8 +168,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, tab, inserted: 0, note: "empty payload, table left unchanged" }), { headers: { "Content-Type": "application/json" } });
     }
     const table = TABLE[tab];
-    await sb.from(table).delete().not("src_row_hash", "is", null);
-    await insertBatches(sb, table, mapped);
+    await replaceTabWithRetry(sb, table, mapped);
     await sb.from("sync_runs").insert({ source: tab + "-appscript", ok: true, rows_upserted: mapped.length, message: "app script push" });
     // Refresh derived clients + sentiment after escalations/feedback change.
     // NB: supabase-js v2's query builder is thenable but has no .catch() — must
@@ -141,7 +179,12 @@ Deno.serve(async (req) => {
     }
     return new Response(JSON.stringify({ ok: true, tab, inserted: mapped.length }), { headers: { "Content-Type": "application/json" } });
   } catch (e) {
-    await sb.from("sync_runs").insert({ source: "sheet-ingest", ok: false, message: String(e) });
+    // Two rows: one under the tab's own source so the tab reads as FAILED rather than
+    // silently keeping its last success, and one under 'sheet-ingest' for the raw error.
+    await sb.from("sync_runs").insert([
+      { source: tabName + "-appscript", ok: false, rows_upserted: 0, message: "push failed — table preserved · " + String(e).slice(0, 300) },
+      { source: "sheet-ingest", ok: false, message: tabName + ": " + String(e) },
+    ]);
     return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 });

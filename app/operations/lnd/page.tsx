@@ -9,7 +9,7 @@ import { KPIRow, Panel, Segments, FilterBar } from '@/components/PageParts'
 import { NotSplitNote } from '@/components/UnitToggle'
 import MultiSelect from '@/components/MultiSelect'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
-import { getLnd, getLndModules, creditedPct, strictPct, type LndRow, type LndModule } from '@/lib/supabase'
+import { clearReadCache, getLnd, getLndModules, creditedPct, strictPct, type LndRow, type LndModule } from '@/lib/supabase'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-md px-2 py-2 text-sm outline-none focus:border-mav-yellow'
 // Re-reads the published sheet on demand. Authenticated with the public anon key —
@@ -112,6 +112,10 @@ export default function LndPage() {
       })
       const j = await res.json()
       if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`)
+      // Reads are held for a minute and only the supabase.rpc wrapper drops that cache;
+      // the fetch above never touches it. Re-reading without this returns the copy taken
+      // before the sync, so the page reports "nothing changed" over fresh rows.
+      clearReadCache()
       const [r2, m2] = await Promise.all([getLnd(), getLndModules()])
       setRows(r2); setMods(m2)
       setSyncMsg(

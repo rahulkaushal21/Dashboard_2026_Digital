@@ -8,7 +8,7 @@ import KPICard from '@/components/KPICard'
 import { daysSince, fmtDay, fmtMonth, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import RevenueChart from '@/components/RevenueChart'
-import { getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, getOpportunityDepts, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
+import { clearReadCache, getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, getOpportunityDepts, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { buildInsights, type Tone } from '@/lib/insights'
@@ -77,7 +77,11 @@ const ago = (ts: string | null, nowMs: number) => {
 }
 const freshWithin = (ts: string | null, mins: number, nowMs: number) => { const t = parseTs(ts); return !isNaN(t) && (nowMs - t) / 60000 < mins }
 const later = (a: string | null, b: string | null) => { const ta = parseTs(a), tb = parseTs(b); if (isNaN(ta)) return b; if (isNaN(tb)) return a; return ta >= tb ? a : b }
-const FN_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '') + '/functions/v1/sync-web-revenue'
+// One endpoint, the whole chain, in dependency order — inbound pulls, then the derive
+// functions, then sheet-writer out to the project sheet. It used to point at
+// sync-web-revenue, which refreshed one feed of six and left "Sync now" telling the truth
+// about only the revenue tab. See supabase/functions/sync-all/index.ts.
+const FN_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '') + '/functions/v1/sync-all'
 const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 // --- segment (service department) bifurcation --------------------------------
@@ -176,14 +180,36 @@ export default function Dashboard() {
       setLastRefreshed(new Date()); setNowMs(Date.now())
     } finally { setRefreshing(false) }
   }
-  // "Sync now" actually re-pulls the revenue sheet (via a Supabase edge function) THEN reloads the data.
+  // "Sync now" runs the whole sync-all chain (see FN_URL above) and THEN reloads the data.
+  //
+  // clearReadCache() is not optional here. Reads are held for a minute and the cache is
+  // otherwise only dropped by the supabase.rpc wrapper — a raw fetch to an edge function
+  // never goes through it. Without this line the reload below was served the copy taken
+  // BEFORE the sync, so the button pulled fresh rows into the database and then showed
+  // the old ones: 30 Sep 2026, a $300 line entered that morning stayed invisible however
+  // many times it was pressed.
   const refreshAll = async () => {
     setSyncing(true); setSyncResult(null)
     try {
       const res = await fetch(FN_URL, { method: 'POST', headers: ANON ? { apikey: ANON, Authorization: 'Bearer ' + ANON } : {} })
       const j = await res.json().catch(() => null)
-      setSyncResult(j && j.ok ? `Sheet synced · ${j.rows} rows · ${j.agencies} agencies` : 'Sheet sync did not complete — showing last data')
-    } catch { setSyncResult('Sheet sync unreachable — showing last data') }
+      if (!j) {
+        setSyncResult('Sync did not complete — showing last data')
+      } else if (j.throttled) {
+        // Not a failure. Saying "synced" here would be a lie, and saying nothing made
+        // people press it again.
+        setSyncResult(j.message || 'Just synced — showing that run')
+      } else if (j.ok) {
+        const n = (j.steps || []).filter((s: any) => !s.skipped).length
+        setSyncResult(`${j.dry_run ? 'Dry run' : 'Synced'} · ${n} steps · ${((j.ms || 0) / 1000).toFixed(1)}s`)
+      } else {
+        // NAME what broke. "did not complete" sent someone to re-press a button that had
+        // already done four of its six steps.
+        const bad = (j.steps || []).filter((s: any) => !s.ok).map((s: any) => s.step)
+        setSyncResult(`Sync incomplete — ${bad.join(', ') || 'unknown step'} failed; showing what landed`)
+      }
+    } catch { setSyncResult('Sync unreachable — showing last data') }
+    clearReadCache()
     await load()
     setSyncing(false)
   }
@@ -560,7 +586,18 @@ export default function Dashboard() {
             </span>
           )}
         </span>
-        <span className="ml-auto text-mav-muted">{syncing ? 'Pulling the revenue sheet…' : refreshing ? 'Refreshing…' : syncResult ? syncResult : lastRefreshed ? `Updated ${lastRefreshed.toLocaleTimeString()}` : ''}</span>
+        {/* TWO DIFFERENT CLOCKS, and this one used to say "Updated 16:09:41" next to
+            "Web revenue 22m ago" with nothing to tell them apart. They are both right and
+            they measure different things: that one is when the SYNC last ran, this one is
+            when THIS PAGE last read the database. A page read at 16:09 showing data synced
+            at 15:47 is correct and looked like a contradiction. So this says what it is. */}
+        <span className="ml-auto text-mav-muted"
+          title="When this page last read the database — not when the data was last synced. The sync times are the ones on the left, under Last sync.">
+          {syncing ? 'Syncing sheets, deals and clients…'
+            : refreshing ? 'Refreshing…'
+            : syncResult ? syncResult
+            : lastRefreshed ? `Screen read ${lastRefreshed.toLocaleTimeString()}` : ''}
+        </span>
       </div>
 
       <KPIRow cols={4}>

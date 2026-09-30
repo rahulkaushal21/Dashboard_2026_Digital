@@ -25,8 +25,9 @@ output becomes its next input. Point `TARGET_SHEET_ID` at a new file, always.
    - `TARGET_SHEET_ID` — the id from step 1
    - `GOOGLE_SERVICE_ACCOUNT_JSON` — the whole key file, pasted as-is
 
-5. **Dry run first.** It builds all three tabs and reports the row counts without
-   touching Google:
+5. **Dry run first.** It builds all four tabs and reports, tab by tab, exactly what it
+   would change — `0 updated, 0 added` is a real and common answer — without touching
+   Google:
    `curl ".../functions/v1/sheet-writer?token=<TOKEN>&dry=1"`
 
 6. **Then run it for real**, and schedule it:
@@ -61,9 +62,26 @@ not a sheet id and is a sign the wrong value is in it.
 
 ## Decisions worth knowing
 
-**Full replace, not append.** These are dumps. An append has to remember what it wrote
-last time, and any disagreement between that memory and the sheet leaves duplicates
-nobody can untangle. Replacing is idempotent — run it twice, get the same sheet.
+**Changes what changed, and nothing else.** It used to clear each tab and PUT it back.
+That is fine for a machine and wrong for a spreadsheet people work in: for a moment the
+tab is empty, and anything typed into an invoice cell between the read and the write is
+gone with no trace. The writer now reads the tab, works out the difference, and touches
+only the rows that actually differ — a quiet hour writes nothing at all, and the tab is
+never blank. Rows are matched BY POSITION, which is safe because every tab is regenerated
+in a deterministic order; inserting a row in the middle of the source shifts everything
+below it and each shifted row counts as an update.
+
+This paragraph used to read "Full replace, not append", which stayed here for a while
+after the code had stopped doing that. It is the sentence someone reads when they are
+deciding whether it is safe to let the invoice team work in the same tab, so it is worth
+keeping honest.
+
+**The three invoice columns belong to the invoice team, not to the writer.** `Invoice No`,
+`Invoice Currency` and `Invoice Amount` are read out of the target sheet FIRST, before any
+tab is built, and kept in `sheet_row_overrides` keyed by a row fingerprint. Whatever the
+invoice team types wins over whatever the dashboard would have written. The merge is field
+by field, so clearing one of the three does not drop the other two, and an override stops
+applying if its sheet row moved rather than following the wrong line down the tab.
 
 **`RAW`, not `USER_ENTERED`.** A project name starting with `=` or `+` would otherwise be
 parsed as a formula, and a reference with a leading zero would lose it.
