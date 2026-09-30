@@ -2561,7 +2561,7 @@ export interface InvoiceMappingRow {
   invoice_services?: string | null
   /** Every sheet line this month mapped to the same invoice, summed. */
   group_sheet_usd?: number | null
-  matched_by?: 'invoice no' | 'project id' | 'client + value' | null
+  matched_by?: 'invoice no' | 'project id' | 'client + value' | 'client + line value' | null
   state: MappingState
   note?: string | null
 }
