@@ -237,6 +237,23 @@ export default function Invoices() {
   const keepsWho = (x: { is_contractor?: boolean | null }) =>
     who === 'all' ? true : who === 'contractor' ? !!x.is_contractor : !x.is_contractor
 
+  // Contractor work reaches back to 1 January — there are earlier contractor jobs still
+  // to settle, and the getter already fetches them. So picking the Contractor segment
+  // WIDENS the window instead of narrowing it: without this the rows arrive and are then
+  // hidden by a three-month range, which is the worst of both.
+  const contractorView = who === 'contractor'
+  const moneyFloor = contractorView ? CONTRACTOR_FLOOR : FLOOR
+  // Only while the From box is still where the load put it — an explicit From is the
+  // user's, and overriding it would make the box lie about what is on screen.
+  const moneyFrom = contractorView && from === since ? CONTRACTOR_FLOOR : from
+  const inMoneyRange = (d?: string | null) => {
+    if (!d) return false
+    if (d < moneyFloor) return false
+    if (moneyFrom && d < moneyFrom) return false
+    if (to && d > to) return false
+    return true
+  }
+
   // ── money side: per project, from the ledger outwards ───────────────────────
   const money = useMemo(() => status
     .filter(x => hit(search, x.company_name, x.project_name, x.project_id, x.project_key,
