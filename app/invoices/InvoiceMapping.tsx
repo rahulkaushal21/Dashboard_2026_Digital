@@ -8,7 +8,7 @@ import { fmtDay } from '@/components/CardDetail'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { inUnit, unitOf } from '@/lib/business-unit'
-import { getInvoiceMapping, refreshInvoiceData, type InvoiceMappingRow, type MappingState } from '@/lib/supabase'
+import { getInvoiceMapping, refreshInvoiceData, type InvoiceMappingRow, type MappingState, getBookingMonths, type BookingMonth} from '@/lib/supabase'
 
 // Invoice mapping
 // ---------------
@@ -86,6 +86,7 @@ export default function InvoiceMapping() {
   const months = useMemo(() => monthsBack(12), [])
   const [month, setMonth] = useState(months[0].v)
   const [rows, setRows] = useState<InvoiceMappingRow[] | null>(null)
+  const [appBooked, setAppBooked] = useState<BookingMonth[]>([])
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [step, setStep] = useState('')
@@ -105,6 +106,9 @@ export default function InvoiceMapping() {
     setUpdatedAt(new Date())
   }, [])
   useEffect(() => { load(month) }, [month, load])
+  // The invoice app's own booking figure. Fetched once and kept: it is small, and it is
+  // the number people compare this page against.
+  useEffect(() => { getBookingMonths().then(setAppBooked).catch(() => {}) }, [])
 
   const refresh = async () => {
     setRefreshing(true); setError('')
@@ -166,6 +170,9 @@ export default function InvoiceMapping() {
   const amOptions = uniq(inDept.flatMap(r => splitNames(r.sales_person)))
 
   const monthLabel = months.find(m => m.v === month)?.label || month
+  const bookedThisMonth = useMemo(
+    () => appBooked.find(b => (b.booking_month || '').slice(0, 7) === month),
+    [appBooked, month])
   const copyFor = async (am: string, list: InvoiceMappingRow[]) => {
     const lines = [
       `Invoices to raise — ${monthLabel}${am ? ` — ${am}` : ''}`,
@@ -224,7 +231,7 @@ export default function InvoiceMapping() {
           <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} /> {refreshing ? 'Refreshing…' : 'Refresh data'}
         </button>
         <span className="text-xs text-mav-muted">
-          {step || (updatedAt ? `Shown as of ${updatedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · the sync also runs every hour` : '')}
+          {step || (updatedAt ? `Shown as of ${updatedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · the sync also runs every 15 minutes` : '')}
         </span>
       </div>
       {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
@@ -248,6 +255,20 @@ export default function InvoiceMapping() {
           info="Sheet rows with no invoice found by invoice number, project ID, or client and value. Take these to the AM."
           details={loading ? undefined : rowDetails(toRaise, 'Invoices to raise, by AM')} />
       </KPIRow>
+
+      {/* Two different questions were being read as one number. Said here so nobody has
+          to reconcile them by hand again. */}
+      {bookedThisMonth && (
+        <p className="text-[11px] text-mav-muted/80 -mt-2 mb-4 max-w-3xl">
+          The invoice app booked <strong className="text-mav-fg">{usd(bookedThisMonth.booked_usd)}</strong> in {monthLabel}.
+          That answers a different question from the cards above: it counts invoices <em>booked</em> in the
+          month, whichever month&rsquo;s work they bill, while &ldquo;Invoiced against it&rdquo; counts what was
+          invoiced against {monthLabel}&rsquo;s <em>sheet rows</em>, whenever the invoice was raised.
+          {bookedThisMonth.adjustments_usd
+            ? <> Includes {usd(bookedThisMonth.adjustments_usd)} of recorded amendments.</>
+            : null}
+        </p>
+      )}
 
       <Segments<Seg> value={seg} onChange={setSeg} items={[
         { id: 'raise', label: 'To raise', count: toRaise.length, title: 'Booked in the sheet, no invoice found' },

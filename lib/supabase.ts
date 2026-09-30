@@ -170,9 +170,14 @@ const readCache = new Map<string, CacheEntry>()
 /** Drop everything held. Called after any write so nobody reads their own stale data. */
 export function clearReadCache() { readCache.clear() }
 
-async function read<T>(table: string, cols = '*', orderBy?: string): Promise<T[] | null> {
+/** An optional server-side floor: `gte` on `column`. Rows the page would throw away
+ *  should never cross the wire — the Invoices page discards everything before April 2026
+ *  and was downloading 3,483 reconciliation rows to keep 996. */
+type Floor = { column: string; gte: string }
+
+async function read<T>(table: string, cols = '*', orderBy?: string, floor?: Floor): Promise<T[] | null> {
 if (!supabase) return null
-const key = `${table}|${cols}|${orderBy || ''}`
+const key = `${table}|${cols}|${orderBy || ''}|${floor ? `${floor.column}>=${floor.gte}` : ''}`
 // A shallow copy per caller: the cached array is shared, and several pages sort what
 // they are handed in place. Without this, one page's sort would silently reorder
 // another's — including the paginated reads that require a stable order.
@@ -188,12 +193,17 @@ if (hit && Date.now() - hit.at < READ_TTL_MS) return copy(hit.rows)
 const PAGE = 1000
 const page = (from: number) => {
   let q = supabase!.from(table).select(cols).range(from, from + PAGE - 1)
+  if (floor) q = q.gte(floor.column, floor.gte)
   if (orderBy) q = q.order(orderBy, { ascending: true })
   return q
 }
 // head:true asks PostgREST for the count and NO rows — the body is empty. Counting
 // by re-selecting the first page again would send those 1,000 rows twice.
-const countOnly = () => supabase!.from(table).select(cols, { count: 'exact', head: true })
+const countOnly = () => {
+  let q = supabase!.from(table).select(cols, { count: 'exact', head: true })
+  if (floor) q = q.gte(floor.column, floor.gte)
+  return q
+}
 
 const run = (async (): Promise<T[] | null> => {
   // NO exact count on the first request. count=exact makes Postgres run the whole
@@ -2407,12 +2417,18 @@ export interface ProjectInvoiceStatus {
  * The map is keyed on the RAW ledger project_id, so a caller holding a ledger row can
  * look it up directly; the view does the normalising (PRJ…_3 -> PRJ…) internally.
  */
+/** The Invoices page shows nothing before this — the invoice app only became the
+ *  reference in April 2026. Applied server-side so the earlier rows are never sent.
+ *  If a page ever widens its range, widen this with it. */
+export const INVOICE_FLOOR = '2026-04-01'
+
 export async function getProjectInvoiceStatus(): Promise<Map<string, ProjectInvoiceStatus>> {
   const m = new Map<string, ProjectInvoiceStatus>()
   if (!supabase) return m
   // read() paginates. 3,099 rows, and an unbounded PostgREST select stops at 1,000 —
   // which would have quietly hidden two thirds of the sheet.
-  const rows = await read<ProjectInvoiceStatus>('project_invoice_status_mv', '*', 'row_key')
+  const rows = await read<ProjectInvoiceStatus>('project_invoice_status_mv', '*', 'row_key',
+    { column: 'booking_month', gte: INVOICE_FLOOR })
   for (const r of rows || []) m.set(r.project_id, r)
   return m
 }
@@ -2546,7 +2562,11 @@ export async function getInvoiceRecon(): Promise<InvoiceRecon[]> {
   // read() paginates on a stable key. PostgREST caps an unbounded select at 1,000 and
   // there are ~3,500 invoices — taking the first page would have made the reconciliation
   // gap look a third of its real size.
-  return (await read<InvoiceRecon>('invoice_reconciliation_mv', '*', 'invoice_no')) || []
+  // Floored on booking_date, which is what the page filters on. A handful of rows have
+  // no booking date; they come through the invoice_date fallback below rather than being
+  // dropped, because a missing date must never silently shrink the gap.
+  return (await read<InvoiceRecon>('invoice_reconciliation_mv', '*', 'invoice_no',
+    { column: 'booking_date', gte: INVOICE_FLOOR })) || []
 }
 
 // ── Invoice mapping: the month's sheet rows against the invoices raised for them ──────
