@@ -166,15 +166,15 @@ const mapRfq = (x: Record<string, unknown>) => ({
   created_at: ts(x.CreatedByDatetime),
   modified_at: ts(x.LastModifiedDatetime),
   rfq_cancelled_at: ts(x.RFQCancelledDate),
-  payload: x,
   synced_at: new Date().toISOString(),
 });
 
 // Only what the quote endpoint alone knows. Deliberately NOT company/amount/status:
 // those come from the RFQ pass, and GetQuote reports Amount 0.0 on live priced deals.
 // No raw payload is kept on quotes, invoices or invoice lines (120): nothing read it, and
-// at 54 MB it was a tenth of the free plan's database cap. The opportunity mapper still
-// keeps its payload because web_open_opportunity_evidence reads a field out of it.
+// at 54 MB it was a tenth of the free plan's database cap. That covers the RFQ pass too,
+// which upserts into quote_api_quotes. The opportunity mapper still keeps its payload
+// because web_open_opportunity_evidence reads a field out of it.
 const mapQuote = (x: Record<string, unknown>) => ({
   quote_no: s(x.QuoteNumber),
   authorized_at: ts(x.QuoteAuthorizeDate),
