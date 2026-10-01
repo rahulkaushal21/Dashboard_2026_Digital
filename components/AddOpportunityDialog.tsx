@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   addOpportunity, findPossibleDuplicates, getFxRates, toUsd,
   getClientDefaults, searchClients, getDirectoryMember,
-  getTechnologyOptions, getClientTopTechnology, clientKey,
-  type DuplicateHit, type FxRate, type ClientDefaults,
+  getTechnologyOptions, getClientTopTechnology, clientKey, listDirectory,
+  type DuplicateHit, type FxRate, type ClientDefaults, type DirectoryMember,
 } from '@/lib/supabase'
 import { isNbdOwner } from '@/lib/nbd'
 import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, CHANNELS } from '@/lib/deal-fields'
@@ -77,8 +77,15 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   // Which fields the last client pick filled in. Held in a ref rather than state because
   // nothing renders from it — it only needs to be right by the time the next pick runs.
   const fromClient = useRef<Set<string>>(new Set())
+  // The PM list the owner is PICKED from rather than typed into. A typed owner decides who
+  // can confirm the deal, and directory_owner_match compares it against the directory — so
+  // a misspelling here does not make a harmless typo, it makes a deal only an admin can
+  // confirm. The AM beside it is still free text because there is no AM directory to pick
+  // from; see the note on that field.
+  const [pms, setPms] = useState<DirectoryMember[]>([])
 
   useEffect(() => {
+    listDirectory().then(l => setPms(l.filter(m => m.active))).catch(() => {})
     getFxRates().then(setRates)
     getTechnologyOptions().then(setTechOptions).catch(() => {})
     getClientTopTechnology().then(setTopTech).catch(() => {})
@@ -281,7 +288,16 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
 
           {/* Reads "New business owner (NBD)" the moment an NBD name is typed — see lib/nbd.ts. */}
           <F label={isNbdOwner(salesPerson) ? 'New business owner (NBD)' : 'Account manager'}><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>
-          <F label="PM owner" hint="Whoever is named here can confirm the deal later."><input className={inputCls} value={pmOwner} onChange={e => setPmOwner(e.target.value)} /></F>
+          <F label="PM owner" hint="Whoever is named here can confirm the deal later.">
+            <select className={inputCls} value={pmOwner} onChange={e => setPmOwner(e.target.value)}>
+              <option value="">— choose —</option>
+              {pms.map(m => <option key={m.email} value={m.name}>{m.name}</option>)}
+              {/* A name the client's history supplied that is not on the directory — a
+                  leaver, usually. It has to stay selectable or opening the form on an old
+                  client and saving would silently reassign their deal. */}
+              {pmOwner && !pms.some(m => m.name === pmOwner) && <option value={pmOwner}>{pmOwner} (not in list)</option>}
+            </select>
+          </F>
 
           <div className="sm:col-span-2"><F label="Note"><textarea className={inputCls} rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="Anything worth knowing about this deal" /></F></div>
 
