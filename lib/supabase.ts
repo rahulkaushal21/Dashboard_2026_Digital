@@ -1308,6 +1308,37 @@ export async function listDirectory(): Promise<DirectoryMember[]> {
   return (data as DirectoryMember[]) || []
 }
 
+/**
+ * The account managers an AM field is picked from, rather than typed into.
+ *
+ * There was no such list until 124, and the cost of that is in the data: forty spellings
+ * of about twenty-five people across opportunities, web_revenue and web_clients —
+ * "Kaustub" for Kaustubh Agrawal, "Nevilson" for Nevilson Christian, "Vikram Sahi" for
+ * Vikram Shahi on thirty-two deals. Each split a person's work in two in every report
+ * that groups by AM.
+ *
+ * `aliases` holds those old spellings so a historical name still resolves to one person.
+ * Nothing rewrites the stored values: an opportunity still says what it said, and the
+ * dropdown stops NEW variants being created. Rewriting history is a separate decision,
+ * because the Quotes tab would put its own spelling back within the half hour.
+ */
+export interface AmMember { name: string; slug: string; aliases: string[]; active: boolean; team?: string; note?: string }
+
+export async function listAms(): Promise<AmMember[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('am_directory')
+    .select('name, slug, aliases, active, team, note').order('name')
+  return (data as AmMember[]) || []
+}
+
+/** Resolve whatever is stored to the directory's spelling, or give it back unchanged. */
+export function canonicalAm(name: string | undefined, ams: AmMember[]): string {
+  const v = (name || '').trim()
+  if (!v) return ''
+  const hit = ams.find(a => a.name === v) || ams.find(a => (a.aliases || []).includes(v))
+  return hit ? hit.name : v
+}
+
 const slugify = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 
 /**

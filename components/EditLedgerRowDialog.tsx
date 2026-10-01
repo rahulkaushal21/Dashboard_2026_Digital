@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { saveLedgerRow, getPickList, getContractors, listDirectory, CONTRACTOR, type LedgerRow, type Contractor, type DirectoryMember } from '@/lib/supabase'
+import { saveLedgerRow, getPickList, getContractors, listDirectory, listAms, canonicalAm, CONTRACTOR, type LedgerRow, type Contractor, type DirectoryMember, type AmMember } from '@/lib/supabase'
 import { CURRENCIES } from '@/lib/deal-fields'
 
 // The columns somebody fills in AFTER the deal is won.
@@ -57,6 +57,14 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   // overwriting it — without that mark the edit reverts within thirty minutes.
   const [salesPerson, setSalesPerson] = useState(row.sales_person || '')
   const [agency, setAgency] = useState(row.company_name || '')
+  const [ams, setAms] = useState<AmMember[]>([])
+  // Pull the stored spelling onto the directory's as the list arrives, so a row saying
+  // "Vikram Sahi" shows Vikram Shahi already selected rather than falling through to the
+  // "not in list" option and looking like a separate person.
+  useEffect(() => { listAms().then(l => {
+    setAms(l)
+    setSalesPerson(p => canonicalAm(p, l) || p)
+  }).catch(() => {}) }, [])
   const [pms, setPms] = useState<DirectoryMember[]>([])
   useEffect(() => { listDirectory().then(l => setPms(l.filter(m => m.active))) }, [])
 
@@ -163,12 +171,17 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
               <input type="month" className={ctl} value={month} disabled={fixed} readOnly={fixed}
                 onChange={e => setMonth(e.target.value)} />
             </F>
-            {/* Still a text box rather than a picker: there is no AM directory to pick
-                from, which is why forty spellings of about twenty-five people are in the
-                data. Becomes a dropdown once am_directory exists. */}
-            <F label="Account manager" hint={fixed ? undefined : 'Clearing this leaves the line with no AM, which is allowed.'}>
-              <input className={ctl} value={salesPerson} disabled={fixed} readOnly={fixed}
-                onChange={e => setSalesPerson(e.target.value)} />
+            <F label="Account manager" hint={fixed ? undefined : 'Picked from the AM directory. Leaving it blank is allowed.'}>
+              <select className={ctl} value={salesPerson} disabled={fixed} onChange={e => setSalesPerson(e.target.value)}>
+                <option value="">— none —</option>
+                {ams.filter(a => a.active || a.name === salesPerson)
+                    .map(a => <option key={a.slug} value={a.name}>{a.name}{a.active ? '' : ' (left)'}</option>)}
+                {/* A spelling the directory has never heard of. It has to stay selectable
+                    or opening this dialog and saving anything else would reassign the
+                    deal to nobody. */}
+                {salesPerson && !ams.some(a => a.name === salesPerson) &&
+                  <option value={salesPerson}>{salesPerson} (not in list)</option>}
+              </select>
             </F>
             {/* Last in the group, because it is the one with consequences beyond the row:
                 the client a line belongs to is this name, so renaming it moves the line's

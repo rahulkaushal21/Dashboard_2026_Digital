@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   addOpportunity, findPossibleDuplicates, getFxRates, toUsd,
   getClientDefaults, searchClients, getDirectoryMember,
-  getTechnologyOptions, getClientTopTechnology, clientKey, listDirectory,
-  type DuplicateHit, type FxRate, type ClientDefaults, type DirectoryMember,
+  getTechnologyOptions, getClientTopTechnology, clientKey, listDirectory, listAms, canonicalAm,
+  type DuplicateHit, type FxRate, type ClientDefaults, type DirectoryMember, type AmMember,
 } from '@/lib/supabase'
 import { isNbdOwner } from '@/lib/nbd'
 import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, CHANNELS } from '@/lib/deal-fields'
@@ -83,9 +83,14 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   // confirm. The AM beside it is still free text because there is no AM directory to pick
   // from; see the note on that field.
   const [pms, setPms] = useState<DirectoryMember[]>([])
+  // Same for the AM, since 124. The client autofill below hands back whatever that
+  // client's history says, which may be an old spelling, so it is resolved against the
+  // directory on the way in rather than offered as a stray "not in list" entry.
+  const [ams, setAms] = useState<AmMember[]>([])
 
   useEffect(() => {
     listDirectory().then(l => setPms(l.filter(m => m.active))).catch(() => {})
+    listAms().then(l => { setAms(l); setSalesPerson(p => canonicalAm(p, l) || p) }).catch(() => {})
     getFxRates().then(setRates)
     getTechnologyOptions().then(setTechOptions).catch(() => {})
     getClientTopTechnology().then(setTopTech).catch(() => {})
@@ -287,7 +292,15 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
           <F label="Client contact"><input className={inputCls} value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="name@client.com" /></F>
 
           {/* Reads "New business owner (NBD)" the moment an NBD name is typed — see lib/nbd.ts. */}
-          <F label={isNbdOwner(salesPerson) ? 'New business owner (NBD)' : 'Account manager'}><input className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)} /></F>
+          <F label={isNbdOwner(salesPerson) ? 'New business owner (NBD)' : 'Account manager'}>
+            <select className={inputCls} value={salesPerson} onChange={e => setSalesPerson(e.target.value)}>
+              <option value="">— choose —</option>
+              {ams.filter(a => a.active || a.name === salesPerson)
+                  .map(a => <option key={a.slug} value={a.name}>{a.name}{a.active ? '' : ' (left)'}</option>)}
+              {salesPerson && !ams.some(a => a.name === salesPerson) &&
+                <option value={salesPerson}>{salesPerson} (not in list)</option>}
+            </select>
+          </F>
           <F label="PM owner" hint="Whoever is named here can confirm the deal later.">
             <select className={inputCls} value={pmOwner} onChange={e => setPmOwner(e.target.value)}>
               <option value="">— choose —</option>
