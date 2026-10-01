@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { saveLedgerRow, getPickList, getContractors, CONTRACTOR, type LedgerRow, type Contractor } from '@/lib/supabase'
+import { saveLedgerRow, getPickList, getContractors, listDirectory, CONTRACTOR, type LedgerRow, type Contractor, type DirectoryMember } from '@/lib/supabase'
 import { CURRENCIES } from '@/lib/deal-fields'
 
 // The columns somebody fills in AFTER the deal is won.
@@ -10,10 +10,11 @@ import { CURRENCIES } from '@/lib/deal-fields'
 // yes, and finance raises the invoice weeks later. Asking for them in the confirm dialog
 // would have produced a required field people answer with anything to get past it.
 //
-// So they live here instead, on the row, editable by whoever does know. Nothing in this
-// form can change what the deal is worth, who owns it, or whether it is won: the RPC
-// behind it reaches these columns and no others, which is a stronger guarantee than a
-// form that merely declines to show the rest.
+// So they live here instead, on the row, editable by whoever does know. Since 118 the
+// value, owner and month are editable too, on a DASHBOARD line: the dashboard is where a
+// line starts now, so it is where a wrong figure or month is put right. Whether the deal
+// is won is still not touched here. A sheet line's value, owner and month are what the
+// old spreadsheet recorded and feed the revenue tables directly, so they stay read-only.
 //
 // Works on both sides of the ledger. A dashboard row updates the opportunity; a SHEET row
 // writes an overlay beside the spreadsheet, because sheet_raw is re-synced and anything
@@ -43,6 +44,15 @@ const Group = ({ title, blurb, children }: { title: string; blurb: string; child
 export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   row: LedgerRow; onClose: () => void; onSaved: () => void
 }) {
+  // ---- the booking itself (118). Fixed on a sheet line; see the note at the top.
+  const fixed = row.source === 'raw'
+  const [value, setValue] = useState(row.local_value != null ? String(row.local_value) : row.amount_usd != null ? String(row.amount_usd) : '')
+  const [currency, setCurrency] = useState(row.currency || 'USD')
+  const [pmOwner, setPmOwner] = useState(row.pm_owner || '')
+  const [month, setMonth] = useState((row.booking_month || '').slice(0, 7))
+  const [pms, setPms] = useState<DirectoryMember[]>([])
+  useEffect(() => { listDirectory().then(l => setPms(l.filter(m => m.active))) }, [])
+
   const [projectName, setProjectName] = useState(row.project_name || '')
   const [projectId, setProjectId] = useState(row.project_id || '')
   const [quoteId, setQuoteId] = useState(row.quote_id || '')
@@ -86,6 +96,8 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
     // opportunity, a sheet row writes the overlay beside the spreadsheet. Both RPCs
     // refuse anybody who is not the row's PC/SME.
     const res = await saveLedgerRow(row, {
+      // The booking's own fields go only where they can change; a sheet line sends none.
+      ...(fixed ? {} : { local_value: num(value), currency, pm_owner: pmOwner, month: month || null }),
       project_name: projectName, project_id: projectId, quote_id: quoteId, expert, integration,
       contractor_name: contractorName, outsource_currency: outsourceCur,
       delivery_status: status, invoice_no: invoiceNo, invoice_currency: invoiceCur,
@@ -116,6 +128,33 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         </div>
 
         <div className="px-5 py-4 overflow-y-auto">
+          <Group title="The booking"
+            blurb={fixed
+              ? 'From the old sheet. These three are what it recorded and feed the revenue tables, so they are shown here but changed in the sheet.'
+              : 'What the line is worth, whose it is, and the month it books under. Every total moves with the value; the change is logged with who made it.'}>
+            <F label="Value" hint={fixed ? undefined : 'In the currency beside it. The USD figure is worked out from the two.'}>
+              <input type="number" className={ctl} value={value} disabled={fixed} readOnly={fixed}
+                onChange={e => setValue(e.target.value)} />
+            </F>
+            <F label="Currency">
+              <select className={ctl} value={currency} disabled={fixed} onChange={e => setCurrency(e.target.value)}>
+                {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                {currency && !CURRENCIES.includes(currency as any) && <option value={currency}>{currency} (not in list)</option>}
+              </select>
+            </F>
+            <F label="PM owner" hint={fixed ? undefined : 'Handing it to a colleague means they, or an admin, edit it from then on.'}>
+              <select className={ctl} value={pmOwner} disabled={fixed} onChange={e => setPmOwner(e.target.value)}>
+                <option value="">— choose —</option>
+                {pms.map(m => <option key={m.email} value={m.name}>{m.name}</option>)}
+                {pmOwner && !pms.some(m => m.name === pmOwner) && <option value={pmOwner}>{pmOwner} (not in list)</option>}
+              </select>
+            </F>
+            <F label="Month" hint={fixed ? undefined : 'The month this line books under.'}>
+              <input type="month" className={ctl} value={month} disabled={fixed} readOnly={fixed}
+                onChange={e => setMonth(e.target.value)} />
+            </F>
+          </Group>
+
           <Group title="Identifiers" blurb="The sheet's own labels for this project.">
             <F label="Project name" hint="Written to the project sheet on the next run.">
               <input className={ctl} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="What the sheet should call this project" />
@@ -196,7 +235,11 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         </div>
 
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
-          <span className="text-[11px] text-mav-fg/60">Value, owner and month are set at confirmation and cannot be changed here.</span>
+          <span className="text-[11px] text-mav-fg/60">
+            {fixed
+              ? 'Value, owner and month come from the old sheet and are changed there.'
+              : 'Whether the deal is won is not changed here; remove the line instead.'}
+          </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs transition-colors">Cancel</button>
             <button onClick={save} disabled={saving}

@@ -1610,6 +1610,9 @@ export interface LedgerRow {
 export interface ProjectFieldEdits {
   /** The ledger's Project Name, which on a dashboard line is the subject. Blank leaves it. */
   project_name?: string
+  /** The three fields that used to be fixed at confirmation (118). Value is in the deal's
+   *  own currency; the USD figure is recomputed in the database. Month is 'YYYY-MM'. */
+  local_value?: number | null; currency?: string; pm_owner?: string; month?: string | null
   project_id?: string; quote_id?: string; expert?: string
   internal_delivery?: string | null; internal_hrs?: number | null; actual_hrs?: number | null
   integration?: string; outsource_price?: number | null
@@ -1630,6 +1633,8 @@ export async function updateProjectFields(id: number, f: ProjectFieldEdits): Pro
   const n = (v?: number | null) => v ?? null
   const { error } = await supabase.rpc('update_project_fields', {
     p_id: id, p_project_name: t(f.project_name),
+    p_local_value: n(f.local_value), p_currency: t(f.currency), p_pm_owner: t(f.pm_owner),
+    p_month: f.month ? `${f.month}-01` : null,
     p_project_id: t(f.project_id), p_quote_id: t(f.quote_id), p_expert: t(f.expert),
     p_internal_delivery: f.internal_delivery || null,
     p_internal_hrs: n(f.internal_hrs), p_actual_hrs: n(f.actual_hrs),
@@ -2193,6 +2198,9 @@ export async function saveClientQbr(company: string, qbrDate: string, f: {
 export interface SheetRowEdits {
   /** The ledger's Project Name. On a sheet line it goes into the overlay (117). Blank leaves it. */
   project_name?: string
+  /** Dashboard lines only (118): a sheet line's value, owner and month are the old
+   *  spreadsheet's record and feed the revenue tables directly, so they are refused. */
+  local_value?: number | null; currency?: string; pm_owner?: string; month?: string | null
   project_id?: string; quote_id?: string; expert?: string
   contractor_name?: string; outsource_currency?: string; outsource_price?: number | null
   delivery_status?: string; start_date?: string | null; delivery_date?: string | null
@@ -2220,9 +2228,16 @@ export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): 
 
 /** Save to whichever side of the ledger this row came from. */
 export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
-  return row.source === 'raw'
-    ? updateSheetRowFields(row.source_id, f)   // source_id is the sheet's row number
-    : updateProjectFields(row.source_id, f)
+  if (row.source === 'raw') {
+    const { local_value, currency, pm_owner, month, ...rest } = f
+    const touched = (local_value != null && local_value !== row.local_value)
+      || (currency !== undefined && currency !== (row.currency || 'USD'))
+      || (pm_owner !== undefined && pm_owner.trim() !== (row.pm_owner || '').trim())
+      || (month != null && month !== (row.booking_month || '').slice(0, 7))
+    if (touched) return { ok: false, error: 'This line comes from the old sheet; its value, owner and month are what the sheet recorded and cannot be changed here.' }
+    return updateSheetRowFields(row.source_id, rest)   // source_id is the sheet's row number
+  }
+  return updateProjectFields(row.source_id, f)
 }
 
 /**
