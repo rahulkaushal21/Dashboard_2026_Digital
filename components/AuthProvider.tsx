@@ -90,12 +90,30 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
     run()
 
+    // SAFETY NET. Everything above awaits the Supabase client, and on a phone that
+    // can hang: the client serialises session reads through the browser's Web Locks,
+    // and a tab iOS Safari suspended in the background can hold that lock without
+    // ever releasing it, so getSession() never resolves and the page shows "Loading…"
+    // until the tab is killed. Nothing in `run` can notice, because the thing that
+    // would notice is the thing that is stuck. So after eight seconds the page settles
+    // on its own: the cached profile if there is one (the next action re-checks the
+    // session anyway), the sign-in screen if not. Harmless on a healthy load, which
+    // settles in well under a second and makes this a no-op.
+    const fallback = window.setTimeout(() => {
+      if (done) return
+      setProfile(p => {
+        if (p !== undefined) return p   // already settled; leave it alone
+        const stored = getStoredProfile()
+        return stored && stored.is_active ? stored : null
+      })
+    }, 8000)
+
     // A session can also end while the page sits open — signed out in another
     // tab, or a refresh that fails. Drop straight back to the sign-in screen
     // rather than leaving a dashboard on screen whose every write is refused.
     const stop = onSessionLost(() => { clearSession(); setProfile(null) })
 
-    return () => { done = true; stop() }
+    return () => { done = true; window.clearTimeout(fallback); stop() }
   }, [])
 
   const signOut = () => { signOutGoogle(); clearSession(); setProfile(null); setRefused(null) }
