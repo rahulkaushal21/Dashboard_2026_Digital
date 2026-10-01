@@ -683,6 +683,29 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
     }
   }
 
+  // The columns DERIVED from an edited cell. Writing the edited Outsource Price but not
+  // its USD figure left "Outsource Price (USD)" — the one people add up — at the source
+  // row's old value (almost always 0), so a cost edited in the dashboard looked like it
+  // never arrived. Same for Optimization, which is arithmetic on the two hour columns.
+  // Read from the overrides table itself, so a line only gets recomputed when somebody
+  // actually edited its cost or hours here; untouched lines keep the sheet's own values.
+  const derived = new Map<number, Record<string, string>>();
+  {
+    const { data, error } = await sb.from("sheet_row_overrides")
+      .select("row_index, outsource_price, outsource_currency, internal_hrs, actual_hrs");
+    if (error) throw new Error("sheet_row_overrides: " + error.message);
+    for (const d of data || []) {
+      const out: Record<string, string> = {};
+      if (d.outsource_price != null) {
+        // Sheet lines carry contractor costs in rupees (every source row), so a cost
+        // saved without a currency is read as INR, not as dollars.
+        out["Outsource Price (USD)"] = money(toUsd(Number(d.outsource_price), d.outsource_currency || "INR", rates));
+      }
+      if (d.internal_hrs != null || d.actual_hrs != null) out.__hrs = "1";
+      if (Object.keys(out).length) derived.set(Number(d.row_index), out);
+    }
+  }
+
   let from = 0;
   for (;;) {
     const { data, error } = await sb.from("sheet_raw").select("id, row_index, values")
@@ -702,6 +725,18 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
           if (!value) continue;
           const i = indexOfHeader(headers, name);
           if (i >= 0) row[i] = value;
+        }
+        const dv = derived.get(Number(r.row_index));
+        if (dv) {
+          const usdCol = indexOfHeader(headers, "Outsource Price (USD)");
+          if (dv["Outsource Price (USD)"] && usdCol >= 0) row[usdCol] = dv["Outsource Price (USD)"];
+          if (dv.__hrs) {
+            const optCol = indexOfHeader(headers, "Optimization");
+            const ih = Number(ov["Internal hrs"]), ah = Number(ov["Actual hrs"]);
+            if (optCol >= 0 && ov["Internal hrs"] && ov["Actual hrs"] && ih > 0) {
+              row[optCol] = `${Math.round(((ih - ah) / ih) * 100)}%`;
+            }
+          }
         }
       }
       const ref = `raw:${r.row_index}`;

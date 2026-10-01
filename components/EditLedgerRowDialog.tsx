@@ -52,7 +52,10 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const [internalDelivery, setInternalDelivery] = useState((row.internal_delivery || '').slice(0, 10))
   const [expert, setExpert] = useState(row.expert || '')
   const [contractorName, setContractorName] = useState(row.contractor_name || '')
-  const [outsourceCur, setOutsourceCur] = useState(row.outsource_currency || 'USD')
+  // A line from the old sheet keeps contractor costs in rupees (every source row does),
+  // so a blank currency there means INR — defaulting it to USD booked a ₹30,107 cost as
+  // $30,107. Dashboard-confirmed deals keep the USD default.
+  const [outsourceCur, setOutsourceCur] = useState(row.outsource_currency || (row.source === 'raw' ? 'INR' : 'USD'))
   const [experts, setExperts] = useState<string[]>([])
   const [contractors, setContractors] = useState<Contractor[]>([])
   const [internalHrs, setInternalHrs] = useState(row.internal_hrs != null ? String(row.internal_hrs) : '')

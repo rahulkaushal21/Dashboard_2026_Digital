@@ -308,7 +308,11 @@ export default function ProjectLedger() {
       })
   }, [preSource, fSource, sortKey, sortAsc])
 
-  useEffect(() => { setPage(0) }, [search, fDept, fModel, fGeo, fPm, fAm, fSource, fFrom, fTo])
+  // The month stays put while filtering. This used to jump back to the current month on
+  // every keystroke and every dropdown — someone looking at August who typed a client
+  // name landed on October and was told nothing matched. Only a From/To range resets it,
+  // since a range is its own single page.
+  useEffect(() => { setPage(0) }, [fFrom, fTo])
 
   // One page per booking month. A fixed hundred rows split September across two pages and
   // put the tail of August on the first — the unit of work here is a month, so that is
