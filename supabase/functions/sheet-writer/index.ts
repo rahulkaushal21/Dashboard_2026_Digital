@@ -653,12 +653,15 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
     let o = 0;
     for (;;) {
       const { data, error } = await sb.from("web_sheet_rows")
-        .select("id, has_override, project_id, quote_id, expert, project_status, start_date, delivery_date, internal_delivery, internal_hrs, actual_hrs, integration, invoice_no, invoice_currency, invoice_amount, outsource_price")
+        .select("id, has_override, project_name, project_id, quote_id, expert, project_status, start_date, delivery_date, internal_delivery, internal_hrs, actual_hrs, integration, invoice_no, invoice_currency, invoice_amount, outsource_price")
         .eq("has_override", true).order("id").range(o, o + 999);
       if (error) throw new Error("web_sheet_rows: " + error.message);
       if (!data?.length) break;
       for (const r of data) {
         overrides.set(Number(r.id), {
+          // The view already coalesces the overlay over the source cell, so this is the
+          // renamed name where there is one and the sheet's own otherwise (117).
+          "Project Name": s(r.project_name),
           "Project Id": s(r.project_id),
           "Quote ID": s(r.quote_id),
           "Expert": s(r.expert),

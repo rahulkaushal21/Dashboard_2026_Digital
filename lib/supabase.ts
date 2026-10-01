@@ -2183,7 +2183,7 @@ export async function saveClientQbr(company: string, qbrDate: string, f: {
 // what enforces it.
 
 export interface SheetRowEdits {
-  /** Only a dashboard line's name can change here; a sheet line's is the spreadsheet's cell. */
+  /** The ledger's Project Name. On a sheet line it goes into the overlay (117). Blank leaves it. */
   project_name?: string
   project_id?: string; quote_id?: string; expert?: string
   contractor_name?: string; outsource_currency?: string; outsource_price?: number | null
@@ -2197,7 +2197,7 @@ export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): 
   const t = (v?: string) => v === undefined ? null : v
   const n = (v?: number | null) => v ?? null
   const { error } = await supabase.rpc('update_sheet_row_fields', {
-    p_row_index: rowIndex,
+    p_row_index: rowIndex, p_project_name: t(f.project_name),
     p_project_id: t(f.project_id), p_quote_id: t(f.quote_id), p_expert: t(f.expert),
     p_contractor_name: t(f.contractor_name), p_outsource_currency: t(f.outsource_currency),
     p_outsource_price: n(f.outsource_price), p_project_status: t(f.delivery_status),
@@ -2212,14 +2212,9 @@ export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): 
 
 /** Save to whichever side of the ledger this row came from. */
 export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
-  if (row.source === 'raw') {
-    // The spreadsheet's Project Name cell is the source of truth and comes back on every
-    // sync; an overlay here would be overwritten or, worse, disagree with it.
-    if (f.project_name !== undefined && f.project_name.trim() !== (row.project_name || '').trim())
-      return { ok: false, error: 'This line comes from the sheet, so its project name is changed in the sheet itself.' }
-    return updateSheetRowFields(row.source_id, f)   // source_id is the sheet's row number
-  }
-  return updateProjectFields(row.source_id, f)
+  return row.source === 'raw'
+    ? updateSheetRowFields(row.source_id, f)   // source_id is the sheet's row number
+    : updateProjectFields(row.source_id, f)
 }
 
 /**

@@ -83,8 +83,8 @@ const COLUMNS: Col[] = [
   { key: 'project_id', label: 'Project Id', get: r => dash(r.project_id), edit: 'project_id', kind: 'text' },
   { key: 'quote_id', label: 'Quote ID', get: r => dash(r.quote_id), edit: 'quote_id', kind: 'text' },
   { key: 'dept', label: 'Service Department', get: r => dash(r.service_dept) },
-  // Editable on a dashboard line (a moved copy is named by the copy, and the name is
-  // often wrong); a sheet line's name is the spreadsheet's own cell and is refused here.
+  // Editable on both sides: a dashboard line's name is its subject, a sheet line's goes
+  // into the overlay (117). Either way the sheet-writer carries it to the project sheet.
   { key: 'project', label: 'Project Name', default: true, get: r => dash(r.project_name), edit: 'project_name', kind: 'text' },
   { key: 'ptype', label: 'Project Type', default: true, get: r => dash(r.engagement_model) },
   { key: 'tech', label: 'Technology', get: r => dash(r.technology) },
