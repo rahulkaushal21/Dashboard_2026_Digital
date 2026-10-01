@@ -431,10 +431,11 @@ export default function ProjectLedger() {
   const pickedRows = useMemo(() => shown.filter(r => picked.has(r.row_key)), [shown, picked])
   const pickedTotal = pickedRows.reduce((s, r) => s + (r.amount_usd || 0), 0)
 
-  // copy_row_to_month works on the LIVE sheet_raw id, because it reads the row now.
-  // Editing uses source_id (the sheet's own row number), which is the one that
-  // survives a re-sync. Two ids for one row, each for the thing it is stable for.
-  const copyId = (r: LedgerRow) => r.source === 'raw' ? (r.sheet_raw_id ?? r.source_id) : r.source_id
+  // Both sides are keyed on source_id. For a sheet line that is the sheet's own row
+  // number, the one handle that survives the half-hourly re-sync (119). It used to pass
+  // the live sheet_raw id, which is reissued every sync: the delivery-date prompt held
+  // one from the first attempt, a sync ran, and "Add" said "No such line in the sheet."
+  const copyId = (r: LedgerRow) => r.source_id
 
   const moveSelected = async () => {
     if (!pickedRows.length) return
