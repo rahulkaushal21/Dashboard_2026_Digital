@@ -43,6 +43,7 @@ const Group = ({ title, blurb, children }: { title: string; blurb: string; child
 export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   row: LedgerRow; onClose: () => void; onSaved: () => void
 }) {
+  const [projectName, setProjectName] = useState(row.project_name || '')
   const [projectId, setProjectId] = useState(row.project_id || '')
   const [quoteId, setQuoteId] = useState(row.quote_id || '')
   const [status, setStatus] = useState(row.delivery_status || '')
@@ -82,6 +83,8 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
     // opportunity, a sheet row writes the overlay beside the spreadsheet. Both RPCs
     // refuse anybody who is not the row's PC/SME.
     const res = await saveLedgerRow(row, {
+      // A sheet line's name is read-only here, so it is not sent for one.
+      ...(row.source === 'raw' ? {} : { project_name: projectName }),
       project_id: projectId, quote_id: quoteId, expert, integration,
       contractor_name: contractorName, outsource_currency: outsourceCur,
       delivery_status: status, invoice_no: invoiceNo, invoice_currency: invoiceCur,
@@ -113,6 +116,13 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
 
         <div className="px-5 py-4 overflow-y-auto">
           <Group title="Identifiers" blurb="The sheet's own labels for this project.">
+            {row.source === 'raw'
+              ? <F label="Project name" hint="From the sheet. Change it in the sheet itself and it syncs back here.">
+                  <input className={ctl} value={projectName} disabled readOnly />
+                </F>
+              : <F label="Project name">
+                  <input className={ctl} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="What the sheet should call this project" />
+                </F>}
             <F label="Project Id"><input className={ctl} value={projectId} onChange={e => setProjectId(e.target.value)} placeholder="PRJ…" /></F>
             <F label="Quote ID"><input className={ctl} value={quoteId} onChange={e => setQuoteId(e.target.value)} placeholder="QUT…" /></F>
           </Group>
