@@ -195,6 +195,10 @@ export default function ProjectLedger() {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [errors, setErrors] = useState<string[]>([])
+  // Lines the move refused for want of a delivery date alone. Each gets a date box
+  // below the errors, and "Add" retries that one line with the date filled in. Any other
+  // missing field goes to the error list as before - it needs the Edit dialog.
+  const [needDate, setNeedDate] = useState<{ row: LedgerRow; date: string; busy?: boolean }[]>([])
 
   const load = () => getProjectLedger().then(setRows).finally(() => setLoading(false))
   const [removing, setRemoving] = useState<string | null>(null)
@@ -409,25 +413,48 @@ export default function ProjectLedger() {
   const pickedRows = useMemo(() => shown.filter(r => picked.has(r.row_key)), [shown, picked])
   const pickedTotal = pickedRows.reduce((s, r) => s + (r.amount_usd || 0), 0)
 
+  // copy_row_to_month works on the LIVE sheet_raw id, because it reads the row now.
+  // Editing uses source_id (the sheet's own row number), which is the one that
+  // survives a re-sync. Two ids for one row, each for the thing it is stable for.
+  const copyId = (r: LedgerRow) => r.source === 'raw' ? (r.sheet_raw_id ?? r.source_id) : r.source_id
+
   const moveSelected = async () => {
     if (!pickedRows.length) return
-    setBusy(true); setStatus(''); setErrors([])
-    let ok = 0; const errs: string[] = []
+    setBusy(true); setStatus(''); setErrors([]); setNeedDate([])
+    let ok = 0; const errs: string[] = []; const ask: { row: LedgerRow; date: string }[] = []
     // One at a time, so a row that is refused does not take the rest of the batch with
     // it. Every refusal is reported with the client's name.
     for (const r of pickedRows) {
-      // copy_row_to_month works on the LIVE sheet_raw id, because it reads the row now.
-      // Editing uses source_id (the sheet's own row number), which is the one that
-      // survives a re-sync. Two ids for one row, each for the thing it is stable for.
-      const rowId = r.source === 'raw' ? (r.sheet_raw_id ?? r.source_id) : r.source_id
-      const res = await copyRowToMonth(r.source, rowId, target, r.local_value ?? r.amount_usd)
-      if (res.error) errs.push(`${r.company_name}: ${res.error}`)
-      else ok++
+      const res = await copyRowToMonth(r.source, copyId(r), target, r.local_value ?? r.amount_usd)
+      if (!res.error) { ok++; continue }
+      // Only the date is missing: ask for it here rather than sending the PM away.
+      if (res.missing?.length === 1 && res.missing[0] === 'Delivery date') ask.push({ row: r, date: '' })
+      else errs.push(`${r.company_name}: ${res.error}`)
     }
     setBusy(false)
     setPicked(new Set())
-    setStatus(`${ok} moved into ${monLabel(target)}${errs.length ? `, ${errs.length} could not be.` : '.'}`)
+    const parts = [`${ok} moved into ${monLabel(target)}`]
+    if (ask.length) parts.push(`${ask.length} need${ask.length === 1 ? 's' : ''} a delivery date first`)
+    if (errs.length) parts.push(`${errs.length} could not be`)
+    setStatus(parts.join(', ') + '.')
     setErrors(errs)
+    setNeedDate(ask)
+    load()
+  }
+
+  const addWithDate = async (i: number) => {
+    const item = needDate[i]
+    if (!item || !item.date) return
+    setNeedDate(l => l.map((x, j) => j === i ? { ...x, busy: true } : x))
+    const r = item.row
+    const res = await copyRowToMonth(r.source, copyId(r), target, r.local_value ?? r.amount_usd, item.date)
+    if (res.error) {
+      setNeedDate(l => l.map((x, j) => j === i ? { ...x, busy: false } : x))
+      setErrors(e => [...e, `${r.company_name}: ${res.error}`])
+      return
+    }
+    setNeedDate(l => l.filter((_, j) => j !== i))
+    setStatus(`${r.company_name} moved into ${monLabel(target)}.`)
     load()
   }
 
@@ -677,6 +704,27 @@ export default function ProjectLedger() {
         <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-xs text-red-300 space-y-0.5">
           {errors.slice(0, 8).map((e, i) => <div key={i}>{e}</div>)}
           {errors.length > 8 && <div className="text-mav-muted">…and {errors.length - 8} more.</div>}
+        </div>
+      )}
+      {/* The move refused these for a delivery date and nothing else. The date is typed
+          here and the line retried, instead of the PM opening each one to find out. */}
+      {needDate.length > 0 && (
+        <div className="mb-4 rounded-lg border border-mav-yellow/40 bg-mav-yellow/10 px-3 py-2.5 text-xs space-y-1.5">
+          <div className="text-mav-yellow font-medium">These need a delivery date before they can go into {monLabel(target)}:</div>
+          {needDate.map((n, i) => (
+            <div key={n.row.row_key} className="flex flex-wrap items-center gap-2">
+              <span className="min-w-[14rem]">{n.row.company_name}<span className="text-mav-muted"> · {n.row.engagement_model || 'no project type'}</span></span>
+              <input type="date" value={n.date} disabled={n.busy}
+                onChange={e => setNeedDate(l => l.map((x, j) => j === i ? { ...x, date: e.target.value } : x))}
+                className={sel} />
+              <button onClick={() => addWithDate(i)} disabled={!n.date || n.busy}
+                className="rounded-full bg-mav-fill text-black font-semibold px-3 py-1 text-xs disabled:opacity-40 hover:brightness-95 transition">
+                {n.busy ? 'Adding…' : `Add to ${monLabel(target)}`}
+              </button>
+              <button onClick={() => setNeedDate(l => l.filter((_, j) => j !== i))} disabled={n.busy}
+                className="text-mav-muted hover:text-mav-text">Skip</button>
+            </div>
+          ))}
         </div>
       )}
 

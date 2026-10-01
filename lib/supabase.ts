@@ -1767,12 +1767,22 @@ export async function getProjectLedger(): Promise<LedgerRow[]> {
 }
 
 /** Copy one ledger line into a month, whichever side it came from. */
-export async function copyRowToMonth(source: string, id: number, month: string, amount?: number | null): Promise<{ id?: number; error?: string }> {
+/**
+ * Copy a ledger line into another month. `deliveryDate` is optional: the copy never
+ * carries one forward (last month's hand-over date is not next month's), so a line whose
+ * project type is delivered on a day comes back refused with `missing` naming
+ * 'Delivery date', and the page asks the PM for it and calls again.
+ */
+export async function copyRowToMonth(source: string, id: number, month: string, amount?: number | null, deliveryDate?: string | null): Promise<{ id?: number; error?: string; missing?: string[] }> {
   if (!supabase) return { error: 'Supabase not configured' }
   const { data, error } = await supabase.rpc('copy_row_to_month', {
     p_source: source, p_id: id, p_month: `${month}-01`, p_amount: amount ?? null,
+    p_delivery_date: deliveryDate || null,
   })
-  if (error) return { error: error.message }
+  if (error) {
+    const m = /still missing:\s*(.+)$/.exec(error.message)
+    return { error: error.message, missing: m ? m[1].split(',').map(x => x.trim()) : undefined }
+  }
   return { id: Number(data) }
 }
 
