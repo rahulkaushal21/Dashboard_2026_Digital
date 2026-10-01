@@ -5,8 +5,10 @@ import {
   confirmOpportunityFull, opportunityMissingFields, getFxRates, toUsd, rollUpOpportunities,
   getSheetVocab, getSheetClientDefaults, sheetDefaultsFor, geoCodeFromSheet,
   getPickList, getContractors, CONTRACTOR, type Contractor,
+  listDirectory, getDirectoryMember, type DirectoryMember,
   type FxRate, type Opportunity, type SheetVocab, type SheetClientDefaults,
 } from '@/lib/supabase'
+import { currentEmail } from '@/lib/access'
 import {
   SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL,
   VOCAB_FALLBACK, OPEN_ENDED_TYPES, normBusinessType,
@@ -167,6 +169,23 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
   // ---- people
   const [salesPerson, setSalesPerson] = useState(deal.sales_person || '')
   const [pmOwner, setPmOwner] = useState(deal.pm_owner || '')
+  // PM owner is picked from the directory, and starts as the person confirming: since
+  // 114 anyone on the directory can confirm, so the one at the keyboard is the best
+  // default. Still a choice - a deal confirmed on a colleague's behalf is reassigned
+  // from the same list. Someone not on the directory (an admin account) keeps whatever
+  // the deal already says.
+  const [pms, setPms] = useState<DirectoryMember[]>([])
+  const [mePm, setMePm] = useState<DirectoryMember | null>(null)
+  useEffect(() => {
+    let live = true
+    listDirectory().then(list => { if (live) setPms(list.filter(m => m.active)) })
+    getDirectoryMember(currentEmail()).then(m => {
+      if (!live || !m) return
+      setMePm(m); setPmOwner(m.name)
+    })
+    return () => { live = false }
+  }, [])
+  const pmNames = useMemo(() => pms.map(m => m.name), [pms])
 
   const [rates, setRates] = useState<FxRate[]>([])
   const [vocab, setVocab] = useState<SheetVocab>(VOCAB_FALLBACK as SheetVocab)
@@ -532,9 +551,9 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
                 </F>
               </>
             )}
-            <F label="PM owner" need={missing.includes('PM owner')} auto={has('pmOwner')} from={deal.company_name}>
-              <input className={`${ctl} ${border(missing.includes('PM owner'))}`} value={pmOwner}
-                onChange={e => setPmOwner(e.target.value)} />
+            <F label="PM owner" need={missing.includes('PM owner')} auto={has('pmOwner')} from={deal.company_name}
+              hint={mePm && pmOwner === mePm.name ? 'You. Change it if this is for a colleague.' : undefined}>
+              <Pick value={pmOwner} onChange={setPmOwner} options={pmNames} bad={missing.includes('PM owner')} />
             </F>
             <F label={ownerLabel(salesPerson)} need={missing.includes('Account manager')} auto={has('salesPerson')} from={deal.company_name}>
               <input className={`${ctl} ${border(missing.includes('Account manager'))}`} value={salesPerson}
