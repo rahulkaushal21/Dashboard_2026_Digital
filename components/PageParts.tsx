@@ -73,7 +73,14 @@ export function Panel({ title, info, right, children, flush, className = '' }: {
   className?: string
 }) {
   return (
-    <section className={`bg-mav-panel border border-mav-line rounded-xl ${flush ? 'overflow-clip' : 'p-4'} ${className}`}>
+    // min-w-0 is load-bearing on a phone. A grid or flex item refuses to shrink below its
+    // content's natural width unless told it may, and overflow-clip does not count as
+    // "scrollable" for that rule. So a panel holding a wide table (Business Trend's "Deals
+    // to close", 720px of columns) sat 488px wide inside a 390px screen, spilling off the
+    // right edge and taking the panel beside it with it. With min-w-0 the panel shrinks to
+    // its column and the table scrolls sideways inside its own overflow-x-auto wrapper,
+    // which is what the wrapper was there for.
+    <section className={`bg-mav-panel border border-mav-line rounded-xl min-w-0 ${flush ? 'overflow-clip' : 'p-4'} ${className}`}>
       {(title || right) && (
         <div className={`flex flex-wrap items-center justify-between gap-2 ${flush ? 'px-4 py-3 border-b border-mav-line' : 'mb-3'}`}>
           <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">

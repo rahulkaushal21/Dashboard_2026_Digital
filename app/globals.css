@@ -505,3 +505,14 @@ thead .sticky-action {
   background-color: rgb(var(--mav-panel));
   background-image: linear-gradient(rgb(255 219 45 / 0.18), rgb(255 219 45 / 0.18));
 }
+/* On a phone the pinned column is half the screen: "Confirm · Open" sat over the client
+   name and the date was all that showed. Below the desktop breakpoint it scrolls with the
+   rest of the table instead; the buttons are one swipe away and nothing is hidden. */
+@media (max-width: 1023px) {
+  .sticky-action {
+    position: static;
+    border-left: 0;
+    box-shadow: none;
+    background-image: none;
+  }
+}
