@@ -12,7 +12,7 @@ import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import Link from 'next/link'
-import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
+import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getLastOkSync, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile, currentEmail } from '@/lib/access'
 
@@ -202,7 +202,16 @@ export default function ProjectLedger() {
   // missing field goes to the error list as before - it needs the Edit dialog.
   const [needDate, setNeedDate] = useState<{ row: LedgerRow; date: string; internal: string; busy?: boolean }[]>([])
 
-  const load = () => getProjectLedger().then(setRows).finally(() => setLoading(false))
+  // When the hourly writer last put the ledger into the project sheet. A dashboard line is
+  // "in the sheet" once a successful run has happened after it was confirmed; the ledger
+  // itself only knows which SIDE a line came from, not whether it has been carried yet.
+  const [lastWrite, setLastWrite] = useState<string | null>(null)
+  const load = () => Promise.all([
+    getProjectLedger().then(setRows),
+    getLastOkSync('sheet-writer').then(setLastWrite),
+  ]).finally(() => setLoading(false))
+  const carried = (r: LedgerRow) =>
+    r.in_sheet || (!!lastWrite && !!r.confirmed_at && new Date(r.confirmed_at) <= new Date(lastWrite))
   const [removing, setRemoving] = useState<string | null>(null)
 
   // What is currently hidden, and therefore what the spreadsheet is showing as Deleted.
@@ -376,7 +385,10 @@ export default function ProjectLedger() {
   const pageTotal = mCounted.reduce((s, r) => s + (r.amount_usd || 0), 0)
   const pageAwaitingTotal = mAwaiting.reduce((s, r) => s + (r.amount_usd || 0), 0)
   const pageClients = new Set(mCounted.map(r => (r.company_name || '').toLowerCase())).size
-  const notInSheet = useMemo(() => pageRows.filter(r => !r.in_sheet), [pageRows])
+  // Confirmed here and not yet carried into the project sheet. It used to be every
+  // dashboard line, for ever, which told people lines were missing from a sheet they
+  // could see them in.
+  const notInSheet = useMemo(() => pageRows.filter(r => !carried(r)), [pageRows, lastWrite])
   // Tab counts: the month on screen, under every filter but the source split.
   const pageAllSources = pageMonth === RANGE ? preSource : preSource.filter(r => (rowMonth(r) || '—') === pageMonth)
   const sourceCounts = {
@@ -495,7 +507,7 @@ export default function ProjectLedger() {
     // Columns picker is showing, so a paste into the spreadsheet lands in the right columns.
     const head = [...COLUMNS.map(c => c.label), 'In sheet']
     const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    const body = shown.map(r => [...COLUMNS.map(c => { const v = c.get(r); return v === '—' ? '' : v }), r.in_sheet ? 'yes' : 'no'].map(esc).join(','))
+    const body = shown.map(r => [...COLUMNS.map(c => { const v = c.get(r); return v === '—' ? '' : v }), carried(r) ? 'yes' : 'no'].map(esc).join(','))
     const blob = new Blob([[head.map(esc).join(','), ...body].join('\n')], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
@@ -616,7 +628,7 @@ export default function ProjectLedger() {
         <KPICard tone="amber" label="Not in the sheet yet" value={loading ? '…' : String(notInSheet.length)}
           sub="confirmed here, pending"
           details={loading ? undefined : notInSheetDetails}
-          info="Confirmed in the dashboard and not yet carried into the sheet by the hourly writer. The 'Confirmed here only' tab shows only these." />
+          info="Confirmed in the dashboard since the hourly writer last ran, so the project sheet does not have the line yet. Clears on its own after the next run. The 'Confirmed here only' tab shows every line confirmed here, carried or not." />
         <KPICard tone="yellow" label="Awaiting information" value={loading ? '…' : money(pageAwaitingTotal)}
           sub={`${mAwaiting.length} line${mAwaiting.length === 1 ? '' : 's'} · not counted`}
           details={loading ? undefined : awaitingDetails}
@@ -630,8 +642,10 @@ export default function ProjectLedger() {
         onChange={v => setFSource(v)}
         items={[
           { id: '', label: 'Sheet + dashboard', count: sourceCounts.all },
-          { id: 'sheet', label: 'In the sheet', count: sourceCounts.sheet },
-          { id: 'dashboard', label: 'Confirmed here only', count: sourceCounts.dashboard },
+          // Where a line STARTED. Nothing new starts in the old spreadsheet any more, so
+          // the split is history versus the dashboard, not "in the sheet or not".
+          { id: 'sheet', label: 'From the old sheet', count: sourceCounts.sheet },
+          { id: 'dashboard', label: 'Confirmed here', count: sourceCounts.dashboard },
         ]} />
 
       {/* Row 1: search, the month and the three filters reached for most. Everything else
@@ -814,7 +828,9 @@ export default function ProjectLedger() {
                   <td className={td}>
                     {r.in_sheet
                       ? <span className="text-xs text-mav-fg/50">yes</span>
-                      : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300">pending</span>}
+                      : carried(r)
+                      ? <span className="text-xs text-mav-fg/50" title="Carried into the project sheet by the hourly writer">written</span>
+                      : <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300" title="Goes into the project sheet on the writer's next hourly run">pending</span>}
                   </td>
                 )}
                 <td className={`${td} sticky-action text-right`}>

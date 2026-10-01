@@ -285,6 +285,14 @@ const { data } = await supabase.from('sync_runs').select('ran_at').eq('source', 
 return data && data.length ? (data[0] as { ran_at: string }).ran_at : null
 }
 
+/** When this source last ran SUCCESSFULLY. A failed run in between does not undo what the
+ *  one before it wrote, so "has the writer carried this line yet" is judged against this. */
+export async function getLastOkSync(source: string): Promise<string | null> {
+  if (!supabase) return null
+  const { data } = await supabase.from('sync_runs').select('ran_at').eq('source', source).eq('ok', true).order('ran_at', { ascending: false }).limit(1)
+  return data && data.length ? (data[0] as { ran_at: string }).ran_at : null
+}
+
 // Like getLastSync but also returns ok/message of the most recent run, so the UI
 // can distinguish a healthy scan from a failed one (e.g. Gmail auth expired ->
 // the routine writes an ok:false heartbeat via markScanFailed).
