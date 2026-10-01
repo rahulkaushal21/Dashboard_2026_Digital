@@ -1168,17 +1168,17 @@ export const ownerMatches = (cell: string | undefined, aliases: string[]) =>
 /**
  * May this person confirm this deal, as far as the browser can tell?
  *
- * A PM is named in pm_owner. Admins may confirm anything. `team` is a pod label for
- * grouping the team and has no part in this.
+ * Anyone active on the PM directory may, and admins may. A deal is not tied to the one
+ * person in pm_owner: many accounts are worked by both LP/HUB and Web, and whoever has
+ * the client in front of them confirms it (114). The directory is still the gate.
  *
  * THIS IS FOR SHOWING THE BUTTON ONLY. The same rule is enforced in the database and
  * that is the one that counts — this copy just avoids offering an action that would
  * be refused.
  */
-export function canConfirmLocally(o: Opportunity, me: DirectoryMember | null, isAdmin: boolean): boolean {
+export function canConfirmLocally(_o: Opportunity, me: DirectoryMember | null, isAdmin: boolean): boolean {
   if (isAdmin) return true
-  if (!me) return false
-  return ownerMatches(o.pm_owner, me.aliases)
+  return !!me && me.active
 }
 
 export interface NewOpportunity {
