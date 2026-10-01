@@ -1613,6 +1613,11 @@ export interface ProjectFieldEdits {
   /** The three fields that used to be fixed at confirmation (118). Value is in the deal's
    *  own currency; the USD figure is recomputed in the database. Month is 'YYYY-MM'. */
   local_value?: number | null; currency?: string; pm_owner?: string; month?: string | null
+  /** AM and agency (123). Sending either marks it in opportunities.manual_fields, after
+   *  which no sync may overwrite it — without that the Quotes tab wins back within the
+   *  half hour. A blank agency is read as "not sent": blanking it would detach the line
+   *  from its client. A blank AM does clear it, deliberately. */
+  sales_person?: string; company_name?: string
   project_id?: string; quote_id?: string; expert?: string
   internal_delivery?: string | null; internal_hrs?: number | null; actual_hrs?: number | null
   integration?: string; outsource_price?: number | null
@@ -1644,6 +1649,7 @@ export async function updateProjectFields(id: number, f: ProjectFieldEdits): Pro
     p_delivery_status: t(f.delivery_status),
     p_delivery_date: f.delivery_date || null, p_start_date: f.start_date || null,
     p_contractor_name: t(f.contractor_name), p_outsource_currency: t(f.outsource_currency),
+    p_sales_person: t(f.sales_person), p_company_name: t(f.company_name),
   })
   return error ? { ok: false, error: error.message } : { ok: true }
 }
@@ -2198,9 +2204,12 @@ export async function saveClientQbr(company: string, qbrDate: string, f: {
 export interface SheetRowEdits {
   /** The ledger's Project Name. On a sheet line it goes into the overlay (117). Blank leaves it. */
   project_name?: string
-  /** Dashboard lines only (118): a sheet line's value, owner and month are the old
-   *  spreadsheet's record and feed the revenue tables directly, so they are refused. */
+  /** Dashboard lines only (118, and AM/agency since 123): a sheet line's value, owner,
+   *  month, AM and agency are the old spreadsheet's record and feed the revenue tables
+   *  directly, so they are refused here and saveLedgerRow says so rather than dropping
+   *  them silently. */
   local_value?: number | null; currency?: string; pm_owner?: string; month?: string | null
+  sales_person?: string; company_name?: string
   project_id?: string; quote_id?: string; expert?: string
   contractor_name?: string; outsource_currency?: string; outsource_price?: number | null
   delivery_status?: string; start_date?: string | null; delivery_date?: string | null
@@ -2229,12 +2238,14 @@ export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): 
 /** Save to whichever side of the ledger this row came from. */
 export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
   if (row.source === 'raw') {
-    const { local_value, currency, pm_owner, month, ...rest } = f
+    const { local_value, currency, pm_owner, month, sales_person, company_name, ...rest } = f
     const touched = (local_value != null && local_value !== row.local_value)
       || (currency !== undefined && currency !== (row.currency || 'USD'))
       || (pm_owner !== undefined && pm_owner.trim() !== (row.pm_owner || '').trim())
       || (month != null && month !== (row.booking_month || '').slice(0, 7))
-    if (touched) return { ok: false, error: 'This line comes from the old sheet; its value, owner and month are what the sheet recorded and cannot be changed here.' }
+      || (sales_person !== undefined && sales_person.trim() !== (row.sales_person || '').trim())
+      || (company_name !== undefined && company_name.trim() !== (row.company_name || '').trim())
+    if (touched) return { ok: false, error: 'This line comes from the old sheet; its value, owner, month, AM and agency are what the sheet recorded and cannot be changed here.' }
     return updateSheetRowFields(row.source_id, rest)   // source_id is the sheet's row number
   }
   return updateProjectFields(row.source_id, f)

@@ -11,10 +11,11 @@ import { CURRENCIES } from '@/lib/deal-fields'
 // would have produced a required field people answer with anything to get past it.
 //
 // So they live here instead, on the row, editable by whoever does know. Since 118 the
-// value, owner and month are editable too, on a DASHBOARD line: the dashboard is where a
-// line starts now, so it is where a wrong figure or month is put right. Whether the deal
-// is won is still not touched here. A sheet line's value, owner and month are what the
-// old spreadsheet recorded and feed the revenue tables directly, so they stay read-only.
+// value, owner and month are editable too, on a DASHBOARD line, and since 123 the AM and
+// the agency: the dashboard is where a line starts now, so it is where a wrong figure,
+// month, owner or client name is put right. Whether the deal is won is still not touched
+// here. A sheet line's five are what the old spreadsheet recorded and feed the revenue
+// tables directly, so they stay read-only.
 //
 // Works on both sides of the ledger. A dashboard row updates the opportunity; a SHEET row
 // writes an overlay beside the spreadsheet, because sheet_raw is re-synced and anything
@@ -50,6 +51,12 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const [currency, setCurrency] = useState(row.currency || 'USD')
   const [pmOwner, setPmOwner] = useState(row.pm_owner || '')
   const [month, setMonth] = useState((row.booking_month || '').slice(0, 7))
+  // AM and agency (123). Editable here because the team fills these in under time
+  // pressure and gets them wrong, and the dashboard is where a wrong one is now put
+  // right. Saving either marks it in manual_fields so the half-hourly Quotes sync stops
+  // overwriting it — without that mark the edit reverts within thirty minutes.
+  const [salesPerson, setSalesPerson] = useState(row.sales_person || '')
+  const [agency, setAgency] = useState(row.company_name || '')
   const [pms, setPms] = useState<DirectoryMember[]>([])
   useEffect(() => { listDirectory().then(l => setPms(l.filter(m => m.active))) }, [])
 
@@ -97,7 +104,10 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
     // refuse anybody who is not the row's PC/SME.
     const res = await saveLedgerRow(row, {
       // The booking's own fields go only where they can change; a sheet line sends none.
-      ...(fixed ? {} : { local_value: num(value), currency, pm_owner: pmOwner, month: month || null }),
+      ...(fixed ? {} : {
+        local_value: num(value), currency, pm_owner: pmOwner, month: month || null,
+        sales_person: salesPerson, company_name: agency,
+      }),
       project_name: projectName, project_id: projectId, quote_id: quoteId, expert, integration,
       contractor_name: contractorName, outsource_currency: outsourceCur,
       delivery_status: status, invoice_no: invoiceNo, invoice_currency: invoiceCur,
@@ -130,7 +140,7 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         <div className="px-5 py-4 overflow-y-auto">
           <Group title="The booking"
             blurb={fixed
-              ? 'From the old sheet. These three are what it recorded and feed the revenue tables, so they are shown here but changed in the sheet.'
+              ? 'From the old sheet. These are what it recorded and feed the revenue tables, so they are shown here but changed in the sheet.'
               : 'What the line is worth, whose it is, and the month it books under. Every total moves with the value; the change is logged with who made it.'}>
             <F label="Value" hint={fixed ? undefined : 'In the currency beside it. The USD figure is worked out from the two.'}>
               <input type="number" className={ctl} value={value} disabled={fixed} readOnly={fixed}
@@ -152,6 +162,20 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
             <F label="Month" hint={fixed ? undefined : 'The month this line books under.'}>
               <input type="month" className={ctl} value={month} disabled={fixed} readOnly={fixed}
                 onChange={e => setMonth(e.target.value)} />
+            </F>
+            {/* Still a text box rather than a picker: there is no AM directory to pick
+                from, which is why forty spellings of about twenty-five people are in the
+                data. Becomes a dropdown once am_directory exists. */}
+            <F label="Account manager" hint={fixed ? undefined : 'Clearing this leaves the line with no AM, which is allowed.'}>
+              <input className={ctl} value={salesPerson} disabled={fixed} readOnly={fixed}
+                onChange={e => setSalesPerson(e.target.value)} />
+            </F>
+            {/* Last in the group, because it is the one with consequences beyond the row:
+                the client a line belongs to is this name, so renaming it moves the line's
+                revenue, health score and feedback to a different client. */}
+            <F label="Agency" hint={fixed ? undefined : 'The client this line counts towards. Renaming it moves the line to that client.'}>
+              <input className={ctl} value={agency} disabled={fixed} readOnly={fixed}
+                onChange={e => setAgency(e.target.value)} />
             </F>
           </Group>
 
@@ -237,7 +261,7 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
           <span className="text-[11px] text-mav-fg/60">
             {fixed
-              ? 'Value, owner and month come from the old sheet and are changed there.'
+              ? 'Value, owner, month, AM and agency come from the old sheet and are changed there.'
               : 'Whether the deal is won is not changed here; remove the line instead.'}
           </span>
           <div className="flex items-center gap-2">
