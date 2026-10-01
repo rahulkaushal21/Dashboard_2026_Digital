@@ -145,7 +145,13 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
   // is the same number anyway.
   const [localValue, setLocalValue] = useState(
     deal.local_value != null ? String(deal.local_value) : deal.est_value != null ? String(deal.est_value) : '')
-  const [quotePrice, setQuotePrice] = useState(deal.quote_price != null ? String(deal.quote_price) : '')
+  // Quoted price starts as the opportunity's own value: that figure IS the quote. The
+  // confirmed value below is what the client finally agreed, and the two are kept
+  // apart so the sheet's Quote Price and Confirmed Price columns both mean something.
+  const [quotePrice, setQuotePrice] = useState(
+    deal.quote_price != null ? String(deal.quote_price)
+    : deal.local_value != null ? String(deal.local_value)
+    : deal.est_value != null ? String(deal.est_value) : '')
   const [currency, setCurrency] = useState(deal.currency || 'USD')
 
   // ---- dates and delivery
@@ -465,11 +471,11 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
           </Section>
 
           <Section n={4} title="The money" blurb="What you quoted, and what it actually closed at.">
-            <F label="Quoted price" hint="Before negotiation. Leave blank if it was never formally quoted.">
+            <F label="Quoted price" hint="What the opportunity was quoted at, before negotiation.">
               <input type="number" className={`${ctl} ${border(false)}`} value={quotePrice}
                 onChange={e => setQuotePrice(e.target.value)} placeholder="optional" />
             </F>
-            <F label="Confirmed value" need={missing.includes('Value')}>
+            <F label="Confirmed price" need={missing.includes('Value')} hint="The final figure the client agreed. This is what books.">
               <input type="number" className={`${ctl} ${border(missing.includes('Value'))}`} value={localValue}
                 onChange={e => setLocalValue(e.target.value)} />
             </F>

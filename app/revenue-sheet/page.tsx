@@ -83,7 +83,9 @@ const COLUMNS: Col[] = [
   { key: 'project_id', label: 'Project Id', get: r => dash(r.project_id), edit: 'project_id', kind: 'text' },
   { key: 'quote_id', label: 'Quote ID', get: r => dash(r.quote_id), edit: 'quote_id', kind: 'text' },
   { key: 'dept', label: 'Service Department', get: r => dash(r.service_dept) },
-  { key: 'project', label: 'Project Name', default: true, get: r => dash(r.project_name) },
+  // Editable on a dashboard line (a moved copy is named by the copy, and the name is
+  // often wrong); a sheet line's name is the spreadsheet's own cell and is refused here.
+  { key: 'project', label: 'Project Name', default: true, get: r => dash(r.project_name), edit: 'project_name', kind: 'text' },
   { key: 'ptype', label: 'Project Type', default: true, get: r => dash(r.engagement_model) },
   { key: 'tech', label: 'Technology', get: r => dash(r.technology) },
   { key: 'conf', label: 'Confirmation Date', get: r => d10(r.confirmed_at), sort: r => r.confirmed_at || '' },
@@ -198,7 +200,7 @@ export default function ProjectLedger() {
   // Lines the move refused for want of a delivery date alone. Each gets a date box
   // below the errors, and "Add" retries that one line with the date filled in. Any other
   // missing field goes to the error list as before - it needs the Edit dialog.
-  const [needDate, setNeedDate] = useState<{ row: LedgerRow; date: string; busy?: boolean }[]>([])
+  const [needDate, setNeedDate] = useState<{ row: LedgerRow; date: string; internal: string; busy?: boolean }[]>([])
 
   const load = () => getProjectLedger().then(setRows).finally(() => setLoading(false))
   const [removing, setRemoving] = useState<string | null>(null)
@@ -421,14 +423,14 @@ export default function ProjectLedger() {
   const moveSelected = async () => {
     if (!pickedRows.length) return
     setBusy(true); setStatus(''); setErrors([]); setNeedDate([])
-    let ok = 0; const errs: string[] = []; const ask: { row: LedgerRow; date: string }[] = []
+    let ok = 0; const errs: string[] = []; const ask: { row: LedgerRow; date: string; internal: string }[] = []
     // One at a time, so a row that is refused does not take the rest of the batch with
     // it. Every refusal is reported with the client's name.
     for (const r of pickedRows) {
       const res = await copyRowToMonth(r.source, copyId(r), target, r.local_value ?? r.amount_usd)
       if (!res.error) { ok++; continue }
       // Only the date is missing: ask for it here rather than sending the PM away.
-      if (res.missing?.length === 1 && res.missing[0] === 'Delivery date') ask.push({ row: r, date: '' })
+      if (res.missing?.length === 1 && res.missing[0] === 'Delivery date') ask.push({ row: r, date: '', internal: '' })
       else errs.push(`${r.company_name}: ${res.error}`)
     }
     setBusy(false)
@@ -447,7 +449,7 @@ export default function ProjectLedger() {
     if (!item || !item.date) return
     setNeedDate(l => l.map((x, j) => j === i ? { ...x, busy: true } : x))
     const r = item.row
-    const res = await copyRowToMonth(r.source, copyId(r), target, r.local_value ?? r.amount_usd, item.date)
+    const res = await copyRowToMonth(r.source, copyId(r), target, r.local_value ?? r.amount_usd, item.date, item.internal)
     if (res.error) {
       setNeedDate(l => l.map((x, j) => j === i ? { ...x, busy: false } : x))
       setErrors(e => [...e, `${r.company_name}: ${res.error}`])
@@ -714,9 +716,16 @@ export default function ProjectLedger() {
           {needDate.map((n, i) => (
             <div key={n.row.row_key} className="flex flex-wrap items-center gap-2">
               <span className="min-w-[14rem]">{n.row.company_name}<span className="text-mav-muted"> · {n.row.engagement_model || 'no project type'}</span></span>
-              <input type="date" value={n.date} disabled={n.busy}
-                onChange={e => setNeedDate(l => l.map((x, j) => j === i ? { ...x, date: e.target.value } : x))}
-                className={sel} />
+              <label className="flex items-center gap-1.5"><span className="text-mav-muted">Delivery</span>
+                <input type="date" value={n.date} disabled={n.busy}
+                  onChange={e => setNeedDate(l => l.map((x, j) => j === i ? { ...x, date: e.target.value } : x))}
+                  className={sel} /></label>
+              {/* Internal delivery is the team's own target, usually a few days ahead of the
+                  client's. Optional here; hours and optimisation fill in as the work happens. */}
+              <label className="flex items-center gap-1.5"><span className="text-mav-muted">Internal</span>
+                <input type="date" value={n.internal} disabled={n.busy}
+                  onChange={e => setNeedDate(l => l.map((x, j) => j === i ? { ...x, internal: e.target.value } : x))}
+                  className={sel} /></label>
               <button onClick={() => addWithDate(i)} disabled={!n.date || n.busy}
                 className="rounded-full bg-mav-fill text-black font-semibold px-3 py-1 text-xs disabled:opacity-40 hover:brightness-95 transition">
                 {n.busy ? 'Adding…' : `Add to ${monLabel(target)}`}
