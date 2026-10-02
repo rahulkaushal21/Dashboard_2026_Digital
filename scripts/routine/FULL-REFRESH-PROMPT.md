@@ -170,6 +170,14 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     LLM setup" — both were SEO, both were wrongly on the board). **SFMC / Salesforce Marketing
 >     Cloud, and email-build or email-signature scopes, belong to the email team — not this board**
 >     (e.g. Brandtech's "SFMC Offshore Partnership & Pricing Models" was removed).
+>     **BUT a mixed brief is split, not dropped.** When another team (Email, Design, Campaign)
+>     forwards or loops in `lp@mavlers.com` / the web PMs and WE quote a web part — a landing
+>     page, HubSpot/WordPress page, template or module — that part IS a web opportunity. Create
+>     it with only OUR quoted figure (never the other teams' share), AM = the CSM/AM fronting the
+>     client, PM = the web PM named in the thread, and say in the summary which parts belong to
+>     the other teams. (Plato Creative / Enable RSVP, 1 Oct 2026: the email team's 4-part brief
+>     carried a AUD 390 HubSpot thank-you landing page quoted by LP — it was wrongly skipped as
+>     "email team" work.)
 >     Only track a genuine NEW paid scope. When unsure, leave it **off** the board.
 >   - **When you DO create an email opp, populate it fully:** set `sales_person`/`pm_owner`
 >     from the client's existing rows, `geo`, `business_type`, and `est_value` if any figure is
@@ -318,6 +326,8 @@ the conversion called out in the pulse so it can be corrected. Never store a for
 ## What the user has corrected — apply without being asked again
 Every one of these came from a real correction; treat them as standing rules.
 - **Web only.** SEO / AIO / LLM-visibility scopes come off the board even for web clients.
+- **Forwarded from another team still counts.** If the Email/Design/Campaign team brings a brief
+  in and we quote the web part (landing page, HubSpot/WP page), track that part — our figure only.
 - **RFQ mails are evidence, not noise.** `Quote ( QUT… ) Request` from `notifications@uplers.com`
   is where the quoted figure and currency actually live, and an RFQ being raised points at
   invoicing/confirmation. Parse them every run before clearing that sender (step 3).
