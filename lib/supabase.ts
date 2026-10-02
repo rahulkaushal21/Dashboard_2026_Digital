@@ -79,6 +79,14 @@ email_lost?: boolean; email_lost_reason?: string; email_lost_at?: string; email_
 // Confirmed Won from the dashboard — the mirror image of email_lost, and held apart
 // from `won`/`status` for the same reason: the sheet sync overwrites both.
 email_won?: boolean; email_won_reason?: string; email_won_at?: string; email_won_by?: string
+// On Hold / Cancelled / Not an opportunity, called from the dashboard. Same reason as
+// email_lost: the sheet sync rewrites `status`, so the call lives in its own column.
+// getOpportunities() folds it into `status` (On Hold / Cancelled) so every page that
+// reads status honours it, keeps the sheet's own word in `sheet_status`, and leaves
+// not_opp rows out entirely unless the caller asks for them.
+manual_state?: 'on_hold' | 'cancelled' | 'not_opp' | null
+manual_state_reason?: string; manual_state_at?: string; manual_state_by?: string
+sheet_status?: string
 // When the sheet sync last confirmed this row's status — the fallback date for
 // placing a win in the right quarter when email_won_at is absent.
 status_checked_at?: string
@@ -472,7 +480,7 @@ out.set(o.id, { month: b.raw, amount: Math.round(o.est_value || 0), ambiguous })
 return out
 }
 
-export async function getOpportunities(): Promise<Opportunity[]> {
+export async function getOpportunities(opts?: { includeNotOpp?: boolean }): Promise<Opportunity[]> {
 // SINGLE SOURCE OF TRUTH: the opportunities table. One row per DEAL.
 //  • origin='sheet'  — one row per line in the Business-Sheet "Quotes" tab
 //    (price, confirmation status, agency, subject, GEO, AM=sales_person, PC=pm_owner),
@@ -555,10 +563,16 @@ if (!o.won && norm(o.status) !== 'lost' && !norm(o.status).includes('cancel')) {
 // email-origin deal has no Quotes line to disagree with in the first place.
 const lostLag = o.email_lost && o.origin === 'sheet'
 const confirmLag = o.email_won && o.origin === 'sheet'
+const holdLag = o.manual_state === 'on_hold' && o.origin === 'sheet' && !norm(o.status).includes('hold')
+const cancelLag = o.manual_state === 'cancelled' && o.origin === 'sheet'
+const notOppLag = o.manual_state === 'not_opp' && o.origin === 'sheet'
 if (bm && !bm.ambiguous) flag = `⚠ ALREADY BOOKED, OPEN IN SHEET — $${bm.amount.toLocaleString('en-US')} for this client was invoiced in the revenue sheet (${(bm.month || '').slice(0, 7)}), but its Quotes-sheet line still reads Open. Set ${atRow} to Confirmed — until you do, this money is counted twice.`
 else if (bm) flag = `⚠ POSSIBLY ALREADY BOOKED — a $${bm.amount.toLocaleString('en-US')} booking for this client (${(bm.month || '').slice(0, 7)}) matches this quote AND another open quote at the same price. Check which one shipped and set ${atRow} to Confirmed.`
 else if (confirmLag) flag = `⚠ CONFIRMED HERE, OPEN IN SHEET — this was marked Won on the dashboard, but its Quotes-sheet line still reads Open. Set ${atRow} to Confirmed so it books as revenue.`
 else if (lostLag) flag = `⚠ LOST IN EMAIL, OPEN IN SHEET — this was marked Lost here, but its Quotes-sheet line still reads Open. Set ${atRow} to Cancelled so it stops counting as live pipeline.`
+else if (cancelLag) flag = `⚠ CANCELLED HERE, OPEN IN SHEET — this was marked Cancelled on the dashboard, but its Quotes-sheet line still reads ${o.status || 'Open'}. Set ${atRow} to Cancelled.`
+else if (notOppLag) flag = `⚠ NOT AN OPPORTUNITY, STILL IN SHEET — this was marked "not an opportunity" here, but it still has a Quotes-sheet line. Set ${atRow} to Cancelled or remove it.`
+else if (holdLag) flag = `⚠ ON HOLD HERE, ${(o.status || 'Open').toUpperCase()} IN SHEET — this was put On Hold on the dashboard. Set ${atRow} to On Hold.`
 else if (wrongNew) flag = `⚠ NOT NBD, TAGGED “NEW” — Quotes ${atRow}${sr ? ` (${o.quote_key || o.quote_ref || 'no ref'})` : ` ${o.quote_key || o.quote_ref || '(no ref)'}`} is tagged New Business (col P) but its owner${o.sales_person ? ` (${o.sales_person})` : ' is blank and'} is not on the NBD team, so it counts as Repeat. Either set col P to Repeat, or put the NBD owner who actually opened the account in the Account/Sales Person column.`
 else if (inRevenue && taggedNewOnly) flag = 'Booked/existing client but tagged “New” in the Quotes sheet (Business Type, col P) — should be Repeat.'
 }
@@ -600,9 +614,13 @@ client_confirmed_quotes: iq?.client_confirmed_quotes ?? undefined,
 flag_no_agency: iq?.flag_no_agency || undefined,
 flag_stale: iq?.flag_stale || undefined,
 flag,
+// The dashboard's own call outranks the sheet's word (see manual_state on the type).
+status: o.manual_state === 'cancelled' ? 'Cancelled' : o.manual_state === 'on_hold' && !/lost|cancel/i.test(o.status || '') ? 'On Hold' : o.status,
+sheet_status: o.status,
 } as Opportunity
 })
-return out.length ? out : (await import('./mockData')).mockOpportunities
+if (!out.length) return (await import('./mockData')).mockOpportunities
+return opts?.includeNotOpp ? out : out.filter(o => o.manual_state !== 'not_opp')
 }
 export async function getRevenue(): Promise<RevenueRow[]> {
 // web_revenue_lines: the same rows as the old web_revenue aggregate, un-merged into the
@@ -843,6 +861,15 @@ export async function setOpportunityConfirmed(id: number, confirmed: boolean, op
 if (!supabase || !id) return false
 const { data, error } = await supabase.rpc('set_opportunity_confirmed', {
 p_id: id, p_confirmed: confirmed, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null,
+})
+return !error && Number(data) > 0
+}
+// On Hold / Cancelled / Not an opportunity (or null to clear). Same shape as the three
+// above: an RPC returning the row count, mutually exclusive with Confirmed and Lost.
+export async function setOpportunityState(id: number, state: 'on_hold' | 'cancelled' | 'not_opp' | null, opts?: { actor?: string; reason?: string }): Promise<boolean> {
+if (!supabase || !id) return false
+const { data, error } = await supabase.rpc('set_opportunity_state', {
+p_id: id, p_state: state, p_actor: opts?.actor ?? null, p_reason: opts?.reason ?? null,
 })
 return !error && Number(data) > 0
 }
@@ -2395,7 +2422,7 @@ export async function getBigOpenDeals(limit = 25): Promise<{ rows: Opportunity[]
   if (!supabase) return { rows: [], unpriced: 0 }
   const { data, error } = await supabase.from('opportunities')
     .select('id, company_name, source_subject, gist, est_value, local_value, currency, pm_owner, sales_person, service_dept, geo, status, rfq_status, source_date, win_probability, origin, quote_key, quote_id')
-    .eq('won', false).or('unlikely.is.null,unlikely.eq.false').is('email_lost', null)
+    .eq('won', false).or('unlikely.is.null,unlikely.eq.false').is('email_lost', null).is('manual_state', null)
   if (error || !data) return { rows: [], unpriced: 0 }
   const live = (data as Opportunity[]).filter(o => !/lost|cancel|reject|drop/i.test(o.status || ''))
   const priced = live.filter(o => (o.est_value || 0) > 0)

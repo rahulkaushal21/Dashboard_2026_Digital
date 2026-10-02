@@ -13,10 +13,10 @@ import KPICard from '@/components/KPICard'
 import CardDetail, { daysSince, fmtDay, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Pause, TrendingDown, XCircle, Ban, EyeOff, PanelRightOpen } from 'lucide-react'
 import InfoTip from '@/components/InfoTip'
 import DateCell from '@/components/DateCell'
-import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, setOpportunityState, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import StaleOpportunitiesBanner from '@/components/StaleOpportunitiesBanner'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
@@ -122,6 +122,7 @@ const oppStatus = (x: Opportunity) => {
 if (x.won) return 'Won'                       // a booking always wins
 if (x.email_won) return 'Won'                 // confirmed here; the sheet may not know yet
 if (x.booked_month) return 'Won'              // already invoiced in the revenue sheet
+if (x.manual_state === 'not_opp') return 'Not opp'  // dismissed here: never a deal at all
 const s = (x.status || '').toLowerCase()
 if (s.includes('cancel') || s === 'lost') return 'Lost'
 if (x.email_lost) return 'Lost'               // marked Lost here; likewise ahead of the sheet
@@ -136,11 +137,46 @@ const confirmLag = (x: Opportunity) => !!x.email_won && !x.won && x.origin === '
 // Open. Same fix as a confirm-lag (set the row to Confirmed), but nobody made a call
 // here: the revenue sheet did. Kept out of the pipeline until the sheet catches up.
 const bookedLag = (x: Opportunity) => !!x.booked_month && !x.won && x.origin === 'sheet' && !/won|confirm/i.test(x.status || '')
-const sheetLag = (x: Opportunity) => lostLag(x) || confirmLag(x) || bookedLag(x)
+// On Hold / Cancelled / Not an opportunity, called here while the sheet still says otherwise.
+// `status` already carries the dashboard's call (getOpportunities folds it in), so the
+// sheet's own word is read from sheet_status.
+const holdLag = (x: Opportunity) => x.manual_state === 'on_hold' && x.origin === 'sheet' && !/hold|lost|cancel/i.test(x.sheet_status || '')
+const cancelLag = (x: Opportunity) => (x.manual_state === 'cancelled' || x.manual_state === 'not_opp') && x.origin === 'sheet' && !/lost|cancel/i.test(x.sheet_status || '')
+const sheetLag = (x: Opportunity) => lostLag(x) || confirmLag(x) || bookedLag(x) || holdLag(x) || cancelLag(x)
 // Every manual call, whatever its verdict — the set you'd look through to change your mind.
-const markedByHand = (x: Opportunity) => !!(x.email_won || x.email_lost || x.unlikely)
-const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : 'bg-mav-line text-mav-muted'
+const markedByHand = (x: Opportunity) => !!(x.email_won || x.email_lost || x.unlikely || x.manual_state)
+const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : s === 'Not opp' ? 'bg-slate-500/15 text-slate-400' : 'bg-mav-line text-mav-muted'
+// What the status pill says. Cancelled sits in the Lost tab but keeps its own word.
+const statusLabel = (x: Opportunity) => {
+const st = oppStatus(x)
+if (st === 'Not opp') return cancelLag(x) ? 'Not an opp · sheet open' : 'Not an opp'
+if (st === 'Lost' && (x.manual_state === 'cancelled' || /cancel/i.test(x.status || ''))) return cancelLag(x) ? 'Cancelled · sheet open' : 'Cancelled'
+if (st === 'On Hold' && holdLag(x)) return 'On Hold · sheet open'
+return st
+}
 const svcOf = (x: Opportunity) => x.service || serviceOf(x.technology)
+
+// One row action as a 28px round icon, so seven of them fit where two words used to.
+// Colour says what it does (the same family as the status pill it produces); the
+// tooltip says it in words. `active` means this verdict is already on the deal, and
+// clicking again undoes it.
+const ACTION_TONE = {
+  hold:     { idle: 'border-orange-500/50 text-orange-300 hover:bg-orange-500/10',  on: 'bg-orange-500/25 border-orange-400 text-orange-200' },
+  unlikely: { idle: 'border-amber-500/50 text-amber-300 hover:bg-amber-500/10',     on: 'bg-amber-500/25 border-amber-400 text-amber-200' },
+  lost:     { idle: 'border-red-500/50 text-red-400 hover:bg-red-500/10',           on: 'bg-red-500/25 border-red-400 text-red-200' },
+  cancel:   { idle: 'border-rose-500/50 text-rose-300 hover:bg-rose-500/10',        on: 'bg-rose-500/25 border-rose-400 text-rose-200' },
+  notopp:   { idle: 'border-slate-500/50 text-slate-400 hover:bg-slate-500/10',     on: 'bg-slate-500/30 border-slate-400 text-slate-200' },
+  open:     { idle: 'border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10',  on: 'border-mav-yellow/50 text-mav-yellow' },
+} as const
+const IconAction = ({ icon: Icon, label, tone, active, disabled, onClick }: {
+  icon: typeof Check; label: string; tone: keyof typeof ACTION_TONE; active?: boolean; disabled?: boolean; onClick: () => void
+}) => (
+  <button type="button" title={label} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}
+    className={`inline-flex items-center justify-center w-7 h-7 rounded-full border transition-colors disabled:opacity-40 ${active ? ACTION_TONE[tone].on : ACTION_TONE[tone].idle}`}>
+    <Icon size={14} strokeWidth={2.25} />
+  </button>
+)
+const STATE_WORD = { on_hold: 'On Hold', cancelled: 'Cancelled', not_opp: 'Not an opportunity' } as const
 
 type SortKey = 'company' | 'value' | 'win' | 'intent' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
@@ -322,6 +358,7 @@ const [savingUnlikely, setSavingUnlikely] = useState(false)
 const [lagOnly, setLagOnly] = useState(false)
 const [savingLost, setSavingLost] = useState(false)
 const [savingWon, setSavingWon] = useState(false)
+const [savingState, setSavingState] = useState<number | null>(null)
 // Every deal someone marked by hand, so a call can always be found again and reversed.
 const [markedOnly, setMarkedOnly] = useState(false)
 // Deals still Open in the sheet where the client has already committed in writing —
@@ -348,7 +385,7 @@ const [moreOpen, setMoreOpen] = useState(false)
 
 // getOpportunities() merges email leads + the sheet Quotes tab (value + status).
 useEffect(() => {
-  getOpportunities().then(rows => {
+  getOpportunities({ includeNotOpp: true }).then(rows => {
     setAll(rows)
     // Arriving from a client's open quotes on Client 360: ?deal=<id> opens that deal.
     // Matched on the row id, which is stable, rather than on a subject line that is not.
@@ -444,7 +481,7 @@ getDirectoryMember(currentEmail()).then(m => {
 })
 }, [])
 const canEnter = iAmAdmin || !!me
-const reload = () => getOpportunities().then(setAll)
+const reload = () => getOpportunities({ includeNotOpp: true }).then(setAll)
 // Default the "To" date to today (set on the client to avoid a hydration mismatch).
 useEffect(() => { const d = new Date().toISOString().slice(0, 10); setTo(d); setToday(d) }, [])
 // Only for the Service Department filter, so a failure here costs that filter and
@@ -482,18 +519,22 @@ const { unit } = useUnit()
 // no geo. Counted out loud under the table rather than disappearing with the filter.
 const unplacedDeals = useMemo(
   () => unit === 'all' ? 0 : raw.filter(x => unitOf(deptOfOpp(x)) === null).length, [raw, deptById, unit])
-const all = useMemo(
+// withDismissed keeps the deals marked "not an opportunity" — only the table and its
+// tabs read it, so they can be found and un-marked. Every card, alert and breakdown
+// reads `all`, which leaves them out: they were never pipeline.
+const withDismissed = useMemo(
   () => unit === 'all' ? raw : raw.filter(x => inUnit(deptOfOpp(x), unit)),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [raw, deptById, unit])
+const all = useMemo(() => withDismissed.filter(x => oppStatus(x) !== 'Not opp'), [withDismissed])
 
 // One haystack per row, built when the rows arrive rather than on every keystroke:
 // 950 rows across 20-odd fields is real work at typing speed.
 const hay = useMemo(() => {
   const m = new Map<number, string>()
-  for (const x of all) m.set(x.id, haystack(x))
+  for (const x of withDismissed) m.set(x.id, haystack(x))
   return m
-}, [all])
+}, [withDismissed])
 const terms = useMemo(() => searchTerms(search), [search])
 const matches = useCallback((x: Opportunity) =>
   !terms.length || terms.every(t => (hay.get(x.id) || '').includes(t)), [hay, terms])
@@ -505,7 +546,7 @@ const keep = (x: Opportunity, ignoreStatus = false): boolean =>
   && (!fGeo.length || fGeo.includes(x.geo || ''))
   && (!fAM.length || splitNames(x.sales_person).some(n => fAM.includes(n)))
   && (!fPM.length || splitNames(x.pm_owner).some(n => fPM.includes(n)))
-  && (ignoreStatus || !fStatus || oppStatus(x) === fStatus)
+  && (ignoreStatus || (fStatus ? oppStatus(x) === fStatus : oppStatus(x) !== 'Not opp'))
   && (!fSvc.length || fSvc.includes(svcOf(x)))
   && (!fTech.length || fTech.includes(x.technology || ''))
   && (!fDept.length || fDept.includes(deptOfOpp(x)))
@@ -519,21 +560,21 @@ const keep = (x: Opportunity, ignoreStatus = false): boolean =>
   && (inRange(x.source_date || x.first_date))
   && inBand(x.value)
 const o = useMemo(() => {
-const rows = all.filter(x => keep(x))
+const rows = withDismissed.filter(x => keep(x))
 return rows.sort((a, b) => {
 const av = sortVal(a, sort.key), bv = sortVal(b, sort.key)
 if (av < bv) return -1 * sort.dir
 if (av > bv) return 1 * sort.dir
 return 0
 })
-}, [all, matches, deptById, unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
+}, [withDismissed, matches, deptById, unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
 
 const statusCounts = useMemo(() => {
-const c: Record<string, number> = { '': 0, Open: 0, 'On Hold': 0, Won: 0, Lost: 0 }
-for (const x of all) if (keep(x, true)) { c['']++; c[oppStatus(x)] = (c[oppStatus(x)] || 0) + 1 }
+const c: Record<string, number> = { '': 0, Open: 0, 'On Hold': 0, Won: 0, Lost: 0, 'Not opp': 0 }
+for (const x of withDismissed) if (keep(x, true)) { const st = oppStatus(x); if (st !== 'Not opp') c['']++; c[st] = (c[st] || 0) + 1 }
 return c
 // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [all, matches, deptById, search, fType, fGeo, fAM, fPM, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
+}, [withDismissed, matches, deptById, search, fType, fGeo, fAM, fPM, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax])
 
 // How many rows the band is hiding purely because they carry no quoted value.
 // Counted against everything the OTHER filters already allow, so it answers
@@ -569,7 +610,7 @@ const reason = turningOn
 if (turningOn && reason === undefined) return   // cancelled the prompt
 setSavingUnlikely(true)
 const patch = turningOn
-? { unlikely: true, unlikely_reason: reason || undefined, unlikely_at: new Date().toISOString(), unlikely_by: currentEmail() || undefined }
+? { unlikely: true, unlikely_reason: reason || undefined, unlikely_at: new Date().toISOString(), unlikely_by: currentEmail() || undefined, ...(x.manual_state && x.manual_state !== 'on_hold' ? clearState(x) : {}) }
 : { unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined }
 setAll(prev => prev.map(r => r.id === x.id ? { ...r, ...patch } : r))
 setSel(s => s && s.id === x.id ? { ...s, ...patch } : s)
@@ -594,7 +635,7 @@ if (turningOn && reason === undefined) return   // cancelled the prompt
 setSavingLost(true)
 // Lost supersedes "might not come" — the RPC clears it, so the UI must too.
 const patch: Partial<Opportunity> = turningOn
-? { email_lost: true, email_lost_reason: reason || undefined, email_lost_at: new Date().toISOString(), email_lost_by: currentEmail() || undefined, unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined }
+? { email_lost: true, email_lost_reason: reason || undefined, email_lost_at: new Date().toISOString(), email_lost_by: currentEmail() || undefined, unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined, ...clearState(x) }
 : { email_lost: false, email_lost_reason: undefined, email_lost_at: undefined, email_lost_by: undefined }
 setAll(prev => prev.map(r => r.id === x.id ? { ...r, ...patch } : r))
 setSel(s => s && s.id === x.id ? { ...s, ...patch } : s)
@@ -620,7 +661,7 @@ setSavingWon(true)
 const patch: Partial<Opportunity> = turningOn
 ? { email_won: true, email_won_reason: reason || undefined, email_won_at: new Date().toISOString(), email_won_by: currentEmail() || undefined,
     email_lost: false, email_lost_reason: undefined, email_lost_at: undefined, email_lost_by: undefined,
-    unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined }
+    unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined, ...clearState(x) }
 : { email_won: false, email_won_reason: undefined, email_won_at: undefined, email_won_by: undefined }
 setAll(prev => prev.map(r => r.id === x.id ? { ...r, ...patch } : r))
 setSel(s => s && s.id === x.id ? { ...s, ...patch } : s)
@@ -632,6 +673,41 @@ setSel(s => s && s.id === x.id ? x : s)
 window.alert('Could not save that — please try again.')
 }
 }
+
+// On Hold / Cancelled / Not an opportunity (or undo). Optimistic like the others, and
+// like them it does NOT edit the Quotes sheet — a sheet-origin deal carries an
+// "Update sheet" alert until its row agrees. `status` is patched too, because
+// getOpportunities folds the manual call into it and oppStatus reads it from there.
+const toggleState = async (x: Opportunity, state: 'on_hold' | 'cancelled' | 'not_opp') => {
+const turningOn = x.manual_state !== state
+const word = STATE_WORD[state]
+const reason = turningOn
+? (window.prompt(`Mark "${x.company_name}" as ${word}?\n\n${state === 'not_opp' ? 'It leaves the pipeline, every card and every total, and moves to the "Not an opp" tab. ' : state === 'cancelled' ? 'It counts as Lost (labelled Cancelled). ' : 'It moves to the On Hold tab and out of the Open pipeline. '}The Quotes sheet is not edited${x.origin === 'sheet' ? ' — the deal stays flagged until its sheet row matches' : ''}.\n\nWhy? (optional)`) ?? undefined)
+: undefined
+if (turningOn && reason === undefined) return   // cancelled the prompt
+setSavingState(x.id)
+const base = x.sheet_status ?? x.status
+const patch: Partial<Opportunity> = turningOn
+? { manual_state: state, manual_state_reason: reason || undefined, manual_state_at: new Date().toISOString(), manual_state_by: currentEmail() || undefined,
+    status: state === 'cancelled' ? 'Cancelled' : state === 'on_hold' && !/lost|cancel/i.test(base || '') ? 'On Hold' : base, sheet_status: base,
+    email_won: false, email_won_reason: undefined, email_won_at: undefined, email_won_by: undefined,
+    email_lost: false, email_lost_reason: undefined, email_lost_at: undefined, email_lost_by: undefined,
+    ...(state !== 'on_hold' ? { unlikely: false, unlikely_reason: undefined, unlikely_at: undefined, unlikely_by: undefined } : {}) }
+: { manual_state: null, manual_state_reason: undefined, manual_state_at: undefined, manual_state_by: undefined, status: base, sheet_status: base }
+setAll(prev => prev.map(r => r.id === x.id ? { ...r, ...patch } : r))
+setSel(s => s && s.id === x.id ? { ...s, ...patch } : s)
+const ok = await setOpportunityState(x.id, turningOn ? state : null, { actor: currentEmail() || undefined, reason })
+setSavingState(null)
+if (!ok) {   // roll the row back rather than show a call that never saved
+setAll(prev => prev.map(r => r.id === x.id ? x : r))
+setSel(s => s && s.id === x.id ? x : s)
+window.alert('Could not save that — please try again.')
+}
+}
+// What Confirm / Lost / "might not come" clear when they land: the manual state, and
+// the status it had been folded into.
+const clearState = (x: Opportunity): Partial<Opportunity> =>
+x.manual_state ? { manual_state: null, manual_state_reason: undefined, manual_state_at: undefined, manual_state_by: undefined, status: x.sheet_status ?? x.status } : {}
 
 const reset = () => { setSearch(''); setFType(''); setFGeo([]); setFAM([]); setFPM([]); setFStatus(''); setFSvc([]); setFTech([]); setFDept([]); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setCommittedOnly(false); setMisTagOnly(false); setFAge(''); setVMin(''); setVMax('') }
 
@@ -1029,7 +1105,8 @@ className="shrink-0 rounded-full border border-mav-yellow/50 text-mav-yellow px-
     { id: 'Open', label: 'Open', count: statusCounts['Open'] },
     { id: 'On Hold', label: 'On Hold', count: statusCounts['On Hold'] },
     { id: 'Won', label: 'Won', count: statusCounts['Won'] },
-    { id: 'Lost', label: 'Lost', count: statusCounts['Lost'] },
+    { id: 'Lost', label: 'Lost / Cancelled', count: statusCounts['Lost'] },
+    { id: 'Not opp', label: 'Not an opp', count: statusCounts['Not opp'] },
     { id: '', label: 'All', count: statusCounts[''] },
   ]} />
 
@@ -1154,7 +1231,7 @@ className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? 'bg
 <tbody>{pageRows.map(x => {
 const st = oppStatus(x)
 return (
-<tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : x.unlikely ? 'bg-orange-500/[0.07]' : x.flag ? 'bg-amber-500/5' : ''}`}>
+<tr key={x.id} onClick={() => setSel(x)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${st === 'Lost' ? 'bg-red-500/5' : st === 'Not opp' ? 'opacity-60' : x.unlikely ? 'bg-orange-500/[0.07]' : x.flag ? 'bg-amber-500/5' : ''}`}>
 {/* One cell, four states, none of them ambiguous: tick it (yours to confirm),
     a ticked-and-locked box (already booked), "billed" (billed under another deal), or
     nothing at all (somebody else's). A box that always bounces is worse than no box —
@@ -1195,7 +1272,7 @@ return (
 {x.flag_committed_in_email && <span title="The client has already said approved / please proceed, or discussed the invoice, while the Quotes sheet still reads Open. Threads like these confirmed 96% of the time. Most likely a win nobody has logged yet." className="ml-1 text-[10px] font-semibold text-emerald-300">said yes</span>}
 {x.flag_no_agency && <span title="No Agency recorded. Quotes with a blank Agency confirm at 13.5% against 80% when it is filled in — and that holds independently of price." className="ml-1 text-[10px] font-semibold text-orange-300">no agency</span>}
 </>) : <span className="text-xs text-mav-muted">—</span>}</td>}
-{cols.on('status') && <td className="px-3 py-2.5"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (bookedLag(x) ? 'Booked · sheet open' : confirmLag(x) ? 'Won · sheet open' : `Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' ? (lostLag(x) ? 'Lost · sheet open' : 'Lost') : st}</span></td>}
+{cols.on('status') && <td className="px-3 py-2.5"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${statusTone(st)}`}>{st === 'Won' ? (bookedLag(x) ? 'Booked · sheet open' : confirmLag(x) ? 'Won · sheet open' : `Won${x.won_amount ? ' · ' + money(x.won_amount) : ''}`) : st === 'Lost' && lostLag(x) ? 'Lost · sheet open' : statusLabel(x)}</span></td>}
 {cols.on('source') && <td className="px-3 py-2.5 whitespace-nowrap">{(x.sources || (x.source ? [x.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full mr-1 ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}</td>}
 {cols.on('type') && <td className="px-3 py-2.5 whitespace-nowrap"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${typeLabel(x) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : x.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(x)}</span>{x.mis_tagged_new && <span className="ml-1 text-[10px] font-semibold text-red-400" title={`Sheet says New, but ${x.sales_person || 'no owner'} is not on the NBD team — counted as Repeat.`}>mis-tagged</span>}</td>}
 {cols.on('owner') && <td className="px-3 py-2.5 text-mav-muted max-w-[200px]">{x.sales_person ? <div className="truncate" title={`${x.nbd_owner ? 'New Business Development — opened this account' : 'Account Manager — works an account we already have'}: ${x.sales_person}`}>{ownerRole(x)}: {x.sales_person}</div> : <span className="text-mav-muted">Owner: —</span>}{x.pm_owner && <div className="text-xs text-mav-yellow mt-0.5 truncate" title={`Project Manager: ${x.pm_owner}`}>PM: {x.pm_owner}</div>}</td>}
@@ -1203,20 +1280,34 @@ return (
 {cols.on('tech') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap max-w-[160px] truncate" title={x.technology || ''}>{x.technology || '—'}</td>}
 {/* lostLag is checked directly, not just via x.flag: flag comes from the last data
     load, so a deal marked Lost in this session must still show the alert instantly. */}
-{cols.on('flag') && <td className="px-3 py-2.5">{(x.flag || sheetLag(x)) ? <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={bookedLag(x) ? 'Already invoiced in the revenue sheet — the Quotes sheet still shows it Open. Set that row to Confirmed.' : confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? 'Update sheet' : 'Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
+{cols.on('flag') && <td className="px-3 py-2.5">{(x.flag || sheetLag(x)) ? <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${sheetLag(x) ? 'bg-amber-500/25 text-amber-200' : 'bg-amber-500/20 text-amber-300'}`} title={holdLag(x) ? 'Put On Hold here — the Quotes sheet still shows it Open. Set that row to On Hold.' : cancelLag(x) ? (x.manual_state === 'not_opp' ? 'Marked not an opportunity here — the Quotes sheet still has a live row. Set it to Cancelled or remove it.' : 'Marked Cancelled here — the Quotes sheet still shows it Open. Set that row to Cancelled.') : bookedLag(x) ? 'Already invoiced in the revenue sheet — the Quotes sheet still shows it Open. Set that row to Confirmed.' : confirmLag(x) ? 'Confirmed here — the Quotes sheet still shows it Open. Set that row to Confirmed.' : lostLag(x) ? 'Marked Lost here — the Quotes sheet still shows it Open. Set that row to Cancelled.' : x.flag}>{sheetLag(x) ? 'Update sheet' : 'Review'}</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
 {/* The row's action, pinned to the right edge so it is there however many columns are
     on. Confirm is the same single-deal path as the bar above (ConfirmDealDialog), and
     appears only on deals this person may confirm — the rule canPick already mirrors. */}
 <td className="sticky-action px-3 py-2.5 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
-<div className="inline-flex items-center gap-1.5">
+{/* Left to right, the order a deal moves through: confirm it, pause it, doubt it,
+    lose it, cancel it, dismiss it — then open the full record. A verdict already on
+    the deal shows filled; clicking it again undoes it. Deals the sheet settled get
+    only the open button, because the sheet owns them. */}
+{(() => {
+const live = st === 'Open' || st === 'On Hold'
+const busy = savingState === x.id
+return (
+<div className="inline-flex items-center gap-1">
 {canPick(x) && (
   <button type="button" onClick={() => { setAlsoBilling([]); setConfirming(x) }}
-    title="Fill in the revenue-sheet details and book it"
-    className="rounded-full bg-mav-fill text-black text-xs font-semibold px-3 py-1 hover:brightness-95">Confirm</button>
+    title="Confirm — fill in the revenue-sheet details and book it" aria-label="Confirm"
+    className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-mav-fill text-black hover:brightness-95"><Check size={15} strokeWidth={2.75} /></button>
 )}
-<button type="button" onClick={() => setSel(x)}
-  className="rounded-full border border-mav-yellow/50 text-mav-yellow px-3 py-1 text-xs hover:bg-mav-yellow/10">Open</button>
+{(live || x.manual_state === 'on_hold') && <IconAction icon={Pause} tone="hold" label={x.manual_state === 'on_hold' ? 'Undo On Hold' : 'Put On Hold'} active={x.manual_state === 'on_hold'} disabled={busy} onClick={() => toggleState(x, 'on_hold')} />}
+{(live || x.unlikely) && <IconAction icon={TrendingDown} tone="unlikely" label={x.unlikely ? 'Undo "might not come"' : 'Might not come — stays open, discounted'} active={!!x.unlikely} disabled={savingUnlikely} onClick={() => toggleUnlikely(x)} />}
+{(live || x.email_lost) && <IconAction icon={XCircle} tone="lost" label={x.email_lost ? 'Undo Lost' : 'Mark Lost — went elsewhere / said no'} active={!!x.email_lost} disabled={savingLost} onClick={() => toggleLost(x)} />}
+{(live || x.manual_state === 'cancelled') && <IconAction icon={Ban} tone="cancel" label={x.manual_state === 'cancelled' ? 'Undo Cancelled' : 'Mark Cancelled — client called it off'} active={x.manual_state === 'cancelled'} disabled={busy} onClick={() => toggleState(x, 'cancelled')} />}
+{(live || x.manual_state === 'not_opp') && <IconAction icon={EyeOff} tone="notopp" label={x.manual_state === 'not_opp' ? 'Undo — it is an opportunity' : 'Not an opportunity — remove from pipeline'} active={x.manual_state === 'not_opp'} disabled={busy} onClick={() => toggleState(x, 'not_opp')} />}
+<IconAction icon={PanelRightOpen} tone="open" label="Open the full record" onClick={() => setSel(x)} />
 </div>
+)
+})()}
 </td>
 </tr>
 )
@@ -1258,7 +1349,7 @@ return (
   <span className="text-sm text-mav-yellow">↗</span>
 </Link>
 <div className="mt-1 flex flex-wrap gap-1">
-<span className={`text-xs px-2 py-1 rounded-full ${statusTone(oppStatus(sel))}`}>{oppStatus(sel)}</span>
+<span className={`text-xs px-2 py-1 rounded-full ${statusTone(oppStatus(sel))}`}>{statusLabel(sel)}</span>
 <span className={`text-xs px-2 py-1 rounded-full ${typeLabel(sel) === 'New + Repeat' ? 'bg-purple-500/15 text-purple-300' : sel.is_new_client ? 'bg-blue-500/15 text-blue-400' : 'bg-mav-line text-mav-muted'}`}>{typeLabel(sel) === 'New + Repeat' ? 'New + repeat work' : sel.is_new_client ? 'New business' : 'Repeat client'}</span>
 {(sel.sources || (sel.source ? [sel.source] : [])).slice().sort((a, b) => SRC_ORDER.indexOf(a) - SRC_ORDER.indexOf(b)).map(sr => <span key={sr} className={`text-xs px-2 py-1 rounded-full ${srcTag(sr)}`}>{srcLabel(sr)}</span>)}
 </div>
@@ -1278,10 +1369,13 @@ return (
     back to the sheet. Offered on live deals and on anything already marked by
     hand; a deal the SHEET settled has no buttons, because the sheet owns it. */}
 {(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || markedByHand(sel)) && (
-<div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.email_won ? 'border-green-500/40 bg-green-500/10' : sel.email_lost ? 'border-red-500/40 bg-red-500/10' : sel.unlikely ? 'border-orange-500/40 bg-orange-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
+<div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.email_won ? 'border-green-500/40 bg-green-500/10' : sel.email_lost ? 'border-red-500/40 bg-red-500/10' : sel.manual_state === 'cancelled' ? 'border-rose-500/40 bg-rose-500/10' : sel.manual_state === 'not_opp' ? 'border-slate-500/40 bg-slate-500/10' : sel.manual_state === 'on_hold' ? 'border-orange-500/40 bg-orange-500/10' : sel.unlikely ? 'border-orange-500/40 bg-orange-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
 <div className="text-sm font-medium mb-0.5">
 {sel.email_won ? <span className="text-green-300">Confirmed — Won</span>
  : sel.email_lost ? <span className="text-red-300">Marked Lost</span>
+ : sel.manual_state === 'cancelled' ? <span className="text-rose-300">Marked Cancelled</span>
+ : sel.manual_state === 'not_opp' ? <span className="text-slate-300">Marked not an opportunity</span>
+ : sel.manual_state === 'on_hold' ? <span className="text-orange-300">Put On Hold</span>
  : sel.unlikely ? <span className="text-orange-300">Flagged: might not come</span>
  : 'Your call on this deal'}
 </div>
@@ -1321,6 +1415,18 @@ className={`rounded-full border px-3 py-1 text-xs transition-colors disabled:opa
 {savingUnlikely ? 'Saving…' : sel.unlikely ? 'Undo unlikely' : 'Might not come'}
 </button>
 )}
+{/* The three manual states. Same rule as the buttons above: offered while the deal
+    is live, and on any deal already carrying that state so it can be undone. */}
+{([['on_hold', 'On Hold', 'border-orange-500/50 text-orange-300 hover:bg-orange-500/10'],
+   ['cancelled', 'Cancelled', 'border-rose-500/50 text-rose-300 hover:bg-rose-500/10'],
+   ['not_opp', 'Not an opportunity', 'border-slate-500/50 text-slate-300 hover:bg-slate-500/10']] as const)
+  .filter(([k]) => oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || sel.manual_state === k)
+  .map(([k, word, tone]) => (
+<button key={k} disabled={savingState === sel.id} onClick={() => toggleState(sel, k)}
+className={`rounded-full border px-3 py-1 text-xs transition-colors disabled:opacity-50 ${sel.manual_state === k ? 'border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10' : tone}`}>
+{savingState === sel.id ? 'Saving…' : sel.manual_state === k ? `Undo ${word}` : word}
+</button>
+))}
 </div>
 {sel.email_won && (sel.email_won_reason || sel.email_won_by) && (
 <div className="mt-2.5 pt-2 border-t border-green-500/20 text-xs text-mav-muted">
@@ -1332,6 +1438,12 @@ className={`rounded-full border px-3 py-1 text-xs transition-colors disabled:opa
 <div className="mt-2.5 pt-2 border-t border-red-500/20 text-xs text-mav-muted">
 {sel.email_lost_reason && <div className="text-red-200/80">“{sel.email_lost_reason}”</div>}
 {sel.email_lost_by && <div className="mt-0.5">marked by {sel.email_lost_by}{sel.email_lost_at ? ` · ${fmtDay(sel.email_lost_at)}` : ''}</div>}
+</div>
+)}
+{sel.manual_state && (sel.manual_state_reason || sel.manual_state_by) && (
+<div className="mt-2.5 pt-2 border-t border-mav-line text-xs text-mav-muted">
+{sel.manual_state_reason && <div className="text-mav-fg/80">“{sel.manual_state_reason}”</div>}
+{sel.manual_state_by && <div className="mt-0.5">{STATE_WORD[sel.manual_state]} · marked by {sel.manual_state_by}{sel.manual_state_at ? ` · ${fmtDay(sel.manual_state_at)}` : ''}</div>}
 </div>
 )}
 {sel.unlikely && (sel.unlikely_reason || sel.unlikely_by) && (

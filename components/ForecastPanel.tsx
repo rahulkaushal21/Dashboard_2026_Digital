@@ -135,7 +135,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
     // Win rate on quotes decided in the last 90 days, and quotes left undecided.
     const now = today.getTime(), DAY = 86400000
     const age = (o: Opportunity) => (now - new Date(o.first_date || o.source_date || o.created_at || now).getTime()) / DAY
-    const isLost = (o: Opportunity) => !!o.email_lost || /lost/i.test(o.status || '')
+    const isLost = (o: Opportunity) => !!o.email_lost || /lost|cancel/i.test(o.status || '')
     const recent = live.filter(o => age(o) <= 90)
     const won90 = recent.filter(o => o.won).length
     const lost90 = recent.filter(o => !o.won && isLost(o)).length
