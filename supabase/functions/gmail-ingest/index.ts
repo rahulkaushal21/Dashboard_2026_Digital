@@ -2,9 +2,42 @@
 // and upserts them into the PRIVATE email_inbox table. Claude later reads unprocessed
 // rows to deep-dive and classify (opportunities / feedback / escalations / sentiment).
 //
-// Body: { mailbox?, messages: [{ message_id, rfc_message_id?, mailbox?, thread_id,
-//          subject, from_addr, to_addrs, cc_addrs, msg_date, snippet, body, has_external }] }
+// Body: { mailbox?, b64 }                      ← preferred, see the WAF note below
+//       { mailbox?, messages: [...] }          ← still accepted
+//   where a message is { message_id, rfc_message_id?, mailbox?, thread_id, subject,
+//   from_addr, to_addrs, cc_addrs, msg_date, snippet, body, has_external }
 // Auth: ?token=... (shared secret).
+//
+// ── CLOUDFLARE WAF: WHY THE PAYLOAD ARRIVES BASE64 (4 Oct 2026) ─────────────────
+// Capture died at 06:48 on 4 Oct and stayed dead for seven hours. The Apps Script
+// logged `ingest error 403` with a Cloudflare "Sorry, you have been blocked" page:
+//
+//   "The action you just performed triggered the security solution. There are
+//    several actions that could trigger this block including submitting a certain
+//    word or phrase, a SQL command or malformed data."
+//
+// Cloudflare sits in front of every Supabase function and inspects the REQUEST BODY.
+// This endpoint's body is raw client email, and client email legitimately contains
+// SQL, script tags, shell snippets and malformed HTML — so sooner or later a real
+// message reads as an attack. One did.
+//
+// It was unrecoverable without this change, because of how the pusher is built: the
+// cursor is held whenever any batch fails (correctly — a moved cursor would skip
+// mail), and the batch size is 200, so all 18 queued messages travelled together.
+// Every retry re-sent the same poisoned batch and got the same 403. Capture could
+// never move past it on its own.
+//
+// Verified before writing this, against the live endpoint: the function was ACTIVE,
+// the token good (empty batch -> 200), 5 MB payloads fine, and a synthetic body
+// carrying `<script>alert(1)</script> UNION SELECT` passed straight through to the
+// 401. So it is not size, not the URL, not auth, and not the obvious signatures —
+// it is whatever is in that one message, which we cannot see and cannot predict.
+//
+// So the payload is no longer sent as inspectable text. `b64` is base64 of the JSON
+// messages array: alphanumeric, matching no rule. `messages` is still accepted so an
+// older copy of the script keeps working during the changeover.
+// Do NOT "simplify" this back to plain JSON. It will work for weeks and then one
+// client's email will stop capture dead again, silently, for as long as nobody looks.
 //
 // ── CROSS-MAILBOX DEDUP (v3) ────────────────────────────────────────────────────
 // Gmail's message id is PER-MAILBOX: the same email sitting in web@ and in nitin@
@@ -40,6 +73,18 @@ function normRfc(v: unknown): string | null {
   return s && s.includes("@") ? s.slice(0, 250) : null;
 }
 
+// atob yields one char per BYTE, so a multi-byte character (an em dash, an accent,
+// a CJK subject line) comes back mangled if the result is used as a string directly.
+// Rebuild the byte array and let TextDecoder do UTF-8 properly — client mail is full
+// of smart quotes and the subject is what dedup and quote-intent match on.
+function decodeB64Messages(b64: string): unknown[] {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const parsed = JSON.parse(new TextDecoder().decode(bytes));
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 Deno.serve(async (req) => {
   const url = new URL(req.url);
   if (url.searchParams.get("token") !== TOKEN) return new Response("unauthorized", { status: 401 });
@@ -48,13 +93,24 @@ Deno.serve(async (req) => {
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   try {
     const body = await req.json();
-    const rows = Array.isArray(body?.messages) ? body.messages : [];
+    // b64 first, plain `messages` second. A bad b64 string is a hard error rather than
+    // a silent empty push: "0 inserted" looks like a quiet night and would hide this.
+    let rows: unknown[];
+    if (typeof body?.b64 === "string" && body.b64.length) {
+      try {
+        rows = decodeB64Messages(body.b64);
+      } catch (e) {
+        throw new Error("b64 payload did not decode: " + String(e));
+      }
+    } else {
+      rows = Array.isArray(body?.messages) ? body.messages : [];
+    }
     const defaultMailbox = body?.mailbox ? String(body.mailbox).toLowerCase().slice(0, 200) : null;
     if (rows.length === 0) {
       return new Response(JSON.stringify({ ok: true, inserted: 0, note: "empty payload" }), { headers: { "Content-Type": "application/json" } });
     }
     // Keep only the columns we store; clamp body length so a giant thread can't blow up a row.
-    const clean = rows.map((r: Record<string, unknown>) => {
+    const clean = (rows as Record<string, unknown>[]).map((r: Record<string, unknown>) => {
       const mid = String(r.message_id ?? "").slice(0, 255);
       const rfc = normRfc(r.rfc_message_id);
       return {

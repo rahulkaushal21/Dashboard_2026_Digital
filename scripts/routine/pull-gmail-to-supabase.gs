@@ -307,14 +307,34 @@ function computeExternal(participants) {
 
 // Returns count inserted (>=0) on success, or -1 on failure (so the caller holds the cursor).
 function postBatch(messages) {
+  // BASE64, NOT PLAIN JSON — and this is not cosmetic.
+  //
+  // Cloudflare sits in front of every Supabase function and inspects the request
+  // BODY. This body is raw client email, and client email legitimately contains SQL,
+  // script tags, shell snippets and broken HTML. On 4 Oct 2026 one real message
+  // tripped Cloudflare's rule ("submitting a certain word or phrase, a SQL command
+  // or malformed data") and it answered 403 with a block page.
+  //
+  // That stalled capture for SEVEN HOURS, and could never have recovered on its own:
+  // the cursor is held whenever a batch fails (right — a moved cursor skips mail),
+  // and the batch below is 200, so all 18 queued messages travelled together. Every
+  // run re-sent the same poisoned payload and got the same 403.
+  //
+  // Encoded, the body is alphanumeric and matches no content rule. The edge function
+  // reads `b64` and still accepts `messages`, so the two can be rolled out in either
+  // order. Charset is explicit: without it a smart quote or an accent comes back
+  // mangled, and the subject line is what dedup and quote-intent match on.
+  var payload = Utilities.base64Encode(JSON.stringify(messages), Utilities.Charset.UTF_8);
   var res = UrlFetchApp.fetch(SUPABASE_FN + '?token=' + INGEST_TOKEN, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({ mailbox: EXPECTED_MAILBOX, messages: messages }),
+    payload: JSON.stringify({ mailbox: EXPECTED_MAILBOX, b64: payload }),
     muteHttpExceptions: true
   });
   var code = res.getResponseCode();
-  if (code !== 200) { Logger.log('ingest error ' + code + ': ' + res.getContentText().slice(0, 300)); return -1; }
+  // 3000, not 300: at 300 the Cloudflare page is cut off before the sentence that
+  // says WHY it blocked, which is the only part worth reading.
+  if (code !== 200) { Logger.log('ingest error ' + code + ': ' + res.getContentText().slice(0, 3000)); return -1; }
   try { return JSON.parse(res.getContentText()).inserted || 0; } catch (e) { return 0; }
 }
 
