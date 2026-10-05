@@ -8,7 +8,7 @@ import KPICard from '@/components/KPICard'
 import { daysSince, fmtDay, fmtMonth, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import RevenueChart from '@/components/RevenueChart'
-import { clearReadCache, getRevenue, getClients, getOpportunities, getLastSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, getOpportunityDepts, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
+import { clearReadCache, getRevenue, getClients, getOpportunities, getLastSync, getLastOkSync, getLastSyncStatus, getBookingsFull, getQuoteCloseSpeed, getEmailReviewState, getOpportunityDepts, type RevenueRow, type Client, type Opportunity, type BookingRow, type EmailReviewState } from '@/lib/supabase'
 import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { buildInsights, type Tone } from '@/lib/insights'
@@ -173,7 +173,7 @@ export default function Dashboard() {
     try {
       const [r, c, o, b, cs, srA, srB, so, mr, od] = await Promise.all([
         getRevenue(), getClients(), getOpportunities(), getBookingsFull(), getQuoteCloseSpeed(),
-        getLastSync('web-revenue-appscript'), getLastSync('web-revenue-sync'), getLastSyncStatus('email-opportunities-scan'),
+        getLastOkSync('sheet-writer'), Promise.resolve(null as string | null), getLastSyncStatus('email-opportunities-scan'),
         getEmailReviewState(), getOpportunityDepts(),
       ])
       setRev(r); setClients(c); setOpps(o); setBookingRows(b); setCloseSpeed(cs); setSyncRev(later(srA, srB))
@@ -595,8 +595,13 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mb-5 text-xs">
         <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Last sync</span>
         <span className="inline-flex items-center gap-1.5">
+          {/* The dashboard is the record and the project sheet is its dump, written every
+              half hour. This used to say when the OLD revenue sheet was last read, which
+              stopped on 4 Oct 2026 when that sheet was locked (migration 126) — so it only
+              ever aged, and "18h ago" read as something broken. Now it says the one sync
+              that still matters: the last time what is here reached the spreadsheet. */}
           <span className={`w-2 h-2 rounded-full ${freshWithin(syncRev, 45, nowMs) ? 'bg-green-400' : syncRev ? 'bg-amber-400' : 'bg-mav-line'}`} />
-          <span className="text-mav-muted">Web revenue</span><span className="font-medium">{ago(syncRev, nowMs)}</span>
+          <span className="text-mav-muted" title="When the dashboard last wrote its lines into the project spreadsheet. Runs at 17 and 47 past every hour; amber once it is more than 45 minutes old.">Written to sheet</span><span className="font-medium">{ago(syncRev, nowMs)}</span>
         </span>
         {/* Email review is a PERSON reading the mailbox — there is no cron behind it, and
             the page used to imply there was ("auto hourly + on-demand", beside a button
@@ -626,7 +631,7 @@ export default function Dashboard() {
           )}
         </span>
         {/* TWO DIFFERENT CLOCKS, and this one used to say "Updated 16:09:41" next to
-            "Web revenue 22m ago" with nothing to tell them apart. They are both right and
+            "Written to sheet 22m ago" with nothing to tell them apart. They are both right and
             they measure different things: that one is when the SYNC last ran, this one is
             when THIS PAGE last read the database. A page read at 16:09 showing data synced
             at 15:47 is correct and looked like a contradiction. So this says what it is. */}
