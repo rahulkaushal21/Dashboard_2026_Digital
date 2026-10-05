@@ -8,7 +8,7 @@ import { UnplacedNote } from '@/components/UnitToggle'
 import { useAuth } from '@/components/AuthProvider'
 import { OWNER_EMAIL } from '@/lib/access'
 import { growthPct, type PmQuarter } from '@/lib/pm-metrics'
-import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, type FQ, type PmMember } from '@/lib/pm-team'
+import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, GROWTH_BANDS, Q2C_BANDS, FEEDBACK_BANDS, type Band, type FQ, type PmMember } from '@/lib/pm-team'
 import { usePmData } from './usePmData'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
@@ -181,8 +181,56 @@ export default function PmTeam() {
           </div>
         </Panel>
       ))}
+      {/* The KPIs themselves, under the scores. The table above says what each PM got;
+          this says what they are measured on and what each band is worth, straight from
+          the KPI sheet, so nobody has to open the spreadsheet to know what a 6 means.
+          Rahul, 5 Oct 2026. */}
+      <Panel className="mb-6" title="How the KPIs are scored"
+        right={<span className="text-xs text-mav-muted">From the KPI sheet · quarterly</span>}>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <BandTable title="Growth" weight={WEIGHTS.growth} bands={GROWTH_BANDS}
+            what="Overall business, this year against last year, month over month: the quarter's average month against the baseline month." />
+          <BandTable title="Q2C" weight={WEIGHTS.q2c} bands={Q2C_BANDS}
+            what="Quote to confirmation on New Development: the share of the quarter's new-development quotes that were won." />
+          <BandTable title="Feedback" weight={WEIGHTS.feedback} bands={FEEDBACK_BANDS}
+            what="Client feedbacks received in the quarter on new development, dedicated or account work." />
+        </div>
+        <p className="mt-4 text-xs text-mav-muted">
+          The Total is attainment against the top band, weighted {Math.round(WEIGHTS.growth * 100)} / {Math.round(WEIGHTS.q2c * 100)} / {Math.round(WEIGHTS.feedback * 100)}:
+          {' '}{Math.round(WEIGHTS.growth * 100)}% × (growth ÷ {TARGETS.growth}) + {Math.round(WEIGHTS.q2c * 100)}% × (Q2C ÷ {TARGETS.q2c}) + {Math.round(WEIGHTS.feedback * 100)}% × (feedbacks ÷ {TARGETS.feedback}),
+          each part capped at 100%. Negative growth or a missing Q2C counts as zero, not as a penalty.
+        </p>
+      </Panel>
       </>
       )}
+    </div>
+  )
+}
+
+/** One KPI's band table: what the measure is, its weight, and what each band scores. */
+function BandTable({ title, weight, bands, what }: { title: string; weight: number; bands: Band[]; what: string }) {
+  return (
+    <div className="rounded-lg border border-mav-line/60 overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-mav-line/60 bg-mav-yellow/10">
+        <div className="flex items-baseline justify-between">
+          <span className="font-semibold">{title}</span>
+          <span className="text-xs text-mav-muted">{Math.round(weight * 100)}% weight</span>
+        </div>
+        <div className="text-[11px] text-mav-muted mt-0.5 leading-snug">{what}</div>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="text-[11px] uppercase tracking-[0.08em] text-mav-muted">
+          <tr><th className="text-left px-4 py-1.5 font-medium">Band</th><th className="text-right px-4 py-1.5 font-medium">Score</th></tr>
+        </thead>
+        <tbody>
+          {bands.map(b => (
+            <tr key={b.label} className="border-t border-mav-line/40">
+              <td className="px-4 py-1.5">{b.label}</td>
+              <td className="px-4 py-1.5 text-right tabular-nums font-medium">{b.score}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
