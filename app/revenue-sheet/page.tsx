@@ -197,6 +197,11 @@ export default function ProjectLedger() {
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [errors, setErrors] = useState<string[]>([])
+  // The last removal, said out loud. The row leaves the table the moment the reload
+  // lands, which on a quiet page is the same as nothing having happened — the prompt
+  // closes and the screen looks as it did. This stays until dismissed, and carries the
+  // one undo that matters right after a removal.
+  const [removed, setRemoved] = useState<{ what: string; rowKey: string } | null>(null)
   // Lines the move refused for want of a delivery date alone. Each gets a date box
   // below the errors, and "Add" retries that one line with the date filled in. Any other
   // missing field goes to the error list as before - it needs the Edit dialog.
@@ -247,6 +252,8 @@ export default function ProjectLedger() {
     const res = await deleteLedgerRow(r.row_key, ledgerFingerprint(r), reason)
     setRemoving(null)
     if (!res.ok) { window.alert(`Could not remove it: ${res.error}`); return }
+    setStatus(''); setErrors([])
+    setRemoved({ what, rowKey: r.row_key })
     clearReadCache(); load(); loadGone()
   }
   useEffect(() => {
@@ -738,6 +745,20 @@ export default function ProjectLedger() {
       )}
 
       {status && <div className="mb-3 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-xs text-green-300">{status}</div>}
+      {removed && (
+        <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span><span className="font-semibold">Removed:</span> {removed.what}. It no longer counts anywhere; the hourly writer marks it Deleted in the spreadsheet.</span>
+          {isAdmin && (
+            <button onClick={async () => {
+              const res = await restoreLedgerRow(removed.rowKey)
+              if (!res.ok) { setErrors([`Could not put it back: ${res.error}`]); return }
+              setRemoved(null); setStatus(`Put back: ${removed.what}.`)
+              clearReadCache(); load(); loadGone()
+            }} className="rounded-full border border-red-400/60 px-2.5 py-0.5 text-red-200 hover:bg-red-500/10 transition-colors">Put it back</button>
+          )}
+          <button onClick={() => setRemoved(null)} aria-label="Dismiss" className="ml-auto text-red-300/70 hover:text-red-200">×</button>
+        </div>
+      )}
       {errors.length > 0 && (
         <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-xs text-red-300 space-y-0.5">
           {errors.slice(0, 8).map((e, i) => <div key={i}>{e}</div>)}
