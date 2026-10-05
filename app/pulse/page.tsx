@@ -59,12 +59,15 @@ const SOURCES: { id: string; label: string }[] = [
 
 const usd = (n?: number) => (n ? `$${Math.round(n).toLocaleString()}` : '')
 const time = (d?: string | null) => d ? new Date(d).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—'
-const stamp = (d?: string | null) => d ? `${fmtDay(d)}, ${time(d)}` : '—'
+const stamp = (d?: string | null) => d ? (hasTime(d) ? `${fmtDay(d)}, ${time(d)}` : fmtDay(d)) : '—'
 const ago = (d?: string | null) => {
   const t = Date.parse(d || ''); if (!Number.isFinite(t)) return ''
   const m = Math.max(0, Math.round((Date.now() - t) / 60000))
   return m < 60 ? `${m}m ago` : m < 48 * 60 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`
 }
+// A date with no time of day (escalations, feedback) would print as 05:30 — UTC midnight
+// in IST — which reads like a real time. Only show one when the source has it.
+const hasTime = (d?: string) => /T\d{2}:\d{2}/.test(d || '') && !/T00:00(:00(\.0+)?)?(Z|\+00(:00)?)?$/.test(d || '')
 const one = (s?: string) => (s || '').replace(/\s+/g, ' ').trim()
 
 export default function PulsePage() {
@@ -269,7 +272,7 @@ export default function PulsePage() {
                 <tr key={i.key} className="border-b border-mav-line/60 hover:bg-mav-fg/[0.03] align-top">
                   <td className="px-3 py-2">
                     <DateCell d={i.at} />
-                    <div className="text-[11px] text-mav-muted">{time(i.at)}</div>
+                    {hasTime(i.at) && <div className="text-[11px] text-mav-muted">{time(i.at)}</div>}
                   </td>
                   <td className="px-3 py-2"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${KIND[i.kind].cls}`}>{KIND[i.kind].label}</span></td>
                   <td className="px-3 py-2 min-w-0" title={i.detail || ''}>
