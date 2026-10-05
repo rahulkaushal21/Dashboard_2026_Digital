@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator, Receipt } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator, Receipt, Activity, MessageSquare, ClipboardList } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
@@ -26,39 +26,43 @@ type Entry = Leaf | Group
 const isGroup = (e: Entry): e is Group => 'children' in e
 
 const nav: Entry[] = [
-  // ── The eight pages the business is run from day to day ──────────────────────
-  // Everything that is read to DECIDE something sits at this level. Everything that is
-  // read to EXPLAIN something afterwards went into the group below. Thirteen top-level
-  // items meant scanning the whole rail to find the two or three anybody opens daily.
+  // ── A focused rail (owner's call, 5 Oct 2026) ─────────────────────────────────
+  // Sixteen links in a column made the two or three anybody opens daily hard to find.
+  // Top level is now what is opened EVERY day — the pulse, the dashboard, the pipeline —
+  // and the rest sits in four groups by the job it does. Order inside each group is the
+  // order agreed on 28 Sep. Groups open by themselves when you are inside one.
+  //
+  // Daily Pulse first and on its own: it is the morning read, everything new from the
+  // mailbox, quotes and sheets in one list, so it must never be one click deeper.
+  { href: '/pulse', label: 'Daily Pulse', icon: Activity },
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/opportunities', label: 'Opportunities', icon: Briefcase },
-  // The page has always held the feedback sheet plus manually added praise; 'Delights'
-  // described the best of it rather than the thing itself. The URL stays /delights so
-  // existing links and bookmarks still resolve.
-  { href: '/delights', label: 'Feedback', icon: Sparkles },
-  // Critical Escalations only. Major Process Gap is the standing log, which is read to
-  // find patterns rather than to act today, so it sits with the reports.
-  { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
-  // Order agreed with Pratik, 28 Sep 2026: the two client-voice pages straight after the
-  // pipeline, then the client view, then the ledger.
-  { href: '/clients', label: 'Client 360', icon: Users },
-  { href: '/revenue-sheet', label: 'Project sheet', icon: Table2 },
-  { href: '/pm-team', label: 'PM Team', icon: UserCog },
-  // What needs a PM today, across projects and deals, each with the button that clears
-  // it. Straight under PM Team (owner's call, 28 Sep 2026), with its open count beside it.
-  { href: '/actions', label: 'Actions', icon: Zap },
-  { href: '/kb-report', label: 'KB report', icon: PieChart },
-
-  // ── Everything read to explain the numbers, not to act on them ───────────────
-  // Access is still granted per sub-page, never per group: an empty group is dropped
-  // rather than shown, so nobody sees a header that opens onto nothing.
+  // What clients are saying. /delights keeps its URL so old links still resolve. Major
+  // Process Gap is the standing log of what went wrong, read alongside escalations.
+  {
+    label: 'Client voice', icon: MessageSquare, children: [
+      { href: '/delights', label: 'Feedback', icon: Sparkles },
+      { href: '/critical-escalations', label: 'Critical Escalations', icon: Siren },
+      { href: '/clients', label: 'Client 360', icon: Users },
+      { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
+    ],
+  },
+  // The delivery side: the ledger, the people, what is due, and the knowledge base.
+  {
+    label: 'Delivery', icon: ClipboardList, children: [
+      { href: '/revenue-sheet', label: 'Project sheet', icon: Table2 },
+      { href: '/pm-team', label: 'PM Team', icon: UserCog },
+      { href: '/actions', label: 'Actions', icon: Zap },
+      { href: '/kb-report', label: 'KB report', icon: PieChart },
+    ],
+  },
+  // Read to explain the numbers, not to act on them.
   {
     label: 'Business Reports', icon: BarChart3, children: [
       { href: '/invoices', label: 'Invoices & Reconciliation', icon: Receipt },
       { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
       { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
       { href: '/last-year', label: 'Quarter over Quarter', icon: History },
-      { href: '/escalations', label: 'Major Process Gap', icon: AlertTriangle },
       { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
       { href: '/operations/revenue-history', label: 'Revenue History', icon: Archive },
       { href: '/operations/lnd', label: 'L&D Program', icon: GraduationCap },
@@ -143,7 +147,7 @@ export default function Sidebar() {
       <DepartmentSwitch />
       <nav className="space-y-1">
         {items.map(entry => isGroup(entry)
-          ? <NavGroup key={entry.label} group={entry} path={path} />
+          ? <NavGroup key={entry.label} group={entry} path={path} counts={{ '/actions': actionCount }} />
           : <NavLink key={entry.href} leaf={entry} path={path} count={entry.href === '/actions' ? actionCount : null} />)}
       </nav>
       <div className="mt-auto pt-4 border-t border-mav-line">
@@ -195,12 +199,23 @@ function NavLink({ leaf, path, indent, count }: { leaf: Leaf; path: string; inde
   )
 }
 
-function NavGroup({ group, path }: { group: Group; path: string }) {
+// Open/closed is remembered per browser, so a group someone keeps open stays open.
+const groupKey = (label: string) => `nav-group:${label}`
+function NavGroup({ group, path, counts = {} }: { group: Group; path: string; counts?: Record<string, number | null> }) {
   const { label, icon: Icon, children } = group
   const hasActive = children.some(c => samePath(path, c.href))
-  // Open when you're inside it; otherwise remember what you last toggled.
-  const [open, setOpen] = useState(hasActive)
+  const [open, setOpenRaw] = useState(hasActive)
+  useEffect(() => {
+    try { if (window.localStorage.getItem(groupKey(label)) === '1') setOpenRaw(true) } catch { /* private window */ }
+  }, [label])
+  const setOpen = (f: (o: boolean) => boolean) => setOpenRaw(o => {
+    const n = f(o)
+    try { window.localStorage.setItem(groupKey(label), n ? '1' : '0') } catch { /* private window */ }
+    return n
+  })
   const expanded = open || hasActive
+  // A closed group still shows the count of anything inside that has one (Actions).
+  const total = children.reduce((s, c) => s + (counts[c.href] || 0), 0)
   return (
     <div>
       <button
@@ -208,12 +223,13 @@ function NavGroup({ group, path }: { group: Group; path: string }) {
         aria-expanded={expanded}
         className={`w-full ${linkCls(false)} justify-between text-left ${hasActive ? 'text-mav-fg' : ''}`}
       >
-        <span className="flex items-center gap-3 min-w-0"><Icon size={16} className="shrink-0" /> <span className="min-w-0 truncate">{label}</span></span>
+        <span className="flex items-center gap-3 min-w-0"><Icon size={16} className="shrink-0" /> <span className="min-w-0 truncate">{label}</span>
+          {!expanded && total > 0 && <span className="-ml-2 shrink-0 font-normal opacity-60 tabular-nums">({total.toLocaleString()})</span>}</span>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
       {expanded && (
         <div className="mt-1 space-y-1">
-          {children.map(c => <NavLink key={c.href} leaf={c} path={path} indent />)}
+          {children.map(c => <NavLink key={c.href} leaf={c} path={path} indent count={counts[c.href] ?? null} />)}
         </div>
       )}
     </div>

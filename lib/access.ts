@@ -37,6 +37,7 @@ export const isAllowedDomain = (email?: string | null): boolean => {
 // Every signed-in person sees all of these. The list stays so the sidebar and the
 // route guard read from one place.
 export const PAGES: { href: string; label: string }[] = [
+  { href: '/pulse', label: 'Daily Pulse' },
   { href: '/', label: 'Dashboard' },
   { href: '/opportunities', label: 'Opportunities' },
   { href: '/needs-input', label: 'Needs Input' },
