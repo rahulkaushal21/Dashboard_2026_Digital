@@ -199,20 +199,15 @@ function NavLink({ leaf, path, indent, count }: { leaf: Leaf; path: string; inde
   )
 }
 
-// Open/closed is remembered per browser, so a group someone keeps open stays open.
-const groupKey = (label: string) => `nav-group:${label}`
+// Closed by default (owner's call, 5 Oct 2026); a group opens itself only while you are on
+// one of its pages, and a click opens it for the visit. Nothing is remembered between
+// visits, so the rail always starts focused.
 function NavGroup({ group, path, counts = {} }: { group: Group; path: string; counts?: Record<string, number | null> }) {
   const { label, icon: Icon, children } = group
   const hasActive = children.some(c => samePath(path, c.href))
-  const [open, setOpenRaw] = useState(hasActive)
-  useEffect(() => {
-    try { if (window.localStorage.getItem(groupKey(label)) === '1') setOpenRaw(true) } catch { /* private window */ }
-  }, [label])
-  const setOpen = (f: (o: boolean) => boolean) => setOpenRaw(o => {
-    const n = f(o)
-    try { window.localStorage.setItem(groupKey(label), n ? '1' : '0') } catch { /* private window */ }
-    return n
-  })
+  const [open, setOpen] = useState(hasActive)
+  // Drop the open/closed state an earlier build saved, so it cannot reopen a group.
+  useEffect(() => { try { window.localStorage.removeItem(`nav-group:${label}`) } catch { /* private window */ } }, [label])
   const expanded = open || hasActive
   // A closed group still shows the count of anything inside that has one (Actions).
   const total = children.reduce((s, c) => s + (counts[c.href] || 0), 0)

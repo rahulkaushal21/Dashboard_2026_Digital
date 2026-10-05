@@ -2829,3 +2829,24 @@ export async function getStaleOpportunities(): Promise<OpenOppEvidence[]> {
     .order('est_value', { ascending: false })
   return (data as OpenOppEvidence[]) || []
 }
+
+// ---- Daily Pulse: what the refresh routine said, and what changed on deals ----------
+// The routine's end-of-run summary is stamped on its heartbeat (sync_runs, source
+// 'email-opportunities-scan'); the Daily Pulse splits it into findings. Deal edits,
+// reassignments and confirmations come from opportunity_events. Both read-only.
+export interface RefreshRun { ran_at: string; ok: boolean; message?: string }
+export async function getRefreshRuns(days = 7): Promise<RefreshRun[]> {
+  if (!supabase) return []
+  const since = new Date(Date.now() - days * 86400000).toISOString()
+  const { data } = await supabase.from('sync_runs').select('ran_at, ok, message')
+    .eq('source', 'email-opportunities-scan').gte('ran_at', since).order('ran_at', { ascending: false })
+  return (data as RefreshRun[]) || []
+}
+export interface OppEvent { id: number; opportunity_id: number; event: string; actor?: string; at: string; detail?: Record<string, unknown> }
+export async function getOpportunityEvents(days = 7): Promise<OppEvent[]> {
+  if (!supabase) return []
+  const since = new Date(Date.now() - days * 86400000).toISOString()
+  const { data } = await supabase.from('opportunity_events').select('id, opportunity_id, event, actor, at, detail')
+    .gte('at', since).neq('event', 'project_type_inferred').order('at', { ascending: false })
+  return (data as OppEvent[]) || []
+}

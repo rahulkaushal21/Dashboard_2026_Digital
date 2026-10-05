@@ -309,6 +309,13 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 > ('email-opportunities-scan', true, <n>, '<one-line summary>');` (source MUST be exactly
 > `email-opportunities-scan`). Dead capture → `markScanFailed`, do NOT stamp.
 >
+> **The heartbeat message is what the Daily Pulse page shows as "Refresh notes".** Write it
+> as `refresh: <how much was read>; <finding>; <finding>; …` — one finding per `; `, each
+> starting with the CLIENT name (so the page can place it in LP/HUB or WEB), then what changed
+> and why, with the dollar figure where there is one. Include everything the chat pulse
+> would say: win% moves, deals warmed/cooled, Lost/Won, things you could not make stick,
+> figures you converted. A finding with no client is shown to every department.
+>
 > **Pulse:** new opps (with owner+cost), status/win% changes with evidence, Won moved,
 > duplicates removed, deals warmed/cooled (esp. from calls), open escalations + how long.
 > **Also state plainly:** anything you could NOT make stick (a sheet-owned column, a sheet edit
