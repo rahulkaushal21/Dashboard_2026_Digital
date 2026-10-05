@@ -409,9 +409,17 @@ export default function Clients() {
       const want = readDeepLink('client')
       if (!want) return
       const k = want.trim().toLowerCase()
+      const kk = akey(want)
       const hit = rows.find(c => (c.company_name || '').trim().toLowerCase() === k)
         || rows.find(c => (c.company_name || '').trim().toLowerCase().includes(k))
+        // Same prefix match the escalation loaders use: "Layer 8 Training" opens
+        // "Layer 8 Training, Inc.".
+        || rows.find(c => { const ck = akey(c.company_name); return ck.length >= 4 && kk.length >= 4 && (ck.startsWith(kk) || kk.startsWith(ck)) })
       if (hit) setSelC(hit)
+      // No record under that name. Leave the name in the search box so the page shows an
+      // empty list under "Ventica" rather than landing on the full board with nothing
+      // open, which read as a broken link.
+      else setQ(want)
       clearDeepLink('client')
     })
     getClient360().then(setC360); getEmailSignals().then(setSignals); getEscalations().then(setEscs); getEscalationVerdicts().then(setVerdicts); getBookingsFull().then(setBookings); getFeedback().then(setFeedback)
