@@ -492,13 +492,19 @@ export async function getOpportunities(opts?: { includeNotOpp?: boolean }): Prom
 // the next made the page wait four network round trips end to end for work the
 // database does in under a tenth of a second. The wait was almost entirely the
 // waiting, which is why the page took seconds to show anything.
-const [rows, intentRows, sheetRowRows, booked] = await Promise.all([
+const [rowsRaw, intentRows, sheetRowRows, booked, removed] = await Promise.all([
   read<any>('opportunities').then(r => r || []),
   read<any>('web_quote_intent').then(r => r || []),
   read<any>('web_quote_sheet_row').then(r => r || []),
   read<{ company_name: string; booking_amount: number; booking_month: string }>(
     'web_revenue', 'company_name, booking_amount, booking_month', 'id').then(r => r || []),
+  removedOpportunityIds(),
 ])
+// A line removed on the Project sheet page is gone from here too. The removal lives in
+// ledger_deletions and the ledger view honours it, but this list reads the opportunities
+// table itself, so the won deal kept showing on Opportunities, Business Trend and the
+// KB report after the revenue figures had let it go. Same rule, same source.
+const rows = rowsRaw.filter((o: any) => !removed.has(o.id))
 const norm = (s?: string) => (s || '').trim().toLowerCase()
 // Buying-intent scores, open deals only. Keyed by opportunity id so a miss just
 // leaves the badge off rather than breaking the row.
@@ -1597,6 +1603,16 @@ export interface ProjectSheetRow {
   local_value?: number; currency?: string; source_subject?: string; origin?: string
 }
 
+/** The opportunity ids whose ledger line ('opp:<id>') has been removed. Read from the
+ *  in-force view because that is the one the anon key can see; an opportunity's id
+ *  never drifts, so for these keys in-force and recorded are the same set. */
+export async function removedOpportunityIds(): Promise<Set<number>> {
+  const rows = (await read<{ row_key: string }>('web_ledger_deletions_in_force', 'row_key', 'row_key')) || []
+  const out = new Set<number>()
+  for (const r of rows) { const m = /^opp:(\d+)$/.exec(r.row_key || ''); if (m) out.add(Number(m[1])) }
+  return out
+}
+
 /** Everything confirmed in the given month (YYYY-MM). */
 export async function getProjectSheet(month: string): Promise<ProjectSheetRow[]> {
   if (!supabase) return []
@@ -1606,7 +1622,8 @@ export async function getProjectSheet(month: string): Promise<ProjectSheetRow[]>
     .select('id, company_name, contact_email, service_dept, project_type, technology, geo, pm_owner, sales_person, confirmed_at, est_value, local_value, currency, source_subject, origin')
     .eq('won', true).gte('confirmed_at', start).lt('confirmed_at', end)
     .order('company_name')
-  return (data as ProjectSheetRow[]) || []
+  const removed = await removedOpportunityIds()
+  return ((data as ProjectSheetRow[]) || []).filter(r => !removed.has(r.id))
 }
 
 /**
