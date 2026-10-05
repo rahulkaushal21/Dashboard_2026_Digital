@@ -194,7 +194,15 @@ export default function PulsePage() {
     }
     // Each finding from a refresh run's own summary. Placed by the first client it names,
     // when it names one we know; otherwise it is company-wide and shows in every view.
-    const known = [...clientDepts.entries()].filter(([k]) => k.length >= 5)
+    // Known names: clients with booked work, then companies on deals (their deal's
+    // department), longest first so "kerrygroup" wins over "kerry".
+    const names = new Map<string, { dept: string; name: string }>()
+    for (const o of opps) {
+      const k = clientKey(o.company_name), d = oppDepts.get(Number(o.id))
+      if (k.length >= 4 && d && !names.has(k)) names.set(k, { dept: d, name: o.company_name || '' })
+    }
+    clientDepts.forEach((d, k) => { if (k.length >= 5) names.set(k, { dept: d, name: names.get(k)?.name || '' }) })
+    const known = [...names.entries()].sort((a, b) => b[0].length - a[0].length)
     for (const r of runs) {
       if (!r.message) continue
       const { head, parts } = findings(r.message)
@@ -203,9 +211,9 @@ export default function PulsePage() {
         const k = clientKey(p)
         const hit = known.find(([ck]) => k.includes(ck))
         out.push({
-          key: `r${r.ran_at}${i}`, kind: 'refresh', at: r.ran_at, client: hit ? (opps.find(o => clientKey(o.company_name) === hit[0])?.company_name || 'Client') : 'Refresh run',
+          key: `r${r.ran_at}${i}`, kind: 'refresh', at: r.ran_at, client: hit ? (hit[1].name || 'Client') : 'Refresh run',
           title: p, detail: r.ok ? `From the ${time(r.ran_at)} refresh — ${head}` : `The ${time(r.ran_at)} refresh did not complete`,
-          dept: hit?.[1], href: '/', hrefLabel: 'Dashboard',
+          dept: hit?.[1].dept, href: '/', hrefLabel: 'Dashboard',
           facts: [['Run', stamp(r.ran_at)], ['Result', r.ok ? 'Completed' : 'Failed'], ['Run summary', head]],
         })
       })
