@@ -907,12 +907,30 @@ async function buildQuotes(sb: any): Promise<string[][]> {
   const rows: { date: string; cells: string[] }[] = [];
 
   const { data: qs, error } = await sb.from("quotes")
-    .select("quote_id, added_date, service_dept, technology, subject_project, agency, client_email, pc_sme, project_type, currency_type, estimated_cost, usd_value, status, notes, geo, business_type, sales_person, confirmed_in_days")
-    .order("id");
+    .select("quote_id, added_date, service_dept, technology, subject_project, agency, client_email, pc_sme, project_type, currency_type, estimated_cost, usd_value, status, notes, geo, business_type, sales_person, confirmed_in_days, sheet_row")
+    .order("sheet_row");
   if (error) throw new Error("quotes: " + error.message);
+
+  // NO QUOTE WITHOUT A DATE. Rahul, 5 Oct 2026. Four rows of the old Quotes tab were
+  // typed in without one, and they printed as undated lines at the bottom of this tab.
+  // Two fallbacks, in order:
+  //   1. the deal's own date on the dashboard — sync_quotes_to_opportunities sets
+  //      source_date from the booking when the sheet left it blank (Sunrise: 14 Jul 2026);
+  //   2. the nearest dated row ABOVE it in the tab. The old tab was filled top to bottom
+  //      as quotes came in, so a row sits between its neighbours in time; the previous
+  //      row's date is the right month and within days of the truth, where a blank is
+  //      nothing at all.
+  const { data: oppDates } = await sb.from("opportunities")
+    .select("quote_key, source_date, first_date").eq("origin", "sheet").like("quote_key", "r:%");
+  const dateByRow = new Map<string, string>();
+  for (const o of oppDates || []) { const d = s(o.source_date) || s(o.first_date); if (d) dateByRow.set(s(o.quote_key), d); }
+  let lastDated = "";
   for (const q of qs || []) {
-    rows.push({ date: s(q.added_date), cells: [
-      s(q.quote_id), sheetDate(q.added_date), s(q.service_dept), s(q.technology), s(q.subject_project),
+    const own = s(q.added_date);
+    const date = own || dateByRow.get(`r:${q.sheet_row}`) || lastDated;
+    if (own) lastDated = own;
+    rows.push({ date, cells: [
+      s(q.quote_id), sheetDate(date), s(q.service_dept), s(q.technology), s(q.subject_project),
       s(q.agency), s(q.client_email), s(q.pc_sme), s(q.project_type), s(q.currency_type), money(q.estimated_cost),
       money(q.usd_value), s(q.status), s(q.notes), s(q.geo), s(q.business_type), s(q.sales_person),
       q.confirmed_in_days === null || q.confirmed_in_days === undefined ? "" : String(q.confirmed_in_days),
