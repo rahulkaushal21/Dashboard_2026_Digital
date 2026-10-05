@@ -181,6 +181,25 @@ export default function Dashboard() {
       setLastRefreshed(new Date()); setNowMs(Date.now())
     } finally { setRefreshing(false) }
   }
+  // Coming back to the tab reloads it, once what it holds is more than two minutes old.
+  // The page otherwise only ever read on open or on Sync now; switching the department
+  // or the period only re-filters what it already has. A line removed on the Project
+  // sheet page stayed in the November column here for as long as the tab was open,
+  // which read as the removal not having worked. Two minutes, so a quick switch between
+  // tabs is not a reload.
+  const loadedAt = useRef(0)
+  useEffect(() => { if (lastRefreshed) loadedAt.current = lastRefreshed.getTime() }, [lastRefreshed])
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - loadedAt.current < 2 * 60_000) return
+      clearReadCache(); load()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // "Sync now" runs the whole sync-all chain (see FN_URL above) and THEN reloads the data.
   //
   // clearReadCache() is not optional here. Reads are held for a minute and the cache is
