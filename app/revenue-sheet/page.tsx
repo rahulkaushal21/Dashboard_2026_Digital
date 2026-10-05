@@ -312,7 +312,9 @@ export default function ProjectLedger() {
   // every keystroke and every dropdown — someone looking at August who typed a client
   // name landed on October and was told nothing matched. Only a From/To range resets it,
   // since a range is its own single page.
-  useEffect(() => { setPage(0) }, [fFrom, fTo])
+  // Setting a range collapses the pager to one page. Clearing one is handled by the
+  // month picker, which already says which page to land on.
+  useEffect(() => { if (fFrom || fTo) setPage(0) }, [fFrom, fTo])
 
   // One page per booking month. A fixed hundred rows split September across two pages and
   // put the tail of August on the first — the unit of work here is a month, so that is
@@ -345,19 +347,34 @@ export default function ProjectLedger() {
   const monthPagesAll = useMemo(() => {
     const inData = new Set(shown.map(r => rowMonth(r) || '—'))
     const out: string[] = []
-    if (thisMonth) {
-      let [y, m] = thisMonth.split('-').map(Number)
+    // The list runs newest first, and "newest" is the latest month the ledger holds,
+    // not today's: a retainer filed into November sits ABOVE October. It used to be
+    // appended after April 2025, at the bottom of a twenty-month list, which is where
+    // "CMIC Webflow Support … Nov 2026" went missing. Read off the department's whole
+    // ledger rather than the filtered rows, so the month is offered even while a filter
+    // hides its only line — otherwise there is no way to get to it.
+    const ahead = rows.map(r => rowMonth(r)).filter(k => k && k > thisMonth).sort()
+    const top = ahead.length ? ahead[ahead.length - 1] : thisMonth
+    if (top) {
+      let [y, m] = top.split('-').map(Number)
       while (`${y}-${String(m).padStart(2, '0')}` >= SHEET_START) {
         out.push(`${y}-${String(m).padStart(2, '0')}`)
         m--; if (m < 1) { m = 12; y-- }
       }
     }
-    // Anything outside that window the data still holds: an older import, or a booking
-    // already filed forward into next year.
+    // Anything older than the window the data still holds: an older import.
     for (const k of [...inData].filter(k => k !== '—' && !out.includes(k)).sort().reverse()) out.push(k)
     if (inData.has('—')) out.push('—')
     return out
-  }, [shown, thisMonth])
+  }, [shown, rows, thisMonth])
+  // Open on the current month. Page 0 is the top of the list, and the top is no longer
+  // always this month — a line booked into November puts November above it.
+  const landed = useRef(false)
+  useEffect(() => {
+    if (landed.current || !thisMonth || !rows.length) return
+    const i = monthPagesAll.indexOf(thisMonth)
+    if (i >= 0) { setPage(i); landed.current = true }
+  }, [thisMonth, rows.length, monthPagesAll])
   // What the pager actually walks: one page when a range is in force, every month
   // otherwise.
   const monthPages = useMemo(() => rangeMode ? [RANGE] : monthPagesAll, [rangeMode, monthPagesAll])
