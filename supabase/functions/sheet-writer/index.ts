@@ -604,6 +604,10 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
   const refCol = headers.length - 1;
   const delCol = indexOfHeader(headers, DELETED_HEADER);
   const delNoteCol = indexOfHeader(headers, DELETED_NOTE_HEADER);
+  // Project Status (column N). A removed line is also marked Cancelled there, so the
+  // status column — the one the team filters and reports on — says the same thing as
+  // the Deleted flag at the far right. Rahul, 5 Oct 2026.
+  const statusCol = indexOfHeader(headers, "Project Status");
 
   const deletions = await readDeletions(sb);
   // Applied on every row, both the sheet-origin ones and the dashboard-origin ones, so a
@@ -615,6 +619,9 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
     // restored line has to lose the mark rather than keep it from last run.
     if (delCol >= 0) row[delCol] = note === undefined ? "" : "Deleted";
     if (delNoteCol >= 0) row[delNoteCol] = note ?? "";
+    // Only set, never cleared: a restored line keeps whatever status it had, and a line
+    // that was never removed is not touched.
+    if (note !== undefined && statusCol >= 0) row[statusCol] = "Cancelled";
   };
 
   const invoices = await readInvoiceColumns(sb, tok, sheetId, "Web, Hub & LP");
