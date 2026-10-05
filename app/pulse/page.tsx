@@ -147,8 +147,11 @@ export default function PulsePage() {
 
   const since = useMemo(() => (loadedAt ? loadedAt.getTime() : Date.now()) - Number(win) * 3600_000, [loadedAt, win])
   const inDept = useMemo(() => items.filter(i => inUnit(i.dept, unit)), [items, unit])
-  const recent = useMemo(() => inDept.filter(i => Date.parse(i.at) >= since)
-    .sort((a, b) => RANK[a.kind] - RANK[b.kind] || b.at.localeCompare(a.at)), [inDept, since])
+  // Bounded at now as well: recurring deals are filed under future months (a retainer's
+  // November instalment exists in October), and those are not news.
+  const until = loadedAt ? loadedAt.getTime() : Date.now()
+  const recent = useMemo(() => inDept.filter(i => { const t = Date.parse(i.at); return t >= since && t <= until })
+    .sort((a, b) => RANK[a.kind] - RANK[b.kind] || b.at.localeCompare(a.at)), [inDept, since, until])
   const of = (...k: Kind[]) => recent.filter(i => k.includes(i.kind))
   const shown = recent.filter(i => TAB_KINDS[tab].includes(i.kind))
   const openInDept = openEsc.filter(e => inUnit(e.dept, unit))
@@ -175,7 +178,7 @@ export default function PulsePage() {
 
   return (
     <div>
-      <Header title="Daily Pulse" chip={unitLabel(unit)}
+      <Header title="Daily Pulse"
         subtitle="Everything new from the mailbox, quotes and sheets in one list, for the department picked in the sidebar — read it instead of the inbox."
         actions={
           <button onClick={() => load(true)} disabled={loading}
