@@ -1,5 +1,5 @@
 'use client'
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import ClientLink from '@/components/ClientLink'
 import GreetingBar from '@/components/GreetingBar'
 import { useUnit } from '@/components/BusinessUnitProvider'
@@ -13,6 +13,7 @@ import { currentEmail } from '@/lib/access'
 import { fmtUsd, topClients } from '@/lib/metrics'
 import { buildInsights, type Tone } from '@/lib/insights'
 import { useMine } from '@/lib/mine'
+import { fyStartYear } from '@/lib/forecast'
 import MineFilter from '@/components/MineFilter'
 import { RefreshCw, Sparkles, ArrowRight } from 'lucide-react'
 import Link from 'next/link'
@@ -266,12 +267,31 @@ export default function Dashboard() {
     return keys.map(k => ({ key: k, month: monthLabel(k), revenue: Math.round(allMonthTotals[k] || 0) }))
   }, [allMonthTotals])
 
-  // --- segment x month matrix (trailing 6 months, independent of filter) -----
+  // --- segment x month matrix (the fiscal year, independent of filter) -------
+  // April to March of the FY we are in. It used to be the trailing six months, which
+  // put the table on a window nobody else reports on: every target and every review
+  // is a fiscal year, and a six-month total matches no figure anyone is carrying.
+  // The months still to come are columns of $0 on purpose — the year is the frame,
+  // and the empty columns say how much of it is left.
+  const fyY = fyStartYear(now)
   const segMonths = useMemo(() => {
     const keys: string[] = []
-    for (let i = 5; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
+    for (let i = 0; i < 12; i++) { const d = new Date(fyY, 3 + i, 1); keys.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`) }
     return keys
-  }, [])
+  }, [fyY])
+  const thisMonth = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`
+  // Twelve months do not fit beside the segment names, so the table scrolls sideways
+  // and opens with the current month at the right edge: what has happened on screen,
+  // what is still to come off to the right. The segment column and the FY total stay
+  // pinned, so a number never loses its row name or its year while scrolling.
+  const segScroll = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const box = segScroll.current; if (!box) return
+    const cur = box.querySelector<HTMLElement>('[data-month="' + thisMonth + '"]')
+    const tot = box.querySelector<HTMLElement>('[data-fy-total]')
+    if (!cur) return
+    box.scrollLeft = Math.max(0, cur.offsetLeft + cur.offsetWidth - (box.clientWidth - (tot?.offsetWidth || 0)))
+  }, [thisMonth, bookingRowsAll.length, unit])
   // Two matrices off one pass: the segment totals, and the same split by engagement.
   const { segData, engData } = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
@@ -290,7 +310,7 @@ export default function Dashboard() {
     return { segData: m, engData: e }
   }, [bookingRows, segMonths])
   // Only the departments inside the selected unit get a row. The data is already scoped,
-  // so the others would be six months of $0 — rows that look like a collapse.
+  // so the others would be a year of $0 — rows that look like a collapse.
   const segRows = useMemo(() => {
     const rows = SEG_ORDER.filter(seg => inUnit(seg, unit))
     if (segData['Other'] && Object.values(segData['Other']).some(v => v)) rows.push('Other')
@@ -678,8 +698,8 @@ export default function Dashboard() {
         // Said once, here, rather than leaving two unlabelled sub-rows to be guessed at.
         info={<>Each segment is split into <b>Dedicated</b> — retainers, including Partial Dedicated — and <b>P2P</b>,
           which is everything won project by project: new development, ad-hoc, maintenance, additional pages.</>}
-        right={<span className="text-xs text-mav-muted">Service department · trailing 6 months · USD</span>}>
-        <div className="overflow-x-auto">
+        right={<span className="text-xs text-mav-muted">Service department · FY {fyY}–{String(fyY + 1).slice(2)} · April to March · USD</span>}>
+        <div ref={segScroll} className="overflow-x-auto">
           {/* A real grid, not just row rules.
               The lines are mav-FG at low alpha rather than mav-line, so they follow the
               theme in the right direction on their own: fg is near-white on the dark
@@ -687,12 +707,12 @@ export default function Dashboard() {
               near-black on the light ones, where it has to be darker. A fixed
               border-mav-line was doing neither well enough to separate a month from the
               month beside it. */}
-          <table className="w-full text-sm min-w-[720px] border-collapse">
+          <table className="w-full text-sm min-w-[1280px] border-collapse">
             <thead className="text-left">
               <tr className="border-b-2 border-mav-fg/25">
-                <th className="px-5 py-3 border-r border-mav-fg/15">Segment</th>
-                {segMonths.map(k => <th key={k} className="px-4 py-3 text-right whitespace-nowrap border-r border-mav-fg/15">{monthLabel(k)}</th>)}
-                <th className="px-5 py-3 text-right whitespace-nowrap">6-mo total</th>
+                <th className="px-5 py-3 border-r border-mav-fg/15 sticky left-0 z-10 bg-mav-panel">Segment</th>
+                {segMonths.map(k => <th key={k} data-month={k} className={`px-4 py-3 text-right whitespace-nowrap border-r border-mav-fg/15 ${k === thisMonth ? 'text-mav-yellow' : ''}`}>{monthLabel(k)}</th>)}
+                <th data-fy-total className="px-5 py-3 text-right whitespace-nowrap border-l border-mav-fg/15 sticky right-0 z-10 bg-mav-panel">FY total</th>
               </tr>
             </thead>
             <tbody>
@@ -708,30 +728,30 @@ export default function Dashboard() {
                       A tint, not filled: twenty solid yellow cells would shout louder
                       than the numbers on them. */}
                   <tr className="border-t-2 border-mav-fg/20 bg-mav-yellow/10 text-mav-fg">
-                    <td className="px-5 pt-3 pb-1.5 font-semibold whitespace-nowrap border-r border-mav-fg/15">{seg}</td>
+                    <td className="px-5 pt-3 pb-1.5 font-semibold whitespace-nowrap border-r border-mav-fg/15 sticky left-0 z-10 bg-mav-panel shadow-[inset_0_0_0_9999px_rgba(255,219,45,0.10)]">{seg}</td>
                     {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-medium tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(segData[seg]?.[k] || 0)}</td>)}
-                    <td className="px-5 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap">{fmtUsd(rowTotal(seg))}</td>
+                    <td className="px-5 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap border-l border-mav-fg/15 sticky right-0 z-10 bg-mav-panel shadow-[inset_0_0_0_9999px_rgba(255,219,45,0.10)]">{fmtUsd(rowTotal(seg))}</td>
                   </tr>
                   {ENG.map(g => (
                     <tr key={g} className="text-xs text-mav-muted hover:bg-mav-dark/40 border-t border-mav-fg/10">
-                      <td className="pl-9 pr-5 py-1 whitespace-nowrap border-r border-mav-fg/15">{g}</td>
+                      <td className="pl-9 pr-5 py-1 whitespace-nowrap border-r border-mav-fg/15 sticky left-0 z-10 bg-mav-panel">{g}</td>
                       {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(engCell(seg, g, k))}</td>)}
-                      <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(engRowTotal(seg, g))}</td>
+                      <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap border-l border-mav-fg/15 sticky right-0 z-10 bg-mav-panel">{fmtUsd(engRowTotal(seg, g))}</td>
                     </tr>
                   ))}
                 </Fragment>
               ))}
               {/* Stronger than a segment row, because it is a different kind of line. */}
               <tr className="border-t-2 border-mav-yellow/60 bg-mav-yellow/20 text-mav-fg">
-                <td className="px-5 pt-3 pb-1.5 font-semibold border-r border-mav-fg/15">Total</td>
+                <td className="px-5 pt-3 pb-1.5 font-semibold border-r border-mav-fg/15 sticky left-0 z-10 bg-mav-panel shadow-[inset_0_0_0_9999px_rgba(255,219,45,0.20)]">Total</td>
                 {segMonths.map(k => <td key={k} className="px-4 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(colTotal(k))}</td>)}
-                <td className="px-5 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
+                <td className="px-5 pt-3 pb-1.5 text-right font-semibold tabular-nums whitespace-nowrap border-l border-mav-fg/15 sticky right-0 z-10 bg-mav-panel shadow-[inset_0_0_0_9999px_rgba(255,219,45,0.20)]">{fmtUsd(segMonths.reduce((s, k) => s + colTotal(k), 0))}</td>
               </tr>
               {ENG.map(g => (
                 <tr key={g} className="text-xs text-mav-muted bg-mav-yellow/[0.06] border-t border-mav-fg/10">
-                  <td className="pl-9 pr-5 py-1 whitespace-nowrap border-r border-mav-fg/15">{g}</td>
+                  <td className="pl-9 pr-5 py-1 whitespace-nowrap border-r border-mav-fg/15 sticky left-0 z-10 bg-mav-panel shadow-[inset_0_0_0_9999px_rgba(255,219,45,0.06)]">{g}</td>
                   {segMonths.map(k => <td key={k} className="px-4 py-1 text-right tabular-nums whitespace-nowrap border-r border-mav-fg/15">{fmtUsd(engColTotal(g, k))}</td>)}
-                  <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap">{fmtUsd(segMonths.reduce((s, k) => s + engColTotal(g, k), 0))}</td>
+                  <td className="px-5 py-1 text-right tabular-nums whitespace-nowrap border-l border-mav-fg/15 sticky right-0 z-10 bg-mav-panel shadow-[inset_0_0_0_9999px_rgba(255,219,45,0.06)]">{fmtUsd(segMonths.reduce((s, k) => s + engColTotal(g, k), 0))}</td>
                 </tr>
               ))}
             </tbody>
