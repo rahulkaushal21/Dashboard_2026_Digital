@@ -129,20 +129,18 @@ if (x.email_lost) return 'Lost'               // marked Lost here; likewise ahea
 if (s.includes('hold')) return 'On Hold'
 return 'Open'
 }
-// A call made on the dashboard that the Quotes sheet hasn't caught up with yet. Only
-// sheet-origin deals can drift like this, and only until someone edits the sheet.
-const lostLag = (x: Opportunity) => !!x.email_lost && !x.won && x.origin === 'sheet' && !/lost|cancel/i.test(x.status || '')
-const confirmLag = (x: Opportunity) => !!x.email_won && !x.won && x.origin === 'sheet' && !/won|confirm/i.test(x.status || '')
-// Delivered and invoiced — the revenue sheet has the money, the Quotes row still says
-// Open. Same fix as a confirm-lag (set the row to Confirmed), but nobody made a call
-// here: the revenue sheet did. Kept out of the pipeline until the sheet catches up.
-const bookedLag = (x: Opportunity) => !!x.booked_month && !x.won && x.origin === 'sheet' && !/won|confirm/i.test(x.status || '')
-// On Hold / Cancelled / Not an opportunity, called here while the sheet still says otherwise.
-// `status` already carries the dashboard's call (getOpportunities folds it in), so the
-// sheet's own word is read from sheet_status.
-const holdLag = (x: Opportunity) => x.manual_state === 'on_hold' && x.origin === 'sheet' && !/hold|lost|cancel/i.test(x.sheet_status || '')
-const cancelLag = (x: Opportunity) => (x.manual_state === 'cancelled' || x.manual_state === 'not_opp') && x.origin === 'sheet' && !/lost|cancel/i.test(x.sheet_status || '')
-const sheetLag = (x: Opportunity) => lostLag(x) || confirmLag(x) || bookedLag(x) || holdLag(x) || cancelLag(x)
+// "Sheet lag" — a call made here that the old Quotes sheet had not caught up with — is
+// over. Since 1 Oct 2026 the dashboard is the record and the sheet-writer prints each
+// deal's verdict (Confirmed, Lost, Cancelled, On Hold, Not an opportunity) into the Quotes
+// tab of the project spreadsheet every half hour; the old sheet is frozen and nobody
+// edits it. So there is no row to go and update, and no alert to raise. Rahul, 6 Oct 2026.
+// The five checks stay as names because the markup reads them; they are all false now.
+const lostLag = (_x: Opportunity) => false
+const confirmLag = (_x: Opportunity) => false
+const bookedLag = (_x: Opportunity) => false
+const holdLag = (_x: Opportunity) => false
+const cancelLag = (_x: Opportunity) => false
+const sheetLag = (_x: Opportunity) => false
 // Every manual call, whatever its verdict — the set you'd look through to change your mind.
 const markedByHand = (x: Opportunity) => !!(x.email_won || x.email_lost || x.unlikely || x.manual_state)
 const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : s === 'Not opp' ? 'bg-slate-500/15 text-slate-400' : 'bg-mav-line text-mav-muted'
@@ -629,7 +627,7 @@ window.alert('Could not save that flag — please try again.')
 const toggleLost = async (x: Opportunity) => {
 const turningOn = !x.email_lost
 const reason = turningOn
-? (window.prompt(`Mark "${x.company_name}" as Lost?\n\nThis records the loss here immediately. The Quotes sheet is not edited — the deal will stay flagged until you set its sheet row to Cancelled.\n\nWhy was it lost? (optional)`) ?? undefined)
+? (window.prompt(`Mark "${x.company_name}" as Lost?\n\nIt counts as Lost here straight away, and the Quotes tab of the project spreadsheet shows Lost on the next run, within the half hour.\n\nWhy was it lost? (optional)`) ?? undefined)
 : undefined
 if (turningOn && reason === undefined) return   // cancelled the prompt
 setSavingLost(true)
@@ -653,7 +651,7 @@ window.alert('Could not save that — please try again.')
 const toggleConfirmed = async (x: Opportunity) => {
 const turningOn = !x.email_won
 const reason = turningOn
-? (window.prompt(`Mark "${x.company_name}" as Confirmed (Won)?\n\nIt counts as Won here straight away. The Quotes sheet is not edited — the deal stays flagged until you set its sheet row to Confirmed so it books as revenue.\n\nNote? (optional)`) ?? undefined)
+? (window.prompt(`Mark "${x.company_name}" as Confirmed (Won)?\n\nIt counts as Won here straight away, and the Quotes tab of the project spreadsheet shows Confirmed on the next run, within the half hour.\n\nNote? (optional)`) ?? undefined)
 : undefined
 if (turningOn && reason === undefined) return   // cancelled the prompt
 setSavingWon(true)
@@ -682,7 +680,7 @@ const toggleState = async (x: Opportunity, state: 'on_hold' | 'cancelled' | 'not
 const turningOn = x.manual_state !== state
 const word = STATE_WORD[state]
 const reason = turningOn
-? (window.prompt(`Mark "${x.company_name}" as ${word}?\n\n${state === 'not_opp' ? 'It leaves the pipeline, every card and every total, and moves to the "Not an opp" tab. ' : state === 'cancelled' ? 'It counts as Lost (labelled Cancelled). ' : 'It moves to the On Hold tab and out of the Open pipeline. '}The Quotes sheet is not edited${x.origin === 'sheet' ? ' — the deal stays flagged until its sheet row matches' : ''}.\n\nWhy? (optional)`) ?? undefined)
+? (window.prompt(`Mark "${x.company_name}" as ${word}?\n\n${state === 'not_opp' ? 'It leaves the pipeline, every card and every total, and moves to the "Not an opp" tab. ' : state === 'cancelled' ? 'It counts as Lost (labelled Cancelled). ' : 'It moves to the On Hold tab and out of the Open pipeline. '}The Quotes tab of the project spreadsheet shows ${word} on the next run, within the half hour.\n\nWhy? (optional)`) ?? undefined)
 : undefined
 if (turningOn && reason === undefined) return   // cancelled the prompt
 setSavingState(x.id)
@@ -1381,8 +1379,8 @@ return (
 </div>
 <div className="text-xs text-mav-muted mb-2.5">
 {markedByHand(sel)
- ? 'Recorded on the dashboard only — the Quotes sheet is never edited automatically. Change it any time; nothing here is final.'
- : 'Record the outcome here the moment you know it. The Quotes sheet still needs updating by hand afterwards.'}
+ ? 'Recorded here and written to the Quotes tab of the project spreadsheet on the next run, within the half hour. Change it any time; nothing here is final.'
+ : 'Record the outcome here the moment you know it. It reaches the Quotes tab of the project spreadsheet on the next run, within the half hour.'}
 </div>
 {/* Confirming is ONE action now. There used to be a quick toggle beside this that
     recorded the call without the details, from the era when the Quotes sheet was the

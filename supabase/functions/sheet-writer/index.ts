@@ -924,15 +924,40 @@ async function buildQuotes(sb: any): Promise<string[][]> {
     .select("quote_key, source_date, first_date").eq("origin", "sheet").like("quote_key", "r:%");
   const dateByRow = new Map<string, string>();
   for (const o of oppDates || []) { const d = s(o.source_date) || s(o.first_date); if (d) dateByRow.set(s(o.quote_key), d); }
+  // THE DASHBOARD DRIVES THIS TAB. Rahul, 6 Oct 2026: "since now there is no old sheet
+  // we are using, if i am updating anything in the dashboard this should reflect the new
+  // spreadsheet." A verdict given on Opportunities — Confirmed, Lost, Cancelled, On Hold,
+  // Not an opportunity, Might not come — lives on the opportunity row, never on the
+  // quotes table (which is the old sheet's copy and no longer edited). Until now this
+  // tab printed the old sheet's Status, so a deal put On Hold here still read "Quote
+  // Shared" in the spreadsheet. The verdict now overrides Status, and the reason, who
+  // and when go into Notes, so the tab says what the dashboard says.
+  const { data: verdicts } = await sb.from("opportunities")
+    .select("quote_key, email_won, email_won_by, email_won_at, email_won_reason, email_lost, email_lost_by, email_lost_at, email_lost_reason, manual_state, manual_state_by, manual_state_at, manual_state_reason, unlikely, unlikely_by, unlikely_at, unlikely_reason")
+    .eq("origin", "sheet").like("quote_key", "r:%");
+  const verdictByRow = new Map<string, { status: string; note: string }>();
+  const STATE: Record<string, string> = { on_hold: "On Hold", cancelled: "Cancelled", not_opp: "Not an opportunity" };
+  const stamp = (who: unknown, at: unknown) => [s(who), sheetDate(s(at))].filter(Boolean).join(" ");
+  for (const o of verdicts || []) {
+    let status = "", note = "";
+    if (o.email_won)            { status = "Confirmed"; note = `Confirmed on the dashboard ${stamp(o.email_won_by, o.email_won_at)}${o.email_won_reason ? " — " + s(o.email_won_reason) : ""}`; }
+    else if (o.manual_state)    { status = STATE[s(o.manual_state)] || s(o.manual_state); note = `${status} on the dashboard ${stamp(o.manual_state_by, o.manual_state_at)}${o.manual_state_reason ? " — " + s(o.manual_state_reason) : ""}`; }
+    else if (o.email_lost)      { status = "Lost"; note = `Lost on the dashboard ${stamp(o.email_lost_by, o.email_lost_at)}${o.email_lost_reason ? " — " + s(o.email_lost_reason) : ""}`; }
+    else if (o.unlikely)        { note = `Might not come — flagged on the dashboard ${stamp(o.unlikely_by, o.unlikely_at)}${o.unlikely_reason ? " — " + s(o.unlikely_reason) : ""}`; }
+    if (status || note) verdictByRow.set(s(o.quote_key), { status, note: note.trim() });
+  }
   let lastDated = "";
   for (const q of qs || []) {
     const own = s(q.added_date);
     const date = own || dateByRow.get(`r:${q.sheet_row}`) || lastDated;
     if (own) lastDated = own;
+    const v = verdictByRow.get(`r:${q.sheet_row}`);
+    const status = v?.status || s(q.status);
+    const notes = v?.note ? [s(q.notes), v.note].filter(Boolean).join(" · ") : s(q.notes);
     rows.push({ date, cells: [
       s(q.quote_id), sheetDate(date), s(q.service_dept), s(q.technology), s(q.subject_project),
       s(q.agency), s(q.client_email), s(q.pc_sme), s(q.project_type), s(q.currency_type), money(q.estimated_cost),
-      money(q.usd_value), s(q.status), s(q.notes), s(q.geo), s(q.business_type), s(q.sales_person),
+      money(q.usd_value), status, notes, s(q.geo), s(q.business_type), s(q.sales_person),
       q.confirmed_in_days === null || q.confirmed_in_days === undefined ? "" : String(q.confirmed_in_days),
     ] });
   }
