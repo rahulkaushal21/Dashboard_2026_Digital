@@ -8,6 +8,8 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const TOKEN = "ingestWebHub_a7c2e9";
+// Tabs of the OLD spreadsheet whose pushes are refused — see the 410 below.
+const FROZEN_TABS = new Set(["quotes", "feedback"]);
 const MONTHS: Record<string, string> = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
 
 function h(s: string): string { let x = 5381; for (let i = 0; i < s.length; i++) { x = ((x << 5) + x) + s.charCodeAt(i); x = x >>> 0; } return x.toString(16); }
@@ -159,6 +161,19 @@ Deno.serve(async (req) => {
     const tab = String(body?.tab || "");
     tabName = tab || "unknown";
     if (!MAP[tab]) return new Response(JSON.stringify({ ok: false, error: "unknown tab: " + tab }), { status: 400, headers: { "Content-Type": "application/json" } });
+    // THE OLD SHEET IS FROZEN. Rahul, 6 Oct 2026: "old sheet is entirely frozen feedback
+    // quotes webhublp completely." Since 1 Oct the dashboard is the record: quotes are
+    // entered there or found in mail, feedback is logged there, and the sheet-writer
+    // fills the NEW spreadsheet from it. A push from the old sheet's script would now
+    // overwrite the quotes and feedback tables with a stale copy, so it is refused. The
+    // Apps Script trigger in the old sheet still fires until somebody deletes it; every
+    // run gets this answer and nothing changes. Escalations and SQLs are other sheets and
+    // still land. Nothing is logged to sync_runs: a refused push is not a sync, and a row
+    // an hour saying so would only bury the real ones.
+    if (FROZEN_TABS.has(tab)) {
+      return new Response(JSON.stringify({ ok: false, frozen: true, tab, message: "The old sheet is frozen since 1 Oct 2026 — the dashboard is the record now. Delete this trigger in the old spreadsheet." }),
+        { status: 410, headers: { "Content-Type": "application/json" } });
+    }
     const objs = toObjects(body?.rows || []).filter((x) => KEEP[tab](x.r));
     let mapped = objs.map((x, i) => MAP[tab](x.r, i, x.sheetRow));
     if (tab === "esc") mapped = mapped.map(fixEscDrift);
