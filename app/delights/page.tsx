@@ -36,6 +36,7 @@ const COLS: ColumnDef[] = [
   { key: 'date', label: 'Date', locked: true },
   { key: 'client', label: 'Client', locked: true },
   { key: 'geo', label: 'GEO', default: true },
+  { key: 'pm', label: 'PM', default: true },
   { key: 'source', label: 'Source', default: true },
   { key: 'quote', label: 'Feedback', default: true },
   { key: 'project', label: 'Project' },
@@ -303,6 +304,7 @@ export default function Delights() {
                 <th className="px-3 py-2.5">Date</th>
                 <th className="px-3 py-2.5">Client</th>
                 {cols.on('geo') && <th className="px-3 py-2.5">GEO</th>}
+                {cols.on('pm') && <th className="px-3 py-2.5">PM</th>}
                 {cols.on('source') && <th className="px-3 py-2.5">Source</th>}
                 {cols.on('quote') && <th className="px-3 py-2.5">Feedback</th>}
                 {cols.on('project') && <th className="px-3 py-2.5">Project</th>}
@@ -320,6 +322,7 @@ export default function Delights() {
                     <td className="px-3 py-2.5 text-mav-muted"><DateCell d={r.date} /></td>
                     <td className="px-3 py-2.5 font-semibold max-w-[220px] truncate" title={r.company_name}>{r.company_name}</td>
                     {cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.geo || '—'}</td>}
+                    {cols.on('pm') && <td className="px-3 py-2.5 whitespace-nowrap" title="The client's primary owner — the PM whose feedback KPI this counts on">{r.pm_owner || '—'}</td>}
                     {cols.on('source') && <td className="px-3 py-2.5">
                       <div className="flex gap-1">
                         {!!r.sheet_count && <span title={`${r.sheet_count} logged in the feedback sheet`} className={`${badge} bg-green-500/15 text-green-400`}>Sheet</span>}
@@ -359,6 +362,7 @@ export default function Delights() {
                 <h2 className="text-xl font-semibold"><ClientLink name={sel_.company_name} className="text-mav-yellow" /></h2>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {sel_.geo && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.geo}</span>}
+                  {sel_.pm_owner && <span className="text-xs px-2 py-1 rounded-full bg-mav-yellow/15 text-mav-yellow" title="The client's primary owner — the PM whose feedback KPI this counts on">PM {sel_.pm_owner}</span>}
                   {sel_.count > 1 && <span className="text-xs px-2 py-1 rounded-full bg-green-500/15 text-green-400">{sel_.count} testimonials</span>}
                   {sel_.client_email && <span className="text-xs px-2 py-1 rounded-full bg-mav-line text-mav-muted">{sel_.client_email}</span>}
                 </div>

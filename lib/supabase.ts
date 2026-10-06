@@ -941,6 +941,8 @@ export async function decideManualFeedback(id: number, approve: boolean, note?: 
 export interface DelightItem { quote?: string; project?: string; evidence?: string; date?: string; type?: string; source?: 'sheet' | 'email'; subject?: string }
 export interface Delight {
   company_name: string; geo?: string; count: number
+  /** The client's primary owner — the PM whose scorecard this feedback counts on. */
+  pm_owner?: string
   headline?: string; headline_project?: string; headline_evidence?: string
   items: DelightItem[]; date?: string; client_email?: string
   sheet_count?: number; email_count?: number
@@ -960,11 +962,16 @@ export async function getDelights(): Promise<Delight[]> {
   // "did this client praise us". web_real_feedback is now the only answer, scored by
   // feedback_quality(): see migration 070 for what the score rewards and punishes, and
   // why length alone could never be the rule.
-  const [rowsRes, clients] = await Promise.all([
+  const [rowsRes, clients, owners] = await Promise.all([
     supabase.from('web_real_feedback')
       .select('source, id, company_name, client_email, quote, evidence, project, at, feedback_type, geo, score'),
     getClients(),
+    getClientOwners(),
   ])
+  // The PM shown is the one the scorecard credits: the client's primary owner, by
+  // revenue, not whoever typed the feedback row up (see pm-metrics, "Feedback follows
+  // the client"). Same rule here so the name on the card is the name on the KPI.
+  const pmFor = (name?: string): string | undefined => (owners.get(ckey(name)) || [])[0]
   const geoBy = new Map<string, string>()
   for (const c of clients) { const k = ckey(c.company_name); if (k && c.geo) geoBy.set(k, c.geo) }
   const geoFor = (name?: string, fallback?: string): string => {
@@ -993,7 +1000,7 @@ export async function getDelights(): Promise<Delight[]> {
     const g = groups.get(key)
     if (!g) {
       groups.set(key, {
-        company_name: r.company_name || '', geo: geoFor(r.company_name, r.geo), count: 1,
+        company_name: r.company_name || '', geo: geoFor(r.company_name, r.geo), count: 1, pm_owner: pmFor(r.company_name),
         items: [item], date: item.date, client_email: r.client_email || undefined,
       })
     } else {
