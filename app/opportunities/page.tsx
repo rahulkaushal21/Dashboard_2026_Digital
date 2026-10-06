@@ -429,7 +429,11 @@ const isAdhoc = (x: Opportunity) => {
 }
 const canPick = (x: Opportunity) =>
   !x.won && !x.email_won && !x.rolled_into && canConfirmLocally(x, me, iAmAdmin)
-const pickedRows = useMemo(() => raw.filter(x => picked.has(x.id)), [raw, picked])
+// A deal that has been decided — confirmed, lost, cancelled, put on hold, dismissed —
+// drops out of the pick the moment it is decided. It used to stay: mark a picked deal
+// Cancelled and the "selected · Confirm" bar kept offering to confirm it.
+const stillOpen = (x: Opportunity) => !x.won && !x.email_won && !x.email_lost && !x.manual_state
+const pickedRows = useMemo(() => raw.filter(x => picked.has(x.id) && stillOpen(x)), [raw, picked])
 const pickedClients = useMemo(
   () => Array.from(new Set(pickedRows.map(x => (x.company_name || '').trim()).filter(Boolean))),
   [pickedRows])
