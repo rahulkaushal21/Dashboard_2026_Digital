@@ -953,7 +953,9 @@ export interface Delight {
 // testimonials. Scoring what the text DOES, in one place both this page and the PM
 // scorecard can read, is the replacement.
 
-const NOT_DELIGHTS = ['sprung', 'scholarstack']
+// Fluid Ideas: the praise on record is for work another team delivered, not ours —
+// Rahul, 6 Oct 2026. The signal stays for Client 360; it is not a Web delight.
+const NOT_DELIGHTS = ['sprung', 'scholarstack', 'fluidideas']
 const isNotDelight = (name?: string) => { const k = ckey(name); return !!k && NOT_DELIGHTS.some(n => k.includes(n)) }
 export async function getDelights(): Promise<Delight[]> {
   if (!supabase) return []
