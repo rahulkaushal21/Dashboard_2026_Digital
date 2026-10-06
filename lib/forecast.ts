@@ -67,6 +67,8 @@ export interface ForecastMonth {
   booked?: number
   /** On a combined forecast, each unit's share of this month. */
   parts?: Record<string, number>
+  /** What the pipeline moved this month by, signed (see ForecastInputs.pipeline). */
+  pipelineAdj?: number
 }
 
 /** Automatic inputs beyond the revenue history — nothing typed by anybody. */
@@ -75,6 +77,14 @@ export interface ForecastInputs {
   nowcast?: Nowcast | null
   /** Invoices already raised per month 'YYYY-MM' in the invoice app, this unit. */
   ahead?: Map<string, number>
+  /**
+   * The pipeline, read as a DIFFERENCE from normal, never added outright (migration 136):
+   * open deals of the last 120 days at their own win probability, against what this unit
+   * typically wins from quotes in a month. Positive means more is visible than usual.
+   * A quarter of the gap goes to the month in progress, half to the next month, a
+   * quarter to the one after; beyond that the history already says what a month wins.
+   */
+  pipeline?: { weighted: number; quotedWonAvg: number } | null
 }
 
 export interface Forecast {
@@ -279,6 +289,10 @@ export function buildForecast(
   // Settled months plus the estimated close of the month in progress — the base the
   // required pace is measured from.
   let settledAndPartial = 0
+  // Pipeline gap, and how much of it each month ahead takes.
+  const gap = inputs.pipeline ? inputs.pipeline.weighted - inputs.pipeline.quotedWonAvg : 0
+  const PIPE_SHARE = [0.25, 0.5, 0.25]
+  let aheadIdx = 0
 
   for (let i = 0; i < 12; i++) {
     const d = new Date(fyY, 3 + i, 1)
@@ -300,7 +314,8 @@ export function buildForecast(
       // what is already in and what the seasonal level implies — never below what
       // has actually been billed.
       const sofar = seen || 0
-      const expected = level * (idx / 100)
+      const pipeAdj = gap * PIPE_SHARE[0]
+      const expected = Math.max(0, level * (idx / 100) + pipeAdj)
       const inv = inputs.ahead?.get(k) || 0
       const nc = inputs.nowcast
       // With a nowcast: blend what this month's own bookings imply with the model, in
@@ -312,7 +327,7 @@ export function buildForecast(
       months.push({
         key: k, label: label(k), index: idx,
         value: est, low: Math.max(floor, est * (1 - e)), high: Math.max(est * (1 + e), floor),
-        actual: false, partial: true, invoiced: inv, booked: sofar,
+        actual: false, partial: true, invoiced: inv, booked: sofar, pipelineAdj: pipeAdj,
       })
       bookedToDate += sofar
       projected += est
@@ -326,8 +341,10 @@ export function buildForecast(
     const inv = inputs.ahead?.get(k) || 0
     const booked = seen || 0
     const floor = Math.max(inv, booked)
-    const v = Math.max(level * (idx / 100), floor)
-    months.push({ key: k, label: label(k), index: idx, value: v, low: Math.max(v - sd, floor), high: v + sd, actual: false, invoiced: inv, booked })
+    aheadIdx++
+    const pipeAdj = gap * (PIPE_SHARE[aheadIdx] || 0)
+    const v = Math.max(level * (idx / 100) + pipeAdj, floor)
+    months.push({ key: k, label: label(k), index: idx, value: v, low: Math.max(v - sd, floor), high: v + sd, actual: false, invoiced: inv, booked, pipelineAdj: pipeAdj || undefined })
     projected += v
     futureCount++
   }
@@ -592,6 +609,7 @@ export function combineForecasts(parts: Forecast[], target: number): Forecast | 
       actual, partial: partial || undefined,
       invoiced: actual ? undefined : sum(m => m.invoiced),
       booked: actual ? undefined : sum(m => m.booked),
+      pipelineAdj: actual ? undefined : sum(m => m.pipelineAdj),
       parts: Object.fromEntries(ps.map(p => [p.unit || '?', (p.months.find(m => m.key === k) || { value: 0 }).value])),
     }
   })

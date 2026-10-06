@@ -295,6 +295,24 @@ return data && data.length ? (data[0] as { ran_at: string }).ran_at : null
 
 /** When this source last ran SUCCESSFULLY. A failed run in between does not undo what the
  *  one before it wrote, so "has the writer carried this line yet" is judged against this. */
+// The revenue the old reports were built on — Apr 2023 to Mar 2025, one line per client
+// per month, by department. The forecast reads it UNDER web_revenue_lines so the seasonal
+// index rests on three and a half years rather than one and a half: with one year, LP/HUB
+// had no usable shape and was forecast flat. Months from Apr 2025 come from the ledger.
+export async function getRevenueHistoryRows(): Promise<BookingRow[]> {
+  const rows = (await read<{ id: number; company_name?: string; booking_month?: string; booking_amount?: number; service_dept?: string; geo?: string; engagement_model?: string; technology?: string }>(
+    'revenue_history', 'id, company_name, booking_month, booking_amount, service_dept, geo, engagement_model, technology', 'id')) || []
+  return rows.filter(r => (r.booking_month || '') < '2025-04-01')
+    .map(r => ({ id: -r.id, company_name: r.company_name, booking_month: r.booking_month, booking_amount: r.booking_amount, service_name: r.service_dept, geo: r.geo, engagement_model: r.engagement_model, technology: r.technology }))
+}
+
+/** Per unit: the open pipeline at its own win chance, and what a month usually wins from quotes (migration 136). */
+export interface ForecastInputRow { unit: string; pipeline_deals: number; pipeline_usd: number; pipeline_weighted: number; quoted_won_avg: number; won_deals_in_window: number }
+export async function getForecastInputs(): Promise<Map<string, ForecastInputRow>> {
+  const rows = (await read<ForecastInputRow>('web_forecast_inputs', '*', 'unit')) || []
+  return new Map(rows.map(r => [r.unit, r]))
+}
+
 // The forecast that stands for a month — see forecast_snapshots (migration 135). The
 // first computation in a calendar month is written down; everyone after reads it back.
 export interface ForecastSnapshot<T = unknown> { made_at: string; made_by?: string | null; payload: T }

@@ -6,6 +6,11 @@ import { supabase } from './supabase'
 // FY runs April to March.
 export const FY_TARGET = 3200000
 export const FY_TARGET_LABEL = '$3.2M'
+// Per-unit targets, from Rahul on 6 Oct 2026. They add to the company figure. The
+// Forecast reads the one for the unit being looked at; Business Trend keeps the company's.
+export const FY_TARGETS: Record<'all' | 'lp-hub' | 'web', number> = { all: 3200000, 'lp-hub': 729652, web: 2470348 }
+// Web's target by GEO, same source. AU + UK + US = the Web target.
+export const WEB_GEO_TARGETS: Record<'AU' | 'UK' | 'US', number> = { AU: 420933, UK: 773517, US: 1275898 }
 
 export interface Settings {
   business_sheet_url?: string

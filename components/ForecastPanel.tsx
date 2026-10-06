@@ -9,10 +9,10 @@ import { KPIRow, Panel } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit, unitLabel } from '@/lib/business-unit'
 import { useThemeInk } from '@/lib/use-theme-ink'
-import { getBookingsFull, getOpportunities, getOpportunityDepts, getInvoicesAhead, getForecastSnapshot, saveForecastSnapshot, type BookingRow, type Opportunity, type InvoiceAhead, type ForecastSnapshot } from '@/lib/supabase'
+import { getBookingsFull, getOpportunities, getOpportunityDepts, getInvoicesAhead, getForecastSnapshot, saveForecastSnapshot, getRevenueHistoryRows, getForecastInputs, type BookingRow, type Opportunity, type InvoiceAhead, type ForecastSnapshot, type ForecastInputRow } from '@/lib/supabase'
 import { buildForecast, churnDrag, chooseModel, runRateAt, nowcast, combineForecasts, applySnapshot, snapshotOf, MODEL_LABEL, type Forecast, type ForecastSnapshotPayload } from '@/lib/forecast'
 import type { Unit } from '@/lib/business-unit'
-import { FY_TARGET } from '@/lib/config'
+import { FY_TARGETS, WEB_GEO_TARGETS } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
 import { RefreshCw } from 'lucide-react'
 
@@ -40,6 +40,10 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   const [oppsAll, setOpps] = useState<Opportunity[]>([])
   const [oppDepts, setOppDepts] = useState<Map<number, string>>(new Map())
   const [aheadAll, setAhead] = useState<InvoiceAhead[]>([])
+  // Apr 2023 – Mar 2025, under the ledger's own months: the seasonal index needs years.
+  const [historyRows, setHistoryRows] = useState<BookingRow[]>([])
+  // Open pipeline at its own win chance, and the usual month's quote wins, per unit.
+  const [inputs, setInputs] = useState<Map<string, ForecastInputRow>>(new Map())
   const [loading, setLoading] = useState(true)
   const [showAccounts, setShowAccounts] = useState(false)
   // Set after mount: computing "today" during render makes the static export's
@@ -49,8 +53,8 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   const load = async () => {
     setLoading(true)
     try {
-      const [b, o, od, ah] = await Promise.all([getBookingsFull(), getOpportunities(), getOpportunityDepts(), getInvoicesAhead()])
-      setBookings(b); setOpps(o); setOppDepts(od); setAhead(ah); setToday(new Date())
+      const [b, o, od, ah, hist, inp] = await Promise.all([getBookingsFull(), getOpportunities(), getOpportunityDepts(), getInvoicesAhead(), getRevenueHistoryRows(), getForecastInputs()])
+      setBookings(b); setOpps(o); setOppDepts(od); setAhead(ah); setHistoryRows(hist); setInputs(inp); setToday(new Date())
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
@@ -61,7 +65,9 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   // client's history, then geo). Everything below — the fit, the churn drag, the
   // backtest, the pipeline — is then that unit's, not the company's.
   const { unit } = useUnit()
-  const bookings = useMemo(() => bookingsAll.filter(b => inUnit(b.service_name, unit)), [bookingsAll, unit])
+  // The ledger's lines with the older history underneath, for everything the model fits.
+  const bookings = useMemo(() => [...historyRows, ...bookingsAll].filter(b => inUnit(b.service_name, unit)), [historyRows, bookingsAll, unit])
+  const target = FY_TARGETS[unit]
   const opps = useMemo(() => oppsAll.filter(o => inUnit(oppDepts.get(Number(o.id)), unit)), [oppsAll, oppDepts, unit])
 
   // Each department gets the model that has predicted ITS OWN past best — see
@@ -74,11 +80,13 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   // One unit's forecast, start to finish: its rows, its model, its nowcast, its floors.
   const forecastFor = (u: Exclude<Unit, 'all'>): Forecast | null => {
     if (!today) return null
-    const rows = bookingsAll.filter(b => inUnit(b.service_name, u))
+    const rows = [...historyRows, ...bookingsAll].filter(b => inUnit(b.service_name, u))
     const ch = chooseModel(rows, today)
     const ahead = new Map<string, number>()
     for (const r of aheadAll) if (r.unit === u) ahead.set(r.month, (ahead.get(r.month) || 0) + r.usd)
-    const f = buildForecast(rows, FY_TARGET, today, ch.model, { nowcast: nowcast(rows, today, ch.bt), ahead })
+    const inp = inputs.get(u)
+    const pipeline = inp ? { weighted: inp.pipeline_weighted, quotedWonAvg: inp.quoted_won_avg } : null
+    const f = buildForecast(rows, FY_TARGETS[u], today, ch.model, { nowcast: nowcast(rows, today, ch.bt), ahead, pipeline })
     if (f) f.unit = u
     return f
   }
@@ -86,9 +94,9 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   // fit over the combined history read Web's seasonal shape onto LP/HUB's flat retainers
   // and came out $38k above the sum of the parts for October.
   const fcLive: Forecast | null = useMemo(
-    () => unit === 'all' ? combineForecasts([forecastFor('lp-hub'), forecastFor('web')].filter((f): f is Forecast => !!f), FY_TARGET) : forecastFor(unit),
+    () => unit === 'all' ? combineForecasts([forecastFor('lp-hub'), forecastFor('web')].filter((f): f is Forecast => !!f), FY_TARGETS.all) : forecastFor(unit),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bookingsAll, aheadAll, today, unit])
+    [bookingsAll, historyRows, inputs, aheadAll, today, unit])
 
   // THE FORECAST THAT STANDS. The first computation in a calendar month is written down
   // (forecast_snapshots) and every later visit shows that, not a fresh one: "once you
@@ -293,7 +301,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
       </div>
       {fc && unit !== 'all' && (
         <p className="-mt-2 mb-4 text-[11px] text-mav-muted">
-          {unitLabel(unit)} revenue only, measured against the company-wide {usdK(fc.target)} target — there is no per-unit target.
+          {unitLabel(unit)} revenue only, against its own {usdK(fc.target)} target (the company's {usdK(FY_TARGETS.all)} is LP/HUB {usdK(FY_TARGETS['lp-hub'])} + Web {usdK(FY_TARGETS.web)}).
         </p>
       )}
 
@@ -332,6 +340,8 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
             <TrendChart fc={fc} />
           </Panel>
 
+          {unit === 'web' && <WebGeoTargets bookings={bookingsAll} fc={fc} />}
+
           {/* ---------------- leading indicators ---------------- */}
           {ind && <Indicators ind={ind} />}
 
@@ -359,6 +369,12 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
             info={<>Bar = forecast · red line = {usdK(fc.neededPerMonth)} pace needed for {usdK(fc.target)}. Green is settled. Index is the seasonal index: 100 is an average month, so 113 means that month historically runs 13% above one{seasonal ? '' : ' — not applied here, so every forecast month is 100'}.</>}
             right={<span className="text-xs text-mav-muted">red line = {usdK(fc.neededPerMonth)}/mo needed</span>}>
             <MonthTable fc={fc} />
+            {fc.months.some(m => m.pipelineAdj) && (
+              <p className="px-5 py-2.5 text-[11px] text-mav-muted border-t border-mav-line/60">
+                Pipeline, read against normal: {(unit === 'all' ? ['lp-hub', 'web'] : [unit]).map(u => { const i = inputs.get(u); return i ? `${unitLabel(u as Unit)} ${usdK(i.pipeline_weighted)} open at its own win chance (${i.pipeline_deals} deals of the last 120 days) vs ${usdK(i.quoted_won_avg)} usually won from quotes a month` : null }).filter(Boolean).join(' · ')}.
+                {' '}The gap moves the months ahead by {fc.months.filter(m => m.pipelineAdj).map(m => `${m.label} ${m.pipelineAdj! >= 0 ? '+' : '−'}${usdK(Math.abs(m.pipelineAdj!))}`).join(', ')}; nothing is added on top of what the history already wins.
+              </p>
+            )}
             {seasonal && fc.thinSeasonality > 0 && (
               <p className="px-4 py-2.5 text-[11px] text-mav-muted border-t border-mav-line">
                 {fc.thinSeasonality} of the 12 calendar months rest on a single year of observations — treat the seasonal shape as a reasonable expectation, not an established pattern.
@@ -799,5 +815,72 @@ function Stat({ label, value, note, tone = '' }: { label: string; value: string;
       <div className={`font-mono text-xl font-semibold tabular-nums mt-1 ${tone}`}>{value}</div>
       <div className="text-[11px] text-mav-muted mt-0.5 leading-snug">{note}</div>
     </div>
+  )
+}
+
+
+/* ------------------------------------------------------- Web by GEO vs target --- */
+// Web's target by GEO, from Rahul on 6 Oct 2026. Booked to date is the FY's ledger lines
+// by their GEO cell; the forecast is split by the trailing six months' GEO mix, because
+// the model does not forecast per GEO and a split by target share would only restate
+// the target. Pace compares booked so far with the target pro-rated to the months gone.
+function WebGeoTargets({ bookings, fc }: { bookings: BookingRow[]; fc: Forecast }) {
+  const geoOf = (g?: string): 'AU' | 'UK' | 'US' | null => {
+    const v = (g || '').toUpperCase()
+    if (!v.trim()) return null
+    if (/\bAU\b|AU\/|NZ|APAC|AUSTRALIA/.test(v)) return 'AU'
+    if (/\bUS\b|US\/|USA|CANADA|NORTH AMERICA/.test(v)) return 'US'
+    if (/\bUK\b|UK\/|EU|EUROPE|LONDON/.test(v)) return 'UK'
+    return null
+  }
+  const fyKeys = new Set(fc.months.map(m => m.key))
+  const doneKeys = new Set(fc.months.filter(m => m.actual).map(m => m.key))
+  const trailing = new Set(fc.history.slice(-6).map(h => h.key))
+  const booked: Record<string, number> = { AU: 0, UK: 0, US: 0 }
+  const mix: Record<string, number> = { AU: 0, UK: 0, US: 0 }
+  let unplaced = 0
+  for (const b of bookings) {
+    if (!inUnit(b.service_name, 'web')) continue
+    const k = (b.booking_month || '').slice(0, 7)
+    const g = geoOf(b.geo)
+    if (fyKeys.has(k)) { if (g) booked[g] += b.booking_amount || 0; else unplaced += b.booking_amount || 0 }
+    if (trailing.has(k) && g) mix[g] += b.booking_amount || 0
+  }
+  const mixTotal = mix.AU + mix.UK + mix.US || 1
+  const monthsGone = doneKeys.size + 0.5
+  const rows = (['AU', 'UK', 'US'] as const).map(g => {
+    const target = WEB_GEO_TARGETS[g]
+    const share = mix[g] / mixTotal
+    const projected = booked[g] + fc.months.filter(m => !m.actual).reduce((s, m) => s + m.value, 0) * share
+    return { g, target, booked: booked[g], projected, pace: (booked[g] / (target * monthsGone / 12)) * 100, share }
+  })
+  return (
+    <Panel flush className="mb-5" title="Web by GEO, against target"
+      right={<span className="text-xs text-mav-muted">AU + UK + US = {usdK(FY_TARGETS.web)}{unplaced > 0 ? ` · ${usdK(unplaced)} booked with no GEO` : ''}</span>}>
+      <table className="min-w-full text-sm">
+        <thead className="text-left text-mav-muted border-b border-mav-line">
+          <tr>
+            <th className="px-5 py-2.5 font-medium">GEO</th>
+            <th className="px-3 py-2.5 font-medium text-right">Target</th>
+            <th className="px-3 py-2.5 font-medium text-right">Booked to date</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="Booked so far against the target pro-rated to the months gone">Pace</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="Booked to date plus the forecast for the rest of the year, split by the trailing six months' GEO mix">Projected</th>
+            <th className="px-5 py-2.5 font-medium text-right">Gap</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.g} className="border-b border-mav-line/60">
+              <td className="px-5 py-2.5 font-medium">{r.g === 'US' ? 'USA' : r.g}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-mav-muted">{fmtUsd(r.target)}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{fmtUsd(Math.round(r.booked))}</td>
+              <td className={`px-3 py-2.5 text-right tabular-nums ${r.pace >= 100 ? 'text-green-400' : r.pace >= 85 ? 'text-mav-yellow' : 'text-red-400'}`}>{Math.round(r.pace)}%</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{fmtUsd(Math.round(r.projected))} <span className="text-[11px] text-mav-muted">({Math.round(r.share * 100)}% of Web)</span></td>
+              <td className={`px-5 py-2.5 text-right tabular-nums ${r.projected >= r.target ? 'text-green-400' : 'text-red-400'}`}>{r.projected >= r.target ? '+' : '−'}{fmtUsd(Math.round(Math.abs(r.projected - r.target)))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
   )
 }
