@@ -295,6 +295,21 @@ return data && data.length ? (data[0] as { ran_at: string }).ran_at : null
 
 /** When this source last ran SUCCESSFULLY. A failed run in between does not undo what the
  *  one before it wrote, so "has the writer carried this line yet" is judged against this. */
+// The forecast that stands for a month — see forecast_snapshots (migration 135). The
+// first computation in a calendar month is written down; everyone after reads it back.
+export interface ForecastSnapshot<T = unknown> { made_at: string; made_by?: string | null; payload: T }
+export async function getForecastSnapshot<T = unknown>(unit: string, asOf: string): Promise<ForecastSnapshot<T> | null> {
+  if (!supabase) return null
+  const { data } = await supabase.from('forecast_snapshots').select('made_at, made_by, payload').eq('unit', unit).eq('as_of', asOf).maybeSingle()
+  return (data as ForecastSnapshot<T> | null) || null
+}
+export async function saveForecastSnapshot<T = unknown>(unit: string, asOf: string, payload: T): Promise<ForecastSnapshot<T> | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('save_forecast_snapshot', { p_unit: unit, p_as_of: asOf, p_payload: payload })
+  if (error) return null
+  return (data as ForecastSnapshot<T> | null) || null
+}
+
 export async function getLastOkSync(source: string): Promise<string | null> {
   if (!supabase) return null
   const { data } = await supabase.from('sync_runs').select('ran_at').eq('source', source).eq('ok', true).order('ran_at', { ascending: false }).limit(1)

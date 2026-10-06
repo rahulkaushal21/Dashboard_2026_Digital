@@ -1,9 +1,16 @@
 // Revenue forecast to the end of the financial year.
 //
-// Computed on every load from web_revenue, never written down — a forecast that
-// stops updating is worse than no forecast, because it keeps sounding confident
-// while the ground moves. If there is too little history to say anything honest,
-// build() returns null and the page says so instead of guessing.
+// Computed from web_revenue_lines. Since 6 Oct 2026 each unit's forecast is WRITTEN
+// DOWN once a month (forecast_snapshots, migration 135) the first time the page computes
+// it, and that is the forecast for the month: a number that moved on every load could
+// not be held to or judged. The live computation still runs and is shown as "the model
+// today", beside the one that stands. If there is too little history to say anything
+// honest, build() returns null and the page says so instead of guessing.
+//
+// Since the same day, "All" is not its own fit: it is LP/HUB and Web forecast separately,
+// each with the model that tests best for it, and ADDED (combineForecasts). A single fit
+// over the combined history was reading Web's seasonality onto LP/HUB's retainers and
+// came out $38k above the sum of the parts for October.
 //
 // Method, in full, because a forecast nobody can audit is just an opinion:
 //
@@ -56,8 +63,10 @@ export interface ForecastMonth {
   partial?: boolean
   /** Already invoiced in the invoice app for this month (the floor under the forecast). */
   invoiced?: number
-  /** Month in progress: what is booked in the sheet so far. */
+  /** Month in progress: booked in the sheet so far. Future month: already booked into it. */
   booked?: number
+  /** On a combined forecast, each unit's share of this month. */
+  parts?: Record<string, number>
 }
 
 /** Automatic inputs beyond the revenue history — nothing typed by anybody. */
@@ -99,12 +108,17 @@ export interface Forecast {
   model: ModelId
   /** The run-rate split, when that is the model (and for the indicators either way). */
   runrate: RunRate
+  /** Which unit this is for; 'all' when combined. */
+  unit?: string
+  /** The per-unit forecasts a combined one was built from. */
+  parts?: Forecast[]
 }
 
-export type ModelId = 'seasonal' | 'runrate'
+export type ModelId = 'seasonal' | 'runrate' | 'combined'
 export const MODEL_LABEL: Record<ModelId, string> = {
   seasonal: 'Seasonal level',
   runrate: 'Retainers + run rate',
+  combined: 'LP/HUB + Web, forecast separately',
 }
 
 export interface RunRate {
@@ -202,7 +216,7 @@ function runRateFit(h: Hist, train: [string, number][]): RunRate {
 }
 
 function predict(model: ModelId, h: Hist, train: [string, number][], k: string) {
-  if (model === 'runrate') return runRateFit(h, train).level
+  if (model === 'runrate' || model === 'combined') return runRateFit(h, train).level
   const f = seasonalFit(train)
   return f.level * (f.idx(Number(k.slice(5, 7))) / 100)
 }
@@ -306,11 +320,14 @@ export function buildForecast(
       continue
     }
 
-    // Invoices already raised for a future month are known money: the forecast never
-    // sits below them. For LP/HUB that is the retainer instalments raised in advance.
+    // Known money for a future month is a floor the forecast never sits below: what the
+    // project sheet already books into that month (a retainer filed ahead, a line dated
+    // forward) and invoices already raised in the invoice app for it.
     const inv = inputs.ahead?.get(k) || 0
-    const v = Math.max(level * (idx / 100), inv)
-    months.push({ key: k, label: label(k), index: idx, value: v, low: Math.max(v - sd, inv), high: v + sd, actual: false, invoiced: inv })
+    const booked = seen || 0
+    const floor = Math.max(inv, booked)
+    const v = Math.max(level * (idx / 100), floor)
+    months.push({ key: k, label: label(k), index: idx, value: v, low: Math.max(v - sd, floor), high: v + sd, actual: false, invoiced: inv, booked })
     projected += v
     futureCount++
   }
@@ -544,5 +561,108 @@ export function nowcast(bookings: BookingRow[], today: Date, bt: Backtest | null
       const raw = share > 0 ? datedSoFar / share : expected
       return Math.max(bookedSoFar, w * raw + (1 - w) * expected)
     },
+  }
+}
+
+
+// ── Combining units ─────────────────────────────────────────────────────────────
+/**
+ * LP/HUB and Web added month by month. Each part keeps its own model; the sum's band is
+ * the two bands combined as independent errors (root of the sum of squares), so it is
+ * narrower than simply adding the ranges. The seasonal table and the index come from the
+ * larger part, Web, because they are shown as a shape and the run-rate half has none.
+ */
+export function combineForecasts(parts: Forecast[], target: number): Forecast | null {
+  const ps = parts.filter((p): p is Forecast => !!p)
+  if (!ps.length) return null
+  if (ps.length === 1) return ps[0]
+  const big = ps.reduce((a, b) => (b.level > a.level ? b : a))
+  const keys = big.months.map(m => m.key)
+  const months: ForecastMonth[] = keys.map((k, i) => {
+    const ms = ps.map(p => p.months.find(m => m.key === k) || p.months[i])
+    const value = ms.reduce((s, m) => s + m.value, 0)
+    const hw = Math.sqrt(ms.reduce((s, m) => s + ((m.high - m.low) / 2) ** 2, 0))
+    const actual = ms.every(m => m.actual)
+    const partial = !actual && ms.some(m => m.partial)
+    const sum = (f: (m: ForecastMonth) => number | undefined) => ms.reduce((s, m) => s + (f(m) || 0), 0)
+    return {
+      key: k, label: ms[0].label, index: big.months[i].index, value,
+      low: actual ? value : Math.max(sum(m => Math.max(m.invoiced || 0, m.booked || 0)), value - hw),
+      high: actual ? value : value + hw,
+      actual, partial: partial || undefined,
+      invoiced: actual ? undefined : sum(m => m.invoiced),
+      booked: actual ? undefined : sum(m => m.booked),
+      parts: Object.fromEntries(ps.map(p => [p.unit || '?', (p.months.find(m => m.key === k) || { value: 0 }).value])),
+    }
+  })
+  const projected = months.reduce((s, m) => s + m.value, 0)
+  const spread = Math.sqrt(ps.reduce((s, p) => s + ((p.projectedHigh - p.projectedLow) / 2) ** 2, 0))
+  const futureCount = months.filter(m => !m.actual && !m.partial).length
+  const settledAndPartial = months.filter(m => m.actual || m.partial).reduce((s, m) => s + m.value, 0)
+  const needed = futureCount > 0 ? Math.max(0, (target - settledAndPartial) / futureCount) : 0
+  const histKeys = [...new Set(ps.flatMap(p => p.history.map(h => h.key)))].sort()
+  const history = histKeys.map(k => ({ key: k, label: label(k), value: ps.reduce((s, p) => s + (p.history.find(h => h.key === k)?.value || 0), 0) }))
+  const best = history.reduce((b, h) => (h.value > b.value ? h : b), { key: '', label: '—', value: 0 })
+  const level = ps.reduce((s, p) => s + p.level, 0)
+  return {
+    fyLabel: big.fyLabel, target, months,
+    bookedToDate: ps.reduce((s, p) => s + p.bookedToDate, 0),
+    projected, projectedLow: projected - spread, projectedHigh: projected + spread,
+    gap: target - projected, pctOfTarget: target ? (projected / target) * 100 : 0,
+    neededPerMonth: needed, monthsRemaining: futureCount, bestMonth: best,
+    level, sd: Math.sqrt(ps.reduce((s, p) => s + p.sd ** 2, 0)),
+    historyMonths: Math.min(...ps.map(p => p.historyMonths)),
+    thinSeasonality: big.thinSeasonality, history, seasonal: big.seasonal,
+    drift: { recent: ps.reduce((s, p) => s + p.drift.recent, 0), prior: ps.reduce((s, p) => s + p.drift.prior, 0),
+      pct: (() => { const r = ps.reduce((s, p) => s + p.drift.recent, 0), q = ps.reduce((s, p) => s + p.drift.prior, 0); return q ? ((r - q) / q) * 100 : 0 })() },
+    model: 'combined',
+    runrate: {
+      level: ps.reduce((s, p) => s + p.runrate.level, 0), retainer: ps.reduce((s, p) => s + p.runrate.retainer, 0),
+      retainers: ps.flatMap(p => p.runrate.retainers).sort((a, b) => b.amount - a.amount),
+      adhoc: ps.reduce((s, p) => s + p.runrate.adhoc, 0), cap: big.runrate.cap, capped: ps.reduce((s, p) => s + p.runrate.capped, 0),
+    },
+    unit: 'all',
+    parts: ps,
+  }
+}
+
+// ── The forecast that stands ────────────────────────────────────────────────────
+/** What is written down for a month: enough to render it again, nothing that needs the rows. */
+export interface ForecastSnapshotPayload {
+  made_for: string
+  model: ModelId
+  level: number
+  months: Pick<ForecastMonth, 'key' | 'value' | 'low' | 'high' | 'index' | 'actual' | 'partial' | 'parts'>[]
+  projected: number
+  projectedLow: number
+  projectedHigh: number
+}
+export const snapshotOf = (fc: Forecast, madeFor: string): ForecastSnapshotPayload => ({
+  made_for: madeFor, model: fc.model, level: fc.level,
+  months: fc.months.map(m => ({ key: m.key, value: m.value, low: m.low, high: m.high, index: m.index, actual: m.actual, partial: m.partial, parts: m.parts })),
+  projected: fc.projected, projectedLow: fc.projectedLow, projectedHigh: fc.projectedHigh,
+})
+/**
+ * The live forecast with the month's standing numbers laid over it. Months that have
+ * since closed keep their actual — the snapshot is a prediction, not a record of what
+ * happened — and every month the snapshot forecast keeps the forecast it was given,
+ * including the one in progress. Totals follow.
+ */
+export function applySnapshot(live: Forecast, snap: ForecastSnapshotPayload): Forecast {
+  const byKey = new Map(snap.months.map(m => [m.key, m]))
+  const months = live.months.map(m => {
+    const sm = byKey.get(m.key)
+    if (m.actual || !sm || sm.actual) return m
+    return { ...m, value: sm.value, low: sm.low, high: sm.high, index: sm.index, partial: sm.partial, parts: sm.parts }
+  })
+  const projected = months.reduce((s, m) => s + m.value, 0)
+  const spread = (snap.projectedHigh - snap.projectedLow) / 2
+  const futureCount = months.filter(m => !m.actual && !m.partial).length
+  const settledAndPartial = months.filter(m => m.actual || m.partial).reduce((s, m) => s + m.value, 0)
+  return {
+    ...live, months, projected, projectedLow: projected - spread, projectedHigh: projected + spread,
+    gap: live.target - projected, pctOfTarget: live.target ? (projected / live.target) * 100 : 0,
+    neededPerMonth: futureCount > 0 ? Math.max(0, (live.target - settledAndPartial) / futureCount) : 0,
+    monthsRemaining: futureCount, model: snap.model, level: snap.level,
   }
 }

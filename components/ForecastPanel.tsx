@@ -9,8 +9,9 @@ import { KPIRow, Panel } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit, unitLabel } from '@/lib/business-unit'
 import { useThemeInk } from '@/lib/use-theme-ink'
-import { getBookingsFull, getOpportunities, getOpportunityDepts, getInvoicesAhead, type BookingRow, type Opportunity, type InvoiceAhead } from '@/lib/supabase'
-import { buildForecast, churnDrag, chooseModel, runRateAt, nowcast, MODEL_LABEL, type Forecast } from '@/lib/forecast'
+import { getBookingsFull, getOpportunities, getOpportunityDepts, getInvoicesAhead, getForecastSnapshot, saveForecastSnapshot, type BookingRow, type Opportunity, type InvoiceAhead, type ForecastSnapshot } from '@/lib/supabase'
+import { buildForecast, churnDrag, chooseModel, runRateAt, nowcast, combineForecasts, applySnapshot, snapshotOf, MODEL_LABEL, type Forecast, type ForecastSnapshotPayload } from '@/lib/forecast'
+import type { Unit } from '@/lib/business-unit'
 import { FY_TARGET } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
 import { RefreshCw } from 'lucide-react'
@@ -70,14 +71,49 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
   //  • the month in progress read from its own booking dates (nowcast), and
   //  • invoices already raised in the invoice app for the months ahead — a floor.
   const nc = useMemo(() => (today && choice ? nowcast(bookings, today, choice.bt) : null), [bookings, today, choice])
-  const ahead = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const r of aheadAll) if (unit === 'all' || r.unit === unit) m.set(r.month, (m.get(r.month) || 0) + r.usd)
-    return m
-  }, [aheadAll, unit])
+  // One unit's forecast, start to finish: its rows, its model, its nowcast, its floors.
+  const forecastFor = (u: Exclude<Unit, 'all'>): Forecast | null => {
+    if (!today) return null
+    const rows = bookingsAll.filter(b => inUnit(b.service_name, u))
+    const ch = chooseModel(rows, today)
+    const ahead = new Map<string, number>()
+    for (const r of aheadAll) if (r.unit === u) ahead.set(r.month, (ahead.get(r.month) || 0) + r.usd)
+    const f = buildForecast(rows, FY_TARGET, today, ch.model, { nowcast: nowcast(rows, today, ch.bt), ahead })
+    if (f) f.unit = u
+    return f
+  }
+  // "All" is LP/HUB and Web forecast separately and added — Rahul, 6 Oct 2026. A single
+  // fit over the combined history read Web's seasonal shape onto LP/HUB's flat retainers
+  // and came out $38k above the sum of the parts for October.
+  const fcLive: Forecast | null = useMemo(
+    () => unit === 'all' ? combineForecasts([forecastFor('lp-hub'), forecastFor('web')].filter((f): f is Forecast => !!f), FY_TARGET) : forecastFor(unit),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bookingsAll, aheadAll, today, unit])
+
+  // THE FORECAST THAT STANDS. The first computation in a calendar month is written down
+  // (forecast_snapshots) and every later visit shows that, not a fresh one: "once you
+  // forecasted you shouldn't change it for the entire month" — Rahul, 6 Oct 2026. The
+  // live figure is still shown beside it as "the model today" so the two can be compared.
+  const asOf = today ? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01` : ''
+  const [snap, setSnap] = useState<ForecastSnapshot<ForecastSnapshotPayload> | null>(null)
+  const [snapFor, setSnapFor] = useState('')
+  useEffect(() => {
+    if (!fcLive || !asOf) return
+    let gone = false
+    ;(async () => {
+      const have = await getForecastSnapshot<ForecastSnapshotPayload>(unit, asOf)
+      const got = have || await saveForecastSnapshot(unit, asOf, snapshotOf(fcLive, asOf))
+      if (!gone) { setSnap(got); setSnapFor(`${unit}|${asOf}`) }
+    })()
+    return () => { gone = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unit, asOf, !!fcLive])
+  const snapReady = snapFor === `${unit}|${asOf}`
   const fc: Forecast | null = useMemo(
-    () => (today && choice ? buildForecast(bookings, FY_TARGET, today, choice.model, { nowcast: nc, ahead }) : null),
-    [bookings, today, choice, nc, ahead])
+    () => (fcLive && snapReady && snap ? applySnapshot(fcLive, snap.payload) : fcLive),
+    [fcLive, snap, snapReady])
+  const madeOn = snapReady && snap ? new Date(snap.made_at) : null
+  const liveDiff = fc && fcLive && snapReady && snap ? fcLive.projected - fc.projected : 0
   const drag = useMemo(
     () => (today ? churnDrag(bookings, today) : { clients: 0, perMonth: 0, trailing: 0, accounts: [] }),
     [bookings, today])
@@ -248,7 +284,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">
         <span>
           {loading ? 'Reading the revenue history…'
-            : fc ? `${fc.fyLabel} · built from ${fc.historyMonths} complete months · recomputed every load, never stored`
+            : fc ? `${fc.fyLabel} · built from ${fc.historyMonths} complete months${madeOn ? ` · forecast made ${madeOn.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} and held for the month` : ''}${Math.abs(liveDiff) >= 500 ? ` · the model today would say ${usdK(fcLive!.projected)} for the year` : ''}`
               : 'Not enough history to forecast'}
         </span>
         {method && <span className="inline-flex items-center gap-1.5">How it&apos;s calculated <InfoTip text={method} /></span>}
@@ -417,9 +453,9 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
                   ))}
                 </div>
               )}
-              {(nc || ahead.size > 0) && (() => {
+              {(nc || fc.months.some(m => !m.actual && !m.partial && ((m.invoiced || 0) > 0 || (m.booked || 0) > 0))) && (() => {
                 const cur = fc.months.find(m => m.partial)
-                const next = fc.months.filter(m => !m.actual && !m.partial && (m.invoiced || 0) > 0)
+                const next = fc.months.filter(m => !m.actual && !m.partial && ((m.invoiced || 0) > 0 || (m.booked || 0) > 0))
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                     {nc && cur && (
@@ -432,8 +468,8 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
                     )}
                     {next.length > 0 && (
                       <div className="rounded-lg border border-mav-line bg-mav-dark/40 p-3 text-xs leading-relaxed">
-                        <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-muted mb-1">Invoiced already, months ahead</div>
-                        {next.slice(0, 6).map(m => `${m.label} ${usdK(m.invoiced || 0)}`).join(' · ')}.
+                        <div className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-mav-muted mb-1">Already booked or invoiced, months ahead</div>
+                        {next.slice(0, 6).map(m => `${m.label} ${usdK(Math.max(m.invoiced || 0, m.booked || 0))}`).join(' · ')}.
                         Raised in advance in the invoice app (mostly retainer instalments), so the forecast never sits below them.
                       </div>
                     )}
@@ -606,7 +642,8 @@ function MonthTable({ fc }: { fc: Forecast }) {
             <th className="px-5 py-2.5 font-medium">Month</th>
             <th className="px-3 py-2.5 font-medium text-right">Index</th>
             <th className="px-3 py-2.5 font-medium w-1/3">Shape</th>
-            <th className="px-3 py-2.5 font-medium text-right" title="Already invoiced in the invoice app — the forecast never goes below it">Invoiced already</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="What the project sheet already books into the month — the Business Numbers figure. With invoices already raised in the invoice app, it is the floor the forecast never goes below.">Booked (project sheet)</th>
+            {fc.parts && fc.parts.map(p => <th key={p.unit} className="px-3 py-2.5 font-medium text-right">{unitLabel(p.unit as Unit)}</th>)}
             <th className="px-3 py-2.5 font-medium text-right">Forecast</th>
             <th className="px-5 py-2.5 font-medium text-right">Range</th>
           </tr>
@@ -633,7 +670,8 @@ function MonthTable({ fc }: { fc: Forecast }) {
                   )}
                 </div>
               </td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-mav-muted whitespace-nowrap">{m.actual || !m.invoiced ? '—' : fmtUsd(Math.round(m.invoiced))}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-mav-muted whitespace-nowrap">{m.actual || !m.booked ? '—' : fmtUsd(Math.round(m.booked))}</td>
+              {fc.parts && fc.parts.map(p => <td key={p.unit} className="px-3 py-2.5 text-right tabular-nums text-mav-muted whitespace-nowrap">{m.parts ? fmtUsd(Math.round(m.parts[p.unit || ''] || 0)) : '—'}</td>)}
               <td className="px-3 py-2.5 text-right tabular-nums font-medium whitespace-nowrap">{fmtUsd(Math.round(m.value))}</td>
               <td className="px-5 py-2.5 text-right tabular-nums text-xs text-mav-muted whitespace-nowrap">
                 {m.actual ? '—' : `${fmtUsd(Math.round(Math.max(0, m.low)))} – ${fmtUsd(Math.round(m.high))}`}
@@ -643,6 +681,7 @@ function MonthTable({ fc }: { fc: Forecast }) {
           <tr className="bg-mav-dark/30">
             <td className="px-5 py-3 font-semibold">{fc.fyLabel} total</td>
             <td /><td /><td />
+            {fc.parts && fc.parts.map(p => <td key={p.unit} className="px-3 py-3 text-right tabular-nums text-mav-muted whitespace-nowrap">{usdK(fc.months.reduce((s, m) => s + (m.parts?.[p.unit || ''] || 0), 0))}</td>)}
             <td className="px-3 py-3 text-right font-semibold tabular-nums whitespace-nowrap">{usdK(fc.projected)}</td>
             <td className="px-5 py-3 text-right text-xs text-mav-muted tabular-nums whitespace-nowrap">
               {usdK(fc.projectedLow)} – {usdK(fc.projectedHigh)}
