@@ -7,7 +7,34 @@ open opportunity** (won/status/win%/brief/owners/cost), updates **client health*
 spawning twins.
 
 **Capture window:** `email_inbox` holds a rolling ~10 days of mail. Deals older than that are
-reviewed via the **sheet** (the Quotes tab is the master record), not by re-reading old email.
+reviewed via the **frozen `quotes` snapshot** (870 rows, nothing after 30 Sep 2026), not by
+re-reading old email. Since the 1 Oct 2026 cutover the Quotes tab is **no longer** the master
+for new work — the dashboard is.
+
+---
+
+## Expected silence — check here BEFORE calling anything an outage
+
+These sources are **meant** to be stale. A stale `last_run` on any of them is the system
+working as designed, not an incident. Read this table before writing a word about a dead job.
+
+| Source | Last run you should expect | Why |
+|---|---|---|
+| `quotes-appscript` | 03:49 UTC, 6 Oct 2026 — never again | Trigger deleted by the user. Quotes tab frozen with the old revenue sheet. |
+| `feedback-appscript` | 03:50 UTC, 6 Oct 2026 — never again | Same removal. |
+| `web-revenue-sync` | ~13:17 UTC, 4 Oct 2026 | pg_cron job 2 disabled by migration 126. |
+| `sheet-raw-revenue` | ~13:11 UTC, 4 Oct 2026 | pg_cron job 10 disabled by migration 126. |
+| `sheet-sync` | only when run by hand | pg_cron job 1 disabled by migration 126. Do not run it (see step 1). |
+| `sync-all`, `sheet-ingest`, `sheet-raw` | Sep 2026 or earlier | Retired paths. |
+
+**Must be live — these ARE worth escalating if stale:** `gmail-ingest` (>2h stale = stop and
+`markScanFailed`), `quote-sync` and `mark-deleted-invoices` (every 15 min), `sheet-writer`
+(:17/:47), `sql-appscript` and `esc-appscript` (hourly at :49 — these two are the Apps Scripts
+that still exist), `lnd-sync` (hourly at :23), `rebuild-clients-hourly` (:22).
+
+Disabled pg_cron jobs: 1, 2, 7, 10. **DELETED (gone from `cron.job` entirely): 3 and 5**,
+unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
+`select jobid, jobname, active from cron.job order by jobid;` rather than guessing.
 
 ---
 
@@ -18,21 +45,63 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 > (passwords, API keys) seen in emails. Do every step; give me a short pulse at the end.
 >
 > **1. Refresh the master (sheet) first.**
-> - `select net.http_get(url:='https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/sheet-sync?token=syncWebHubLP_8f3a91');`
->   **This only refreshes bookings/web-revenue — it does NOT pull the Quotes tab.**
-> - **The Quotes tab is PUSH-only.** A Google Apps Script posts it to `sheet-ingest` on the hour
->   at **:49** (`sync_runs.source='quotes-appscript'`). Nothing you can run from SQL will pull it
->   in sooner. So before telling anyone a sheet edit "didn't work", check
->   `select max(ran_at) from sync_runs where source='quotes-appscript';` — if their edit is newer
->   than that, it simply hasn't arrived yet. Say so; don't hand-patch the row and call it fixed.
-> - `select sync_quotes_to_opportunities();` — upserts the Quotes tab, canonicalises names via
->   `client_aliases`, **self-heals blank AM/PM** from the client's other rows, backfills null
->   dates, and runs the JANITORs (removes superseded/duplicate quote lines).
-> - `select reconcile_opportunities();` — cross-source value backfill.
-> - `select * from reconcile_sheet_drift();` — **run this every time, straight after the sync.**
->   (Also on pg_cron at **:09/:39**, right after `sync-quotes-to-opps` :05/:35 and `reconcile-opps`
->   :07/:37, so drift self-heals between refreshes. Running it again by hand is harmless.)
->   It fixes two things that otherwise look like "I updated the sheet and the dashboard ignored me":
+> - **DO NOT call `sheet-sync` any more.** It read the OLD revenue sheet, which was locked at the
+>   1 Oct 2026 cutover, and its pg_cron job (1) was disabled by migration 126 along with
+>   `web-revenue-fullsync-hourly` (2), `canonicalise-after-revenue-sync` (7) and
+>   `sheet-raw-revenue` (10). October revenue onward comes from `source='dashboard'` rows in
+>   `web_project_ledger`, not from that sheet. Running it by hand re-pulls frozen data at best
+>   and disturbs a full-replace table at worst. There is no revenue "drop report" to check now
+>   either — the `· 0 dropped` / `· DROPPED n unusable rows` message belongs to the retired
+>   `web-revenue-sync` and will not change again.
+>   Verify the cutover instead, which is cheap and tells you the real thing:
+>   `select to_char(booking_month,'YYYY-MM'), source, count(*), round(sum(amount_usd),2)
+>    from web_project_ledger where booking_month >= '2026-08-01' group by 1,2 order by 1,2;`
+>   Aug and Sep should be `raw`, Oct onward `dashboard`, and **no `raw` rows in Oct or later**.
+> - **The Quotes tab is FROZEN and its push was REMOVED ON PURPOSE (6 Oct 2026). DO NOT
+>   REPORT THIS AS AN OUTAGE.** The Quotes and Feedback tabs lived in the old revenue sheet,
+>   which was locked at the 1 Oct cutover. The user deleted the two Apps Script triggers so the
+>   system runs fewer jobs. So `sync_runs.source='quotes-appscript'` and `'feedback-appscript'`
+>   **stop at 03:49/03:50 UTC on 6 Oct 2026 and never run again. That is correct.**
+>   `quotes` is now a permanent 870-row snapshot, newest `added_date` 30 Sep 2026.
+>   Claude raised this as "capture is dead, 11 hours of edits lost" on 6 Oct and again as
+>   "35 hours, the most consequential thing on the list" on 7 Oct. Both were false alarms that
+>   sent the user looking for a failure in Apps Script → Executions that does not exist.
+>   **Before calling any silent source an incident, check it against the Expected-silence table
+>   at the top of this file.** A source that is listed there is working as designed.
+> - **The snapshot is NOT re-read any more, and you must not re-read it either.**
+>   Migration `20261007084237_the_database_is_the_only_source_of_a_deal` (7 Oct 2026, 08:42 UTC)
+>   **unscheduled cron jobs 3 (`sync-quotes-to-opps`) and 5 (`reconcile-sheet-drift`)** — they are
+>   DELETED from `cron.job`, not disabled, so they will not appear in a job listing at all.
+>   Rahul's words: *"no need to re-read as well, it should be from the database only."*
+>   Reason: both re-read the frozen snapshot, and the sync's upsert reverted dashboard edits to
+>   sheet-born deals every 30 minutes.
+>   **So DO NOT run `sync_quotes_to_opportunities()` and DO NOT run `reconcile_sheet_drift()`**,
+>   by hand or otherwise. Claude still called `sync_quotes_to_opportunities()` as step 1 on the
+>   7 Oct afternoon refresh, six hours after the migration removed it. No damage that time —
+>   zero sheet-origin rows carried `manual_fields`, so there was nothing to revert — but it is
+>   exactly the re-read the migration exists to prevent. Check `cron.job` before assuming a
+>   step in this file still applies.
+> - **Consequence: a sheet-origin row can no longer be fixed at source.** Nothing pushes the
+>   Quotes tab and nothing re-reads it, so an edit there reaches nothing. All 861 sheet-origin
+>   rows (128 still Open) are frozen as they stand.
+>   The old advice "that column is sheet-owned, fix it in the Quotes tab" is **DEAD**.
+>   Say instead: the row is frozen, and the durable fix is a dashboard edit
+>   (`update_project_fields`, which sets `manual_fields`) or a new dashboard-origin row.
+>   Never tell the user to edit the Quotes tab and never say "it just hasn't arrived yet".
+> - ~~`select sync_quotes_to_opportunities();`~~ **RETIRED 7 Oct 2026 — DO NOT RUN.** See the
+>   bullet above. It re-read the frozen snapshot and reverted dashboard edits. What it used to do
+>   that is still wanted now rides on `reconcile-opps` (cron 4, :07/:37): `fill_opportunity_owners()`
+>   fills blank AM/PM, `reconcile_decision_flags()` handles the spent manual flags, and
+>   `fill_opportunity_currency()` sets currency from the RFQ API. If you need owners filled now,
+>   call `select public.fill_opportunity_owners();` — **not** the old sync.
+> - `select reconcile_opportunities();` — cross-source value backfill. **Still live** (cron 4).
+>   This one is safe and worth running by hand.
+> - ~~`select * from reconcile_sheet_drift();`~~ **RETIRED 7 Oct 2026 — DO NOT RUN.** Its cron job
+>   (5) was unscheduled by the same migration. It existed to repair drift between the dashboard and
+>   a sheet that was still being edited; the sheet is frozen, so there is no drift left to repair
+>   and running it only re-reads the dead snapshot. Keep the step-7 orphan query — reading is fine,
+>   it is the writing that is retired.
+>   **History, for understanding the `r:N` keys you will still see:**
 >   (a) **stale row keys.** A Quotes row with no Quote ID is keyed by its ROW POSITION (`r:N`).
 >   Insert a row near the top of the sheet and everything below shifts down, re-keys, and
 >   duplicates — the old opportunity is orphaned, invisible to every future sync, and
@@ -77,17 +146,16 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >   row and carries a UNIQUE constraint, so two trading names that billed the same
 >   month/service/technology collapse to the same hash and the update dies.
 >
-> - **Check the revenue sync dropped nothing.**
->   `select ran_at, message from sync_runs where source='web-revenue-sync' order by ran_at desc limit 1;`
->   The message ends with either `· 0 dropped` or `· DROPPED n unusable rows worth $X`. **If it
->   reports drops, say so in the pulse with the dollar figure** — those rows are real revenue
->   missing from the monthly total. `sync-web-revenue` recovers a blank **Agency** (falling back to
->   Client Name, then Project Name) and a blank **Month-Year** (deriving it from Confirmation /
->   Delivery / Start Date), so only a row missing BOTH a usable name and every date still drops.
->   The fix belongs in the revenue sheet — **never hand-patch `web_revenue`**, it is a FULL REPLACE
->   every run and any manual row is wiped within the hour.
->   Background: on 31 Jul 2026 three July rows (two blank Agency, one blank Month-Year) silently
->   shaved **$3,600** off the month — $220,378 shown against $223,978 actual.
+> - **The revenue drop report is RETIRED — do not check it and do not report it.**
+>   `web-revenue-sync` last ran 4 Oct 2026 and its `· 0 dropped` / `· DROPPED n unusable rows
+>   worth $X` message will never change again, so quoting it in a pulse is reporting a number
+>   from a dead job. It belonged to the old revenue sheet, which is locked.
+>   Kept for history only: the drop logic recovered a blank **Agency** (falling back to Client
+>   Name, then Project Name) and a blank **Month-Year** (from Confirmation / Delivery / Start
+>   Date), and on 31 Jul 2026 three July rows silently shaved **$3,600** off the month —
+>   $220,378 shown against $223,978 actual. That class of loss cannot recur through this path.
+>   **Still true: never hand-patch `web_revenue`.** It remains a FULL REPLACE table.
+>   Use the `web_project_ledger` cutover query at the top of step 1 as the revenue check instead.
 >
 > - **Operations / L&D.** `select net.http_get(url:='https://hsmuxmvhgteexanssigc.supabase.co/functions/v1/sync-lnd?token=syncLndHub_4e8b21&year=2026');`
 >   (also on pg_cron hourly at **:23**, and the page has a **Sync now** button). It re-reads the
@@ -192,7 +260,7 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     present. Dedup on thread_id. **NEVER leave AM/PM blank on an email opp.** Resolve them from
 >     the thread's own **internal (@mavlers/@uplers) participants** — the person fronting the
 >     client is the AM (`sales_person`), the delivery/PM lead is the `pm_owner`. If the client has
->     existing rows, self-heal fills them (re-run `sync_quotes_to_opportunities()`); otherwise read
+>     existing rows, `fill_opportunity_owners()` fills them (NOT the retired sync); otherwise read
 >     the thread's `from/to/cc` and assign by role. Only sheet-origin rows may carry a blank AM
 >     (that's a gap in the source Quotes sheet, not to be invented here).
 >   - **Write the cost — DEEP-read the whole thread for the FINAL number.** Prices move across
@@ -255,7 +323,8 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     flags. Tell the user which of the two it is instead of silently patching a column that
 >     will revert.
 >   - **Owners & cost** — every deal should have AM (`sales_person`) + PM (`pm_owner`) + a value
->     where one exists. Re-run `sync_quotes_to_opportunities()` so self-heal fills blank owners;
+>     where one exists. Run `select public.fill_opportunity_owners();` to fill blank owners (the old
+>     `sync_quotes_to_opportunities()` is retired — never call it);
 >     backfill `est_value` from the sheet/email.
 >
 > **5. Client health (client section).** Update `email_signals` where a client's brief,
@@ -291,7 +360,7 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     ≠ company) → `enriched=false, gist=null` then re-sync;
 >   - open sheet quote line superseded by a Won line (janitor handles on sync);
 >   - **orphaned sheet rows** — sheet-origin opps whose `quote_key` matches no current row in
->     `quotes`. `reconcile_sheet_drift()` (step 1) clears the clean cases; report any leftovers
+>     `quotes`. `reconcile_sheet_drift()` is RETIRED and no longer clears these; just report them
 >     with their value, since each one double-counts until it is dealt with:
 >     `with qkeys as (select coalesce(nullif(quote_id,''), case when src_row_hash ~ '^Q:[^:]*:[0-9]+$'
 >     then 'r:'||split_part(src_row_hash,':',3) else nullif(src_row_hash,'') end,
@@ -299,8 +368,16 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     from quotes) select id, company_name, quote_key, est_value, status from opportunities o
 >     where origin='sheet' and quote_key is not null
 >     and not exists (select 1 from qkeys k where k.qkey=o.quote_key);`
->   - the **blank Quotes row `r:23`** regenerates on every sync and must be deleted at source in
->     the Quotes tab; until then delete the opp and say so rather than reporting it as fixed;
+>   - the **blank Quotes row `r:23`** — opp `3099591`, `quotes` row `1681233`, the 23rd data row,
+>     carrying only the date 13/05/2025 with agency, project and quote ID all blank. It sits
+>     between "Re: Request for Proposal(RFP) – Mobile App for Delivery Drivers" and "New Website
+>     Development - Mohanad". **It can no longer be fixed at source** — nothing pushes the Quotes
+>     tab since 6 Oct 2026, so editing the sheet changes nothing. The only fix left is to delete
+>     both rows in the database, and the MCP write guard declines DELETE, so it must be pasted by
+>     hand. Give the user this and stop re-reporting it as an open finding every run:
+>     `delete from public.opportunities where id = 3099591;`
+>     `delete from public.quotes where id = 1681233;`
+>     Do not "clear the cells" — a blank row with a date still re-keys as `r:23`.
 >   - **win% without a value** — any open opp with `win_probability` set but `est_value` null/0
 >     **that is NOT an approved/won-lag deal**:
 >     `update opportunities set win_probability=null where not won and lower(coalesce(status,''))
@@ -340,6 +417,18 @@ the conversion called out in the pulse so it can be corrected. Never store a for
 
 ## What the user has corrected — apply without being asked again
 Every one of these came from a real correction; treat them as standing rules.
+- **A job the user switched off is not an outage.** `quotes-appscript` and `feedback-appscript`
+  were removed by the user on 6 Oct 2026 so the system runs fewer triggers. Claude reported the
+  silence as a critical incident on 6 Oct and escalated it again on 7 Oct as "the most
+  consequential thing on the list", sending the user to hunt a failure in Apps Script that did
+  not exist. Check the **Expected-silence table** at the top of this file first. When a source
+  is stale and NOT in that table, say what stopped and when, and ask whether it was deliberate
+  before calling it a failure.
+- **Don't trust the previous run's heartbeat over the live rows.** On 7 Oct the 02:20 heartbeat
+  claimed two deals were "still unpriced, update declined" when both had been written the
+  afternoon before. The heartbeat is a note someone typed, not state. Re-query before repeating
+  it, and correct it in the new heartbeat when it was wrong — the user reads it on the Daily
+  Pulse page.
 - **Web only.** SEO / AIO / LLM-visibility scopes come off the board even for web clients.
 - **Forwarded from another team still counts.** If the Email/Design/Campaign team brings a brief
   in and we quote the web part (landing page, HubSpot/WP page), track that part — our figure only.
