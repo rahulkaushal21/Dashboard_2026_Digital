@@ -113,6 +113,12 @@ const srcLabel = (s: string) => s === 'email' ? 'Email' : 'Sheet'
 const probColor = (p?: number) => p == null ? 'bg-mav-line text-mav-muted' : p >= 60 ? 'bg-green-500/15 text-green-400' : p >= 45 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
 const probBar = (p?: number) => p == null ? 'bg-mav-line' : p >= 60 ? 'bg-green-500' : p >= 45 ? 'bg-amber-500' : 'bg-red-500'
 const money = (n?: number) => '$' + Math.round(n || 0).toLocaleString('en-US')
+// The quote as it was shared with the client, in its own currency. local_value is the
+// figure quoted; est_value (x.value) is the same figure in USD at the fx_rates rate, and
+// that is what every total on the page adds up. Where the quote was in USD, or the scan
+// recorded only a USD figure, the two are one and the same.
+const quotedCurrency = (x: Opportunity) => (x.currency || 'USD').trim().toUpperCase()
+const quotedAmount = (x: Opportunity): number | undefined => x.local_value ?? x.value ?? undefined
 // Mirrored in SQL as opportunity_state(), which the duplicate check in the Add dialog
 // uses. The two disagreed until now: that one looked only at `won` and the sheet's word,
 // so a deal confirmed HERE and still reading Open in the Quotes sheet was offered as a
@@ -176,9 +182,9 @@ const IconAction = ({ icon: Icon, label, tone, active, disabled, onClick }: {
 )
 const STATE_WORD = { on_hold: 'On Hold', cancelled: 'Cancelled', not_opp: 'Not an opportunity' } as const
 
-type SortKey = 'company' | 'value' | 'win' | 'intent' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
+type SortKey = 'company' | 'value' | 'currency' | 'usd' | 'win' | 'intent' | 'status' | 'source' | 'type' | 'owner' | 'geo' | 'tech' | 'date' | 'flag'
 const COLS: { key: SortKey; label: string }[] = [
-{ key: 'date', label: 'Date' }, { key: 'company', label: 'Client' }, { key: 'value', label: 'Value' }, { key: 'win', label: 'Win %' }, { key: 'intent', label: 'Intent' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
+{ key: 'date', label: 'Date' }, { key: 'company', label: 'Client' }, { key: 'value', label: 'Quoted' }, { key: 'currency', label: 'Currency' }, { key: 'usd', label: 'USD' }, { key: 'win', label: 'Win %' }, { key: 'intent', label: 'Intent' }, { key: 'status', label: 'Status' }, { key: 'source', label: 'Source' },
 { key: 'type', label: 'Type' }, { key: 'owner', label: 'Owner / PM' }, { key: 'geo', label: 'GEO' }, { key: 'tech', label: 'Tech' },
 { key: 'flag', label: 'Review' },
 ]
@@ -188,7 +194,7 @@ const COLS: { key: SortKey; label: string }[] = [
 // Action are locked: they are how a row is worked, not a field about it. Date leads and
 // is locked too — the table opens newest first, and "what came in today" is the first
 // question anybody asks of it.
-const DEFAULT_COLS: SortKey[] = ['date', 'company', 'value', 'intent', 'status', 'owner', 'flag']
+const DEFAULT_COLS: SortKey[] = ['date', 'company', 'value', 'currency', 'usd', 'intent', 'status', 'owner', 'flag']
 const TABLE_COLS: ColumnDef[] = [
 { key: 'pick', label: 'Pick', locked: true },
 ...COLS.map(c => ({ key: c.key, label: c.label, locked: c.key === 'company' || c.key === 'date', default: DEFAULT_COLS.includes(c.key) })),
@@ -299,7 +305,9 @@ return bits.join(' · ')
 const sortVal = (x: Opportunity, k: SortKey): string | number => {
 switch (k) {
 case 'company': return (x.company_name || '').toLowerCase()
-case 'value': return x.value ?? -1
+case 'value': return quotedAmount(x) ?? -1
+case 'currency': return quotedCurrency(x)
+case 'usd': return x.value ?? -1
 case 'win': return x.win_probability ?? -1
 case 'intent': return x.intent_score ?? -1
 case 'status': return oppStatus(x)
@@ -508,7 +516,7 @@ if (vMinN !== null && !Number.isNaN(vMinN) && v < vMinN) return false
 if (vMaxN !== null && !Number.isNaN(vMaxN) && v > vMaxN) return false
 return true
 }
-const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' || k === 'value' ? -1 : 1 })
+const toggleSort = (k: SortKey) => setSort(s => s.key === k ? { key: k, dir: (s.dir === 1 ? -1 : 1) } : { key: k, dir: k === 'date' || k === 'win' || k === 'value' || k === 'usd' ? -1 : 1 })
 
 // Straight from web_opportunity_dept. No 'Other': a deal that cannot be placed returns
 // nothing and is simply not matched by a department filter, rather than being filed under
@@ -1263,7 +1271,9 @@ return (
 </div>
 {x.summary && <div className="text-xs text-mav-muted truncate" title={x.summary}>{x.summary.slice(0, 80)}</div>}
 </td>
-{cols.on('value') && <td className={`px-3 py-2.5 whitespace-nowrap font-medium ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>}
+{cols.on('value') && <td className={`px-3 py-2.5 whitespace-nowrap font-medium tabular-nums ${x.unlikely ? 'line-through text-mav-muted' : ''}`}>{quotedAmount(x) ? quotedAmount(x)!.toLocaleString('en-US', { maximumFractionDigits: 2 }) : <span className="text-mav-muted font-normal">—</span>}</td>}
+{cols.on('currency') && <td className="px-3 py-2.5 whitespace-nowrap">{quotedAmount(x) ? <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${quotedCurrency(x) === 'USD' ? 'border-mav-line text-mav-muted' : 'border-mav-yellow/40 text-mav-yellow'}`}>{quotedCurrency(x)}</span> : <span className="text-mav-muted">—</span>}</td>}
+{cols.on('usd') && <td className={`px-3 py-2.5 whitespace-nowrap font-medium tabular-nums ${x.unlikely ? 'line-through text-mav-muted' : ''}`} title={quotedCurrency(x) !== 'USD' && x.value && quotedAmount(x) ? `${quotedAmount(x)!.toLocaleString('en-US')} ${quotedCurrency(x)} at ${(x.value / quotedAmount(x)!).toFixed(4)} USD per ${quotedCurrency(x)} (fx_rates)` : undefined}>{x.value ? money(x.value) : <span className="text-mav-muted font-normal">—</span>}</td>}
 {cols.on('win') && <td className="px-3 py-2.5">{x.win_probability != null ? <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${probColor(x.win_probability)}`}>{x.win_probability}%</span> : <span className="text-xs text-mav-muted">—</span>}</td>}
 {cols.on('intent') && <td className="px-3 py-2.5 whitespace-nowrap">{x.intent_score != null && x.intent_tier ? (<>
 <span title={intentWhy(x)} className={`inline-flex items-baseline gap-1 text-xs font-semibold px-2 py-0.5 rounded ${TIER_STYLE[x.intent_tier]}`}>
