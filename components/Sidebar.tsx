@@ -62,7 +62,7 @@ const nav: Entry[] = [
       { href: '/invoices', label: 'Invoices & Reconciliation', icon: Receipt },
       { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
       { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
-      { href: '/last-year', label: 'Quarter over Quarter', icon: History },
+      { href: '/last-year', label: 'Comparison', icon: History },
       { href: '/sql-leads', label: 'SQL / Leads', icon: Target },
       { href: '/operations/revenue-history', label: 'Revenue History', icon: Archive },
       { href: '/operations/lnd', label: 'L&D Program', icon: GraduationCap },

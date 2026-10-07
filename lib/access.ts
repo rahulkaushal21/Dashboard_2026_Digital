@@ -55,7 +55,7 @@ export const PAGES: { href: string; label: string }[] = [
   // somebody to the dashboard, and so the route guard keeps covering it.
   { href: '/business-trend', label: 'Business Trend' },
   { href: '/forecast', label: 'Forecast' },
-  { href: '/last-year', label: 'Quarter over Quarter Review' },
+  { href: '/last-year', label: 'Comparison' },
   { href: '/pm-team', label: 'PM Team' },
   { href: '/actions', label: 'Actions' },
   { href: '/pm-tools/vendor-calculator', label: 'Vendor Calculator' },
