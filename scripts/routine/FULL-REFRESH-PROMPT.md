@@ -179,6 +179,14 @@ reviewed via the **sheet** (the Quotes tab is the master record), not by re-read
 >     carried a AUD 390 HubSpot thank-you landing page quoted by LP — it was wrongly skipped as
 >     "email team" work.)
 >     Only track a genuine NEW paid scope. When unsure, leave it **off** the board.
+>   - **A work request that reaches `lp@mavlers.com` or `hub@mavlers.com` IS an opportunity.**
+>     These are the shared team inboxes, so a request landing there (To or Cc) is put on the
+>     board whether the client sent it directly or an internal AM/CSM/other team forwarded it.
+>     This overrides (a) and (b) above, and "when unsure, leave it off": an internal handoff into
+>     lp@/hub@ and a new ask from an existing client both get a row (unpriced until a figure is
+>     sent). Still not deals: machine notifications, logistics/admin (equipment pickups, invoices,
+>     access codes) and pure bug/support complaints (those go to `escalations`). Dedup against
+>     the sheet and existing rows as usual. (Pratik, 7 Oct 2026.)
 >   - **When you DO create an email opp, populate it fully:** set `sales_person`/`pm_owner`
 >     from the client's existing rows, `geo`, `business_type`, and `est_value` if any figure is
 >     present. Dedup on thread_id. **NEVER leave AM/PM blank on an email opp.** Resolve them from
@@ -335,6 +343,8 @@ Every one of these came from a real correction; treat them as standing rules.
 - **Web only.** SEO / AIO / LLM-visibility scopes come off the board even for web clients.
 - **Forwarded from another team still counts.** If the Email/Design/Campaign team brings a brief
   in and we quote the web part (landing page, HubSpot/WP page), track that part — our figure only.
+- **lp@ / hub@ requests are deals.** Any work request sent or forwarded to `lp@mavlers.com` or
+  `hub@mavlers.com` — from the client or from our own team — goes on the board (step 3).
 - **RFQ mails are evidence, not noise.** `Quote ( QUT… ) Request` from `notifications@uplers.com`
   is where the quoted figure and currency actually live, and an RFQ being raised points at
   invoicing/confirmation. Parse them every run before clearing that sender (step 3).
