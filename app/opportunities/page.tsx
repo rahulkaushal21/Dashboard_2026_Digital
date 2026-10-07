@@ -1475,7 +1475,9 @@ The Quotes sheet still shows this Open — set that row to <span className="font
 )}
 
 {sel.flag && !sheetLag(sel) && <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">Possible data issue:</span> {sel.flag}</div>}
-{oppStatus(sel) === 'Won' && !sel.email_won && !bookedLag(sel) && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">Won — {money(sel.won_amount || sel.value)} confirmed (booked in the revenue sheet)</div>}
+{oppStatus(sel) === 'Won' && !sel.email_won && !bookedLag(sel) && (sel.confirmed_at || sel.origin === 'sheet'
+  ? <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-sm text-green-400 font-semibold">Won — {money(sel.won_amount || sel.value)} confirmed{sel.confirmed_at ? ` · booked ${sel.confirmed_at.slice(0, 10)}` : ' (booked from the Quotes line)'}</div>
+  : <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"><span className="font-semibold">Won, but not booked.</span> This deal was marked Won without going through Confirm, so it has no booking month and is not in revenue. Press Confirm to book it.</div>)}
 {oppStatus(sel) === 'Lost' && !sel.email_lost && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400 font-semibold">Lost — cancelled in the Quotes sheet. Won always overrides if the client later books.</div>}
 
 {/* WHAT THEY WANT COMES FIRST. This used to open on the close-likelihood bar and a
