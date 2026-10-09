@@ -1904,6 +1904,29 @@ export async function getProjectLedger(): Promise<LedgerRow[]> {
   return (await read<LedgerRow>('web_project_ledger', '*', 'row_key')) || []
 }
 
+/**
+ * Bookings as the invoice app counts them — a different question from the ledger.
+ *
+ * The ledger says what we SOLD and reports on Start Date. This says what was INVOICED,
+ * on BookingDate, for the five services that are ours (quote_api_is_ours: Development
+ * Web, LP/Hub and Mobile App, AI & Automation, Design - Digital). A yearly retainer
+ * books a twelfth of itself each month, a discount is shared equally across an
+ * invoice's service lines, a voided invoice reverses in the month it was voided, and a
+ * month that has closed is served from its snapshot so a later revision books forward
+ * instead of restating it. Reconciled to the cent against the app's own October export.
+ *
+ * `kind` separates the three: 'booking', 'reversal', 'adjustment'.
+ */
+export interface InvoiceBookingRow {
+  invoice_no: string; project_id?: string; client?: string; geo?: string
+  sales_person?: string; pc?: string; status?: string; services?: string
+  invoice_date?: string; booking_date?: string; booking_month?: string
+  amount?: number; kind?: 'booking' | 'reversal' | 'adjustment'; reason?: string
+}
+export async function getInvoiceBookings(): Promise<InvoiceBookingRow[]> {
+  return (await read<InvoiceBookingRow>('web_invoice_bookings', '*', 'booking_date')) || []
+}
+
 /** Copy one ledger line into a month, whichever side it came from. */
 /**
  * Copy a ledger line into another month. `deliveryDate` is optional: the copy never

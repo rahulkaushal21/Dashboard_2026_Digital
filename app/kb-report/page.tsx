@@ -9,7 +9,7 @@ import { inUnit } from '@/lib/business-unit'
 
 import ClientLink from '@/components/ClientLink'
 import MultiSelect from '@/components/MultiSelect'
-import { getProjectLedger, getOpportunities, getOpportunityDepts, type LedgerRow, type Opportunity } from '@/lib/supabase'
+import { getProjectLedger, getOpportunities, getOpportunityDepts, getInvoiceBookings, type LedgerRow, type Opportunity, type InvoiceBookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Reports — the ledger, pivoted, for somebody who runs the business.
@@ -112,6 +112,7 @@ export default function Reports() {
   const [fGeo, setFGeo] = useState<string[]>([])
   const [fAgency, setFAgency] = useState<string[]>([])
   const [fDept, setFDept] = useState<string[]>([])
+  const [bookings, setBookings] = useState<InvoiceBookingRow[]>([])
 
   // The service departments inside the selected unit. The filter offers only these and
   // the department boxes show only these — under LP/HUB, four Web boxes at $0 would read
@@ -121,8 +122,8 @@ export default function Reports() {
   useEffect(() => { setFDept(p => p.filter(d => unitDepts.includes(d))) }, [unitDepts])
 
   useEffect(() => {
-    Promise.all([getProjectLedger(), getOpportunities(), getOpportunityDepts()])
-      .then(([l, o, od]) => { setRows(l); setOpps(o); setOppDepts(od) })
+    Promise.all([getProjectLedger(), getOpportunities(), getOpportunityDepts(), getInvoiceBookings()])
+      .then(([l, o, od, b]) => { setRows(l); setOpps(o); setOppDepts(od); setBookings(b) })
       .finally(() => setLoading(false))
   }, [])
   // Opens on the current month. Set after mount, because working out "now" during render
@@ -246,6 +247,30 @@ export default function Reports() {
     () => shown.filter(r => engOf(r) === 'Dedicated').reduce((s, r) => s + (r.amount_usd || 0), 0), [shown])
   const newBiz = useMemo(
     () => shown.filter(isNew).reduce((s, r) => s + (r.amount_usd || 0), 0), [shown])
+
+  // BOOKINGS — what was invoiced, as the invoice app itself counts it.
+  //
+  // A different question from everything above, and deliberately so. The rest of this
+  // page reports what we SOLD, on Start Date, out of the ledger. This reports what was
+  // INVOICED, on BookingDate, out of the invoice API. The two will never be equal in a
+  // given month and should not be made to agree: a deal sold in September and invoiced
+  // in October belongs to September here and October there.
+  //
+  // Filters do not apply. The booking figure is a finance number reconciled to the cent
+  // against the app's own export; quietly re-slicing it by a PM or a tech filter would
+  // produce something that looks like the agreed figure and is not it.
+  const booked = useMemo(() => {
+    const inRange = (d?: string) => !!d && d >= from && d <= to
+    const rows = bookings.filter(b => inRange(b.booking_date))
+    const sum = (k: InvoiceBookingRow['kind']) =>
+      rows.filter(b => b.kind === k).reduce((s, b) => s + (Number(b.amount) || 0), 0)
+    const invoiced = sum('booking'), reversed = sum('reversal'), adjusted = sum('adjustment')
+    return {
+      rows, invoiced, reversed, adjusted,
+      net: invoiced + reversed + adjusted,
+      n: rows.filter(b => b.kind === 'booking').length,
+    }
+  }, [bookings, from, to])
 
   // Delivery, for the Head of Technology: did the work fit the hours it was sold on?
   // Only lines carrying BOTH figures count, or a row missing one would read as a 100%
@@ -423,25 +448,23 @@ export default function Reports() {
     defaultSort: 'amount',
   }
 
-  const hrs = (n: number) => Math.round(n).toLocaleString()
-  const hoursDetails: CardDetails<LedgerRow> = {
-    subtitle: `Lines carrying both a planned and an actual figure${inView}`,
-    rows: hours.rows,
-    groupBy: r => (r.actual_hrs || 0) > (r.internal_hrs || 0) ? 'Ran over' : 'Within hours',
-    rowKey: r => r.row_key,
+  const bookedDetails: CardDetails<InvoiceBookingRow> = {
+    subtitle: `Invoiced on BookingDate${inView} \u00b7 not affected by the filters above`,
+    rows: booked.rows,
+    groupBy: r => r.kind === 'reversal' ? 'Voided in this period'
+                : r.kind === 'adjustment' ? 'Correction to a closed month' : 'Invoiced',
+    rowKey: r => `${r.kind}:${r.invoice_no}:${r.booking_date}`,
     columns: [
-      { key: 'agency', label: 'Agency', value: r => r.company_name || '—', wide: true, sort: r => r.company_name || '' },
-      { key: 'project', label: 'Project', value: r => r.project_name || '—', wide: true, sort: r => r.project_name || '' },
-      { key: 'planned', label: 'Planned', value: r => hrs(r.internal_hrs || 0), align: 'right', sort: r => r.internal_hrs || 0,
-        total: rs => hrs(rs.reduce((s, r) => s + (r.internal_hrs || 0), 0)) },
-      { key: 'actual', label: 'Actual', value: r => hrs(r.actual_hrs || 0), align: 'right', sort: r => r.actual_hrs || 0,
-        total: rs => hrs(rs.reduce((s, r) => s + (r.actual_hrs || 0), 0)) },
-      { key: 'over', label: 'Over / under', align: 'right',
-        value: r => { const p = r.internal_hrs ? Math.round(((r.actual_hrs || 0) / r.internal_hrs - 1) * 100) : 0; return `${p > 0 ? '+' : ''}${p}%` },
-        sort: r => r.internal_hrs ? (r.actual_hrs || 0) / r.internal_hrs : 0 },
-      { key: 'pm', label: 'PM', value: r => r.pm_owner || '—', sort: r => r.pm_owner || '' },
+      { key: 'inv', label: 'Invoice', value: r => r.invoice_no || '\u2014', wide: true, sort: r => r.invoice_no || '' },
+      { key: 'client', label: 'Client', value: r => r.client || '\u2014', wide: true, sort: r => r.client || '' },
+      { key: 'svc', label: 'Service', value: r => r.services || '\u2014', sort: r => r.services || '' },
+      { key: 'bd', label: 'Booking date', value: r => fmtDay(r.booking_date), sort: r => r.booking_date || '' },
+      { key: 'status', label: 'Status', value: r => r.status || '\u2014', sort: r => r.status || '' },
+      { key: 'amt', label: 'Amount', value: r => fmtUsd(Number(r.amount) || 0), align: 'right',
+        sort: r => Number(r.amount) || 0,
+        total: rs => fmtUsd(rs.reduce((s, r) => s + (Number(r.amount) || 0), 0)) },
     ],
-    defaultSort: 'over',
+    defaultSort: 'amt',
   }
 
   const deptRows = useMemo(() => {
@@ -450,7 +473,6 @@ export default function Reports() {
     return m
   }, [shown])
 
-  const hoursPct = hours.planned ? Math.round((hours.actual / hours.planned - 1) * 100) : 0
   const label = 'font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted'
 
   return (
@@ -491,12 +513,15 @@ export default function Reports() {
             sub={`${pipeline.n} deal${pipeline.n === 1 ? '' : 's'} raised in this window, still open${pipeline.unpriced ? ` · ${pipeline.unpriced} unpriced` : ''}`}
             info="Technology and engagement filters do not apply: an open deal has neither recorded."
             details={pipelineDetails} />
-          <KPICard label="Hours delivered"
-            tone={hours.planned && hours.actual > hours.planned ? 'red' : hours.planned ? 'green' : 'default'}
-            value={hours.planned ? `${hoursPct > 0 ? '+' : ''}${hoursPct}%` : '—'}
-            sub={hours.planned ? `${Math.round(hours.actual).toLocaleString()} actual vs ${Math.round(hours.planned).toLocaleString()} planned` : 'no hours recorded'}
-            info="Only lines carrying BOTH a planned and an actual figure count, or a row missing one would read as a 100% over-run."
-            details={hours.n ? hoursDetails : undefined} />
+          <KPICard label="Bookings" tone={booked.net ? 'green' : 'default'}
+            value={booked.n ? fmtUsd(booked.net) : '—'}
+            sub={booked.n
+              ? `${booked.n} invoice${booked.n === 1 ? '' : 's'}`
+                + (booked.reversed ? ` · ${fmtUsd(booked.reversed)} voided` : '')
+                + (booked.adjusted ? ` · ${fmtUsd(booked.adjusted)} corrections` : '')
+              : 'nothing invoiced in this period'}
+            info="What was INVOICED, on BookingDate, for our five services — Development Web, LP/Hub and Mobile App, AI & Automation, and Design - Digital. A separate question from the revenue above, which is what was SOLD, on Start Date, so the two will not agree in a given month and should not be made to. A yearly retainer books a twelfth of itself each month and a quarterly one a third; a discount is shared equally across an invoice's service lines; a voided invoice reverses in the month it was voided; and a month that has closed is frozen, so a later revision books forward as a correction instead of restating it. Reconciled to the cent against the invoice app's own export. The filters above do not apply to this figure."
+            details={booked.rows.length ? bookedDetails : undefined} />
         </KPIRow>
       )}
 
