@@ -12,7 +12,7 @@ import { useActionCount } from '@/lib/use-action-count'
 import { inUnit, unitLabel } from '@/lib/business-unit'
 import {
   getOpportunities, getOpportunityDepts, getCriticalEscalations, getDelights, getEmailSignals,
-  getClientDepts, clientKey, getLastSyncStatus, getRefreshRuns, getOpportunityEvents, clearReadCache,
+  getClientDepts, clientKey, getLastSyncStatus, getRefreshRuns, clearReadCache,
   type SyncStatus,
 } from '@/lib/supabase'
 
@@ -29,7 +29,7 @@ import {
 type Group = 'deals' | 'esc' | 'fb' | 'info'
 type Tab = Group | 'all'
 type Win = '24' | '72' | '168'
-type Kind = 'won' | 'new' | 'update' | 'lost' | 'escalation' | 'feedback' | 'email' | 'refresh'
+type Kind = 'won' | 'new' | 'lost' | 'escalation' | 'feedback' | 'email' | 'refresh'
 
 interface Item {
   key: string; kind: Kind; at: string; client: string; title: string; detail?: string
@@ -38,7 +38,7 @@ interface Item {
 }
 
 const GROUP_OF: Record<Kind, Group> = {
-  won: 'deals', new: 'deals', update: 'deals', lost: 'deals',
+  won: 'deals', new: 'deals', lost: 'deals',
   escalation: 'esc', feedback: 'fb', email: 'info', refresh: 'info',
 }
 const GROUPS: { id: Group; label: string }[] = [
@@ -47,11 +47,10 @@ const GROUPS: { id: Group; label: string }[] = [
 ]
 const ORDER: Group[] = ['deals', 'esc', 'fb', 'info']
 // Inside Deals: money first.
-const SUB: Record<Kind, number> = { won: 0, new: 1, update: 2, lost: 3, escalation: 0, feedback: 0, email: 1, refresh: 0 }
+const SUB: Record<Kind, number> = { won: 0, new: 1, lost: 2, escalation: 0, feedback: 0, email: 1, refresh: 0 }
 const KIND: Record<Kind, { label: string; cls: string }> = {
   won: { label: 'Won', cls: 'bg-green-500/15 text-green-400' },
   new: { label: 'New deal', cls: 'bg-mav-yellow/15 text-mav-yellow' },
-  update: { label: 'Deal update', cls: 'bg-amber-500/15 text-amber-300' },
   lost: { label: 'Lost', cls: 'bg-mav-fg/10 text-mav-muted' },
   escalation: { label: 'Escalation', cls: 'bg-red-500/15 text-red-400' },
   feedback: { label: 'Feedback', cls: 'bg-sky-500/15 text-sky-400' },
@@ -83,9 +82,14 @@ const who = (email?: string) => (email || '').split('@')[0].replace(/[._]/g, ' '
 
 // "refresh: 68 threads triaged; BOLT … -> Lost; +1 email opp …" → its findings. The first
 // part is the run's own housekeeping (how much it read) and stays as the run's headline.
+//
+// Split on "; " only. The routine writes one finding per semicolon, and a finding is
+// usually several sentences ("Kat picked the full overhaul. The price is only in the
+// deck."). Splitting on ". " as well tore those in half, so the page showed sentence
+// fragments with no client and no verb — which is what made the notes unreadable.
 function findings(message: string): { head: string; parts: string[] } {
   const body = message.replace(/^refresh:\s*/i, '')
-  const parts = body.split(/;\s+|\.\s+(?=[A-Z+])/).map(one).filter(p => p.length > 3)
+  const parts = body.split(/;\s+/).map(one).filter(p => p.length > 3)
   return { head: parts[0] || body, parts: parts.slice(1) }
 }
 
@@ -105,14 +109,13 @@ export default function PulsePage() {
   const load = useCallback(async (fresh = false) => {
     setLoading(true)
     if (fresh) clearReadCache()
-    const [opps, oppDepts, escs, delights, signals, clientDepts, runs, events, ...sync] = await Promise.all([
+    const [opps, oppDepts, escs, delights, signals, clientDepts, runs, ...sync] = await Promise.all([
       getOpportunities(), getOpportunityDepts(), getCriticalEscalations(), getDelights(), getEmailSignals(),
-      getClientDepts(), getRefreshRuns(8), getOpportunityEvents(8),
+      getClientDepts(), getRefreshRuns(8),
       ...SOURCES.map(s => getLastSyncStatus(s.id)),
     ])
     const deptOf = (company?: string) => clientDepts.get(clientKey(company))
     const out: Item[] = []
-    const oppById = new Map(opps.map(o => [Number(o.id), o]))
 
     // ── Deals ────────────────────────────────────────────────────────────────────
     for (const o of opps) {
@@ -133,19 +136,11 @@ export default function PulsePage() {
       const lostAt = x.email_lost_at || (o.unlikely ? x.unlikely_at : null)
       if (!o.won && lostAt) out.push({ ...base, key: `l${o.id}`, kind: 'lost', at: lostAt, detail: one(x.email_lost_reason || x.unlikely_reason) })
     }
-    // Edits and reassignments made on the dashboard (confirmations are already "Won").
-    for (const e of events) {
-      if (e.event === 'confirmed' || e.event === 'created') continue
-      const o = oppById.get(Number(e.opportunity_id))
-      if (!o) continue
-      const changed = Object.keys(e.detail || {}).filter(k => !['note', 'from', 'raw_id'].includes(k))
-      out.push({
-        key: `ev${e.id}`, kind: 'update', at: e.at, client: o.company_name || '—', title: one(o.source_subject) || 'Deal',
-        detail: `${e.event === 'reassigned' ? 'Reassigned' : 'Edited'} by ${who(e.actor)}${changed.length ? ` — ${changed.join(', ').replace(/_/g, ' ')}` : ''}`,
-        dept: oppDepts.get(Number(o.id)), owner: o.pm_owner || '', value: o.est_value || 0,
-        href: `/opportunities?deal=${o.id}`, hrefLabel: 'Opportunities',
-      })
-    }
+    // Field edits and reassignments made on the dashboard are deliberately NOT here
+    // (owner's call, 9 Oct 2026). Deals shows a deal arriving and a deal moving — new,
+    // won, lost. Someone correcting a win% or a next step is an audit trail, not news,
+    // and it buried the deals that actually moved. The history is still on the deal
+    // itself in Opportunities.
 
     // ── Escalations ──────────────────────────────────────────────────────────────
     const escThreads = new Set<string>()
@@ -211,8 +206,11 @@ export default function PulsePage() {
         const k = clientKey(p)
         const hit = known.find(([ck]) => k.includes(ck))
         out.push({
+          // No detail line on a healthy note: the finding IS the content. Repeating the
+          // run's headline under all 24 rows filled the page with one identical truncated
+          // sentence and pushed the finding itself out of view.
           key: `r${r.ran_at}${i}`, kind: 'refresh', at: r.ran_at, client: hit ? (hit[1].name || 'Client') : 'Refresh run',
-          title: p, detail: r.ok ? `From the ${time(r.ran_at)} refresh — ${head}` : `The ${time(r.ran_at)} refresh did not complete`,
+          title: p, detail: r.ok ? undefined : `The ${time(r.ran_at)} refresh did not complete`,
           dept: hit?.[1].dept, href: '/', hrefLabel: 'Dashboard',
           facts: [['Run', stamp(r.ran_at)], ['Result', r.ok ? 'Completed' : 'Failed'], ['Run summary', head]],
         })
@@ -296,7 +294,7 @@ export default function PulsePage() {
       <KPIRow cols={5}>
         <KPICard tone="yellow" label="Deals" value={loading ? '…' : String(deals.length)}
           sub={`${count(deals, 'new')} new · ${usd(quoted) || '$0'} · ${count(deals, 'won')} won · ${count(deals, 'lost')} lost`}
-          info="New opportunities from email or the Quotes tab, deals confirmed won, edited or reassigned on the dashboard, and deals marked lost."
+          info="Deals that arrived or moved: new opportunities from email or the Quotes tab, deals confirmed won, and deals marked lost. Field edits and reassignments are not news and live on the deal in Opportunities."
           details={details(deals, `Deals in the ${winLabel}`)} />
         <KPICard tone={esc.length ? 'red' : 'default'} label="Escalations" value={loading ? '…' : String(esc.length)}
           sub={`new · ${openInDept.length} client${openInDept.length === 1 ? '' : 's'} still open`}
@@ -324,7 +322,7 @@ export default function PulsePage() {
       ]} />
 
       <Panel flush title={<>{tab === 'all' ? 'Everything' : GROUPS.find(g => g.id === tab)?.label} · {winLabel}</>}
-        info="Click a row for the full detail. Order: Deals (won, new, updated, lost), Escalations, Feedback, Other info.">
+        info="Click a row for the full detail. Order: Deals (won, new, lost), Escalations, Feedback, Other info.">
         <div className="max-md:overflow-x-auto">
           <table className="w-full table-fixed text-sm max-md:min-w-[720px]">
             <colgroup>
@@ -354,9 +352,12 @@ export default function PulsePage() {
                     {hasTime(i.at) && <div className="text-[11px] text-mav-muted">{time(i.at)}</div>}
                   </td>
                   <td className="px-3 py-2"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${KIND[i.kind].cls}`}>{KIND[i.kind].label}</span></td>
+                  {/* Wraps to three lines rather than cutting at one. A refresh finding is a
+                      sentence, not a subject line, and an ellipsis after eight words hid the
+                      part that said what changed. The side panel still holds the whole thing. */}
                   <td className="px-3 py-2 min-w-0">
-                    <div className="truncate"><span className="font-semibold">{i.client}</span> <span className="text-mav-muted">·</span> {i.title}</div>
-                    {i.detail && <div className="truncate text-xs text-mav-muted">{i.detail}</div>}
+                    <div className="line-clamp-3"><span className="font-semibold">{i.client}</span> <span className="text-mav-muted">·</span> {i.title}</div>
+                    {i.detail && <div className="line-clamp-2 text-xs text-mav-muted">{i.detail}</div>}
                   </td>
                   <td className="px-3 py-2 truncate text-mav-muted">{i.dept || (i.kind === 'refresh' ? 'All' : '—')}</td>
                   <td className="px-3 py-2 truncate">{i.owner || <span className="text-mav-muted">—</span>}</td>
