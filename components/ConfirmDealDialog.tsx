@@ -48,10 +48,23 @@ const ctl = `mt-1 w-full bg-mav-dark border rounded-md px-3 py-2 text-sm text-ma
   focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors`
 const border = (bad: boolean) => bad ? 'border-amber-400/70' : 'border-mav-fg/20'
 
+/**
+ * Today as the BROWSER sees it. `new Date().toISOString()` is UTC, and IST runs 5h30
+ * ahead — so a PM confirming anything before 05:30 their time would have stamped it
+ * with yesterday's date. Every date on this form is a human's calendar date, never an
+ * instant, so it has to come from the local clock.
+ */
+const todayLocal = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** One labelled control. `need` turns it amber; `auto`/`guess` mark a filled-in value. */
-function F({ label, need, auto, guess, hint, wide, from, children }: {
+function F({ label, need, auto, guess, hint, wide, from, why, children }: {
   label: string; need?: boolean; auto?: boolean; guess?: boolean; hint?: string
-  wide?: boolean; from?: string; children: React.ReactNode
+  // `why` replaces the badge's tooltip. The default wording is about this client's last
+  // project, which is wrong for a value that came off the deal itself.
+  wide?: boolean; from?: string; why?: string; children: React.ReactNode
 }) {
   return (
     <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
@@ -59,7 +72,7 @@ function F({ label, need, auto, guess, hint, wide, from, children }: {
         <span className={`font-medium ${need ? 'text-amber-300' : 'text-mav-fg/85'}`}>{label}</span>
         {need && <span className="text-amber-300">· needed</span>}
         {auto && !need && (
-          <span title={`Filled in from ${from || 'this client'}'s last project — check it`}
+          <span title={why || `Filled in from ${from || 'this client'}'s last project — check it`}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-sky-400/15 text-sky-300">
             <Sparkles size={10} /> prefilled
           </span>
@@ -153,11 +166,26 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     : deal.local_value != null ? String(deal.local_value)
     : deal.est_value != null ? String(deal.est_value) : '')
   const [currency, setCurrency] = useState(deal.currency || 'USD')
+  // Whether those two opened with a figure the system already held, so the badge can say
+  // so. A deal nobody has priced yet opens blank on both, and that is the honest state —
+  // there is no figure to carry across.
+  const quotedFromSystem = deal.quote_price != null || deal.local_value != null || deal.est_value != null
+  const confirmedFromSystem = deal.local_value != null || deal.est_value != null
 
   // ---- dates and delivery
-  const [quoteDate, setQuoteDate] = useState((deal.source_date || '').slice(0, 10))
-  const [confirmedOn, setConfirmedOn] = useState(() => new Date().toISOString().slice(0, 10))
-  const [startDate, setStartDate] = useState(deal.start_date || '')
+  //
+  // QUOTE DATE is the day this opportunity first appeared in the system, and it is never
+  // typed from memory. A sheet row carries the Quotes tab's own date in source_date; an
+  // email row does not — the mail sync writes first_date and leaves source_date null,
+  // which is exactly why this field kept opening blank and "needed" on the deals the
+  // mailbox found rather than the ones somebody typed. created_at is the last resort: a
+  // row cannot have been found before it existed. The PM can still change it.
+  const foundOn = (deal.source_date || deal.first_date || deal.created_at || '').slice(0, 10)
+  const [quoteDate, setQuoteDate] = useState(foundOn)
+  // Confirmed on and Start date both open on today — the usual answer by a wide margin,
+  // and a retainer that really runs the 15th to the 14th is one edit away.
+  const [confirmedOn, setConfirmedOn] = useState(todayLocal)
+  const [startDate, setStartDate] = useState(deal.start_date || todayLocal())
   const [deliveryDate, setDeliveryDate] = useState(deal.delivery_date || '')
   const [deliveryType, setDeliveryType] = useState(deal.delivery_type || '')
   const [deliveryStatus, setDeliveryStatus] = useState(deal.delivery_status || 'Under Development')
@@ -471,11 +499,15 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
           </Section>
 
           <Section n={4} title="The money" blurb="What you quoted, and what it actually closed at.">
-            <F label="Quoted price" hint="What the opportunity was quoted at, before negotiation.">
+            <F label="Quoted price" auto={quotedFromSystem}
+              why="The figure already on this opportunity, from the quote sync or the mail scan — change it if the quote moved"
+              hint="What the opportunity was quoted at, before negotiation.">
               <input type="number" className={`${ctl} ${border(false)}`} value={quotePrice}
                 onChange={e => setQuotePrice(e.target.value)} placeholder="optional" />
             </F>
-            <F label="Confirmed price" need={missing.includes('Value')} hint="The final figure the client agreed. This is what books.">
+            <F label="Confirmed price" need={missing.includes('Value')} auto={confirmedFromSystem}
+              why="Opened on the figure the system holds for this deal — change it if the client agreed something else"
+              hint="The final figure the client agreed. This is what books.">
               <input type="number" className={`${ctl} ${border(missing.includes('Value'))}`} value={localValue}
                 onChange={e => setLocalValue(e.target.value)} />
             </F>
@@ -500,7 +532,9 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
           </Section>
 
           <Section n={5} title="Dates" blurb="When it was quoted, when it was won, and when it runs.">
-            <F label="Quote date" need={missing.includes('Quote date')}>
+            <F label="Quote date" need={missing.includes('Quote date')} auto={!!foundOn}
+              why="The day this opportunity first reached the system, from the mail sync or the Quotes tab — not typed"
+              hint={foundOn ? undefined : 'Nothing on this deal records when it arrived, so this one has to be typed.'}>
               <input type="date" className={`${ctl} ${border(missing.includes('Quote date'))}`} value={quoteDate}
                 onChange={e => setQuoteDate(e.target.value)} />
             </F>
