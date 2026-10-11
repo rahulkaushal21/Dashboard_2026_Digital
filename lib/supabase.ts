@@ -1742,7 +1742,26 @@ export interface ProjectFieldEdits {
   feedback_status?: string; delivery_status?: string
   delivery_date?: string | null; start_date?: string | null
   contractor_name?: string; outsource_currency?: string
+  /** How the line is CLASSIFIED (144). Eight dropdowns the confirm dialog asks for and
+   *  nothing could change afterwards. Department and geography decide which totals the
+   *  line lands in, so each one is written to the edit trail. */
+  service_dept?: string; project_type?: string; technology?: string
+  service_type?: string; delivery_type?: string; client_type?: string
+  geo?: string; business_type?: string
 }
+
+/**
+ * The eight classification fields, in one place.
+ *
+ * Both save paths spread this over their parameter object so neither can forget one —
+ * and forgetting one is not a missing field but a failed save: the live database still
+ * carries the pre-144 signatures of both RPCs alongside the wide ones, and PostgREST
+ * refuses to choose between two candidates. Every call names every parameter.
+ */
+const CLASSIFICATION = ['service_dept', 'project_type', 'technology', 'service_type',
+  'delivery_type', 'client_type', 'geo', 'business_type'] as const
+const classParams = (f: ProjectFieldEdits | SheetRowEdits): Record<string, string | null> =>
+  Object.fromEntries(CLASSIFICATION.map(k => [`p_${k}`, (f as any)[k] === undefined ? null : (f as any)[k]]))
 
 /**
  * Save those later-known fields. The RPC can reach these columns and no others — not the
@@ -1767,6 +1786,7 @@ export async function updateProjectFields(id: number, f: ProjectFieldEdits): Pro
     p_delivery_date: f.delivery_date || null, p_start_date: f.start_date || null,
     p_contractor_name: t(f.contractor_name), p_outsource_currency: t(f.outsource_currency),
     p_sales_person: t(f.sales_person), p_company_name: t(f.company_name),
+    ...classParams(f),
   })
   return error ? { ok: false, error: error.message } : { ok: true }
 }
@@ -2355,6 +2375,11 @@ export interface SheetRowEdits {
   delivery_status?: string; start_date?: string | null; delivery_date?: string | null
   internal_delivery?: string | null; internal_hrs?: number | null; actual_hrs?: number | null
   integration?: string; invoice_no?: string; invoice_currency?: string; invoice_amount?: number | null
+  /** The eight dropdowns (144). On a sheet line these go into the overlay beside the
+   *  spreadsheet, so the next sync cannot wipe them. */
+  service_dept?: string; project_type?: string; technology?: string
+  service_type?: string; delivery_type?: string; client_type?: string
+  geo?: string; business_type?: string
 }
 
 export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
@@ -2371,6 +2396,7 @@ export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): 
     p_internal_hrs: n(f.internal_hrs), p_actual_hrs: n(f.actual_hrs),
     p_integration: t(f.integration), p_invoice_no: t(f.invoice_no),
     p_invoice_currency: t(f.invoice_currency), p_invoice_amount: n(f.invoice_amount),
+    ...classParams(f),
   })
   return error ? { ok: false, error: error.message } : { ok: true }
 }

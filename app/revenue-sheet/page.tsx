@@ -12,7 +12,8 @@ import { askReason } from '@/lib/ask'
 import MultiSelect from '@/components/MultiSelect'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import Link from 'next/link'
-import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getLastOkSync, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
+import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getLastOkSync, getSheetVocab, type SheetVocab, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
+import { SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK } from '@/lib/deal-fields'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile, currentEmail } from '@/lib/access'
 
@@ -54,7 +55,7 @@ const keeps = (picked: string[], v?: string | null) => picked.length === 0 || pi
 // (Agency: the row's name). Thirty-five columns is right for checking a month against the
 // sheet and far too many for ticking retainers, so the rest sit behind the Columns picker
 // — every one still there, one tick away, and "Show all columns" brings back the full sheet.
-type EditKind = 'text' | 'number' | 'date'
+type EditKind = 'text' | 'number' | 'date' | 'select'
 type Col = {
   key: string; label: string; default?: boolean; locked?: boolean; right?: boolean
   get: (r: LedgerRow) => string
@@ -65,7 +66,19 @@ type Col = {
   // to this field; everything else is read-only here because it belongs to whoever
   // priced or booked the work, not to whoever is reconciling the month.
   edit?: keyof SheetRowEdits; kind?: EditKind
+  // Where the CURRENT value is read from, when the ledger calls the column something
+  // other than the field being written. Only Project Type needs it: the ledger says
+  // engagement_model and the RPC takes project_type.
+  editFrom?: keyof LedgerRow
+  // A 'select' column's choices. Takes the sheet's own vocabulary, and the row, because
+  // geography is spelt as a code on a dashboard line and as a region on a sheet line.
+  options?: (r: LedgerRow, v: SheetVocab) => readonly string[]
 }
+
+// The sheet's regions and the dashboard's codes, under one set of labels. See the note
+// on the same split in EditLedgerRowDialog — each side keeps its own spelling or the
+// line drops out of its own grouping.
+const geoOptions = (r: LedgerRow) => r.source === 'raw' ? GEOS.map(g => GEO_SHEET_LABEL[g] || g) : [...GEOS]
 
 const dash = (v: unknown) => (v === null || v === undefined || v === '') ? '—' : String(v)
 const d10 = (v?: string) => (v || '').slice(0, 10) || '—'
@@ -82,12 +95,12 @@ const optimisation = (r: LedgerRow) => {
 const COLUMNS: Col[] = [
   { key: 'project_id', label: 'Project Id', get: r => dash(r.project_id), edit: 'project_id', kind: 'text' },
   { key: 'quote_id', label: 'Quote ID', get: r => dash(r.quote_id), edit: 'quote_id', kind: 'text' },
-  { key: 'dept', label: 'Service Department', get: r => dash(r.service_dept) },
+  { key: 'dept', label: 'Service Department', get: r => dash(r.service_dept), edit: 'service_dept', kind: 'select', options: () => SERVICE_DEPTS },
   // Editable on both sides: a dashboard line's name is its subject, a sheet line's goes
   // into the overlay (117). Either way the sheet-writer carries it to the project sheet.
   { key: 'project', label: 'Project Name', default: true, get: r => dash(r.project_name), edit: 'project_name', kind: 'text' },
-  { key: 'ptype', label: 'Project Type', default: true, get: r => dash(r.engagement_model) },
-  { key: 'tech', label: 'Technology', get: r => dash(r.technology) },
+  { key: 'ptype', label: 'Project Type', default: true, get: r => dash(r.engagement_model), edit: 'project_type', editFrom: 'engagement_model', kind: 'select', options: () => PROJECT_TYPES },
+  { key: 'tech', label: 'Technology', get: r => dash(r.technology), edit: 'technology', kind: 'select', options: (_r, v) => v.technology },
   { key: 'conf', label: 'Confirmation Date', get: r => d10(r.confirmed_at), sort: r => r.confirmed_at || '' },
   { key: 'start', label: 'Start Date', default: true, get: r => d10(r.start_date), sort: r => r.start_date || '', edit: 'start_date', kind: 'date' },
   { key: 'delivery', label: 'Delivery Date', get: r => d10(r.delivery_date), sort: r => r.delivery_date || '', edit: 'delivery_date', kind: 'date' },
@@ -96,21 +109,21 @@ const COLUMNS: Col[] = [
   { key: 'acthrs', label: 'Actual hrs', right: true, get: r => num(r.actual_hrs), sort: r => r.actual_hrs ?? -1, edit: 'actual_hrs', kind: 'number' },
   { key: 'opt', label: 'Optimization', right: true, get: optimisation, sort: r => (r.internal_hrs && r.internal_hrs > 0 && r.actual_hrs != null) ? (r.internal_hrs - r.actual_hrs) / r.internal_hrs : -999 },
   { key: 'status', label: 'Project Status', default: true, get: r => dash(r.delivery_status), edit: 'delivery_status', kind: 'text' },
-  { key: 'stype', label: 'Service Type', get: r => dash(r.service_type) },
-  { key: 'dtype', label: 'Delivery Type', get: r => dash(r.delivery_type) },
+  { key: 'stype', label: 'Service Type', get: r => dash(r.service_type), edit: 'service_type', kind: 'select', options: (_r, v) => v.service_type },
+  { key: 'dtype', label: 'Delivery Type', get: r => dash(r.delivery_type), edit: 'delivery_type', kind: 'select', options: (_r, v) => v.delivery_type },
   { key: 'sme', label: 'PC/SME', default: true, get: r => dash(r.pm_owner) },
   { key: 'expert', label: 'Expert', get: r => dash(r.expert), edit: 'expert', kind: 'text' },
   { key: 'integration', label: 'Integration', get: r => dash(r.integration), edit: 'integration', kind: 'text' },
   { key: 'agency', label: 'Agency', locked: true, get: r => dash(r.company_name) },
   { key: 'cname', label: 'Client Name', get: r => dash(r.client_name) },
   { key: 'cemail', label: 'Client Email', get: r => dash(r.contact_email) },
-  { key: 'ctype', label: 'Client Type', get: r => dash(r.client_type) },
-  { key: 'geo', label: 'Geo', get: r => dash(r.geo) },
+  { key: 'ctype', label: 'Client Type', get: r => dash(r.client_type), edit: 'client_type', kind: 'select', options: (_r, v) => v.client_type },
+  { key: 'geo', label: 'Geo', get: r => dash(r.geo), edit: 'geo', kind: 'select', options: geoOptions },
   { key: 'cur', label: 'Currency Type', get: r => dash(r.currency) },
   { key: 'qprice', label: 'Quote Price', right: true, get: r => num(r.quote_price), sort: r => r.quote_price ?? -1 },
   { key: 'cprice', label: 'Confirmed Price', right: true, get: r => num(r.local_value), sort: r => r.local_value ?? -1 },
   { key: 'usd', label: 'USD Conversion', default: true, right: true, get: r => num(r.amount_usd), sort: r => r.amount_usd ?? -1 },
-  { key: 'btype', label: 'Business Type', get: r => dash(r.business_type) },
+  { key: 'btype', label: 'Business Type', get: r => dash(r.business_type), edit: 'business_type', kind: 'select', options: (_r, v) => v.business_type },
   { key: 'am', label: 'Account/Sales Person', get: r => dash(r.sales_person) },
   { key: 'outsrc', label: 'Outsource Price', right: true, get: r => num(r.outsource_price), sort: r => r.outsource_price ?? -1, edit: 'outsource_price', kind: 'number' },
   { key: 'invno', label: 'Invoice No', get: r => dash(r.invoice_no), edit: 'invoice_no', kind: 'text' },
@@ -181,6 +194,10 @@ export default function ProjectLedger() {
   // One cell being edited in place: the row, the column, and what has been typed.
   const [cell, setCell] = useState<{ rowKey: string; col: string; value: string } | null>(null)
   const [cellBusy, setCellBusy] = useState(false)
+  // The sheet's own vocabulary, for the dropdown columns. Falls back to the built-in
+  // list so a cell opened before this lands is never an empty select.
+  const [vocab, setVocab] = useState<SheetVocab>(VOCAB_FALLBACK as SheetVocab)
+  useEffect(() => { getSheetVocab().then(setVocab).catch(() => {}) }, [])
 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   // Thirty-five columns is right for reconciling a month against the spreadsheet and far
@@ -509,18 +526,25 @@ export default function ProjectLedger() {
   // blank or change a value, and cannot clear one. Clearing is rare, destructive and
   // belongs in the full Edit dialog where you can see what else you are about to change.
   const rawOf = (r: LedgerRow, c: Col) => {
-    const v = (r as any)[c.edit as string]
+    const v = (r as any)[(c.editFrom || c.edit) as string]
     if (v == null) return ''
     return c.kind === 'date' ? String(v).slice(0, 10) : String(v)
   }
 
-  const saveCell = async () => {
+  // `chosen` is how a dropdown saves: a select has no Enter and blurring it after a
+  // pick would race the state update, so it hands the new value straight in rather than
+  // going through setCell first.
+  const saveCell = async (chosen?: string) => {
     if (!cell) { return }
     const c = COLUMNS.find(x => x.key === cell.col)
     const r = rows.find(x => x.row_key === cell.rowKey)
     if (!c?.edit || !r) { setCell(null); return }
-    const v = cell.value.trim()
+    const v = (chosen ?? cell.value).trim()
     if (v === rawOf(r, c)) { setCell(null); return }
+    // Choosing the blank option is how somebody gets out of a dropdown opened by
+    // accident, not an instruction to unclassify the line. Clearing one of these is
+    // rare and belongs in the Edit dialog, where the rest of the row is visible.
+    if (v === '' && c.kind === 'select') { setCell(null); return }
     const patch: SheetRowEdits = {}
     ;(patch as any)[c.edit] = c.kind === 'number' ? (v === '' ? null : Number(v)) : v
     setCellBusy(true); setErrors([])
@@ -572,7 +596,9 @@ export default function ProjectLedger() {
       never stored, not an empty one; those values are in the source spreadsheet.
       <br /><br />
       <b>Double-click a cell to fill it in</b> &mdash; Project Id, Quote ID, Expert, dates,
-      hours, invoice &mdash; or use Edit on the right of the row for the lot. Only the row&rsquo;s own PC/SME can change it
+      hours, invoice &mdash; or use Edit on the right of the row for the lot. Service
+      Department, Project Type, Service Type, Delivery Type, Technology, Client Type, Geo
+      and Business Type open as dropdowns and save on the pick. Only the row&rsquo;s own PC/SME can change it
       {isAdmin ? ', and you, as an admin' : ''}; the database refuses anybody else. Edits to a sheet line are kept beside
       the sheet, not in it, so the next sync cannot wipe them. One cell at a time can fill a blank or change a value but never clear one; use Edit for that.
     </>
@@ -842,14 +868,29 @@ export default function ProjectLedger() {
                   return (
                     <td key={c.key}
                       onDoubleClick={editable ? () => setCell({ rowKey: r.row_key, col: c.key, value: rawOf(r, c) }) : undefined}
-                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-mav-fg/25' : 'text-mav-fg/80'} ${open ? '' : 'max-w-[14rem] truncate'} ${editable && !open ? 'cursor-text hover:bg-mav-fg/5' : ''}`}
+                      className={`${td} ${c.right ? 'text-right' : ''} ${v === '—' ? 'text-mav-fg/25' : 'text-mav-fg/80'} ${open ? '' : 'max-w-[14rem] truncate'} ${editable && !open ? (c.kind === 'select' ? 'cursor-pointer' : 'cursor-text') + ' hover:bg-mav-fg/5' : ''}`}
                       title={open ? '' : editable ? `${v === '—' ? 'Empty' : v} — double-click to edit` : (v === '—' ? '' : v)}>
-                      {open ? (
+                      {open && c.kind === 'select' ? (
+                        // A dropdown saves on the pick itself. Values the sheet has
+                        // never heard of stay listed, marked, so opening this cell on a
+                        // row reading 'WEB-US (KS)' and changing nothing else cannot
+                        // quietly reclassify it.
+                        <select autoFocus disabled={cellBusy} value={cell!.value}
+                          onChange={e => saveCell(e.target.value)}
+                          onBlur={() => setCell(null)}
+                          onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setCell(null) } }}
+                          className="w-40 bg-mav-dark border border-mav-yellow rounded px-1.5 py-0.5 text-xs text-mav-fg outline-none">
+                          <option value="">— choose —</option>
+                          {(c.options?.(r, vocab) || []).map(o => <option key={o} value={o}>{o}</option>)}
+                          {cell!.value && !(c.options?.(r, vocab) || []).includes(cell!.value) &&
+                            <option value={cell!.value}>{cell!.value} (not in list)</option>}
+                        </select>
+                      ) : open ? (
                         <input autoFocus disabled={cellBusy}
                           type={c.kind === 'number' ? 'number' : c.kind === 'date' ? 'date' : 'text'}
                           value={cell!.value}
                           onChange={e => setCell({ ...cell!, value: e.target.value })}
-                          onBlur={saveCell}
+                          onBlur={() => saveCell()}
                           onKeyDown={e => {
                             if (e.key === 'Enter') { e.preventDefault(); saveCell() }
                             // Escape abandons the edit. Without it the only way out of a

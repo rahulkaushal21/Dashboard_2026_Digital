@@ -7,7 +7,7 @@ import {
   type DuplicateHit, type FxRate, type ClientDefaults, type DirectoryMember, type AmMember,
 } from '@/lib/supabase'
 import { isNbdOwner } from '@/lib/nbd'
-import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, CHANNELS } from '@/lib/deal-fields'
+import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, CHANNELS, VOCAB_FALLBACK } from '@/lib/deal-fields'
 import { currentEmail } from '@/lib/access'
 
 // Adding a deal the email scan did not catch — a referral, an upsell raised on a call,
@@ -61,6 +61,10 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   const [contactEmail, setContactEmail] = useState('')
   const [note, setNote] = useState('')
   const [channel, setChannel] = useState('')
+  // Repeat or New. The RPC has always taken it and the form never asked, so every
+  // hand-added deal arrived unclassified and the PM met the question for the first time
+  // at confirmation. The client pick below answers it from their own history.
+  const [businessType, setBusinessType] = useState('')
 
   const [clients, setClients] = useState<ClientDefaults[]>([])
   const [picked, setPicked] = useState<ClientDefaults | null>(null)
@@ -147,6 +151,10 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
     apply('serviceDept', c.service_dept, serviceDept, setServiceDept)
     apply('projectType', c.project_type, projectType, setProjectType)
     apply('contactEmail', c.contact_email, contactEmail, setContactEmail)
+    // web_client_defaults already decides whether this is somebody we have worked with,
+    // and that is exactly what Repeat means. Still a dropdown, because a dormant account
+    // coming back is a judgement call.
+    apply('businessType', c.is_existing_client ? 'Repeat' : 'New', businessType, setBusinessType)
     fromClient.current = now
   }
 
@@ -173,7 +181,7 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
     setSaving(true); setError('')
     const res = await addOpportunity({
       company, channel: channel || undefined, est_value: valueN, currency, quote_date: quoteDate,
-      service_dept: serviceDept, project_type: projectType, technology,
+      service_dept: serviceDept, project_type: projectType, technology, business_type: businessType,
       sales_person: salesPerson, pm_owner: pmOwner, geo, subject, note,
       contact_email: contactEmail || undefined, force: needsForce,
     })
@@ -253,7 +261,7 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
           )}
 
           <F label="Quote date"><input type="date" className={inputCls} value={quoteDate} onChange={e => setQuoteDate(e.target.value)} /></F>
-          <F label="Geography"><select className={inputCls} value={geo} onChange={e => setGeo(e.target.value)}><option value="">—</option>{GEOS.map(g => <option key={g} value={g}>{g}</option>)}</select></F>
+          <F label="Geography"><select className={inputCls} value={geo} onChange={e => setGeo(e.target.value)}><option value="">—</option>{GEOS.map(g => <option key={g} value={g}>{GEO_SHEET_LABEL[g] || g}</option>)}</select></F>
 
           <F label="Service / dept">
             <select className={inputCls} value={serviceDept} onChange={e => setServiceDept(e.target.value)}>
@@ -288,6 +296,12 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
               <input className={inputCls} value={technology} autoFocus
                 onChange={e => setTechnology(e.target.value)} placeholder="Name the technology" />
             )}
+          </F>
+          <F label="Business type" hint="Repeat if we have worked with them before.">
+            <select className={inputCls} value={businessType} onChange={e => setBusinessType(e.target.value)}>
+              <option value="">—</option>
+              {VOCAB_FALLBACK.business_type.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
           </F>
           <F label="Client contact"><input className={inputCls} value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="name@client.com" /></F>
 

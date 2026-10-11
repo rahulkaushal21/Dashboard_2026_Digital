@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { saveLedgerRow, getPickList, getContractors, listDirectory, listAms, canonicalAm, CONTRACTOR, type LedgerRow, type Contractor, type DirectoryMember, type AmMember } from '@/lib/supabase'
-import { CURRENCIES } from '@/lib/deal-fields'
+import { saveLedgerRow, getPickList, getContractors, listDirectory, listAms, canonicalAm, getSheetVocab, CONTRACTOR, type LedgerRow, type Contractor, type DirectoryMember, type AmMember, type SheetVocab } from '@/lib/supabase'
+import { CURRENCIES, SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK, normBusinessType } from '@/lib/deal-fields'
 
 // The columns somebody fills in AFTER the deal is won.
 //
@@ -32,6 +32,26 @@ const F = ({ label, hint, wide, children }: { label: string; hint?: string; wide
     {children}
     {hint && <span className="mt-1 block text-[11px] text-mav-fg/50">{hint}</span>}
   </label>
+)
+
+// A dropdown that can never silently change what it was given.
+//
+// The sheet's vocabulary is what 3,218 hand-filled rows actually say, and a dozen of
+// those rows say something nobody would pick today — geo 'Agency', a client_type holding
+// somebody's email address, a department reading 'WEB-US (KS)'. Those have to stay
+// SELECTABLE, marked, or opening this dialog to change an invoice number would quietly
+// reclassify the line as well. Same reasoning as the Expert and AM pickers above.
+const Pick = ({ value, onChange, options, label }: {
+  value: string; onChange: (v: string) => void; options: readonly string[]
+  label?: (v: string) => string
+}) => (
+  <select className={`mt-1 w-full bg-mav-dark border border-mav-fg/20 rounded-md px-3 py-2 text-sm text-mav-fg
+    focus:outline-none focus:border-mav-yellow focus:ring-1 focus:ring-mav-yellow/40 transition-colors`}
+    value={value} onChange={e => onChange(e.target.value)}>
+    <option value="">— choose —</option>
+    {options.map(o => <option key={o} value={o}>{label ? label(o) : o}</option>)}
+    {value && !options.includes(value) && <option value={value}>{value} (not in list)</option>}
+  </select>
 )
 
 const Group = ({ title, blurb, children }: { title: string; blurb: string; children: React.ReactNode }) => (
@@ -67,6 +87,40 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   }).catch(() => {}) }, [])
   const [pms, setPms] = useState<DirectoryMember[]>([])
   useEffect(() => { listDirectory().then(l => setPms(l.filter(m => m.active))) }, [])
+
+  // ---- how the line is classified (144).
+  //
+  // Eight fields the confirm dialog asks for and nothing could change afterwards. They
+  // are not cosmetic: service_dept is what the Business Unit switch splits on and what
+  // every per-department total counts, and geo is what the revenue sheet's pods are. A
+  // line typed into the wrong department was wrong on six pages with no way to fix it.
+  //
+  // Editable on BOTH sides, sheet lines included — a sheet line's answers go into the
+  // overlay beside the spreadsheet, so none of this is the `fixed` set above. Changing
+  // one moves a line's value between totals; it cannot change the value, the month, or
+  // whether the deal is won.
+  const [serviceDept, setServiceDept] = useState(row.service_dept || '')
+  const [projectType, setProjectType] = useState(row.engagement_model || '')
+  const [technology, setTechnology] = useState(row.technology || '')
+  const [serviceType, setServiceType] = useState(row.service_type || '')
+  const [deliveryType, setDeliveryType] = useState(row.delivery_type || '')
+  const [clientType, setClientType] = useState(row.client_type || '')
+  const [geo, setGeo] = useState(row.geo || '')
+  // Existing → Repeat, New Repeat → Repeat. Folded on the way IN as well as out, so a
+  // row carrying an old spelling shows the current one selected rather than falling
+  // through to "(not in list)".
+  const [businessType, setBusinessType] = useState(normBusinessType(row.business_type))
+  const [vocab, setVocab] = useState<SheetVocab>(VOCAB_FALLBACK as SheetVocab)
+  useEffect(() => { getSheetVocab().then(setVocab).catch(() => {}) }, [])
+
+  // GEOGRAPHY IS SPELT DIFFERENTLY ON THE TWO SIDES and always has been. The dashboard
+  // stores the code — ten pages filter on 'US'/'UK'/'AU' — and the revenue sheet stores
+  // the region, 'US/Canada'. 1,441 sheet rows say the long form and 25 dashboard rows
+  // say the short one. Writing the dashboard's spelling onto a sheet line would drop it
+  // out of the sheet's own grouping, so each side is offered its own vocabulary under
+  // the same labels.
+  const geoOptions = fixed ? GEOS.map(g => GEO_SHEET_LABEL[g] || g) : [...GEOS]
+  const geoLabel = (v: string) => fixed ? v : (GEO_SHEET_LABEL[v] || v)
 
   const [projectName, setProjectName] = useState(row.project_name || '')
   const [projectId, setProjectId] = useState(row.project_id || '')
@@ -116,6 +170,12 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         local_value: num(value), currency, pm_owner: pmOwner, month: month || null,
         sales_person: salesPerson, company_name: agency,
       }),
+      // The eight go to both sides. A sheet line's land in the overlay; `fixed` does not
+      // cover them, because the sheet's own cell is not the last word on which
+      // department a line belongs to — it is the thing being corrected.
+      service_dept: serviceDept, project_type: projectType, technology,
+      service_type: serviceType, delivery_type: deliveryType, client_type: clientType,
+      geo, business_type: businessType,
       project_name: projectName, project_id: projectId, quote_id: quoteId, expert, integration,
       contractor_name: contractorName, outsource_currency: outsourceCur,
       delivery_status: status, invoice_no: invoiceNo, invoice_currency: invoiceCur,
@@ -198,6 +258,34 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
             </F>
             <F label="Project Id"><input className={ctl} value={projectId} onChange={e => setProjectId(e.target.value)} placeholder="PRJ…" /></F>
             <F label="Quote ID"><input className={ctl} value={quoteId} onChange={e => setQuoteId(e.target.value)} placeholder="QUT…" /></F>
+          </Group>
+
+          <Group title="Classification"
+            blurb="What kind of work this is and whose numbers it counts towards. Prefilled from the confirmation — change any of it. The department and geography decide which totals the line lands in, so every change here is logged.">
+            <F label="Service department" hint="What the Business Unit switch splits on and what every per-department total counts.">
+              <Pick value={serviceDept} onChange={setServiceDept} options={SERVICE_DEPTS} />
+            </F>
+            <F label="Project type" hint="The engagement model, in the sheet's own spelling.">
+              <Pick value={projectType} onChange={setProjectType} options={PROJECT_TYPES} />
+            </F>
+            <F label="Service type">
+              <Pick value={serviceType} onChange={setServiceType} options={vocab.service_type} />
+            </F>
+            <F label="Delivery type">
+              <Pick value={deliveryType} onChange={setDeliveryType} options={vocab.delivery_type} />
+            </F>
+            <F label="Technology">
+              <Pick value={technology} onChange={setTechnology} options={vocab.technology} />
+            </F>
+            <F label="Client type">
+              <Pick value={clientType} onChange={setClientType} options={vocab.client_type} />
+            </F>
+            <F label="Geography" hint={fixed ? "The sheet's regions, which is what this line is grouped by." : undefined}>
+              <Pick value={geo} onChange={setGeo} options={geoOptions} label={geoLabel} />
+            </F>
+            <F label="Business type" hint="Repeat or New. Existing and New Repeat both mean Repeat.">
+              <Pick value={businessType} onChange={setBusinessType} options={vocab.business_type} />
+            </F>
           </Group>
 
           <Group title="Delivery" blurb="Filled in as the work is scheduled and done.">
