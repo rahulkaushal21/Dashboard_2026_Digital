@@ -20,7 +20,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Next 16 requires Node >= 20.9. The 20 line is itself out of support, so
+          # pinning there would have swapped one end-of-life dependency for another.
+          # 22 is the current LTS; the upgrade was verified locally on 24, so 22 sits
+          # comfortably inside the tested range rather than at its edge.
+          node-version: 22
       # `npm ci` rather than `npm install`: it installs EXACTLY what package-lock.json
       # pins and fails if the lockfile and package.json disagree. `npm install` was free
       # to resolve something newer than the lockfile, which meant the thing we tested
