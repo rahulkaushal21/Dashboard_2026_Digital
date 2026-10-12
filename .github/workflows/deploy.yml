@@ -21,7 +21,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+      # `npm ci` rather than `npm install`: it installs EXACTLY what package-lock.json
+      # pins and fails if the lockfile and package.json disagree. `npm install` was free
+      # to resolve something newer than the lockfile, which meant the thing we tested
+      # locally and the thing that went live were not guaranteed to be the same build.
+      - run: npm ci
+      # Advisory, never blocking. A failed audit must not stop a deploy — the site would
+      # go stale over a transitive dev-dependency nobody can act on at 2am. This puts the
+      # count in the run log so a new critical is visible instead of invisible.
+      - run: npm audit --audit-level=high || true
       - run: npm run build
         env:
           DEPLOY_TARGET: github

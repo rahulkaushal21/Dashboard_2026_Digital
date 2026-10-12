@@ -1,0 +1,50 @@
+# Dependency updates, as pull requests rather than as silence.
+#
+# Until now nothing watched this: package.json had two commits in its whole history,
+# both from the original upload, and Next.js 14 went end-of-life in October 2025 without
+# anything here noticing. Dependabot's job is to make that visible, not to update
+# anything on its own — every bump arrives as a PR somebody reads and merges.
+#
+# NOTHING HERE DEPLOYS BY ITSELF. The Pages workflow runs on push to main, and a
+# Dependabot PR is a branch; it has to be merged by a human before the site rebuilds.
+# A failing build on a PR is the point.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Enough to cover a quiet week without burying the repo. Security advisories are
+    # raised regardless of this cap.
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    groups:
+      # One PR for the toolchain rather than six. These move together and are only ever
+      # merged after a build, so splitting them makes more reading, not more safety.
+      build-tooling:
+        patterns:
+          - typescript
+          - '@types/*'
+          - eslint
+          - eslint-config-next
+          - tailwindcss
+          - postcss
+          - autoprefixer
+      # Next and React are a set: Next 16 requires React 19, and letting Dependabot
+      # raise them one at a time would produce a PR that cannot build.
+      next-react:
+        patterns:
+          - next
+          - react
+          - react-dom
+
+  # The deploy workflow's own actions — checkout, setup-node, upload-pages-artifact,
+  # deploy-pages. These pin to major tags and go stale silently.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
