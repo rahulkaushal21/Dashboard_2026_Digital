@@ -10,7 +10,7 @@
     "routine": "node scripts/routine/run.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.45.0",
+    "@supabase/supabase-js": "^2.117.3",
     "lucide-react": "^0.400.0",
     "next": "^16.4.0",
     "react": "^18.3.0",
