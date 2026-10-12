@@ -11,7 +11,7 @@ import {
 import { currentEmail } from '@/lib/access'
 import {
   SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL,
-  VOCAB_FALLBACK, OPEN_ENDED_TYPES, normBusinessType,
+  VOCAB_FALLBACK, RETAINER_SHAPED_TYPES, normBusinessType,
 } from '@/lib/deal-fields'
 import { isNbdOwner } from '@/lib/nbd'
 
@@ -31,9 +31,13 @@ const ownerLabel = (who: string) => isNbdOwner(who) ? 'New business owner (NBD)'
 //
 // Everything is required because after the 1 Oct cutover there is no second pass in the
 // sheet where somebody fills the gaps. The database enforces that; this form exists to
-// make it easy to satisfy rather than to be the rule. Two exceptions, both deliberate:
-// Quote Price (15% of historical rows never had one) and, on retainer-shaped project
-// types, Delivery Date (a Dedicated engagement is not delivered on a day).
+// make it easy to satisfy rather than to be the rule. ONE exception now: Quote Price,
+// which 15% of historical rows never had.
+//
+// Delivery Date used to be the second, waived on retainer-shaped types because a
+// Dedicated engagement is not delivered on a day. Dropped in 145 - that is true of the
+// engagement and false of the line, which covers one month that ends, and it is the
+// date the delivery team works from.
 
 
 // ---- presentation ---------------------------------------------------------
@@ -307,10 +311,6 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
   const rate = rates.find(r => r.currency.toUpperCase() ===
     (currency.toUpperCase() === 'EURO' ? 'EUR' : currency.toUpperCase()))?.rate_to_usd ?? 1
 
-  // A retainer has no delivery date; demanding one would make the monthly confirmation,
-  // the highest-volume one there is, impossible to complete honestly.
-  const openEnded = OPEN_ENDED_TYPES.includes(projectType)
-
   // Checked live, from what is on screen, so ticking the last box is instant rather than
   // waiting for a failed save to say so. The DATABASE is still the authority — it runs
   // the same rule inside confirm_opportunity and refuses regardless of what this says.
@@ -332,11 +332,11 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     need('Account manager', !!salesPerson.trim())
     need('PM owner', !!pmOwner.trim())
     need('Start date', !!startDate)
-    need('Delivery date', openEnded || !!deliveryDate)
+    need('Delivery date', !!deliveryDate)
     return m
   }, [deal.company_name, amt, currency, quoteDate, serviceDept, projectType, serviceType,
       technology, clientName, clientType, geo, deliveryType, salesPerson, pmOwner,
-      startDate, deliveryDate, openEnded])
+      startDate, deliveryDate])
 
   const ready = missing.length === 0
 
@@ -546,8 +546,13 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
               <input type="date" className={`${ctl} ${border(missing.includes('Start date'))}`} value={startDate}
                 onChange={e => setStartDate(e.target.value)} />
             </F>
+            {/* Required on EVERY project type since 145, retainers included. A Dedicated
+                engagement is not delivered on a day, but a Dedicated LINE covers one
+                month and that month ends - and the delivery team works from this date.
+                The old sheet's own Dedicated rows all carry one. */}
             <F label="Delivery date" need={missing.includes('Delivery date')}
-              hint={openEnded ? `Not needed — ${projectType} work has no single delivery date.` : undefined}>
+              hint={RETAINER_SHAPED_TYPES.includes(projectType)
+                ? 'For a retainer, the end of the month this line covers.' : undefined}>
               <input type="date" className={`${ctl} ${border(missing.includes('Delivery date'))}`} value={deliveryDate}
                 onChange={e => setDeliveryDate(e.target.value)} />
             </F>

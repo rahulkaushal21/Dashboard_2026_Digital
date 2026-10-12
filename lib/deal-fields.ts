@@ -84,5 +84,16 @@ export const normBusinessType = (v?: string | null) => {
   return (v || '').trim()
 }
 
-/** Project types with no delivery date — a retainer is not delivered on a day. */
-export const OPEN_ENDED_TYPES = ['Dedicated', 'Partial Dedicated', 'Ballpark']
+/**
+ * The retainer-shaped project types.
+ *
+ * These used to be EXEMPT from needing a delivery date, on the grounds that a retainer
+ * is not delivered on a day. That is true of the engagement and false of the line: a
+ * Dedicated line covers one month, that month ends, and the delivery team works from
+ * the date. The old sheet settles it — all 44 Dedicated and 19 Partial Dedicated rows
+ * in it carry a delivery date, so PMs were filling it in regardless of the rule.
+ *
+ * Since 145 the date is required on every type and this list only decides whether to
+ * HINT what the date usually is. Rahul, 12 Oct 2026.
+ */
+export const RETAINER_SHAPED_TYPES = ['Dedicated', 'Partial Dedicated', 'Ballpark']
