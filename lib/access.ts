@@ -44,6 +44,8 @@ export const isOwner = (email?: string | null) => (email || '').trim().toLowerCa
  * that needs no login at all to read.
  */
 export const INCENTIVE_EMAIL = 'rahul.k@mavlers.com'
+/** Deliberately NOT in PAGES: that list is what every signed-in person may see. */
+export const INCENTIVE_PATH = '/pm-team/incentive'
 export const canSeeIncentive = (email?: string | null) =>
   (email || '').trim().toLowerCase() === INCENTIVE_EMAIL
 
@@ -162,8 +164,14 @@ export const profileFor = (email: string, fullName?: string | null, isAdmin = fa
 
 // Every signed-in person can open every page. The only scoping left is inside
 // the PM Team pages, which narrow to the viewer's own record.
-export function canSee(profile: Profile | null, _path: string): boolean {
-  return !!profile && profile.is_active
+export function canSee(profile: Profile | null, path: string): boolean {
+  if (!profile || !profile.is_active) return false
+  // The incentive sheet is Rahul's alone — see INCENTIVE_EMAIL. Checked here rather than
+  // in the sidebar so the SAME rule hides the menu entry and blocks the URL: the route
+  // guard in AuthProvider reads this function too, and a page that is merely absent from
+  // the rail is still reachable by typing its address.
+  if (path.startsWith(INCENTIVE_PATH)) return canSeeIncentive(profile.email)
+  return true
 }
 
 /**

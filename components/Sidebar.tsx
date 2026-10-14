@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator, Receipt, Activity, MessageSquare, ClipboardList } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator, Receipt, Activity, MessageSquare, ClipboardList, Coins } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
@@ -52,6 +52,9 @@ const nav: Entry[] = [
     label: 'Delivery', icon: ClipboardList, children: [
       { href: '/revenue-sheet', label: 'Project sheet', icon: Table2 },
       { href: '/pm-team', label: 'PM Team', icon: UserCog },
+      // Filtered out for everybody but Rahul by canSee(), which the route guard reads
+      // too — so this is hidden AND the URL is refused, not just missing from the rail.
+      { href: '/pm-team/incentive', label: 'Incentive', icon: Coins },
       { href: '/actions', label: 'Actions', icon: Zap },
       { href: '/kb-report', label: 'KB report', icon: PieChart },
     ],

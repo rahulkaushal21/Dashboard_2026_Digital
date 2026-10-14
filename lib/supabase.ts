@@ -2974,14 +2974,18 @@ export async function getOpportunityEvents(days = 7): Promise<OppEvent[]> {
 
 export interface PmIncentiveRow {
   pm_owner: string
-  /** The quarter before this one, and this one — total delivered USD. */
-  prev_total: number; this_total: number
-  /** The same two divided by three, which is what the growth percentage compares. */
-  prev_avg: number; this_avg: number
-  /** Null when the previous quarter was empty, so growth cannot be worked out. */
+  /** The PM's last-year monthly average, and the bar actually used this quarter. */
+  last_year_avg: number | null
+  base_month: number | null
+  /** True when an earlier quarter of this FY beat the last-year average and raised it. */
+  base_raised: boolean | null
+  prev_total: number
+  this_total: number
+  this_avg: number
+  /** Null when the PM has no baseline on record, so there is no bar to measure against. */
   growth_pct: number | null
   base_usd: number
-  /** 0 on a quarter that went backwards: the booster is only ever a reward. */
+  /** 0 on a quarter that did not beat the bar: the booster is only ever a reward. */
   growth_rate: number
   growth_usd: number
   total_usd: number
@@ -2991,18 +2995,19 @@ export interface PmIncentiveRow {
  * The quarter's incentive working, or an empty list for anyone not entitled to it.
  *
  * Swallows the refusal on purpose. A 42501 here is the expected answer for everybody
- * except one person, not a fault, and surfacing it would tell the caller that there is
+ * except one person, not a fault, and surfacing it would tell the caller there is
  * something to be refused.
  */
 export async function getPmIncentives(quarterStart?: string): Promise<PmIncentiveRow[]> {
   if (!supabase) return []
-  const { data, error } = await supabase.rpc('pm_incentives', { p_quarter_start: quarterStart ?? null })
+  const { data, error } = await supabase.rpc('pm_incentive_sheet', { p_quarter_start: quarterStart ?? null })
   if (error || !data) return []
-  return (data as PmIncentiveRow[]).map(r => ({
-    ...r,
-    prev_total: Number(r.prev_total), this_total: Number(r.this_total),
-    prev_avg: Number(r.prev_avg), this_avg: Number(r.this_avg),
-    growth_pct: r.growth_pct == null ? null : Number(r.growth_pct),
+  const n = (v: any) => (v == null ? null : Number(v))
+  return (data as any[]).map(r => ({
+    pm_owner: r.pm_owner,
+    last_year_avg: n(r.last_year_avg), base_month: n(r.base_month), base_raised: r.base_raised,
+    prev_total: Number(r.prev_total), this_total: Number(r.this_total), this_avg: Number(r.this_avg),
+    growth_pct: n(r.growth_pct),
     base_usd: Number(r.base_usd), growth_rate: Number(r.growth_rate),
     growth_usd: Number(r.growth_usd), total_usd: Number(r.total_usd),
   }))
