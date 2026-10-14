@@ -2,8 +2,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from './AuthProvider'
+import { currentEmail, getStoredProfile } from '@/lib/access'
 import {
   getStaleOpportunities, setOpportunityConfirmed, setOpportunityLost,
+  getDirectoryMember, ownerMatches, type DirectoryMember,
   type OpenOppEvidence,
 } from '@/lib/supabase'
 
@@ -20,12 +22,27 @@ import {
  * reading one row; a banner urging someone to clear ninety of them would be read once and
  * then ignored forever, taking the fourteen real ones with it.
  *
+ * EACH PERSON SEES THEIR OWN. Rahul Jain was being shown Nitin's ice-cream deal and
+ * Gagandeep's Rent the Runway — somebody else's pipeline, with a Clear button under it.
+ * A prompt to act is only honest when the row is yours to act on, so the banner now
+ * matches pm_owner OR sales_person against the signed-in person's directory aliases
+ * (exact parts, never substrings: 'Rahul Kaushal' must not match Rahul Jain). Admins
+ * still see everything, which is also what keeps unowned rows from falling in a hole.
+ *
+ * This is a DISPLAY rule. The writes behind it are already gated in the database, and
+ * anyone determined can still read the view; narrowing that is the Tier 2 work.
+ *
  * Everything here is REVERSIBLE and every write records why it happened, so a wrong clear
  * costs a click rather than a deal.
  */
 export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: () => void }) {
   const { email } = useAuth()
-  const [rows, setRows] = useState<OpenOppEvidence[]>([])
+  const [all, setAll] = useState<OpenOppEvidence[]>([])
+  const [me, setMe] = useState<DirectoryMember | null>(null)
+  const [iAmAdmin, setIAmAdmin] = useState(false)
+  // Undefined until the directory answers, so a non-admin never sees everybody's rows
+  // for the moment between the query returning and the directory landing.
+  const [scoped, setScoped] = useState(false)
   const [open, setOpen] = useState(false)
   const [picked, setPicked] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -34,13 +51,29 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
 
   const load = () => {
     getStaleOpportunities()
-      .then(r => { setRows(r); setPicked(new Set(r.map(x => x.id))) })
+      .then(r => setAll(r))
       // Silent on failure: this is a prompt, not a number anyone reconciles against. A
       // red error bar above the pipeline for a failed side-query would be worse than not
       // showing the prompt at all.
       .catch(() => setFailed(true))
   }
   useEffect(load, [])
+
+  useEffect(() => {
+    setIAmAdmin(!!getStoredProfile()?.is_admin)
+    getDirectoryMember(currentEmail()).then(m => { setMe(m); setScoped(true) })
+  }, [])
+
+  // Mine = either side of the deal names me. An admin sees the lot.
+  const rows = useMemo(() => {
+    if (iAmAdmin) return all
+    if (!scoped || !me) return []
+    return all.filter(r => ownerMatches(r.pm_owner || undefined, me.aliases)
+                        || ownerMatches(r.sales_person || undefined, me.aliases))
+  }, [all, me, iAmAdmin, scoped])
+
+  // The tick boxes follow whatever is actually on screen.
+  useEffect(() => { setPicked(new Set(rows.map(r => r.id))) }, [rows])
 
   const won = useMemo(() => rows.filter(r => r.evidence === 'app won'), [rows])
   const lost = useMemo(() => rows.filter(r => r.evidence === 'app lost'), [rows])
