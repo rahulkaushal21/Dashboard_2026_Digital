@@ -20,14 +20,25 @@ import { getPmIncentives, type PmIncentiveRow } from '@/lib/supabase'
 
 const usd = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const whole = (n: number | null) => n == null ? '—' : '$' + Math.round(n).toLocaleString('en-US')
+const RATE_KEY = 'incentive_usd_inr'
 
 export default function IncentivePage() {
   const [rows, setRows] = useState<PmIncentiveRow[]>([])
   const [loading, setLoading] = useState(true)
-  // The quarter's USD→INR rate, typed in rather than stored: it changes every quarter and
-  // 87.59 was last quarter's, not this one's. Kept in the page only, so no rate of any
-  // kind is written into the build.
+  // The quarter's USD→INR rate. Typed in rather than built in, because it changes every
+  // quarter — 87.59 was last quarter's and 89.41 is this one's — and remembered in this
+  // browser so it survives a reload without being written into the build or the database.
+  // A per-viewer convenience, which is the only thing localStorage is good for: it can
+  // come back empty in a private window or with site data cleared, so every read and
+  // write is wrapped and the page renders fine without it.
   const [inr, setInr] = useState('')
+  useEffect(() => {
+    try { const v = localStorage.getItem(RATE_KEY); if (v) setInr(v) } catch {}
+  }, [])
+  const setRate = (v: string) => {
+    setInr(v)
+    try { localStorage.setItem(RATE_KEY, v) } catch {}
+  }
 
   useEffect(() => { getPmIncentives().then(setRows).finally(() => setLoading(false)) }, [])
 
@@ -76,7 +87,7 @@ export default function IncentivePage() {
         right={
           <label className="flex items-center gap-2 text-xs text-mav-muted">
             USD→INR
-            <input value={inr} onChange={e => setInr(e.target.value)} placeholder="rate" inputMode="decimal"
+            <input value={inr} onChange={e => setRate(e.target.value)} placeholder="rate" inputMode="decimal"
               className="w-24 bg-mav-dark border border-mav-fg/20 rounded px-2 py-1 text-xs text-mav-fg
                          focus:outline-none focus:border-mav-yellow" />
           </label>
