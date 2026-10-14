@@ -1,3 +1,7 @@
+-- APPLIED 14 Oct 2026 by Rahul. Kept as the record of what went in, since it could not
+-- go through a migration from here. Re-running it is harmless - it is a
+-- create or replace.
+--
 -- Paste this into the Supabase SQL editor in one go.
 --
 -- Why it is not in a migration run from here: the MCP connection declines any statement

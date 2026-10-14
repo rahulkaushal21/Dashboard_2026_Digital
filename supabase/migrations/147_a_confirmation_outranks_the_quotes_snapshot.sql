@@ -50,14 +50,23 @@
 --
 -- What is applied here
 -- --------------------
--- Part 1 (the trigger) and Part 3 (the repair) are LIVE as of 14 Oct 2026.
+-- ALL THREE PARTS ARE LIVE as of 14 Oct 2026.
 --
--- Part 2 — the fix to sync_quotes_to_opportunities itself — IS NOT APPLIED. The MCP
--- connection declines any statement containing DELETE, and that function carries three
--- janitor deletes in its body, so it cannot be replaced from here. It has to be pasted
--- by hand. Until it is, the trigger in Part 1 is what holds the line, and it does hold:
--- the exact clobbering UPDATE was replayed against Switch Digital after the trigger
--- went on and the row stayed Won at $2,553.19.
+-- Part 2 — the fix to sync_quotes_to_opportunities itself — could not be applied from
+-- here, because the MCP connection declines any statement containing DELETE and that
+-- function carries three janitor deletes. Rahul pasted apply-147-by-hand.sql the same
+-- day and it is confirmed live: the on-conflict clause guards on confirmed_by and all
+-- three janitors carry `and a.confirmed_by is null`.
+--
+-- VERIFIED BY RUNNING THE THING THAT BROKE IT. After the paste,
+-- sync_quotes_to_opportunities() was called directly — 865 rows upserted — and nothing
+-- moved: Switch Digital stayed Won at $2,553.19 and Design+Marketing at $56.74, the
+-- half-confirmed count stayed 0, and the totals either side were identical (1,093
+-- opportunities, 861 sheet-origin, 83 confirmed, 3,377 ledger rows, October $96,668).
+-- The janitors deleted nothing.
+--
+-- Both layers are kept. Part 1 is not redundant: it catches the NEXT sync that writes
+-- won without looking at confirmed_by, not only this one.
 
 
 -- 1. The net: a confirmed deal cannot silently un-confirm  [APPLIED]
@@ -134,3 +143,10 @@ end $$;
 --          won_amount = public.to_usd(local_value, currency),
 --          win_probability = 100
 --    where id in (3012655, 2925037);
+--
+-- The summary, gist and next_step on both rows were rewritten afterwards too. They still
+-- read "Quote Shared · Switch Digital · $2266" — the text the bug itself had generated —
+-- and since Part 2 now protects those fields on a confirmed row, that wrong label would
+-- have been frozen in place permanently rather than corrected on the next sync. They now
+-- read "Confirmed · Switch Digital · $2553", with the gist naming who confirmed it and
+-- when.
