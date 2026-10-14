@@ -6,7 +6,8 @@ import KPICard from '@/components/KPICard'
 import { KPIRow, Segments, Panel } from '@/components/PageParts'
 import { UnplacedNote } from '@/components/UnitToggle'
 import { useAuth } from '@/components/AuthProvider'
-import { OWNER_EMAIL } from '@/lib/access'
+import { OWNER_EMAIL, canSeeIncentive } from '@/lib/access'
+import IncentivePanel from '@/components/IncentivePanel'
 import { growthPct, type PmQuarter } from '@/lib/pm-metrics'
 import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, GROWTH_BANDS, Q2C_BANDS, FEEDBACK_BANDS, type Band, type FQ, type PmMember } from '@/lib/pm-team'
 import { usePmData } from './usePmData'
@@ -181,6 +182,11 @@ export default function PmTeam() {
           </div>
         </Panel>
       ))}
+      {/* Rahul's own, and nobody else's — not the other admins, not web@uplers.com, not
+          the PMs it is about. This check only decides whether to ASK; pm_incentives()
+          refuses everyone else in the database and returns no rows, which is what keeps
+          the rates out of a bundle that needs no login to read. */}
+      {canSeeIncentive(email) && <IncentivePanel />}
       {/* The KPIs themselves, under the scores. The table above says what each PM got;
           this says what they are measured on and what each band is worth, straight from
           the KPI sheet, so nobody has to open the spreadsheet to know what a 6 means.

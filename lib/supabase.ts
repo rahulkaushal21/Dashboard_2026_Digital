@@ -2958,3 +2958,52 @@ export async function getOpportunityEvents(days = 7): Promise<OppEvent[]> {
     .gte('at', since).neq('event', 'project_type_inferred').order('at', { ascending: false })
   return (data as OppEvent[]) || []
 }
+
+// ── PM incentive ─────────────────────────────────────────────────────────────────────
+//
+// Base + growth booster on the quarter's delivered revenue, per PM.
+//
+// EVERY FIGURE COMES FROM THE DATABASE, including the rates. None of the arithmetic
+// happens here, and that is the point: the dashboard is a static export, so anything
+// this file computed would ship inside public JavaScript that needs no login to read —
+// the 0.25%, the growth ladder and every PM's payout, one "view source" away.
+//
+// pm_incentives() refuses anybody but Rahul Kaushal's own named account and returns no
+// rows, so a caller who is not him gets an error rather than data. canSeeIncentive()
+// in lib/access only decides whether to bother asking.
+
+export interface PmIncentiveRow {
+  pm_owner: string
+  /** The quarter before this one, and this one — total delivered USD. */
+  prev_total: number; this_total: number
+  /** The same two divided by three, which is what the growth percentage compares. */
+  prev_avg: number; this_avg: number
+  /** Null when the previous quarter was empty, so growth cannot be worked out. */
+  growth_pct: number | null
+  base_usd: number
+  /** 0 on a quarter that went backwards: the booster is only ever a reward. */
+  growth_rate: number
+  growth_usd: number
+  total_usd: number
+}
+
+/**
+ * The quarter's incentive working, or an empty list for anyone not entitled to it.
+ *
+ * Swallows the refusal on purpose. A 42501 here is the expected answer for everybody
+ * except one person, not a fault, and surfacing it would tell the caller that there is
+ * something to be refused.
+ */
+export async function getPmIncentives(quarterStart?: string): Promise<PmIncentiveRow[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('pm_incentives', { p_quarter_start: quarterStart ?? null })
+  if (error || !data) return []
+  return (data as PmIncentiveRow[]).map(r => ({
+    ...r,
+    prev_total: Number(r.prev_total), this_total: Number(r.this_total),
+    prev_avg: Number(r.prev_avg), this_avg: Number(r.this_avg),
+    growth_pct: r.growth_pct == null ? null : Number(r.growth_pct),
+    base_usd: Number(r.base_usd), growth_rate: Number(r.growth_rate),
+    growth_usd: Number(r.growth_usd), total_usd: Number(r.total_usd),
+  }))
+}

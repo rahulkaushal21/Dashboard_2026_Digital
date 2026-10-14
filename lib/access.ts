@@ -29,6 +29,24 @@ export const ALLOWED_DOMAINS = ['mavlers.com', 'uplers.com']
 export const OWNER_EMAIL = 'web@uplers.com'
 export const isOwner = (email?: string | null) => (email || '').trim().toLowerCase() === OWNER_EMAIL
 
+/**
+ * Who may see the PM incentive working.
+ *
+ * ONE PERSON, and deliberately not OWNER_EMAIL. Rahul asked for this to be his own eyes
+ * only — not the five dashboard admins, not web@uplers.com, and not the PMs it is about.
+ * isOwner() and is_admin both return true for people who must NOT see it, so this
+ * cannot reuse either of them.
+ *
+ * This constant only decides whether to ASK. The real gate is in the database:
+ * pm_incentives() refuses anyone else and returns no rows, so the figures and the rates
+ * never reach the browser for anybody but Rahul. That matters because the dashboard is
+ * a static export — anything the page computed itself would sit in public JavaScript
+ * that needs no login at all to read.
+ */
+export const INCENTIVE_EMAIL = 'rahul.k@mavlers.com'
+export const canSeeIncentive = (email?: string | null) =>
+  (email || '').trim().toLowerCase() === INCENTIVE_EMAIL
+
 export const isAllowedDomain = (email?: string | null): boolean => {
   const at = (email || '').trim().toLowerCase().split('@')[1]
   return !!at && ALLOWED_DOMAINS.includes(at)
