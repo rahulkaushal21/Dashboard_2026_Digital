@@ -110,7 +110,9 @@ export default function IncentivePage() {
                   <td className={`${td} text-right font-medium ${
                     r.growth_pct == null ? 'text-mav-fg/30'
                     : r.growth_pct > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {r.growth_pct == null ? '—' : `${r.growth_pct > 0 ? '+' : ''}${r.growth_pct}%`}
+                    {/* Whole percentages, to read the same as the PM Team scorecard
+                        next door rather than a decimal that looks like a disagreement. */}
+                    {r.growth_pct == null ? '—' : `${r.growth_pct > 0 ? '+' : ''}${Math.round(r.growth_pct)}%`}
                   </td>
                   <td className={`${td} text-right text-mav-fg/60`}>{whole(r.this_total)}</td>
                   <td className={`${td} text-right`}>{usd(r.base_usd)}</td>
@@ -142,7 +144,7 @@ export default function IncentivePage() {
 
       <Panel className="mb-6" title="How it is worked out">
         <ul className="text-sm text-mav-fg/80 space-y-2 list-disc pl-5">
-          <li><b>Base</b> is a fixed percentage of the quarter&rsquo;s booked revenue, read from the <b>same source as the PM Team scorecard</b> next door, so the two agree by construction rather than by luck.</li>
+          <li><b>Base</b> is a fixed percentage of the quarter&rsquo;s booked revenue, read from the <b>same table the PM Team scorecard reads</b>, so Booked, Avg/month and Base/month match it cell for cell.</li>
           <li><b>The bar</b> is the PM&rsquo;s last-year monthly average, raised to a better figure once they beat it in an earlier quarter of the same year, and never lowered. An <span className="text-mav-yellow">↑</span> marks a bar that has been raised.</li>
           <li><b>Growth</b> is the quarter&rsquo;s monthly average against that bar.</li>
           <li><b>The booster</b> is a further percentage of the same revenue, added to the base, and is <b>only ever a reward</b> &mdash; a quarter that did not beat the bar earns base alone.</li>

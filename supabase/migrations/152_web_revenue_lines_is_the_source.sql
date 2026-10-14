@@ -1,0 +1,39 @@
+-- web_revenue_lines is the source
+-- ===============================
+--
+-- Rahul sent the PM Team scorecard for Q2 FY26-27: "this is from the pm team dashboard
+-- and this number is i am trusting is correct as we are using dashboard for everything",
+-- with Rahul Jain's Base/month highlighted at $6,365.
+--
+-- 151 read web_revenue. The scorecard reads web_revenue_LINES, through getBookingsFull().
+-- They are not the same set — for Rahul Jain's Q1 that is 36 rows against 53:
+--
+--                        web_revenue      web_revenue_lines (scorecard)
+--   Rahul Jain Q1 total     22,374             19,094
+--   Rahul Jain bar           7,458              6,365   <- his highlight
+--   Rahul Jain growth        24.5%                46%
+--   band                     0.08%              0.10%
+--
+-- EVERY OTHER PM AGREED between the two tables, which is exactly why this was worth
+-- checking rather than assuming. One row out of eleven exposed it.
+--
+-- Now verified cell for cell against the screenshot — Booked, Avg/month, Base/month, the
+-- "raised" flags and Growth — for all eleven PMs. The only remaining difference is that
+-- the function keeps growth to one decimal where the scorecard rounds to whole
+-- percentages, so Paryusha reads -18.5 here and -18% there; the page now rounds for
+-- display to match, and the band is the same either way.
+--
+-- Q2 FY27: 11 PMs, $596,293 booked, base $1,490.74 + booster $244.62 = $1,735.34.
+-- Five earned a booster: Gagandeep Singh, Gaurav Pardeshi, Madhav Maheshwari,
+-- Maitri Shah, Rahul Jain.
+--
+-- THE LESSON, for whoever changes this next: the incentive's job is to agree with the
+-- scorecard, not to be independently defensible. Three sources were tried —
+-- web_project_ledger (150), web_revenue (151), web_revenue_lines (152) — and they differ
+-- by enough to move somebody a band. Read what getBookingsFull() reads.
+--
+-- One divergence remains and is deliberate: the scorecard filters by the business unit
+-- switch, this does not. A quarterly payout is company-wide, so it should not change
+-- because somebody flipped a filter.
+--
+-- The function body is applied live; see the repository for its text.
