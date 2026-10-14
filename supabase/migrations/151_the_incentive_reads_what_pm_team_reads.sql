@@ -1,0 +1,43 @@
+-- The incentive reads what PM Team reads
+-- ======================================
+--
+-- Rahul: "no just the list we have in PM team / this has the right numbers in q2", with
+-- Maitri's bar at $15,638 against an average of $17,438.
+--
+-- 150 computed from web_project_ledger. Close, but not the same thing. The PM Team page
+-- reads web_revenue_lines and scores growth on booked revenue by booking_month, and that
+-- source is the one that reconciles BOTH figures Rahul has quoted, to the rupee:
+--
+--                         web_revenue        ledger        bookings
+--   Gagandeep Q1 avg      21,581   <- his    21,627        21,627
+--   Maitri Q2 avg         17,438   <- his    17,438        15,167
+--   Maitri bar            15,638   <- his    15,638        15,638
+--
+-- His very first example named 21,581 as Gagandeep's base and I could not account for
+-- the $46 against the ledger's 21,627. This is where it came from.
+--
+-- Two changes, nothing else:
+--
+--   * Source is web_revenue on booking_month, so the incentive and the scorecard on the
+--     sibling page agree by construction rather than by luck.
+--   * The roster is an INNER join on pm_incentive_baselines, which is the PM Team list.
+--     Harshvardhan Sharma books revenue but is not on it and no longer appears — "just
+--     the list we have in PM team".
+--
+-- WHAT MOVED against 150, all of it from the source change:
+--   Rahul Jain    bar 6,448 -> 7,458, growth 44.0% -> 24.5%, band 0.10% -> 0.08%
+--   Nitin Mishra  bar not raised after all (23,333), growth -24.3% -> -22.6%
+--   Madhav        Q2 32,175 -> 31,875, growth 7.3% -> 6.3%
+--   Gagandeep     18.1% -> 18.4%
+--   Harshvardhan  removed
+--
+-- Unchanged and still true: the five who grew are Gagandeep Singh, Gaurav Pardeshi,
+-- Madhav Maheshwari, Maitri Shah and Rahul Jain, exactly Rahul's list; Malay Srivastava
+-- is negative; the booster is only ever a reward.
+--
+-- Q2 FY27: 11 PMs, $596,293 booked, base $1,490.74 + booster $239.05 = $1,729.78.
+--
+-- Still one person's, still computed entirely in the database, and the build still
+-- carries none of it: the rates, the payouts and every total appear in zero files.
+--
+-- The function body is applied live; see the repository for its text.

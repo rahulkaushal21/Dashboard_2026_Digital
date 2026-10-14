@@ -1,6 +1,10 @@
 -- The bar is the last-year average, not last quarter
 -- ==================================================
 --
+-- SUPERSEDED IN PART BY 151. The ratcheting bar below is right; the SOURCE in this file
+-- (web_project_ledger) is not. See 151 — the PM Team page reads web_revenue, and that is
+-- the one that reconciles Rahul's own figures to the rupee.
+--
 -- 149 measured growth as this quarter against the PREVIOUS quarter. Wrong. Rahul sent
 -- the Q1 sheet he had built by hand and the structure gave it away: a "Base Data" column
 -- per PM, and growth computed as the quarter's monthly average against THAT, not against

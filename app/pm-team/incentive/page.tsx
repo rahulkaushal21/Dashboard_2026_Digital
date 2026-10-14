@@ -110,7 +110,7 @@ export default function IncentivePage() {
                   <td className={`${td} text-right font-medium ${
                     r.growth_pct == null ? 'text-mav-fg/30'
                     : r.growth_pct > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {r.growth_pct == null ? 'no bar' : `${r.growth_pct > 0 ? '+' : ''}${r.growth_pct}%`}
+                    {r.growth_pct == null ? '—' : `${r.growth_pct > 0 ? '+' : ''}${r.growth_pct}%`}
                   </td>
                   <td className={`${td} text-right text-mav-fg/60`}>{whole(r.this_total)}</td>
                   <td className={`${td} text-right`}>{usd(r.base_usd)}</td>
@@ -142,15 +142,15 @@ export default function IncentivePage() {
 
       <Panel className="mb-6" title="How it is worked out">
         <ul className="text-sm text-mav-fg/80 space-y-2 list-disc pl-5">
-          <li><b>Base</b> is a fixed percentage of the quarter&rsquo;s delivered revenue, from the Project sheet, counted in the quarter a line <b>starts</b> &mdash; the basis Business Numbers and the Business Overview sheet use.</li>
+          <li><b>Base</b> is a fixed percentage of the quarter&rsquo;s booked revenue, read from the <b>same source as the PM Team scorecard</b> next door, so the two agree by construction rather than by luck.</li>
           <li><b>The bar</b> is the PM&rsquo;s last-year monthly average, raised to a better figure once they beat it in an earlier quarter of the same year, and never lowered. An <span className="text-mav-yellow">↑</span> marks a bar that has been raised.</li>
           <li><b>Growth</b> is the quarter&rsquo;s monthly average against that bar.</li>
           <li><b>The booster</b> is a further percentage of the same revenue, added to the base, and is <b>only ever a reward</b> &mdash; a quarter that did not beat the bar earns base alone.</li>
-          <li>A PM with no baseline on record has no bar to beat, so earns base only.</li>
+          <li>The roster is the PM Team list. Somebody booking revenue who is not on it does not appear here at all.</li>
         </ul>
         <p className="mt-4 text-xs text-mav-muted">
-          Revenue is credited to whoever owns the line at delivery, so an account changing
-          hands moves it &mdash; worth a look before this pays out.
+          Revenue is credited to whoever owns the line, so an account changing hands moves
+          it with them &mdash; worth a look before this pays out.
         </p>
       </Panel>
     </div>
