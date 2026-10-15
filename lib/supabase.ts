@@ -1882,6 +1882,61 @@ export async function getClientTopTechnology(): Promise<Map<string, string>> {
   return new Map(rows.map(r => [r.client_key, r.technology]))
 }
 
+// ── Quotes that never became a deal ──────────────────────────────────────────────────
+//
+// The scan triages ~290 threads a day on sender and subject and deep-reads about thirty.
+// That is the right trade for cold mail and the wrong one for an existing account, where
+// the thread keeps its original subject for ever: Gagandeep quoted $300 under "Routine
+// site health check" and $150 under "Re: check-In", and both were missed for exactly
+// that reason — the subject described routine work and the money was in the body.
+//
+// So the body (and now the attachment names) are searched for deal signals, and anything
+// with no matching opportunity is handed to the PM who owns that client. It does NOT
+// require a price: Rahul, 15 Oct 2026 — "if no price thats ok, but an opportunity should
+// be there". A proposal attachment or a written go-ahead raises a row with no value on it.
+//
+// web_unlogged_deal_signals is a thin view over a materialised one rebuilt hourly;
+// splitting 40,000 message bodies on demand timed out.
+
+export interface DealSignal {
+  thread_id: string
+  client_key: string
+  pm_owner?: string | null
+  /** 'proposal attached' | 'priced quote' | 'proposal sent' | 'scope of work' | 'ballpark asked' | 'go-ahead' */
+  signal: string
+  /** Null is normal and expected — a proposal or a go-ahead carries no figure. */
+  amt?: number | null
+  last_mail: string
+  hits: number
+  subject?: string | null
+  evidence?: string | null
+  message_id: string
+  attachments?: string[] | null
+  company_name?: string | null
+}
+
+export async function getDealSignals(): Promise<DealSignal[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_unlogged_deal_signals')
+    .select('thread_id, client_key, pm_owner, signal, amt, last_mail, hits, subject, evidence, message_id, attachments, company_name')
+    .order('amt', { ascending: false, nullsFirst: false })
+  return ((data as any[]) || []).map(r => ({ ...r, amt: r.amt == null ? null : Number(r.amt) }))
+}
+
+/**
+ * "Not a quote." Recorded against the thread so it never comes back.
+ *
+ * This matters more than the detection does. The old age-based Review flag fired on 83%
+ * of open deals and was therefore read once and ignored for ever; a list with no sticky
+ * dismiss becomes that list within a fortnight.
+ */
+export async function dismissDealSignal(threadId: string, actor?: string, reason?: string): Promise<boolean> {
+  if (!supabase) return false
+  const { error } = await supabase.from('deal_signal_dismissals')
+    .upsert({ thread_id: threadId, dismissed_by: actor ?? null, reason: reason ?? null }, { onConflict: 'thread_id' })
+  return !error
+}
+
 /**
  * A deal that turned out to be the same work as something already recorded.
  *

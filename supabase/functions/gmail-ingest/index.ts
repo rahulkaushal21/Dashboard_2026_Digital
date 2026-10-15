@@ -5,7 +5,7 @@
 // Body: { mailbox?, b64 }                      ← preferred, see the WAF note below
 //       { mailbox?, messages: [...] }          ← still accepted
 //   where a message is { message_id, rfc_message_id?, mailbox?, thread_id, subject,
-//   from_addr, to_addrs, cc_addrs, msg_date, snippet, body, has_external }
+//   from_addr, to_addrs, cc_addrs, msg_date, snippet, body, attachments?, has_external }
 // Auth: ?token=... (shared secret).
 //
 // ── CLOUDFLARE WAF: WHY THE PAYLOAD ARRIVES BASE64 (4 Oct 2026) ─────────────────
@@ -125,6 +125,13 @@ Deno.serve(async (req) => {
         msg_date: r.msg_date ? new Date(String(r.msg_date)).toISOString() : null,
         snippet: r.snippet ? String(r.snippet).slice(0, 1000) : null,
         body: r.body ? String(r.body).slice(0, 60000) : null,
+        // FILENAMES ONLY, never the bytes. A file called "Woodys_Proposal_v2.pdf" is
+        // most of the signal and costs nothing; the contents would mean a Drive
+        // conversion per attachment and a payload far past the 5 MB this endpoint
+        // takes. Capped so one mail with forty files cannot dominate a row.
+        attachments: Array.isArray(r.attachments)
+          ? (r.attachments as unknown[]).slice(0, 12).map((a) => String(a).slice(0, 300))
+          : null,
         has_external: !!r.has_external,
         processed: false,
         archived: backfill,

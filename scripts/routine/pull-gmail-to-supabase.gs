@@ -241,6 +241,18 @@ function pullGmailToSupabase() {
         // Tested on the RAW body: the include-signal may sit in the quoted part.
         if (!external && !INCLUDE_INTERNAL_RE.test(rawBody.slice(0, 4000) + ' ' + m.getSubject())) continue;
         var body = trimQuoted(rawBody);
+        // ATTACHMENT NAMES, not the files. A name like "Woodys_Proposal_v2.pdf" is the
+        // signal; the bytes would mean a Drive conversion each and a payload far past
+        // what the ingest endpoint takes. getName() reads the part header and does not
+        // download the file, which matters because the Gmail quota is already the thing
+        // that binds — the backfill drained it once and killed live capture for 21 hours.
+        // Inline images are excluded: every signature logo would otherwise be an
+        // "attachment", and nothing is learned from that.
+        var names = [];
+        try {
+          var atts = m.getAttachments({ includeInlineImages: false, includeAttachments: true });
+          for (var a = 0; a < atts.length && a < 12; a++) names.push(atts[a].getName());
+        } catch (e) { /* a mail whose parts will not enumerate still gets captured */ }
         out.push({
           message_id: m.getId(),
           rfc_message_id: rfcId(m),
@@ -253,6 +265,7 @@ function pullGmailToSupabase() {
           msg_date: m.getDate().toISOString(),
           snippet: sliceSafe(body, 300),
           body: sliceSafe(body, MAX_BODY_CHARS),
+          attachments: names,
           has_external: external
         });
         if (epoch > maxPushedEpoch) maxPushedEpoch = epoch;

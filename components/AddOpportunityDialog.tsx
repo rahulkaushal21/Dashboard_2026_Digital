@@ -42,9 +42,18 @@ const F = ({ label, children, hint }: { label: string; children: React.ReactNode
   </label>
 )
 
-export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (id: number) => void }) {
-  const [company, setCompany] = useState('')
-  const [value, setValue] = useState('')
+export default function AddOpportunityDialog({ onClose, onAdded, prefill }: {
+  onClose: () => void
+  onAdded: (id: number) => void
+  /**
+   * Opened from a detected signal rather than from the + button: the client, the figure
+   * and the subject are already known. The value may be absent and that is fine — a
+   * proposal or a go-ahead is a deal before anybody has named a price.
+   */
+  prefill?: { company?: string | null; value?: number | null; subject?: string | null; note?: string | null }
+}) {
+  const [company, setCompany] = useState(prefill?.company || '')
+  const [value, setValue] = useState(prefill?.value != null ? String(prefill.value) : '')
   const [currency, setCurrency] = useState('USD')
   const [quoteDate, setQuoteDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [serviceDept, setServiceDept] = useState('')
@@ -57,9 +66,9 @@ export default function AddOpportunityDialog({ onClose, onAdded }: { onClose: ()
   const [salesPerson, setSalesPerson] = useState('')
   const [pmOwner, setPmOwner] = useState('')
   const [geo, setGeo] = useState('')
-  const [subject, setSubject] = useState('')
+  const [subject, setSubject] = useState(prefill?.subject || '')
   const [contactEmail, setContactEmail] = useState('')
-  const [note, setNote] = useState('')
+  const [note, setNote] = useState(prefill?.note || '')
   const [channel, setChannel] = useState('')
   // Repeat or New. The RPC has always taken it and the form never asked, so every
   // hand-added deal arrived unclassified and the PM met the question for the first time

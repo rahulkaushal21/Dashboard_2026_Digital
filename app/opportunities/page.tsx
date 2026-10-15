@@ -19,9 +19,11 @@ import DateCell from '@/components/DateCell'
 import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, setOpportunityState, mergeOpportunity, unmergeOpportunity, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import StaleOpportunitiesBanner from '@/components/StaleOpportunitiesBanner'
+import UnloggedQuotesBanner from '@/components/UnloggedQuotesBanner'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import BillTogetherDialog from '@/components/BillTogetherDialog'
 import MergeDealDialog from '@/components/MergeDealDialog'
+import type { DealSignal } from '@/lib/supabase'
 import MultiSelect from '@/components/MultiSelect'
 import { currentEmail, getStoredProfile } from '@/lib/access'
 import { NBD_TEAM } from '@/lib/nbd'
@@ -726,6 +728,10 @@ window.alert('Could not save that — please try again.')
 const clearState = (x: Opportunity): Partial<Opportunity> =>
 x.manual_state ? { manual_state: null, manual_state_reason: undefined, manual_state_at: undefined, manual_state_by: undefined, status: x.sheet_status ?? x.status } : {}
 
+// A detected quote being turned into a deal: the Add dialog opens already filled from
+// the thread. Held apart from showAdd so the plain + button still opens an empty form.
+const [fromSignal, setFromSignal] = useState<DealSignal | null>(null)
+
 // Merging a duplicate away, and undoing it. Not optimistic: the database refuses some
 // merges outright (a confirmed deal carrying revenue, a project ID that does not exist)
 // and the refusal is the useful part, so the row only moves once the merge has landed.
@@ -1021,7 +1027,23 @@ return (
 {/* Open deals the invoice app has already closed. Renders nothing when there are none,
     so it prompts when there is something to do and is invisible the rest of the time. */}
 <StaleOpportunitiesBanner onChanged={reload} />
+{/* Money discussed in email that never became a deal — read out of the body and the
+    attachment names, because the subject line is where both of September's missed
+    quotes were hiding. */}
+<UnloggedQuotesBanner onAdd={setFromSignal} />
 {showAdd && <AddOpportunityDialog onClose={() => setShowAdd(false)} onAdded={() => { setShowAdd(false); reload() }} />}
+{fromSignal && (
+  <AddOpportunityDialog
+    prefill={{
+      company: fromSignal.company_name,
+      value: fromSignal.amt,
+      subject: fromSignal.subject,
+      note: `From email, ${(fromSignal.last_mail || '').slice(0, 10)} — ${fromSignal.signal}.`
+        + (fromSignal.evidence ? ` "${fromSignal.evidence.slice(0, 200)}"` : ''),
+    }}
+    onClose={() => setFromSignal(null)}
+    onAdded={() => { setFromSignal(null); reload() }} />
+)}
 {billing && pickedRows.length > 1 && (
   <BillTogetherDialog deals={pickedRows} onClose={() => setBilling(false)}
     onChosen={(primary, total) => {
