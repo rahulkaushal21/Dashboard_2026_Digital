@@ -32,22 +32,31 @@ export const isOwner = (email?: string | null) => (email || '').trim().toLowerCa
 /**
  * Who may see the PM incentive working.
  *
- * ONE PERSON, and deliberately not OWNER_EMAIL. Rahul asked for this to be his own eyes
- * only — not the five dashboard admins, not web@uplers.com, and not the PMs it is about.
- * isOwner() and is_admin both return true for people who must NOT see it, so this
- * cannot reuse either of them.
+ * A NAMED LIST, and deliberately not is_admin or OWNER_EMAIL. Both of those return true
+ * for people who are not on this list, so neither could be reused. It began as Rahul
+ * alone and grew to five on 15 Oct 2026; it is still an enumeration of individuals, not
+ * a role, and web@uplers.com and the PMs it is about remain outside it.
  *
  * This constant only decides whether to ASK. The real gate is in the database:
- * pm_incentives() refuses anyone else and returns no rows, so the figures and the rates
- * never reach the browser for anybody but Rahul. That matters because the dashboard is
- * a static export — anything the page computed itself would sit in public JavaScript
- * that needs no login at all to read.
+ * pm_incentive_sheet() checks may_see_incentive() against incentive_viewers and refuses
+ * anyone else, so the figures and the rates never reach the browser for anybody not on
+ * it. That matters because the dashboard is a static export — anything the page computed
+ * itself would sit in public JavaScript that needs no login at all to read.
+ *
+ * KEEP THE TWO IN STEP. This list decides the menu entry and the route; the table decides
+ * the data. Someone added here but not there reaches a page that says "Nothing to show".
  */
-export const INCENTIVE_EMAIL = 'rahul.k@mavlers.com'
+export const INCENTIVE_EMAILS = [
+  'rahul.k@mavlers.com',
+  'krunal@mavlers.com',
+  'krunal.s@mavlers.com',
+  'hiren@mavlers.com',
+  'pratik@mavlers.com',
+]
 /** Deliberately NOT in PAGES: that list is what every signed-in person may see. */
 export const INCENTIVE_PATH = '/pm-team/incentive'
 export const canSeeIncentive = (email?: string | null) =>
-  (email || '').trim().toLowerCase() === INCENTIVE_EMAIL
+  INCENTIVE_EMAILS.includes((email || '').trim().toLowerCase())
 
 export const isAllowedDomain = (email?: string | null): boolean => {
   const at = (email || '').trim().toLowerCase().split('@')[1]
@@ -166,7 +175,7 @@ export const profileFor = (email: string, fullName?: string | null, isAdmin = fa
 // the PM Team pages, which narrow to the viewer's own record.
 export function canSee(profile: Profile | null, path: string): boolean {
   if (!profile || !profile.is_active) return false
-  // The incentive sheet is Rahul's alone — see INCENTIVE_EMAIL. Checked here rather than
+  // The incentive sheet has a named audience — see INCENTIVE_EMAILS. Checked here rather than
   // in the sidebar so the SAME rule hides the menu entry and blocks the URL: the route
   // guard in AuthProvider reads this function too, and a page that is merely absent from
   // the rail is still reachable by typing its address.

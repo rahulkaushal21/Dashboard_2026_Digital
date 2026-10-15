@@ -8,15 +8,15 @@ import { getPmIncentives, type PmIncentiveRow } from '@/lib/supabase'
 //
 // ITS OWN PAGE, AND ITS OWN MENU ENTRY, because it is not for the same audience as the
 // rest of PM Team. canSee() in lib/access hides the rail entry and refuses the route for
-// everybody but Rahul — one rule covering both, since a page merely missing from the
-// sidebar is still reachable by typing its address.
+// everybody outside INCENTIVE_EMAILS — one rule covering both, since a page merely
+// missing from the sidebar is still reachable by typing its address.
 //
 // WHY THERE IS NO ARITHMETIC HERE. The dashboard is a static export, so anything this
 // file worked out would ship inside public JavaScript that needs no login to read — the
 // rates and every payout, one "view source" away. The page renders what
-// pm_incentive_sheet() returns and nothing else, and that function hands rows to one
-// email address. Even the base rate on screen is divided back out of the figures rather
-// than written down.
+// pm_incentive_sheet() returns and nothing else, and that function hands rows only to the
+// addresses listed in incentive_viewers. Even the base rate on screen is divided back out
+// of the figures rather than written down.
 
 const usd = (n: number) => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const whole = (n: number | null) => n == null ? '—' : '$' + Math.round(n).toLocaleString('en-US')
