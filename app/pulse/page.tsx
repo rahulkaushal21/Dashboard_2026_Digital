@@ -119,7 +119,7 @@ export default function PulsePage() {
 
     // ── Deals ────────────────────────────────────────────────────────────────────
     for (const o of opps) {
-      if (o.rolled_into != null) continue
+      if (o.rolled_into != null || o.merged) continue
       const x = o as any
       const base = {
         client: o.company_name || '—', title: one(o.source_subject) || 'Untitled deal',

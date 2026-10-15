@@ -205,7 +205,7 @@ export function buildPmStats(
     const s = out.get(slug); if (!s) continue
     for (const [k, v] of Object.entries(m)) s.byMonth.set(k, v)
   }
-  for (const o of opps) { const pm = pmOf(o.pm_owner); if (pm) out.get(pm.slug)!.opps.push(o) }
+  for (const o of opps) { if (o.merged) continue; const pm = pmOf(o.pm_owner); if (pm) out.get(pm.slug)!.opps.push(o) }
   for (const q of quotes) { const pm = pmOf(q.pc_sme); if (pm) out.get(pm.slug)!.quotes.push(q) }
   // Feedback follows the client, not the cell.
   //
@@ -224,6 +224,11 @@ export function buildPmStats(
   // Email-origin deals that read as New Development, so Q2C stops depending on
   // somebody remembering to raise a Quotes line.
   for (const o of opps) {
+    // A merged deal is the same work as something already counted, so it is not a quote
+    // of its own and must not reach the Q2C cohort at all — not as a win, not as a loss,
+    // not in the denominator. Merging exists precisely so a duplicate stops costing the
+    // PM their conversion rate.
+    if (o.merged) continue
     if (o.origin !== 'email' || !emailNewDev(o)) continue
     const pm = pmOf(o.pm_owner); if (!pm) continue
     out.get(pm.slug)!.emailNewDevOpps.push(o)

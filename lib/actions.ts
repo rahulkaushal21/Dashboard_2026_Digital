@@ -35,7 +35,7 @@ export const isOpenProject = (r: LedgerRow) => !/^(delivered|cancel)/i.test((r.d
 // Same verdict the Opportunities page reaches, kept to the open case: anything won,
 // booked, lost or on hold is not a quote waiting on anybody.
 export const isOpenDeal = (x: Opportunity) => {
-  if (x.won || x.email_won || x.booked_month || x.email_lost || x.rolled_into) return false
+  if (x.won || x.email_won || x.booked_month || x.email_lost || x.rolled_into || x.merged) return false
   const s = (x.status || '').toLowerCase()
   return !(s.includes('cancel') || s === 'lost' || s.includes('hold') || s.includes('won') || s.includes('confirm'))
 }

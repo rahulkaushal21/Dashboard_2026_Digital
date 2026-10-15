@@ -69,6 +69,16 @@ local_value?: number
 // Billed as part of another deal: several ad-hoc jobs, one invoice. This one is won and
 // books nothing of its own — the deal it points at carries the combined amount.
 rolled_into?: number | null
+// MERGED — this deal is the same work as something already recorded, so it is not a
+// deal of its own at all. Either a duplicate of another opportunity (merged_into), or
+// part of a project already on the sheet (merged_project). It is deliberately NOT Lost:
+// a duplicate that gets cancelled costs the PM their quote-to-conversion for a quote
+// that only ever existed once. See merge_opportunity() in the database.
+merged_into?: number | null
+merged_project?: string | null
+merged_reason?: string | null; merged_at?: string | null; merged_by?: string | null
+/** Set by getOpportunities: either kind of merge. One test for every page. */
+merged?: boolean
 // "Might not come" — a human call that this open quote probably won't convert.
 // The deal stays Open (it isn't Lost), but it's discounted from the realistic view.
 unlikely?: boolean; unlikely_reason?: string; unlikely_at?: string; unlikely_by?: string
@@ -654,7 +664,11 @@ flag_no_agency: iq?.flag_no_agency || undefined,
 flag_stale: iq?.flag_stale || undefined,
 flag,
 // The dashboard's own call outranks the sheet's word (see manual_state on the type).
-status: o.manual_state === 'cancelled' ? 'Cancelled' : o.manual_state === 'on_hold' && !/lost|cancel/i.test(o.status || '') ? 'On Hold' : o.status,
+// A merged deal outranks every other word on the row, including the sheet's. It is
+// not open, not lost and not won — it is not a deal, and only one segment can say so.
+status: (o.merged_into != null || o.merged_project) ? 'Merged'
+  : o.manual_state === 'cancelled' ? 'Cancelled' : o.manual_state === 'on_hold' && !/lost|cancel/i.test(o.status || '') ? 'On Hold' : o.status,
+merged: o.merged_into != null || !!o.merged_project,
 sheet_status: o.status,
 } as Opportunity
 })
@@ -1866,6 +1880,70 @@ export async function getTechnologyOptions(): Promise<string[]> {
 export async function getClientTopTechnology(): Promise<Map<string, string>> {
   const rows = (await read<{ client_key: string; technology: string }>('web_client_top_technology', 'client_key, technology', 'client_key')) || []
   return new Map(rows.map(r => [r.client_key, r.technology]))
+}
+
+/**
+ * A deal that turned out to be the same work as something already recorded.
+ *
+ * TWO SHAPES, ONE RULE. Either it duplicates another opportunity — a PM raised it by
+ * hand and the Quotes sync then brought the same deal in from the sheet — or the work is
+ * already running under a project on the sheet and the quote was never a separate deal
+ * at all. Pass ONE of `into` or `project`.
+ *
+ * WHY NOT JUST MARK IT CANCELLED, which is what people were doing: because a quote that
+ * only ever existed once would then count twice in the Q2C denominator, once as a win
+ * and once as a loss. Rahul, 15 Oct 2026 — "cancelling opportunities cost team over
+ * quote to conversion". A merged deal leaves the cohort entirely instead; it is not a
+ * quote that failed, it is a quote that was never separate.
+ *
+ * Returns the database's own refusal in `error`, because the useful information is in
+ * the wording — "This deal is confirmed and booking revenue" tells the PM what to do
+ * next and a bare false would throw that away.
+ */
+export async function mergeOpportunity(
+  id: number,
+  target: { into?: number; project?: string },
+  opts?: { actor?: string; reason?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('merge_opportunity', {
+    p_id: id,
+    p_into: target.into ?? null,
+    p_project: target.project ?? null,
+    p_actor: opts?.actor ?? null,
+    p_reason: opts?.reason ?? null,
+  })
+  if (error) return { ok: false, error: error.message }
+  const says = (data as string) || ''
+  return says ? { ok: false, error: says } : { ok: true }
+}
+
+/** Undo a merge. Every merge is reversible, which is what makes it safe to offer. */
+export async function unmergeOpportunity(id: number, actor?: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('unmerge_opportunity', { p_id: id, p_actor: actor ?? null })
+  if (error) return { ok: false, error: error.message }
+  const says = (data as string) || ''
+  return says ? { ok: false, error: says } : { ok: true }
+}
+
+export interface ProjectLookup {
+  project_id: string; company_name?: string; pm_owner?: string
+  amount_usd?: number; booking_month?: string; service_name?: string
+}
+/**
+ * Does this project ID exist, and whose is it? Shown back before the merge is saved, so
+ * a mistyped ID is caught by the person rather than by the month-end figures.
+ */
+export async function lookupProject(projectId: string): Promise<ProjectLookup | null> {
+  if (!supabase) return null
+  const id = projectId.trim()
+  if (!id) return null
+  const { data } = await supabase.from('web_project_ledger')
+    .select('project_id, company_name, pm_owner, amount_usd, booking_month, service_name')
+    .eq('project_id', id).limit(1)
+  const row = (data as ProjectLookup[] | null)?.[0]
+  return row || null
 }
 
 /**

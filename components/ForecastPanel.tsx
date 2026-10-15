@@ -170,7 +170,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
     // first appeared as a WON quote in the Quotes tab / email that month.
     const ret = new Set(fc.runrate.retainers.map(r => r.name.trim().toLowerCase()))
     const adhocIn = (k: string) => [...(byMonth.get(k)?.entries() || [])].reduce((s, [c, v]) => s + (ret.has(c) ? 0 : v), 0)
-    const live = opps.filter(o => o.rolled_into == null)
+    const live = opps.filter(o => o.rolled_into == null && !o.merged)
     const oMonth = (o: Opportunity) => mo(o.first_date || o.source_date || o.created_at)
     const wonIn = (k: string) => live.filter(o => o.won && oMonth(o) === k).reduce((s, o) => s + (o.won_amount || o.est_value || 0), 0)
     const adhoc3 = last3.reduce((s, k) => s + adhocIn(k), 0)

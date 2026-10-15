@@ -13,14 +13,15 @@ import KPICard from '@/components/KPICard'
 import CardDetail, { daysSince, fmtDay, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
-import { ChevronDown, ChevronRight, Check, Pause, TrendingDown, XCircle, Ban, EyeOff, PanelRightOpen } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Pause, TrendingDown, XCircle, Ban, EyeOff, PanelRightOpen, Merge } from 'lucide-react'
 import InfoTip from '@/components/InfoTip'
 import DateCell from '@/components/DateCell'
-import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, setOpportunityState, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
+import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, setOpportunityState, mergeOpportunity, unmergeOpportunity, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
 import AddOpportunityDialog from '@/components/AddOpportunityDialog'
 import StaleOpportunitiesBanner from '@/components/StaleOpportunitiesBanner'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import BillTogetherDialog from '@/components/BillTogetherDialog'
+import MergeDealDialog from '@/components/MergeDealDialog'
 import MultiSelect from '@/components/MultiSelect'
 import { currentEmail, getStoredProfile } from '@/lib/access'
 import { NBD_TEAM } from '@/lib/nbd'
@@ -125,6 +126,10 @@ const quotedAmount = (x: Opportunity): number | undefined => x.local_value ?? x.
 // live duplicate — Point B's $5,200. The one case SQL cannot see is booked_month, which
 // is matched against the revenue rows on this side.
 const oppStatus = (x: Opportunity) => {
+// Merged outranks every other verdict, INCLUDING a win. The sheet can keep calling a
+// duplicate Confirmed for as long as it likes; a deal that is the same work as another
+// one is not a deal of its own, and it must never land in Open, Won or Lost.
+if (x.merged) return 'Merged'
 if (x.won) return 'Won'                       // a booking always wins
 if (x.email_won) return 'Won'                 // confirmed here; the sheet may not know yet
 if (x.booked_month) return 'Won'              // already invoiced in the revenue sheet
@@ -149,10 +154,11 @@ const cancelLag = (_x: Opportunity) => false
 const sheetLag = (_x: Opportunity) => false
 // Every manual call, whatever its verdict — the set you'd look through to change your mind.
 const markedByHand = (x: Opportunity) => !!(x.email_won || x.email_lost || x.unlikely || x.manual_state)
-const statusTone = (s: string) => s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : s === 'Not opp' ? 'bg-slate-500/15 text-slate-400' : 'bg-mav-line text-mav-muted'
+const statusTone = (s: string) => s === 'Merged' ? 'bg-violet-500/15 text-violet-300' : s === 'Won' ? 'bg-green-500/15 text-green-400' : s === 'Lost' ? 'bg-red-500/15 text-red-400' : s === 'On Hold' ? 'bg-orange-500/15 text-orange-300' : s === 'Not opp' ? 'bg-slate-500/15 text-slate-400' : 'bg-mav-line text-mav-muted'
 // What the status pill says. Cancelled sits in the Lost tab but keeps its own word.
 const statusLabel = (x: Opportunity) => {
 const st = oppStatus(x)
+if (st === 'Merged') return x.merged_project ? 'Merged into project' : 'Merged — duplicate'
 if (st === 'Not opp') return cancelLag(x) ? 'Not an opp · sheet open' : 'Not an opp'
 if (st === 'Lost' && (x.manual_state === 'cancelled' || /cancel/i.test(x.status || ''))) return cancelLag(x) ? 'Cancelled · sheet open' : 'Cancelled'
 if (st === 'On Hold' && holdLag(x)) return 'On Hold · sheet open'
@@ -171,6 +177,7 @@ const ACTION_TONE = {
   cancel:   { idle: 'border-rose-500/50 text-rose-300 hover:bg-rose-500/10',        on: 'bg-rose-500/25 border-rose-400 text-rose-200' },
   notopp:   { idle: 'border-slate-500/50 text-slate-400 hover:bg-slate-500/10',     on: 'bg-slate-500/30 border-slate-400 text-slate-200' },
   open:     { idle: 'border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10',  on: 'border-mav-yellow/50 text-mav-yellow' },
+  merge:    { idle: 'border-violet-500/50 text-violet-300 hover:bg-violet-500/10',  on: 'bg-violet-500/25 border-violet-400 text-violet-200' },
 } as const
 const IconAction = ({ icon: Icon, label, tone, active, disabled, onClick }: {
   icon: typeof Check; label: string; tone: keyof typeof ACTION_TONE; active?: boolean; disabled?: boolean; onClick: () => void
@@ -580,7 +587,7 @@ return 0
 }, [withDismissed, matches, deptById, unit, search, fType, fGeo, fAM, fPM, fStatus, fSvc, fTech, fDept, flagOnly, unlikelyOnly, lagOnly, markedOnly, committedOnly, misTagOnly, fAge, from, to, vMin, vMax, sort])
 
 const statusCounts = useMemo(() => {
-const c: Record<string, number> = { '': 0, Open: 0, 'On Hold': 0, Won: 0, Lost: 0, 'Not opp': 0 }
+const c: Record<string, number> = { '': 0, Open: 0, 'On Hold': 0, Won: 0, Lost: 0, Merged: 0, 'Not opp': 0 }
 for (const x of withDismissed) if (keep(x, true)) { const st = oppStatus(x); if (st !== 'Not opp') c['']++; c[st] = (c[st] || 0) + 1 }
 return c
 // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -718,6 +725,27 @@ window.alert('Could not save that — please try again.')
 // the status it had been folded into.
 const clearState = (x: Opportunity): Partial<Opportunity> =>
 x.manual_state ? { manual_state: null, manual_state_reason: undefined, manual_state_at: undefined, manual_state_by: undefined, status: x.sheet_status ?? x.status } : {}
+
+// Merging a duplicate away, and undoing it. Not optimistic: the database refuses some
+// merges outright (a confirmed deal carrying revenue, a project ID that does not exist)
+// and the refusal is the useful part, so the row only moves once the merge has landed.
+const [merging, setMerging] = useState<Opportunity | null>(null)
+const doMerge = async (target: { into?: number; project?: string }, reason: string): Promise<string | null> => {
+const x = merging
+if (!x) return 'Nothing selected.'
+const r = await mergeOpportunity(x.id, target, { actor: currentEmail() || undefined, reason })
+if (!r.ok) return r.error || 'Could not merge that.'
+await reload()
+setSel(null)
+return null
+}
+const undoMerge = async (x: Opportunity) => {
+if (!window.confirm(`Un-merge "${x.company_name}"?\n\nIt goes back to being a deal of its own, and counts in quote-to-conversion again.`)) return
+const r = await unmergeOpportunity(x.id, currentEmail() || undefined)
+if (!r.ok) { window.alert(r.error || 'Could not un-merge that.'); return }
+await reload()
+setSel(s => s && s.id === x.id ? { ...s, merged: false, merged_into: null, merged_project: null } : s)
+}
 
 const reset = () => { setSearch(''); setFType(''); setFGeo([]); setFAM([]); setFPM([]); setFStatus(''); setFSvc([]); setFTech([]); setFDept([]); setFrom('2026-04-01'); setTo(new Date().toISOString().slice(0, 10)); setFlagOnly(false); setUnlikelyOnly(false); setLagOnly(false); setMarkedOnly(false); setCommittedOnly(false); setMisTagOnly(false); setFAge(''); setVMin(''); setVMax('') }
 
@@ -1004,6 +1032,11 @@ return (
       setConfirming({ ...primary, value: total, local_value: total, est_value: total })
     }} />
 )}
+{merging && (
+  <MergeDealDialog deal={merging}
+    siblings={all.filter(o => clientKey(o.company_name) === clientKey(merging.company_name))}
+    onClose={() => setMerging(null)} onMerge={doMerge} />
+)}
 {confirming && (
   <ConfirmDealDialog deal={confirming} alsoBilling={alsoBilling}
     onClose={() => { setConfirming(null); setAlsoBilling([]) }}
@@ -1116,6 +1149,7 @@ className="shrink-0 rounded-full border border-mav-yellow/50 text-mav-yellow px-
     { id: 'On Hold', label: 'On Hold', count: statusCounts['On Hold'] },
     { id: 'Won', label: 'Won', count: statusCounts['Won'] },
     { id: 'Lost', label: 'Lost / Cancelled', count: statusCounts['Lost'] },
+    { id: 'Merged', label: 'Merged', count: statusCounts['Merged'] },
     { id: 'Not opp', label: 'Not an opp', count: statusCounts['Not opp'] },
     { id: '', label: 'All', count: statusCounts[''] },
   ]} />
@@ -1316,6 +1350,9 @@ return (
 {(live || x.email_lost) && <IconAction icon={XCircle} tone="lost" label={x.email_lost ? 'Undo Lost' : 'Mark Lost — went elsewhere / said no'} active={!!x.email_lost} disabled={savingLost} onClick={() => toggleLost(x)} />}
 {(live || x.manual_state === 'cancelled') && <IconAction icon={Ban} tone="cancel" label={x.manual_state === 'cancelled' ? 'Undo Cancelled' : 'Mark Cancelled — client called it off'} active={x.manual_state === 'cancelled'} disabled={busy} onClick={() => toggleState(x, 'cancelled')} />}
 {(live || x.manual_state === 'not_opp') && <IconAction icon={EyeOff} tone="notopp" label={x.manual_state === 'not_opp' ? 'Undo — it is an opportunity' : 'Not an opportunity — remove from pipeline'} active={x.manual_state === 'not_opp'} disabled={busy} onClick={() => toggleState(x, 'not_opp')} />}
+{/* Deliberately beside Cancel, because it is the thing people were reaching for
+    Cancel to do. A merged deal shows it filled, and clicking undoes the merge. */}
+{(live || x.merged) && <IconAction icon={Merge} tone="merge" label={x.merged ? (x.merged_project ? `Merged into project ${x.merged_project} — click to undo` : 'Merged as a duplicate — click to undo') : 'Merge — the same work as another deal or an existing project'} active={!!x.merged} disabled={busy} onClick={() => x.merged ? undoMerge(x) : setMerging(x)} />}
 <IconAction icon={PanelRightOpen} tone="open" label="Open the full record" onClick={() => setSel(x)} />
 </div>
 )
@@ -1380,7 +1417,28 @@ return (
     reversible from here — pick a different verdict, or Undo to hand the deal
     back to the sheet. Offered on live deals and on anything already marked by
     hand; a deal the SHEET settled has no buttons, because the sheet owns it. */}
-{(oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || markedByHand(sel)) && (
+{sel.merged && (
+<div className="mb-4 rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2.5">
+  <div className="text-sm font-medium text-violet-200 mb-0.5">
+    {sel.merged_project ? 'Merged into an existing project' : 'Merged — a duplicate of another deal'}
+  </div>
+  <div className="text-xs text-mav-fg/70">
+    {sel.merged_project
+      ? <>The work is booked under <span className="font-mono">{sel.merged_project}</span>; this quote was never a separate deal.</>
+      : <>The real deal is #{sel.merged_into}. This row stays for its history and books nothing of its own.</>}
+    {sel.merged_reason ? <> — “{sel.merged_reason}”</> : null}
+  </div>
+  <div className="text-[11px] text-mav-muted mt-1">
+    It counts as neither a win nor a loss, so it is out of quote-to-conversion entirely.
+    {sel.merged_by ? ` Merged by ${sel.merged_by}.` : ''}
+  </div>
+  <button onClick={() => undoMerge(sel)}
+    className="mt-2 text-xs px-3 py-1.5 rounded-md border border-violet-400/50 text-violet-200 hover:bg-violet-500/10">
+    Un-merge
+  </button>
+</div>
+)}
+{!sel.merged && (oppStatus(sel) === 'Open' || oppStatus(sel) === 'On Hold' || markedByHand(sel)) && (
 <div className={`mb-4 rounded-lg border px-3 py-2.5 ${sel.email_won ? 'border-green-500/40 bg-green-500/10' : sel.email_lost ? 'border-red-500/40 bg-red-500/10' : sel.manual_state === 'cancelled' ? 'border-rose-500/40 bg-rose-500/10' : sel.manual_state === 'not_opp' ? 'border-slate-500/40 bg-slate-500/10' : sel.manual_state === 'on_hold' ? 'border-orange-500/40 bg-orange-500/10' : sel.unlikely ? 'border-orange-500/40 bg-orange-500/10' : 'border-mav-line bg-mav-dark/40'}`}>
 <div className="text-sm font-medium mb-0.5">
 {sel.email_won ? <span className="text-green-300">Confirmed — Won</span>
