@@ -10,7 +10,7 @@ import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 
 import Link from 'next/link'
-import { getBusinessNumbers, getBigOpenDeals, getOpportunityDepts, getMonthDateMismatches, BIZ_ORDER, type BizRow, type MonthDateMismatch, type Opportunity } from '@/lib/supabase'
+import { getBusinessNumbers, getBigOpenDeals, getOpportunityDepts, getMonthDateMismatches, getBookingTargets, BIZ_ORDER, type BizRow, type MonthDateMismatch, type Opportunity, type BookingTarget } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Business Numbers — the month, by service, for somebody who runs the business.
@@ -87,6 +87,37 @@ const Bars = ({ now, before, max }: { now: number; before: number; max: number }
   </div>
 )
 
+// Revenue against the month's target: the figure, then how far along it is. The bar is
+// the share of target already booked, capped at full so a month that beat its target does
+// not spill out of its cell. Red under a third, amber under two thirds, green from there.
+const Against = ({ now, target }: { now: number; target: number | null }) => {
+  if (target === null) return <span className="text-mav-fg/35 text-xs">no target</span>
+  if (target === 0) return <span className="text-mav-muted text-xs">target is 0</span>
+  const p = (now / target) * 100
+  const tone = p >= 100 ? 'bg-green-400' : p >= 66 ? 'bg-mav-yellow' : p >= 33 ? 'bg-amber-400' : 'bg-red-400'
+  return (
+    <div className="min-w-[7rem]">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="tabular-nums">{fmtUsd(target)}</span>
+        <span className={`text-xs tabular-nums ${p >= 100 ? 'text-green-400' : 'text-mav-muted'}`}>{Math.round(p)}%</span>
+      </div>
+      <div className="h-2 rounded-sm bg-mav-dark overflow-hidden mt-1">
+        <div className={`h-full rounded-sm ${tone}`} style={{ width: `${Math.min(100, p)}%` }} />
+      </div>
+    </div>
+  )
+}
+
+// The first day of every month the window touches, so a two-month range reads against
+// two months of target.
+const monthsIn = (from: string, to: string): string[] => {
+  const out: string[] = []
+  const a = new Date(+from.slice(0, 4), +from.slice(5, 7) - 1, 1)
+  const b = new Date(+to.slice(0, 4), +to.slice(5, 7) - 1, 1)
+  for (let d = a; d <= b; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) out.push(ymd(d))
+  return out
+}
+
 export default function BusinessNumbers() {
   const [rowsAll, setRows] = useState<BizRow[]>([])
   const [dealsAll, setDeals] = useState<Opportunity[]>([])
@@ -104,6 +135,9 @@ export default function BusinessNumbers() {
   const deals = useMemo(() => dealsAll.filter(d => inUnit(oppDepts.get(Number(d.id)), unit)).slice(0, 25), [dealsAll, oppDepts, unit])
   const [unpriced, setUnpriced] = useState(0)
   const [loading, setLoading] = useState(true)
+  // The month's booking targets, typed in Settings → Targets. Fetched for every month the
+  // window touches; a service with no row has no target and the table says so.
+  const [targets, setTargets] = useState<BookingTarget[]>([])
   // Normally empty, and then this renders nothing at all.
   const [mismatchAll, setMismatch] = useState<MonthDateMismatch[]>([])
   // The sheet rows carry their service department, so the warning follows the switch too.
@@ -128,6 +162,21 @@ export default function BusinessNumbers() {
   }, [from, to])
 
   useEffect(() => {
+    if (!from || !to || from > to) return
+    const ms = monthsIn(from, to)
+    getBookingTargets(ms[0], ms[ms.length - 1]).then(setTargets).catch(() => setTargets([]))
+  }, [from, to])
+
+  // Sum of the window's months for a service, or null when none of them has a target.
+  const targetFor = (bucket: string): number | null => {
+    const hit = targets.filter(t => t.dept === bucket)
+    return hit.length ? hit.reduce((n, t) => n + t.target_usd, 0) : null
+  }
+  // A target is a whole-month number. On a part-month window it still shows, labelled as
+  // the month's figure, rather than being pro-rated into something nobody set.
+  const partMonth = !!rows[0] && !rows[0].whole_month
+
+  useEffect(() => {
     // Every priced open deal, ranked; the page cuts to 25 once the department is applied.
     getBigOpenDeals(100000).then(d => { setDeals(d.rows); setUnpriced(d.unpriced) })
     getOpportunityDepts().then(setOppDepts)
@@ -149,6 +198,11 @@ export default function BusinessNumbers() {
     this_revenue: 0, prev_revenue: 0, this_deals: 0, prev_deals: 0, this_quotes: 0, prev_quotes: 0,
     this_quotes_usd: 0, prev_quotes_usd: 0, open_quotes: 0, open_quotes_usd: 0,
   }), [shown])
+
+  const tTarget = useMemo(() => {
+    const hit = shown.map(r => targetFor(r.bucket)).filter((x): x is number => x !== null)
+    return hit.length ? hit.reduce((a, b) => a + b, 0) : null
+  }, [shown, targets]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const w = rows[0]
   const thisLabel = w ? `${dayLabel(w.this_start)} – ${dayLabel(w.this_end)}` : ''
@@ -244,7 +298,8 @@ export default function BusinessNumbers() {
       {/* The four numbers a leader checks first. */}
       <KPIRow cols={4}>
         {[
-          { label: 'Revenue', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue, sub: `${fmtUsd(t.prev_revenue)} in ${prevLabel}`, tone: 'accent' as const },
+          { label: 'Revenue', value: fmtUsd(t.this_revenue), now: t.this_revenue, before: t.prev_revenue,
+            sub: tTarget ? `${Math.round((t.this_revenue / tTarget) * 100)}% of the ${fmtUsd(tTarget)} target · ${fmtUsd(t.prev_revenue)} in ${prevLabel}` : `${fmtUsd(t.prev_revenue)} in ${prevLabel}`, tone: 'accent' as const },
           { label: 'Projects started', value: String(t.this_deals), now: t.this_deals, before: t.prev_deals, sub: `${t.prev_deals} in ${prevLabel}`, tone: 'green' as const },
           { label: 'Quotes raised', value: String(t.this_quotes), now: t.this_quotes, before: t.prev_quotes, sub: `${fmtUsd(t.this_quotes_usd)} quoted · ${t.prev_quotes} in ${prevLabel}`, tone: 'default' as const },
           { label: 'Open pipeline', value: fmtUsd(t.open_quotes_usd), now: 0, before: 0, sub: `${t.open_quotes} quotes still in play, all time`, tone: 'amber' as const },
@@ -294,6 +349,12 @@ export default function BusinessNumbers() {
                   <th className={`${th} text-right`}>Revenue</th>
                   <th className={`${th} text-right`}>vs last month</th>
                   <th className={th}>
+                    <span className="inline-flex items-center gap-1">
+                      Target
+                      <InfoTip text={<>The month&rsquo;s booking target per service, set in Settings → Targets. {partMonth ? <>The window is narrower than a month, so this is the whole month&rsquo;s target against part of a month&rsquo;s revenue.</> : <>A range across several months adds their targets together.</>}</>} />
+                    </span>
+                  </th>
+                  <th className={th}>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="inline-block w-2 h-2 rounded-sm bg-mav-yellow" />this
                       <span className="inline-block w-2 h-2 rounded-sm bg-mav-fg/25 ml-2" />last
@@ -313,6 +374,7 @@ export default function BusinessNumbers() {
                       <div className="text-[11px] text-mav-muted">{fmtUsd(r.prev_revenue)} last</div>
                     </td>
                     <td className={`${td} text-right`}><Delta now={r.this_revenue} before={r.prev_revenue} /></td>
+                    <td className={td}><Against now={r.this_revenue} target={targetFor(r.bucket)} /></td>
                     <td className={td}><Bars now={r.this_revenue} before={r.prev_revenue} max={maxRev} /></td>
                     <td className={`${td} text-right tabular-nums`}>{r.this_deals}
                       <div className="text-[11px] text-mav-muted">{r.prev_deals} last</div>
@@ -335,6 +397,7 @@ export default function BusinessNumbers() {
                     <div className="text-[11px] text-mav-muted font-normal">{fmtUsd(t.prev_revenue)} last</div>
                   </td>
                   <td className={`${td} text-right`}><Delta now={t.this_revenue} before={t.prev_revenue} /></td>
+                  <td className={`${td} font-semibold`}><Against now={t.this_revenue} target={tTarget} /></td>
                   <td className={td} />
                   <td className={`${td} text-right tabular-nums font-semibold`}>{t.this_deals}</td>
                   <td className={td} />

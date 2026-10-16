@@ -11,6 +11,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { listAdmins, addAdmin, removeAdmin, isOwner, OWNER_EMAIL, ALLOWED_DOMAINS, type AdminRow } from '@/lib/access'
 import PmDirectoryPanel from '@/components/PmDirectoryPanel'
 import FxRatesPanel from '@/components/FxRatesPanel'
+import TargetsPanel from '@/components/TargetsPanel'
 import PickListPanel from '@/components/PickListPanel'
 import ContractorsPanel from '@/components/ContractorsPanel'
 import { getDirectoryMember } from '@/lib/supabase'
@@ -172,13 +173,14 @@ function AdminsPanel() {
 
 // The sections of Settings, one at a time. Access is the owner's alone, so it is only
 // offered to the owner — the panel renders nothing for anyone else.
-type Tab = 'general' | 'appearance' | 'access' | 'directory' | 'fx' | 'experts' | 'contractors'
+type Tab = 'general' | 'appearance' | 'access' | 'directory' | 'fx' | 'targets' | 'experts' | 'contractors'
 const TABS: { id: Tab; label: string; ownerOnly?: boolean }[] = [
   { id: 'general',     label: 'Data sources' },
   { id: 'appearance',  label: 'Appearance' },
   { id: 'access',      label: 'PM Team access', ownerOnly: true },
   { id: 'directory',   label: 'PM directory' },
   { id: 'fx',          label: 'Currency' },
+  { id: 'targets',     label: 'Targets' },
   { id: 'experts',     label: 'Experts' },
   { id: 'contractors', label: 'Contractors' },
 ]
@@ -225,6 +227,8 @@ export default function Admin() {
       {shown === 'access' && <AdminsPanel />}
       {shown === 'directory' && <PmDirectoryPanel canEdit={canEdit} />}
       {shown === 'fx' && <FxRatesPanel canEdit={canEdit} actor={email || OWNER_EMAIL} />}
+      {/* The month's booking target per service — the sheet's H column, now typed here. */}
+      {shown === 'targets' && <TargetsPanel canEdit={canEdit} actor={email || OWNER_EMAIL} />}
       {shown === 'experts' && (
         <PickListPanel kind="expert" canEdit={canEdit} title="Experts"
           blurb="Who builds the work — the options on the Expert dropdown when a deal is confirmed, and on the ledger. Listed A–Z. Contractor is on the list deliberately: it is the sheet's own marker for work built outside, and choosing it asks who the contractor was and what they cost." />

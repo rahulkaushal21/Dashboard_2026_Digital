@@ -2610,6 +2610,42 @@ export async function getMonthDateMismatches(): Promise<MonthDateMismatch[]> {
   return (data as MonthDateMismatch[]) || []
 }
 
+// ── Monthly booking targets ──────────────────────────────────────────────────────────
+//
+// The H column of the old Business Overview sheet: a booking target per service per
+// month, typed by the leads and tracked by KB. One row per month per service, USD. The
+// FY targets in lib/config.ts are the year per business unit and stay in code; this is
+// the month per service, and it is edited in Settings → Targets.
+
+export const TARGET_DEPTS = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation'] as const
+export type TargetDept = typeof TARGET_DEPTS[number]
+
+export interface BookingTarget {
+  /** First day of the month, YYYY-MM-DD. */
+  month: string
+  dept: TargetDept
+  target_usd: number
+  note?: string | null
+  updated_by?: string | null
+  updated_at?: string
+}
+
+/** Targets for every month from `fromMonth` to `toMonth` inclusive (YYYY-MM-01). */
+export async function getBookingTargets(fromMonth: string, toMonth: string): Promise<BookingTarget[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('booking_targets').select('*')
+    .gte('month', fromMonth).lte('month', toMonth).order('month').order('dept')
+  return ((data as any[]) || []).map(r => ({ ...r, target_usd: Number(r.target_usd ?? 0) })) as BookingTarget[]
+}
+
+export async function saveBookingTarget(month: string, dept: TargetDept, usd: number, updatedBy: string, note?: string): Promise<{ error?: string }> {
+  if (!supabase) return { error: 'Supabase not configured' }
+  if (!(usd >= 0)) return { error: 'A target cannot be negative.' }
+  const { error } = await supabase.from('booking_targets')
+    .upsert({ month, dept, target_usd: usd, note: note || null, updated_by: updatedBy, updated_at: new Date().toISOString() })
+  return error ? { error: error.message } : {}
+}
+
 /** The five services the business is run by, plus Other, in a fixed order. */
 export const BIZ_ORDER = ['LP/HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation', 'Other']
 
