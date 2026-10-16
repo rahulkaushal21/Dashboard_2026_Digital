@@ -1,0 +1,42 @@
+-- Bookings come from the app
+-- ==========================
+--
+-- GetBookings, found with ?probe=1 because the documentation names neither the endpoint
+-- nor its fields (GetBooking, GetBookingAPI and GetBookingData are all 404). One row per
+-- booking EVENT per service line, so it carries amendments and deletions — which is what
+-- invoice_booking_snapshots never could: a CSV exported by hand on 9 Oct, 3,528 rows,
+-- stopping at September, with exactly one hand-typed adjustment beside it.
+--
+-- 4,992 events pulled over 200 days, 27 services, 53 of them deleted. Amounts arrive in
+-- USD and can be NEGATIVE: a deleted LP/Hub event in October is -450.00, which is how a
+-- reversal reaches us.
+--
+--
+-- RECONCILED TO THE CENT, AND IT FOUND A SCOPE DIFFERENCE
+-- ------------------------------------------------------
+-- Rahul read 84,793.24 off the app's own Web services screen for October. Ours:
+--
+--   Development - Web      69,049.05
+--   Development - LP/Hub   15,534.19
+--                         ----------
+--                          84,583.24     $210.00 short
+--
+-- The $210.00 is one Design - Asset booking (MIT, 6 Oct). Add it and the two agree
+-- EXACTLY: 84,793.24. So the app's "Web services" includes Design - Asset and
+-- quote_api_is_ours() does not.
+--
+-- NOT CHANGED HERE. Whether Design - Asset is our revenue is a business decision, not a
+-- mapping bug, and it is small but not nothing: $7,990 in April, $4,594 in June, $17,076
+-- across this FY. Adding it to quote_api_is_ours() would move every Web figure on the
+-- dashboard, so it waits for a yes.
+--
+--
+-- TWO FIELDS THAT ARRIVE EMPTY
+-- ----------------------------
+-- BookingMonth is listed by the API and sent BLANK on all 4,992 rows — booking_month is
+-- null throughout and booking_month_raw keeps whatever was actually sent so this can be
+-- re-checked rather than re-guessed. Until it is populated, the month has to come from
+-- booking_date, and the October reconciliation above shows booking_date is right.
+--
+-- DeletedBy is blank on 49 of 53 deleted events, which matches the documented behaviour:
+-- populated only after go-live, and empty where the system deleted the record itself.

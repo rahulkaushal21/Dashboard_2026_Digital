@@ -1,6 +1,7 @@
 // quote-sync — mirror the Custom Dashboard API (quote.uplers.net) into Supabase.
 //
-// Four endpoints, one funnel: GetOpportunity → GetRFQ → GetQuote → GetInvoices.
+// Five endpoints, one funnel: GetOpportunity → GetRFQ → GetQuote → GetInvoices,
+// plus GetBookings, which reports booking EVENTS rather than invoice state.
 // See migration 093 for why the join key is a timestamp suffix and why "pipeline raised"
 // and "RFQ raised" are two independent facts rather than two steps.
 //
@@ -300,6 +301,54 @@ const mapInvLine = (x: Record<string, unknown>, line_key: string) => ({
   synced_at: new Date().toISOString(),
 });
 
+// ---------------------------------------------------------------------------
+// BOOKINGS
+//
+// GetBookings — the endpoint's name is not in the documentation; ?probe=1 found it
+// (GetBooking, GetBookingAPI and GetBookingData are all 404). One row per booking EVENT
+// per service line, so it carries amendments and deletions and not just new bookings.
+// That is what invoice_booking_snapshots could never do: a CSV exported by hand on
+// 9 Oct, stopping at September.
+//
+// NOTE there is no BookingAmountInUSD and no Currency field. BookingAmount's unit has to
+// be confirmed against a month we already trust before anything reads it as money.
+// ---------------------------------------------------------------------------
+const mapBooking = (x: Record<string, unknown>) => ({
+  booking_id: s(x.BookingId),
+  booking_date: dt(x.BookingDate),
+  // dt() returns null on all 4,992 rows — BookingMonth is neither dd/mm/yyyy nor ISO.
+  // The raw string is kept so the format can be read off the data and parsed in SQL,
+  // rather than guessing and redeploying. THIS is the field the app totals on: a
+  // HexaGroup booking dated 29 Sep is counted in October, which is the whole of the
+  // $210 gap between our October Web figure and the app's.
+  booking_month: dt(x.BookingMonth),
+  booking_month_raw: s(x.BookingMonth),
+  booking_amount: n(x.BookingAmount),
+  service: s(x.Service),
+  company_name: s(x.CompanyName),
+  contact_email: s(x.ContactEmail),
+  project_id: s(x.ProjectId),
+  order_no: s(x.OrderNumber),
+  order_date: dt(x.OrderDate),
+  invoice_no: s(x.InvoiceNumber),
+  invoice_date: dt(x.InvoiceDate),
+  invoice_created_at: ts(x.InvoiceCreatedDate),
+  invoice_sent_at: ts(x.InvoiceSentDate),
+  status: s(x.Status),
+  bu_type: s(x.BUType),
+  geo: s(x.GEO),
+  geo_head: s(x.GEOHead),
+  pc: s(x.PC),
+  sme: s(x.SME),
+  sales_person: s(x.SalesPersonName),
+  engagement_model: s(x.EngagementModel),
+  comments: s(x.Comments),
+  is_deleted: b(x.IsDeleted),
+  deleted_date: dt(x.DeletedDate),
+  deleted_by: s(x.DeletedBy),
+  synced_at: new Date().toISOString(),
+});
+
 /**
  * invoice | uniqueId | service, plus an ordinal.
  *
@@ -401,11 +450,12 @@ Deno.serve(async (req) => {
 
   const out: Record<string, unknown> = { window: { from, to } };
   try {
-    const [opps, rfqs, quotes, invs] = await Promise.all([
+    const [opps, rfqs, quotes, invs, books] = await Promise.all([
       fetchAll("GetOpportunity", token, from, to),
       fetchAll("GetRFQ", token, from, to),
       fetchAll("GetQuote", token, from, to),
       fetchAll("GetInvoices", token, from, to),
+      fetchAll("GetBookings", token, from, to),
     ]);
 
     out.fetched = {
@@ -413,6 +463,7 @@ Deno.serve(async (req) => {
       rfqs: rfqs.length,
       quotes: quotes.length,
       invoice_lines: invs.length,
+      bookings: books.length,
     };
 
     out.opportunities = await upsert(
@@ -444,12 +495,18 @@ Deno.serve(async (req) => {
       "line_key",
     );
 
+    out.bookings = await upsert(
+      db, "quote_api_bookings",
+      dedupe(books.map(mapBooking).filter((r) => r.booking_id), "booking_id"),
+      "booking_id",
+    );
+
     await db.from("sync_runs").insert({
       source: "quote-sync",
       ok: true,
       rows_upserted: (out.opportunities as number) + (out.rfqs as number) +
         (out.quotes as number) + (out.invoices as number) +
-        (out.invoice_lines as number),
+        (out.invoice_lines as number) + (out.bookings as number),
       message: JSON.stringify(out).slice(0, 2000),
     });
     out.ok = true;
