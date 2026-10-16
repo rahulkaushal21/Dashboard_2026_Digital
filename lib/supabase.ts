@@ -2060,13 +2060,21 @@ export async function getProjectLedger(): Promise<LedgerRow[]> {
 /**
  * Bookings as the invoice app counts them — a different question from the ledger.
  *
- * The ledger says what we SOLD and reports on Start Date. This says what was INVOICED,
- * on BookingDate, for the five services that are ours (quote_api_is_ours: Development
- * Web, LP/Hub and Mobile App, AI & Automation, Design - Digital). A yearly retainer
- * books a twelfth of itself each month, a discount is shared equally across an
- * invoice's service lines, a voided invoice reverses in the month it was voided, and a
- * month that has closed is served from its snapshot so a later revision books forward
- * instead of restating it. Reconciled to the cent against the app's own October export.
+ * The ledger says what we SOLD and reports on Start Date. This says what the invoice app
+ * BOOKED, which is the number Rahul reads month over month.
+ *
+ * IT IS THE APP'S OWN ANSWER NOW, not our reconstruction of it. Until 16 Oct 2026 this
+ * was rebuilt from invoice lines: a yearly retainer spread a twelfth of itself across
+ * twelve months, discounts were shared across an invoice's lines, voided invoices were
+ * reversed by hand. It was close — Apr to Sep landed within 2% — but it was wrong in two
+ * ways that matter. October read $12,156 high, and it invented bookings in Nov, Dec, Jan
+ * and Feb at $660 a month for months the app has booked nothing in.
+ *
+ * GetBookings reports booking EVENTS, one per service line, including reversals as
+ * negative amounts. Every month from April on now ties to the app to the cent. Months
+ * before the feed keep the 9 Oct snapshot, and the handover is on a month boundary: the
+ * feed's first event is 30 March, so March belongs to the snapshot rather than being
+ * served from two days of feed.
  *
  * `kind` separates the three: 'booking', 'reversal', 'adjustment'.
  */
@@ -2884,8 +2892,9 @@ export interface BookingMonth {
   booked_usd: number
   invoices: number
   reversals_usd: number
-  /** Amendments recorded by hand from the app's report because GetInvoices cannot report
-   *  them. Retires when the API exposes booking events. */
+  /** Amendments once recorded by hand because GetInvoices could not report them. The API
+   *  exposes booking events now (GetBookings, 16 Oct 2026), so this is 0 for every month
+   *  the feed covers and the one historical row survives only for months before it. */
   adjustments_usd: number
 }
 

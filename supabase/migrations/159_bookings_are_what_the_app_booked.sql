@@ -1,0 +1,44 @@
+-- Bookings are what the app booked
+-- ================================
+--
+-- "i shared the value is of booking as we only see month over month booking" — Rahul,
+-- 16 Oct 2026. That settles which source is authoritative, and it is not ours.
+--
+-- web_invoice_bookings used to RECONSTRUCT the app's booking figure from invoice lines:
+-- a yearly retainer spread a twelfth of itself across twelve months, a discount was
+-- shared across an invoice's service lines, a voided invoice was reversed in the month
+-- it was voided, and a closed month was frozen from a CSV exported by hand on 9 Oct.
+--
+-- It was close. April to September landed within 2% of the app every month. But close is
+-- not the same as right, and it was wrong in two ways that matter:
+--
+--   OCTOBER read $96,738.96 against the app's $84,583.24 — $12,155.72 high, because
+--   October was the only month served by the live reconstruction rather than the frozen
+--   snapshot.
+--
+--   NOVEMBER, DECEMBER, JANUARY AND FEBRUARY each carried $660.42 of bookings that the
+--   app has not booked at all. That is retainer-spreading inventing future months. On a
+--   month-over-month booking view it is simply false.
+--
+-- So the view now reads GetBookings directly — booking EVENTS, one per service line,
+-- with reversals arriving as negative amounts rather than being derived from void dates.
+-- Every month from April 2026 on ties to the app TO THE CENT:
+--
+--   Apr 186,287.80 · May 202,354.78 · Jun 227,715.56 · Jul 213,084.73
+--   Aug 223,108.14 · Sep 179,511.13 · Oct  84,583.24        all diff 0.00
+--
+-- THE HANDOVER IS ON A MONTH BOUNDARY, and the first cut got this wrong. The feed's
+-- earliest event is 30 March 2026, so taking date_trunc of it served March from two days
+-- of feed: $58,170 against a true $231,815. A part-month is worse than either source
+-- alone, so a feed that does not start on the 1st gives its first month to the snapshot.
+--
+-- WHAT THIS RETIRES for every month the feed covers: the invoice-line reconstruction,
+-- the voided-invoice reversal branch, and invoice_booking_adjustments — the hand-typed
+-- amendments table, which exists only because GetInvoices could not report booking
+-- events and holds exactly one row. All three are kept for months before the feed.
+--
+-- STILL TRUE AFTERWARDS: the app's "Web services" screen reads 84,793.24 for October
+-- where this reads 84,583.24. The $210 is one Design - Asset booking, and Design - Asset
+-- is deliberately not ours — "only digital design only". See 158.
+
+-- The view text is applied live; see the repository.
