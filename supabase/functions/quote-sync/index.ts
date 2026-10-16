@@ -18,6 +18,7 @@
 // natural key. Six months of invoices is ~7.6 MB, so the cost of being correct here is
 // trivial and the cost of being clever is wrong data.
 //
+// GET ?token=…&probe=1        → field NAMES only, no values, writes nothing
 // GET ?token=…                 → rolling window (default 120 days)
 // GET ?token=…&days=400        → wider window
 // GET ?token=…&from=01/04/2026&to=30/09/2026  → explicit range, for a backfill
@@ -106,6 +107,39 @@ async function fetchAll(ep: string, token: string, from: string, to: string) {
   const j = await r.json();
   if (!j?.IsSuccess) throw new Error(`${ep} reported failure: ${s(j?.Message) ?? "no message"}`);
   return (j.Data ?? []) as Record<string, unknown>[];
+}
+
+/**
+ * The SHAPE of an endpoint's response, and nothing else.
+ *
+ * Used to discover what the API actually returns before any mapper is written for it —
+ * the Booking API is documented by behaviour, not by field list, and a mapper written
+ * against guessed names would map nothing and say it succeeded.
+ *
+ * Returns FIELD NAMES ONLY. No values ever leave this function: a booking row carries
+ * client names and amounts, and a discovery tool is not a reason to copy them into a log
+ * or an HTTP response. Same rule the token follows — report the shape, never the content.
+ */
+async function probe(ep: string, token: string, from: string, to: string) {
+  try {
+    const r = await fetch(`${HOST}/${ep}`, {
+      method: "POST",
+      headers: { "Token": token, "Content-Type": "application/json" },
+      body: JSON.stringify({ FROMDATE: from, TODATE: to }),
+    });
+    if (!r.ok) return { endpoint: ep, ok: false, http: r.status };
+    const j = await r.json();
+    if (!j?.IsSuccess) {
+      return { endpoint: ep, ok: false, reported: s(j?.Message) ?? "failure, no message" };
+    }
+    const rows = (j.Data ?? []) as Record<string, unknown>[];
+    // The union across rows, because a field absent from the first row is still a field.
+    const keys = new Set<string>();
+    for (const row of rows.slice(0, 200)) for (const k of Object.keys(row ?? {})) keys.add(k);
+    return { endpoint: ep, ok: true, rows: rows.length, fields: [...keys].sort() };
+  } catch (e) {
+    return { endpoint: ep, ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 // -- mapping -----------------------------------------------------------------
@@ -234,6 +268,17 @@ const mapInvHeader = (x: Record<string, unknown>) => ({
   void_at: ts(x.VoidDate),
   refund_at: ts(x.RefundDate),
   archived_at: ts(x.ArchieveDate),
+  // DELETION, AS THE APP REPORTS IT (Oct 2026). Until now deletion was inferred from
+  // absence by mark_deleted_invoices(), which can only judge invoices CREATED inside the
+  // pull window — 2,691 of 14,509. These three are backfilled by the app, so they cover
+  // the other 11,818 as well.
+  //
+  // Held beside the inferred deleted_at, not instead of it, until the two have been
+  // compared. DeletedBy comes through blank when the system auto-deleted the invoice, so
+  // nothing may depend on it being present.
+  is_deleted: b(x.IsDeleted),
+  deleted_date: dt(x.DeletedDate),
+  deleted_by: s(x.DeletedBy),
   synced_at: new Date().toISOString(),
 });
 
@@ -333,6 +378,21 @@ Deno.serve(async (req) => {
   const from = url.searchParams.get("from") ??
     ddmmyyyy(new Date(now.getTime() - days * 86400000));
   const to = url.searchParams.get("to") ?? ddmmyyyy(now);
+
+  // ?probe=1 — read-only discovery. Writes nothing, returns field names only.
+  // The Booking endpoint's name is not in the documentation, so the candidates are tried
+  // and the response says which one answered.
+  if (url.searchParams.get("probe") === "1") {
+    const extra = url.searchParams.get("endpoints");
+    const candidates = extra
+      ? extra.split(",").map((x) => x.trim()).filter(Boolean)
+      : ["GetInvoices", "GetBooking", "GetBookings", "GetBookingAPI", "GetBookingData"];
+    const shapes = [];
+    for (const ep of candidates) shapes.push(await probe(ep, token, from, to));
+    return new Response(JSON.stringify({ ok: true, window: { from, to }, shapes }, null, 2), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   const db = createClient(
     Deno.env.get("SUPABASE_URL")!,
