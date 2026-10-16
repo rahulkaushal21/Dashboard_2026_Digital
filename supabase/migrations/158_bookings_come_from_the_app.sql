@@ -25,10 +25,19 @@
 -- EXACTLY: 84,793.24. So the app's "Web services" includes Design - Asset and
 -- quote_api_is_ours() does not.
 --
--- NOT CHANGED HERE. Whether Design - Asset is our revenue is a business decision, not a
--- mapping bug, and it is small but not nothing: $7,990 in April, $4,594 in June, $17,076
--- across this FY. Adding it to quote_api_is_ours() would move every Web figure on the
--- dashboard, so it waits for a yes.
+-- SETTLED, AND THE ANSWER IS NO. Rahul, 16 Oct 2026: "only digital design only". The
+-- design service that is ours is Design - DIGITAL, which quote_api_is_ours() already
+-- lists; Design - ASSET is a different service and stays out. So the $210 is a correct
+-- exclusion rather than a gap, and our October Web figure is 84,583.24 against the app's
+-- wider 84,793.24. Nothing changed — the scope was already right, and the reconciliation
+-- proved it rather than finding a fault.
+--
+-- For the record, the five services in scope, over the 200-day pull:
+--   Development - Web        944 events   $1,036,843
+--   Development - LP/Hub     218 events   $  292,350
+--   AI & Automation - WEB     23 events   $   20,457
+--   Development - Mobile App   3 events   $   19,305
+--   Design - Digital           6 events   $    5,860
 --
 --
 -- TWO FIELDS THAT ARRIVE EMPTY
