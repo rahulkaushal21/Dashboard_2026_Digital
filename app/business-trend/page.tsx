@@ -12,7 +12,7 @@ import KPICard from '@/components/KPICard'
 import { daysSince, fmtDay, fmtMonth, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import RevenueChart from '@/components/RevenueChart'
 import { getRevenue, getQuotes, getConversions, getBookingsFull, getOpportunities, getOpportunityDepts, type RevenueRow, type Quote, type QuoteConversion, type BookingRow, type Opportunity } from '@/lib/supabase'
-import { FY_TARGET, FY_TARGET_LABEL } from '@/lib/config'
+import { FY_TARGETS, fyTargetFor, fyTargetLabel } from '@/lib/config'
 import { fmtUsd } from '@/lib/metrics'
 
 // FY 2026-27 revenue goal. One constant — the progress bar, the shortfall line and
@@ -171,6 +171,12 @@ export default function BusinessTrendPage() {
     })
   }, [revenue])
 
+  // The target for whatever unit is on screen. The page used to measure every unit
+  // against the whole company's $3.2M and footnote the fact — so LP/HUB, which is
+  // chasing $729,652, read as 16% of a figure it was never aiming at.
+  const fyTarget = fyTargetFor(unit)
+  const fyLabel = fyTargetLabel(unit)
+
   const fy26Analysis = useMemo(() => {
     const fy26Months = getFY26Months()
     const fy26Rev = revenueByMonthYear(revenue).filter(r => isInFY26(ym(r.month)))
@@ -179,7 +185,7 @@ export default function BusinessTrendPage() {
     const monthsRemaining = Math.max(0, 12 - completedMonths)
     const avgMonthly = completedMonths > 0 ? totalRev / completedMonths : 0
     const projected = totalRev + (avgMonthly * monthsRemaining)
-    const target = FY_TARGET
+    const target = fyTarget
     const onTrack = projected >= target
     const projectedPercent = Math.round((projected / target) * 100)
     return {
@@ -193,7 +199,7 @@ export default function BusinessTrendPage() {
       onTrack,
       data: fy26Rev,
     }
-  }, [revenue])
+  }, [revenue, fyTarget])
 
 
   // ---- Closing the gap to the FY target -------------------------------------
@@ -209,7 +215,7 @@ export default function BusinessTrendPage() {
     const booked = fy.reduce((s, r) => s + r.revenue, 0)
     // Months still to bill, counting the one in progress as still winnable.
     const monthsLeft = Math.max(0, 12 - complete.length)
-    const gap = Math.max(0, FY_TARGET - booked)
+    const gap = Math.max(0, fyTarget - booked)
     const needPerMonth = monthsLeft ? gap / monthsLeft : 0
     const upliftPerMonth = Math.max(0, needPerMonth - runRate)
 
@@ -269,7 +275,7 @@ export default function BusinessTrendPage() {
       slipped, recoverable, top10, top10Share: booked > 0 ? Math.round((top10 / (ranked.reduce((s, [, v]) => s + v, 0) || 1)) * 100) : 0,
       activeClients,
     }
-  }, [fy26Analysis, opportunities, revenue, thisMonth, todayMs])
+  }, [fy26Analysis, opportunities, revenue, thisMonth, todayMs, fyTarget])
 
   // Plain readings of the numbers above — each one is a fact from the data plus the
   // action it implies. No projection is invented here that the figures don't support.
@@ -475,7 +481,7 @@ export default function BusinessTrendPage() {
     const needRows: Need[] = fyMonths.filter(m => !done.has(m)).map(m => ({
       month: m, inProgress: m === thisMonth, billed: fy26Analysis.data.find(r => ym(r.month) === m)?.revenue || 0 }))
     const needed: CardDetails<Need> = {
-      subtitle: `${fmtUsd(plan.gap)} still to book to reach ${FY_TARGET_LABEL}, spread over ${plan.monthsLeft} months`,
+      subtitle: `${fmtUsd(plan.gap)} still to book to reach ${fyLabel}, spread over ${plan.monthsLeft} months`,
       rows: needRows, rowKey: r => r.month, defaultSort: 'month',
       columns: [
         { key: 'month', label: 'Month', value: r => fmtMonth(r.month), sort: r => r.month },
@@ -534,10 +540,10 @@ export default function BusinessTrendPage() {
           sub={`${fy26Analysis.completedMonths} months completed`} details={cardDetails.avg}
           info="Based on completed months in FY 2026-27 (April 2026 to March 2027)." />
         <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="Projected total (12 mo)" value={fmtUsd(fy26Analysis.projected)}
-          sub={`${fy26Analysis.projectedPercent}% of ${FY_TARGET_LABEL}`} details={cardDetails.projected}
+          sub={`${fy26Analysis.projectedPercent}% of ${fyLabel}`} details={cardDetails.projected}
           info="(Actual revenue to date) + (Average monthly × remaining months)." />
         <KPICard tone={fy26Analysis.onTrack ? 'green' : 'red'} label="FY status" value={fy26Analysis.onTrack ? 'On Track' : 'Off Track'}
-          sub={`Target ${FY_TARGET_LABEL}`} />
+          sub={`Target ${fyLabel}`} />
         <KPICard tone="amber" label="Remaining months" value={fy26Analysis.monthsRemaining.toString()} details={cardDetails.remaining} />
       </KPIRow>
 
@@ -601,14 +607,14 @@ export default function BusinessTrendPage() {
       <Panel className="mb-5" title="FY 2026-27 forecast (Apr 2026 – Mar 2027)"
         info={<>
           <p><strong>Financial Year Definition:</strong> April 2026 to March 2027 (12 months)</p>
-          <p><strong>Target:</strong> {FY_TARGET_LABEL} total revenue</p>
+          <p><strong>Target:</strong> {fyLabel} total revenue{unit !== 'all' ? ` — ${unitLabel(unit)}'s own share of the company's $3.2M` : ''}</p>
           <p><strong>Avg Monthly Revenue:</strong> Based on completed months in FY 2026-27</p>
           <p><strong>Projected Total:</strong> (Actual revenue to date) + (Average monthly × remaining months)</p>
         </>}>
         <div className="space-y-5">
           <div>
             <div className="flex justify-between mb-2">
-              <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Projected vs {FY_TARGET_LABEL} target</span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">Projected vs {fyLabel} target</span>
               <span className="text-sm font-semibold text-mav-yellow">{fy26Analysis.projectedPercent}%</span>
             </div>
             <div className="w-full bg-mav-line rounded-full h-3 overflow-hidden">
@@ -619,15 +625,20 @@ export default function BusinessTrendPage() {
             </div>
             <div className="flex justify-between mt-2 text-xs text-mav-muted">
               <span>Projected: <span className="text-mav-fg font-medium">{fmtUsd(fy26Analysis.projected)}</span></span>
-              <span>Target: <span className="text-mav-fg font-medium">{FY_TARGET_LABEL}</span></span>
+              <span>Target: <span className="text-mav-fg font-medium">{fyLabel}</span></span>
             </div>
             {!fy26Analysis.onTrack && (
               <p className="text-xs text-red-400 mt-2">
-                Shortfall: {fmtUsd(FY_TARGET - fy26Analysis.projected)} | Need {fmtUsd(Math.ceil((FY_TARGET - fy26Analysis.projected) / Math.max(1, fy26Analysis.monthsRemaining)))}/month average
+                Shortfall: {fmtUsd(fyTarget - fy26Analysis.projected)} | Need {fmtUsd(Math.ceil((fyTarget - fy26Analysis.projected) / Math.max(1, fy26Analysis.monthsRemaining)))}/month average
               </p>
             )}
+            {/* There IS a per-unit target now, so the note names it and shows the
+                arithmetic rather than apologising for measuring against the wrong one. */}
             {unit !== 'all' && (
-              <p className="text-[11px] text-mav-muted mt-1">{unitLabel(unit)} revenue against the company-wide {FY_TARGET_LABEL} target — there is no per-unit target.</p>
+              <p className="text-[11px] text-mav-muted mt-1">
+                {unitLabel(unit)} revenue against its own {fyLabel} target
+                {' '}— the company&rsquo;s $3.2M is LP/HUB {fmtUsd(FY_TARGETS['lp-hub'])} + Web {fmtUsd(FY_TARGETS.web)}.
+              </p>
             )}
           </div>
           <div>
@@ -662,7 +673,7 @@ export default function BusinessTrendPage() {
       </Panel>
 
       <SectionTitle right={<span className="text-xs text-mav-muted">{plan.monthsLeft} months left · {fmtUsd(plan.gap)} to go</span>}>
-        How we get to {FY_TARGET_LABEL}
+        How we get to {fyLabel}
       </SectionTitle>
       <KPIRow cols={4}>
         <KPICard tone="accent" label="Booked so far" value={fmtUsd(plan.booked)} details={cardDetails.booked} />
