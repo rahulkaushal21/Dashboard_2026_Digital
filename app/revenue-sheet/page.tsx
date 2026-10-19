@@ -84,6 +84,26 @@ const dash = (v: unknown) => (v === null || v === undefined || v === '') ? '—'
 const d10 = (v?: string) => (v || '').slice(0, 10) || '—'
 const num = (v?: number | null) => v == null ? '—' : Number(v).toLocaleString('en-US')
 
+// MONEY IS SHOWN IN WHOLE UNITS, rounded the way a spreadsheet rounds.
+//
+// The ledger carries real decimals — a USD conversion lands on 1,846.7 or 2,988.97 — and
+// toLocaleString's default prints up to three of them. Beside a sheet that shows whole
+// dollars that reads as a different number, which is the one thing this page must never
+// do. Rahul, 19 Oct 2026: "convert price to 1 more number if its more than .5 similar to
+// what spreadsheet formulas do".
+//
+// HALF AWAY FROM ZERO, which is ROUND() in Sheets and Excel, and NOT Math.round(): that
+// one breaks ties towards +∞, so it turns -2.5 into -2 where a spreadsheet gives -3.
+// Reversals and credit notes are negative and real, so the sign has to be handled rather
+// than assumed away.
+//
+// Display and CSV only. Nothing stored changes, and the KPI totals still add the full
+// precision before rounding once — so a column of rounded rows can differ from its total
+// by a dollar or two, exactly as the same column does in the spreadsheet.
+const roundHalfUp = (v: number) => (v < 0 ? -1 : 1) * Math.round(Math.abs(v))
+const price = (v?: number | null) =>
+  v == null ? '—' : roundHalfUp(Number(v)).toLocaleString('en-US')
+
 // Optimization is arithmetic on the two hour columns, so it is derived here rather than
 // stored — there is no way for it to disagree with them.
 const optimisation = (r: LedgerRow) => {
@@ -120,15 +140,15 @@ const COLUMNS: Col[] = [
   { key: 'ctype', label: 'Client Type', get: r => dash(r.client_type), edit: 'client_type', kind: 'select', options: (_r, v) => v.client_type },
   { key: 'geo', label: 'Geo', get: r => dash(r.geo), edit: 'geo', kind: 'select', options: geoOptions },
   { key: 'cur', label: 'Currency Type', get: r => dash(r.currency) },
-  { key: 'qprice', label: 'Quote Price', right: true, get: r => num(r.quote_price), sort: r => r.quote_price ?? -1 },
-  { key: 'cprice', label: 'Confirmed Price', right: true, get: r => num(r.local_value), sort: r => r.local_value ?? -1 },
-  { key: 'usd', label: 'USD Conversion', default: true, right: true, get: r => num(r.amount_usd), sort: r => r.amount_usd ?? -1 },
+  { key: 'qprice', label: 'Quote Price', right: true, get: r => price(r.quote_price), sort: r => r.quote_price ?? -1 },
+  { key: 'cprice', label: 'Confirmed Price', right: true, get: r => price(r.local_value), sort: r => r.local_value ?? -1 },
+  { key: 'usd', label: 'USD Conversion', default: true, right: true, get: r => price(r.amount_usd), sort: r => r.amount_usd ?? -1 },
   { key: 'btype', label: 'Business Type', get: r => dash(r.business_type), edit: 'business_type', kind: 'select', options: (_r, v) => v.business_type },
   { key: 'am', label: 'Account/Sales Person', get: r => dash(r.sales_person) },
-  { key: 'outsrc', label: 'Outsource Price', right: true, get: r => num(r.outsource_price), sort: r => r.outsource_price ?? -1, edit: 'outsource_price', kind: 'number' },
+  { key: 'outsrc', label: 'Outsource Price', right: true, get: r => price(r.outsource_price), sort: r => r.outsource_price ?? -1, edit: 'outsource_price', kind: 'number' },
   { key: 'invno', label: 'Invoice No', get: r => dash(r.invoice_no), edit: 'invoice_no', kind: 'text' },
   { key: 'invcur', label: 'Invoice Currency', get: r => dash(r.invoice_currency), edit: 'invoice_currency', kind: 'text' },
-  { key: 'invamt', label: 'Invoice Amount', right: true, get: r => num(r.invoice_amount), sort: r => r.invoice_amount ?? -1, edit: 'invoice_amount', kind: 'number' },
+  { key: 'invamt', label: 'Invoice Amount', right: true, get: r => price(r.invoice_amount), sort: r => r.invoice_amount ?? -1, edit: 'invoice_amount', kind: 'number' },
   { key: 'month', label: 'Month-Year', get: r => ym(r.booking_month) },
 ]
 
