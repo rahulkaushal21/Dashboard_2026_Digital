@@ -46,6 +46,21 @@ const COLS: ColumnDef[] = [
   { key: 'action', label: 'Action', locked: true },
 ]
 
+// The approval queue used to print each quote on one truncated line, so an approver had
+// to judge feedback they could not read — the title tooltip only showed on hover, and not
+// at all on a touch screen. It now wraps to two lines and opens in full on a click.
+function PendingQuote({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  if (!text) return <span className="text-mav-muted">—</span>
+  return (
+    <button type="button" onClick={() => setOpen(o => !o)}
+      className="text-left italic text-mav-fg/80 hover:text-mav-fg transition w-full"
+      title={open ? 'Click to collapse' : 'Click to read it all'}>
+      <span className={open ? 'block whitespace-pre-wrap' : 'block line-clamp-2'}>&ldquo;{text}&rdquo;</span>
+    </button>
+  )
+}
+
 export default function Delights() {
   const [rowsAll, setRows] = useState<Delight[]>([])
   // ── Business unit ───────────────────────────────────────────────────────────
@@ -224,7 +239,7 @@ export default function Delights() {
                     <td className="px-3 py-2.5 font-medium whitespace-nowrap">{m.company_name}</td>
                     <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{m.channel}</td>
                     <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{fmtDay(m.happened_on)}</td>
-                    <td className="px-3 py-2.5"><p className="max-w-[420px] truncate italic text-mav-fg/80" title={m.quote}>&ldquo;{m.quote}&rdquo;</p></td>
+                    <td className="px-3 py-2.5 min-w-[320px] max-w-[520px]"><PendingQuote text={m.quote} /></td>
                     <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{m.pm_owner || '—'}</td>
                     <td className="px-3 py-2.5 text-mav-muted max-w-[180px] truncate" title={m.submitted_by}>{m.submitted_by}</td>
                     <td className="px-3 py-2.5 sticky-action">
