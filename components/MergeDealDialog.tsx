@@ -144,7 +144,7 @@ export default function MergeDealDialog({ deal, siblings, onClose, onMerge }: {
                    <div className="text-green-400 font-medium">{found.company_name || 'Project found'}</div>
                    <div className="text-mav-fg/70 mt-0.5">
                      {money(found.amount_usd)} · {(found.booking_month || '').slice(0, 7) || 'no month'}
-                     {found.pm_owner ? ` · ${found.pm_owner}` : ''}{found.service_name ? ` · ${found.service_name}` : ''}
+                     {found.pm_owner ? ` · ${found.pm_owner}` : ''}{found.service_dept ? ` · ${found.service_dept}` : ''}
                    </div>
                    {found.project_id && found.project_id !== projectId.trim() && (
                      <div className="text-mav-fg/50 mt-0.5 font-mono">on the sheet as {found.project_id}</div>

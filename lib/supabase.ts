@@ -1984,7 +1984,12 @@ export async function unmergeOpportunity(id: number, actor?: string): Promise<{ 
 
 export interface ProjectLookup {
   project_id: string; company_name?: string; pm_owner?: string
-  amount_usd?: number; booking_month?: string; service_name?: string
+  // service_dept, NOT service_name. The ledger renames the sheet's column on the way
+  // through (`r.service_name as service_dept`, migration 034). Asking for service_name
+  // made PostgREST reject the whole select, so every lookup errored and the dialog
+  // reported the ID as unknown — "Part of an existing project" could never once have
+  // worked. Caught 22 Oct 2026 only because the dialog started showing the error.
+  amount_usd?: number; booking_month?: string; service_dept?: string
 }
 /**
  * Does this project ID exist, and whose is it? Shown back before the merge is saved, so
@@ -1995,7 +2000,7 @@ export async function lookupProject(projectId: string): Promise<ProjectLookupRes
   if (!supabase) return { row: null, error: 'Supabase not configured' }
   const id = projectId.trim()
   if (!id) return { row: null }
-  const cols = 'project_id, company_name, pm_owner, amount_usd, booking_month, service_name'
+  const cols = 'project_id, company_name, pm_owner, amount_usd, booking_month, service_dept'
   // A FAILED QUERY IS NOT AN ABSENT PROJECT. The ledger is readable by signed-in users
   // only, so a lapsed session returned no rows and the dialog said the ID did not exist —
   // which sent the PM hunting the sheet for a project that was there all along.
