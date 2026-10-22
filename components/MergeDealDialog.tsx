@@ -153,7 +153,12 @@ export default function MergeDealDialog({ deal, siblings, onClose, onMerge }: {
                ) : lookErr ? (
                  <div className="text-red-400">
                    The sheet could not be read, so this ID has not been checked.
-                   <div className="text-mav-fg/60 mt-1">{lookErr} — sign in again, then retry.</div>
+                   {/* The reason verbatim. The first time this line appeared it named a
+                       column the ledger does not have — a dashboard fault, not a lapsed
+                       session — so it must not prescribe one cure. */}
+                   <div className="text-mav-fg/60 mt-1">
+                     {lookErr}. Retry; if it says this again the fault is the dashboard&apos;s, not your ID&apos;s.
+                   </div>
                  </div>
                ) : projectId.trim() ? (
                  <div className="text-amber-400">
