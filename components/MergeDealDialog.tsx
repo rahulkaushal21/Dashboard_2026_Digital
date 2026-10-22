@@ -43,13 +43,14 @@ export default function MergeDealDialog({ deal, siblings, onClose, onMerge }: {
   // What that project ID actually is, shown back before anything is saved — a mistyped
   // ID should be caught by the person looking at it, not by the month-end figures.
   const [found, setFound] = useState<ProjectLookup | null>(null)
+  const [lookErr, setLookErr] = useState<string | null>(null)
   const [looking, setLooking] = useState(false)
   useEffect(() => {
     const id = projectId.trim()
-    if (kind !== 'project' || !id) { setFound(null); setLooking(false); return }
+    if (kind !== 'project' || !id) { setFound(null); setLookErr(null); setLooking(false); return }
     setLooking(true)
     const t = setTimeout(() => {
-      lookupProject(id).then(r => { setFound(r); setLooking(false) })
+      lookupProject(id).then(r => { setFound(r.row); setLookErr(r.error || null); setLooking(false) })
     }, 300)
     return () => clearTimeout(t)
   }, [projectId, kind])
@@ -63,7 +64,10 @@ export default function MergeDealDialog({ deal, siblings, onClose, onMerge }: {
   const ready = kind === 'deal' ? into != null : !!found
   const save = async () => {
     setBusy(true); setErr(null)
-    const e = await onMerge(kind === 'deal' ? { into } : { project: projectId.trim() }, reason)
+    // The ID AS THE SHEET HOLDS IT, not as it was typed. The lookup matches a bare id
+    // against a cell that may carry an instalment counter (PRJ…_3), so sending the typed
+    // text back would be refused by the very check the green card just passed.
+    const e = await onMerge(kind === 'deal' ? { into } : { project: (found?.project_id || projectId).trim() }, reason)
     setBusy(false)
     if (e) setErr(e); else onClose()
   }
@@ -142,9 +146,24 @@ export default function MergeDealDialog({ deal, siblings, onClose, onMerge }: {
                      {money(found.amount_usd)} · {(found.booking_month || '').slice(0, 7) || 'no month'}
                      {found.pm_owner ? ` · ${found.pm_owner}` : ''}{found.service_name ? ` · ${found.service_name}` : ''}
                    </div>
+                   {found.project_id && found.project_id !== projectId.trim() && (
+                     <div className="text-mav-fg/50 mt-0.5 font-mono">on the sheet as {found.project_id}</div>
+                   )}
+                 </div>
+               ) : lookErr ? (
+                 <div className="text-red-400">
+                   The sheet could not be read, so this ID has not been checked.
+                   <div className="text-mav-fg/60 mt-1">{lookErr} — sign in again, then retry.</div>
                  </div>
                ) : projectId.trim() ? (
-                 <span className="text-red-400">No project on the sheet has that ID.</span>
+                 <div className="text-amber-400">
+                   No project on the sheet carries that ID.
+                   <div className="text-mav-fg/60 mt-1">
+                     The sheet is read for <b>booked</b> work, so a project that has not booked
+                     revenue yet will not be here even though it is on the sheet. Check the ID,
+                     or merge into the duplicate deal instead.
+                   </div>
+                 </div>
                ) : (
                  <span className="text-mav-muted">The work is already booked under a project — the quote was never separate.</span>
                )}

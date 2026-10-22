@@ -1990,15 +1990,36 @@ export interface ProjectLookup {
  * Does this project ID exist, and whose is it? Shown back before the merge is saved, so
  * a mistyped ID is caught by the person rather than by the month-end figures.
  */
-export async function lookupProject(projectId: string): Promise<ProjectLookup | null> {
-  if (!supabase) return null
+export interface ProjectLookupResult { row: ProjectLookup | null; error?: string }
+export async function lookupProject(projectId: string): Promise<ProjectLookupResult> {
+  if (!supabase) return { row: null, error: 'Supabase not configured' }
   const id = projectId.trim()
-  if (!id) return null
-  const { data } = await supabase.from('web_project_ledger')
-    .select('project_id, company_name, pm_owner, amount_usd, booking_month, service_name')
-    .eq('project_id', id).limit(1)
-  const row = (data as ProjectLookup[] | null)?.[0]
-  return row || null
+  if (!id) return { row: null }
+  const cols = 'project_id, company_name, pm_owner, amount_usd, booking_month, service_name'
+  // A FAILED QUERY IS NOT AN ABSENT PROJECT. The ledger is readable by signed-in users
+  // only, so a lapsed session returned no rows and the dialog said the ID did not exist —
+  // which sent the PM hunting the sheet for a project that was there all along.
+  let failed: string | undefined
+  const first = async (q: PromiseLike<{ data: unknown; error: { message: string } | null }>) => {
+    const { data, error } = await q
+    if (error) failed = error.message
+    return (data as ProjectLookup[] | null)?.[0] || null
+  }
+
+  // Exact first — the common case, and the cheapest.
+  const exact = await first(supabase.from('web_project_ledger').select(cols).eq('project_id', id).limit(1))
+  if (exact) return { row: exact }
+  if (failed) return { row: null, error: failed }
+
+  // Then the same way the invoice views read a project id, because the SHEET CELL IS NOT
+  // ALWAYS JUST AN ID (migration 095): it carries an instalment counter the sheet appends
+  // (PRJ100725033937_3), sometimes two ids typed into one cell, sometimes stray spaces or
+  // lower case. A PM copying the bare ID off the sheet then got "No project on the sheet
+  // has that ID" for a project that was plainly there. Match on the twelve digits.
+  const key = (id.toUpperCase().match(/PRJ[0-9]{12}/) || [])[0] || (id.match(/[0-9]{12}/) || [])[0]
+  if (!key) return { row: null }
+  const loose = await first(supabase.from('web_project_ledger').select(cols).ilike('project_id', `%${key}%`).limit(1))
+  return { row: loose, error: failed }
 }
 
 /**
