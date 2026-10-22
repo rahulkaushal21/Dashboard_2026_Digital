@@ -104,6 +104,9 @@ export default function PulsePage() {
   const [items, setItems] = useState<Item[]>([])
   const [openEsc, setOpenEsc] = useState<{ client: string; dept?: string }[]>([])
   const [syncs, setSyncs] = useState<Record<string, SyncStatus | null>>({})
+  // The newest run's own headline — what it read and how much of it. The Gist opens
+  // with it, the way the refresh summary does.
+  const [runHead, setRunHead] = useState<{ at: string; head: string; ok: boolean } | null>(null)
   const [sel, setSel] = useState<Item | null>(null)
 
   const load = useCallback(async (fresh = false) => {
@@ -217,6 +220,8 @@ export default function PulsePage() {
       })
     }
 
+    const newest = runs.filter(r => r.message).sort((a, b) => b.ran_at.localeCompare(a.ran_at))[0]
+    setRunHead(newest ? { at: newest.ran_at, head: findings(newest.message || '').head, ok: newest.ok } : null)
     setItems(out); setOpenEsc(stillOpen)
     setSyncs(Object.fromEntries(SOURCES.map((s, i) => [s.id, sync[i] as SyncStatus | null])))
     setLoadedAt(new Date()); setLoading(false)
@@ -290,6 +295,9 @@ export default function PulsePage() {
       <Segments<Win> value={win} onChange={setWin} items={[
         { id: '24', label: 'Last 24 hours' }, { id: '72', label: 'Last 3 days' }, { id: '168', label: 'Last 7 days' },
       ]} />
+
+      <Gist rows={recent} winLabel={winLabel} run={runHead} openClients={openInDept.length}
+        loading={loading} unitNote={unit !== 'all' ? unitLabel(unit) : ''} onPick={setSel} />
 
       <KPIRow cols={5}>
         <KPICard tone="yellow" label="Deals" value={loading ? '…' : String(deals.length)}
@@ -371,6 +379,133 @@ export default function PulsePage() {
 
       {sel && <ItemPanel item={sel} onClose={() => setSel(null)} />}
     </div>
+  )
+}
+
+// The Gist
+// --------
+// The same news as the table below, written out the way the refresh summary reads in
+// chat: a lead line from the run itself, then booked, new, lost, escalations, feedback
+// and signals, each a sentence you can take in without opening a row. It is built from
+// the rows already on the page, so it follows the window tabs and changes with every
+// refresh — there is no second source to go stale.
+//
+// Nothing here is new information. It is the same items, said in prose, because a list
+// of forty rows does not tell you what the day was.
+type Section = { id: string; heading: string; rows: Item[]; line: (i: Item) => string }
+
+// Mail that carries a login. Named, never quoted — the point is to get it rotated, and
+// the value must not be copied onto a dashboard that everyone can read.
+const CRED = /\b(passwords?|passwd|credentials?|wp-?admin login|ftp login|sftp login|api key)\b/i
+
+function Gist({ rows, winLabel, run, openClients, loading, unitNote, onPick }: {
+  rows: Item[]; winLabel: string; run: { at: string; head: string; ok: boolean } | null
+  openClients: number; loading: boolean; unitNote: string; onPick: (i: Item) => void
+}) {
+  const [open, setOpen] = useState(true)
+  const [copied, setCopied] = useState(false)
+  const of = (k: Kind) => rows.filter(i => i.kind === k)
+  const short = (t?: string, n = 150) => { const x = one(t); return !x ? '' : x.length > n ? `${x.slice(0, n - 1)}…` : x }
+
+  const sections: Section[] = [
+    { id: 'won', heading: 'Booked', rows: of('won'),
+      line: i => [i.title, usd(i.value), i.detail].filter(Boolean).join(' · ') },
+    { id: 'new', heading: 'New in', rows: of('new'),
+      line: i => [i.title, i.value ? usd(i.value) : 'unpriced', i.owner].filter(Boolean).join(' · ') },
+    { id: 'lost', heading: 'Lost', rows: of('lost'),
+      line: i => [i.title, short(i.detail, 110)].filter(Boolean).join(' · ') },
+    { id: 'esc', heading: 'Escalations', rows: of('escalation'),
+      line: i => [i.title, short(i.detail, 110)].filter(Boolean).join(' · ') },
+    { id: 'fb', heading: 'Feedback', rows: of('feedback'),
+      line: i => short(i.detail) || i.title },
+    { id: 'email', heading: 'Signals', rows: of('email'),
+      line: i => [i.title, short(i.detail, 110)].filter(Boolean).join(' · ') },
+    { id: 'refresh', heading: 'From the refresh run', rows: of('refresh'),
+      line: i => short(i.title, 220) },
+  ].filter(s => s.rows.length > 0)
+
+  // Distinct clients whose mail named a login in this window.
+  const creds = Array.from(new Set(rows.filter(i => CRED.test(`${i.title} ${i.detail || ''}`))
+    .map(i => i.client).filter(c => c && c !== 'Refresh run' && c !== '—')))
+
+  const money = of('won').reduce((s, i) => s + (i.value || 0), 0)
+  const quoted = of('new').reduce((s, i) => s + (i.value || 0), 0)
+  // The lead line: what moved, in money and count, before any of the detail.
+  const lead = [
+    of('won').length ? `${of('won').length} booked${money ? ` worth ${usd(money)}` : ''}` : '',
+    of('new').length ? `${of('new').length} new${quoted ? ` at ${usd(quoted)} quoted` : ''}` : '',
+    of('lost').length ? `${of('lost').length} lost` : '',
+    of('escalation').length ? `${of('escalation').length} escalation${of('escalation').length > 1 ? 's' : ''}` : '',
+    of('feedback').length ? `${of('feedback').length} piece${of('feedback').length > 1 ? 's' : ''} of feedback` : '',
+  ].filter(Boolean)
+
+  const text = [
+    `Gist · ${winLabel}${unitNote ? ` · ${unitNote}` : ''}`,
+    run ? `${run.ok ? 'Last refresh' : 'Last refresh (failed)'} ${stamp(run.at)}: ${run.head}` : '',
+    lead.length ? lead.join(', ') + '.' : 'Nothing moved in this window.',
+    openClients ? `${openClients} client${openClients === 1 ? '' : 's'} still carrying an open escalation.` : '',
+    ...sections.map(sec => `\n${sec.heading}\n` + sec.rows.map(i => `- ${i.client}: ${sec.line(i)}`).join('\n')),
+    creds.length ? `\nCredentials in mail — get them rotated: ${creds.join(', ')}.` : '',
+  ].filter(Boolean).join('\n')
+
+  return (
+    <Panel className="mb-5" title={<span className="text-mav-fg">Gist · {winLabel}</span>}
+      info="The window's news written out, built from the same rows as the list below — it follows the tabs above and is rebuilt on every refresh. Click any line to open that item."
+      right={
+        <div className="flex items-center gap-2">
+          <button onClick={() => { navigator.clipboard?.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1600) }}
+            className="rounded-full border border-mav-line px-2.5 py-1 text-[11px] text-mav-muted hover:text-mav-fg hover:border-mav-fg/30">
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button onClick={() => setOpen(o => !o)}
+            className="rounded-full border border-mav-line px-2.5 py-1 text-[11px] text-mav-muted hover:text-mav-fg hover:border-mav-fg/30">
+            {open ? 'Hide' : 'Show'}
+          </button>
+        </div>
+      }>
+      {loading ? <p className="text-sm text-mav-muted">Reading the latest…</p> : !open ? null : (
+        <div className="space-y-4 text-sm leading-relaxed">
+          {run && (
+            <p className={run.ok ? 'text-mav-muted' : 'text-red-400'}>
+              <span className="font-semibold text-mav-fg">{run.ok ? 'Last refresh' : 'Last refresh did not complete'} {stamp(run.at)}.</span>{' '}
+              {run.head}
+            </p>
+          )}
+          <p>
+            {lead.length
+              ? <>In the {winLabel}{unitNote ? <> for {unitNote}</> : null}: {lead.join(', ')}.</>
+              : <>Nothing came in or moved in the {winLabel}{unitNote ? <> for {unitNote}</> : null}.</>}
+            {openClients > 0 && <> {openClients} client{openClients === 1 ? '' : 's'} still carrying an open escalation.</>}
+          </p>
+
+          {creds.length > 0 && (
+            <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-amber-300">
+              A login arrived in plain mail from {creds.join(', ')} — get {creds.length > 1 ? 'those' : 'that one'} rotated.
+              The value is deliberately not printed here.
+            </p>
+          )}
+
+          {sections.map(sec => (
+            <div key={sec.id}>
+              <h3 className="font-semibold text-mav-fg mb-1">{sec.heading}</h3>
+              <ul className="space-y-1">
+                {sec.rows.slice(0, 8).map(i => (
+                  <li key={i.key}>
+                    <button onClick={() => onPick(i)} className="text-left hover:text-mav-yellow transition">
+                      <span className="font-medium">{i.client}</span>
+                      <span className="text-mav-muted"> — {sec.line(i)}</span>
+                    </button>
+                  </li>
+                ))}
+                {sec.rows.length > 8 && (
+                  <li className="text-mav-muted">+{sec.rows.length - 8} more in the list below.</li>
+                )}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
   )
 }
 
