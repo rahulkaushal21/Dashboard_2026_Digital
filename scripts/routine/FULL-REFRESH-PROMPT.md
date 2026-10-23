@@ -539,6 +539,31 @@ Two more things the escalation record shows:
   a single point of judgement, and it is also why these reasons are consistent enough to
   learn from — treat them as the standard until somebody else's disagree.
 
+### The spreadsheet can be behind while the writer says it is not
+23 Oct 2026. The user read $134,238.97 for October on the dashboard and $133,565.21 on
+the sheet, and asked whether the sync was broken. It was: **three confirmed deals were
+missing from the Web, Hub & LP tab**, one of them ZULU 8's CBHS WeMoney banners at
+$673.76 — the difference he had spotted by eye.
+
+The writer had been running every half hour the whole time, reporting `ok`. Eight minutes
+before a forced run wrote those three rows it had said *"nothing changed — the
+spreadsheet was left alone"*, and nothing in the data changed in between. The cause is
+structural: `planTab` compares LENGTHS and position — `added = grid.length -
+existing.length`, row i against row i. That answers "is the sheet the same shape" and
+never "is every row I meant to write actually there".
+
+- **Rule: a green sheet-writer run is not evidence the sheet is complete.** `sheet-verify`
+  (cron `5,35`) is what says that: it reads the tab back and compares the REFS in the last
+  column — `raw:<row_index>`, `opp:<id>` — against what the database expects, as sets. It
+  records a FAILED run in `sync_runs` naming the missing rows and the dollars. If it is
+  red, say so in the pulse with the figure; a count alone does not get acted on.
+- **Rule: a row confirmed in the last 40 minutes is waiting, not lost.** The first run of
+  the verifier fired on a deal confirmed 26 seconds after the last write. It now reports
+  those separately. Do not report a pending row as a missing one.
+- **Rule: when the totals disagree, re-run the writer before theorising.** Forcing the job
+  wrote the three rows, and a second forced run then reported nothing to do — which is
+  both the fix and the proof.
+
 ### The cadence: weekly, on a Monday
 `scripts/routine/weekly-hands-audit.sql` holds the eight queries this audit is made of —
 who did what, which fields were corrected, deals closed by hand and whether a reason was
