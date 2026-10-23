@@ -455,6 +455,64 @@ Every one of these came from a real correction; treat them as standing rules.
   judge the deal, never write them into any column, never echo them back — and tell the user to
   rotate anything that arrived in plain email.
 
+## What the team's own hands tell us — audit of 1–23 Oct 2026
+The PM team has had the dashboard since 1 Oct. Every manual action is recorded in
+`opportunity_events`, plus `email_lost_*`, `merged_*` and `manual_feedback`. Read that
+record, not opinion, when deciding what the routine should do differently. Reviewed
+23 Oct 2026: 350 actions by 13 people — 180 edits, 121 confirmations, 32 deals created
+by hand, 63 marked lost, 6 merges (3 of them mine, testing), 5 pieces of feedback.
+
+What the record actually showed, and the rule each finding earns:
+
+- **Automated actors are writing six different names.** `refresh`, `refresh-scan`,
+  `claude`, `claude-refresh`, `refresh 15 Oct`, `refresh 16 Oct` all appear in
+  `email_lost_by` for October. Any per-person audit silently splits across them, and a
+  PM reading "who marked this lost" sees a different word each week.
+  **Rule: the routine writes `refresh` as the actor, exactly that, every time.** Never a
+  date, never a variant. If a human ran it, their email goes in instead.
+- **A bulk sweep leaves no reason behind.** On 22 Oct one person marked 36 deals lost
+  inside an hour — $135,788 of pipeline — and 36 of those 37 rows carry no reason at all.
+  Nobody can now say why any single one went. The one deal that genuinely went to a
+  competitor that day reads identically to the 36 that were only stale.
+  **Rule: when the routine closes several deals in one pass, every row gets the same
+  one-line reason naming the sweep ("stale, no client reply since <date>"), and the pulse
+  says how many and how much went in one go** — never as N separate findings.
+- **The fields humans keep correcting are the ones the sync never fills.**
+  `internal_delivery` (27 corrections, 4 people), `sales_person` (21, 5 people),
+  `value` (10), `delivery_date` (8). Not month, not owner, not status.
+  **Rule: never overwrite those four from email inference.** If the sheet is silent, leave
+  them null and say so — a PM correcting a blank costs less than a PM finding a wrong
+  value they have to notice first. Flag a confirmed deal with no `sales_person` as a gap
+  worth filling, because it is corrected by hand more than any field except delivery.
+- **My own test rows are in the team's numbers.** Four of October's six merges are
+  `web@uplers.com` with the reason "round-trip test" / "duplicate test", merged and
+  unmerged minutes apart on 15 Oct. They were never cleaned up.
+  **Rule: a test action carries a reason beginning `test:` and is undone in the same
+  session. Any count of team activity excludes `web@uplers.com` and `claude`.**
+- **Merging into a project was broken from the day it shipped until 22 Oct.** The lookup
+  asked `web_project_ledger` for a column it does not have (`service_name`; the ledger
+  calls it `service_dept`), so every project ID came back "not on the sheet" and the
+  Merge button stayed disabled. First successful one: Morrison Wilkes / PRJ310826191136,
+  22 Oct. Everything before that could only merge deal-into-deal.
+  **Rule: any deal cancelled or marked lost between 15 and 22 Oct whose reason mentions a
+  duplicate, "already booked", or an existing project is a candidate for a merge that was
+  not available at the time. Re-check those before trusting the quarter's
+  quote-to-conversion.**
+- **Nobody creates deals from nothing; they create them from mail the scan missed.**
+  All 32 hand-created deals carry `origin='pm'`, 20 of them by one person. That is not
+  PMs duplicating the system — it is the scan not finding what they found.
+  **Rule: treat a hand-created deal as a miss report. When one appears, look for the
+  thread it came from and say in the pulse why the scan did not raise it.** The
+  unlogged-quote detector exists for exactly this and should agree with them.
+- **Feedback is barely used: 5 pieces in three weeks, 2 approved, 2 rejected, 1 waiting.**
+  Too few to tune anything on. Worth saying once in a pulse that the queue exists, then
+  leaving it alone.
+
+A standing instruction, not a finding: **this section is appended to, never rewritten.**
+Each audit adds what the hands did since the last one, with the date it was read. The
+point is that the system gets less wrong every month, and that only works if the evidence
+of being wrong stays written down.
+
 ## Cost — what actually drives it
 Storage and hosting are not the expense; **email text read through the model is.**
 Measured 30 Jul 2026: DB 113 MB, ~465 KB per dashboard page load (gzipped), ~96 edge
