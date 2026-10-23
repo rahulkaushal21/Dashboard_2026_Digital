@@ -508,10 +508,49 @@ What the record actually showed, and the rule each finding earns:
   Too few to tune anything on. Worth saying once in a pulse that the queue exists, then
   leaving it alone.
 
-A standing instruction, not a finding: **this section is appended to, never rewritten.**
-Each audit adds what the hands did since the last one, with the date it was read. The
-point is that the system gets less wrong every month, and that only works if the evidence
-of being wrong stays written down.
+### Escalations the user threw out — the richest source of learning here
+A dismissal reason is a sentence saying what the detector should never have flagged, in
+the user's own words. 14 escalations were dismissed with a reason in October, 13 of them
+by one person. They fall into four kinds, and each kind is a rule the detector now owes:
+
+- **The cause is on the client's side** (6 of 14) — "client missed to share the files",
+  "client keep on coming and requesting multiple things", "this is on client side", "On
+  clients end". **Rule: before flagging a delay or a risk, say who caused it. A client
+  who has not sent what we are waiting for is not an escalation against us.** Flag it as
+  a blocker on the client if it needs saying at all.
+- **It is not an escalation at all** (4) — "not an esclation", "this is nothing", "just a
+  normal conversation", and a free plugin we gave a client for feedback read as a paid
+  project going wrong. **Rule: the bar is a client expressing dissatisfaction about work
+  we are accountable for. Not a firm sentence, not a question, not a thread that merely
+  contains a problem.**
+- **We are not contractually on the hook** — "client is not in maintenance retainer, so we
+  are not owning it". **Rule: check the engagement before flagging a site-health or
+  uptime issue. Work outside a retainer is a sales conversation, not an escalation.**
+- **It is actually positive, or commercial** — a client returning after a cheap local
+  developer failed, read as "Blame / frustration"; a pricing pushback read as an
+  escalation. **Rule: a client coming back to us is a win, and a price objection belongs
+  with the deal, not on the escalation board.**
+
+Two more things the escalation record shows:
+- **22 escalations were marked fixed in October and not one carries a resolution note.**
+  A fix with no note teaches nothing and cannot be reused when the same thing happens to
+  the next client. Worth asking for one sentence at the point of marking it fixed.
+- **One person is doing nearly all the triage.** 13 of 14 dismissals are rahul.k. That is
+  a single point of judgement, and it is also why these reasons are consistent enough to
+  learn from — treat them as the standard until somebody else's disagree.
+
+### The cadence: weekly, on a Monday
+`scripts/routine/weekly-hands-audit.sql` holds the eight queries this audit is made of —
+who did what, which fields were corrected, deals closed by hand and whether a reason was
+given, deals created by hand (each one a thread the scan missed), merges, escalation
+dismissal reasons, escalations fixed without a note, and feedback. Set `:since` to the
+Monday a week back and run it.
+
+**A standing instruction, not a finding: this section is appended to, never rewritten.**
+Each week adds what the hands did since the last read, with the date. The point is that
+the system gets less wrong every month, and that only works if the evidence of being
+wrong stays written down. Where a week's findings only strengthen a rule already here,
+add the date to that rule rather than writing it twice.
 
 ## Cost — what actually drives it
 Storage and hosting are not the expense; **email text read through the model is.**

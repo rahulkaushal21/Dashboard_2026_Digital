@@ -366,3 +366,24 @@ open quotes first if you are time-limited.
    ALWAYS call it on a real classification pass, even a 0-row quiet one. (If the
    capture feed itself is stalled — stale email_inbox / gmail-ingest errors — call
    markScanFailed instead, see §0b, and do NOT call markScan.)
+
+## D. Weekly — read the hands (Mondays only)
+Once a week, not every run. The 30-minute routine keeps the data right; this keeps the
+SYSTEM right, by reading what people had to correct by hand and turning it into a rule.
+
+1. Run `scripts/routine/weekly-hands-audit.sql` with `:since` set to the Monday a week
+   back. Eight queries: who did what, which fields were corrected, deals closed by hand
+   and whether a reason was given, deals created by hand, merges, the reasons the user
+   gave for dismissing escalations, escalations fixed with no note, and feedback.
+2. Read the TEXT, not the counts. Every correction is evidence the system was wrong
+   about something, and the dismissal reasons on escalations say it in plain words —
+   "this is on client side", "not an esclation", "client is not in maintenance retainer".
+3. Write what you learn into the "What the team's own hands tell us" section of
+   FULL-REFRESH-PROMPT.md, dated, appending rather than rewriting. Re-run
+   `build-prompt-txt.sh` so the .txt copy follows.
+4. Say it in the Monday pulse in two or three lines: what the team corrected most, what
+   was thrown out and why, and which rule changed as a result. If nothing changed, say
+   that — a week where the system was not wrong is worth knowing too.
+
+Exclude `web@uplers.com` and `claude` from any count of team activity: those are tests
+and the routine itself, and counting them flatters the usage figures.
