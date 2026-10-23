@@ -221,12 +221,17 @@ export default function Dashboard() {
         setSyncResult(j.message || 'Just synced — showing that run')
       } else if (j.ok) {
         const n = (j.steps || []).filter((s: any) => !s.skipped).length
-        setSyncResult(`${j.dry_run ? 'Dry run' : 'Synced'} · ${n} steps · ${((j.ms || 0) / 1000).toFixed(1)}s`)
+        // What went to the SPREADSHEET, said out loud. "Synced 6 steps" read the same
+        // whether forty rows had been written or none, and the question people press
+        // this button for is whether the sheet is up to date now.
+        setSyncResult(`${j.dry_run ? 'Dry run' : 'Synced'} · ${n} steps · ${((j.ms || 0) / 1000).toFixed(1)}s${j.sheet ? ` · ${j.sheet}` : ''}`)
       } else {
         // NAME what broke. "did not complete" sent someone to re-press a button that had
         // already done four of its six steps.
         const bad = (j.steps || []).filter((s: any) => !s.ok).map((s: any) => s.step)
-        setSyncResult(`Sync incomplete — ${bad.join(', ') || 'unknown step'} failed; showing what landed`)
+        // The sheet line matters MORE on a failure, not less: it says whether the
+        // spreadsheet was left behind by whatever broke.
+        setSyncResult(`Sync incomplete — ${bad.join(', ') || 'unknown step'} failed; showing what landed${j.sheet ? ` · ${j.sheet}` : ''}`)
       }
     } catch { setSyncResult('Sync unreachable — showing last data') }
     clearReadCache()

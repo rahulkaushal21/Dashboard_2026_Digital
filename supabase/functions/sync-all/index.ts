@@ -45,12 +45,46 @@ const FN = {
   sheetSync: { path: "sheet-sync", token: "syncWebHubLP_8f3a91", method: "POST" },
   quoteSync: { path: "quote-sync", token: "ingestQuoteApi_5d1b83", method: "GET" },
   sheetWriter: { path: "sheet-writer", token: "writeWebHub_5c1d73", method: "GET" },
+  // Reads the tab back and checks every row the dashboard expects is actually in it.
+  // The writer's own "nothing changed" cannot see a missing row (23 Oct 2026: three
+  // confirmed deals absent while it reported clean), so a manual sync asks the witness.
+  sheetVerify: { path: "sheet-verify", token: "verifyWebHub_9b4e27", method: "GET" },
   webRevenue: { path: "sync-web-revenue", token: null as string | null, method: "POST" },
 };
 
 const BASE = () => (Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "") + "/functions/v1/";
 
 type Step = { step: string; ok: boolean; ms: number; detail?: unknown; error?: string; skipped?: string };
+
+/**
+ * One plain sentence about the spreadsheet, built from what the writer and the verifier
+ * came back with. Counts across every tab, because "written to sheet" means the whole
+ * file, not one of its four tabs.
+ */
+function sheetLine(steps: Step[]): string {
+  const w = steps.find((s) => s.step.startsWith("sheet-writer"));
+  const v = steps.find((s) => s.step.startsWith("sheet-verify"));
+  if (w?.skipped) return "nothing written to the sheet — " + w.skipped;
+
+  let written = "";
+  const ch = (w?.detail as { changes?: Record<string, { updated: number; added: number; removed: number }> } | undefined)?.changes;
+  if (ch) {
+    let updated = 0, added = 0, removed = 0;
+    for (const c of Object.values(ch)) { updated += c.updated || 0; added += c.added || 0; removed += c.removed || 0; }
+    written = updated + added + removed === 0
+      ? "sheet already matched"
+      : `written to sheet: ${added} added, ${updated} updated${removed ? `, ${removed} removed` : ""}`;
+  }
+
+  const vd = v?.detail as { ok?: boolean; missing?: number; missing_usd?: number; pending?: number } | undefined;
+  if (vd && vd.ok === false) {
+    return `${written || "written to sheet"} · STILL SHORT: ${vd.missing} row(s), $${(vd.missing_usd || 0).toLocaleString("en-US")}`;
+  }
+  if (vd && vd.ok === true) {
+    return `${written || "sheet already matched"} · verified${vd.pending ? `, ${vd.pending} just confirmed and due on the next run` : ""}`;
+  }
+  return written;
+}
 
 /** Call one edge function and summarise it. A step never throws — a failed step is data. */
 async function call(name: string, spec: { path: string; token: string | null; method?: string }, extra = ""): Promise<Step> {
@@ -118,6 +152,8 @@ Deno.serve(async (req) => {
   // `pull=0` skips the inbound sheet reads for the day the source sheet is retired —
   // see the note in the reply where this was built. Default is to pull.
   const pull = url.searchParams.get("pull") !== "0";
+  // The two feeds the October cutover retired. Off unless asked for: see PHASE 1.
+  const retired = url.searchParams.get("retired") === "1";
 
   // ---- 60-second floor ----------------------------------------------------
   // Two people on the page, or one impatient double-click, otherwise means two full
@@ -145,10 +181,33 @@ Deno.serve(async (req) => {
   // None of these reads another's output, so they run together. Ordering them serially
   // only made the button slower.
   if (pull) {
+    // THE TWO RETIRED FEEDS ARE NOT CALLED. sheet-raw reads the old source sheet's
+    // published CSV and has answered 401 since the October cutover; sync-web-revenue
+    // fills web_revenue, which the ledger stopped reading at the same time. Both are
+    // dead BY DECISION, not broken.
+    //
+    // They were still being called, still failing, and — because a failed step makes
+    // upstreamOk false — they SKIPPED THE SHEET WRITE ON EVERY MANUAL SYNC. Every
+    // sync-all run in the fortnight to 23 Oct 2026 failed on exactly those two steps,
+    // so "Sync now" had not written to the spreadsheet once in that time, which is how
+    // October's tab came to be three confirmed deals short.
+    //
+    // Pass retired=1 to call them anyway, for the day somebody republishes that sheet.
+    if (retired) {
+      steps.push(
+        ...(await Promise.all([
+          call("sheet-raw (revenue tab, verbatim)", FN.sheetRaw),
+          call("sync-web-revenue", FN.webRevenue),
+        ])),
+      );
+    } else {
+      steps.push({
+        step: "retired inbound pulls (sheet-raw, sync-web-revenue)", ok: true, ms: 0,
+        skipped: "the source sheet was retired at the October cutover — pass retired=1 to call them",
+      });
+    }
     steps.push(
       ...(await Promise.all([
-        call("sheet-raw (revenue tab, verbatim)", FN.sheetRaw),
-        call("sync-web-revenue", FN.webRevenue),
         call("sheet-sync (quotes, esc, feedback, sql)", FN.sheetSync),
         call("quote-sync (quote API)", FN.quoteSync),
       ])),
@@ -191,13 +250,24 @@ Deno.serve(async (req) => {
     });
   }
 
+  // ---- PHASE 4: prove it landed ------------------------------------------
+  // Pressing the button is a claim that the spreadsheet now matches the dashboard, and
+  // until this step that claim rested on the writer saying so about itself. A dry run
+  // has written nothing, so there is nothing to verify.
+  if (upstreamOk && !dry) steps.push(await call("sheet-verify → the sheet matches", FN.sheetVerify));
+
   const failed = steps.filter((s) => !s.ok);
   const ok = failed.length === 0;
   const ms = Date.now() - t0;
 
-  const summary = ok
+  // WHAT WENT TO THE SPREADSHEET, in the summary itself. The button used to report
+  // "Synced 6 steps" whether it had written forty rows or none, so the one question
+  // people actually press it for — is the sheet up to date now? — went unanswered.
+  const sheet = sheetLine(steps);
+  const summary = (ok
     ? `Synced ${steps.filter((s) => !s.skipped).length} steps in ${(ms / 1000).toFixed(1)}s`
-    : `${failed.length} of ${steps.length} steps failed: ${failed.map((s) => s.step).join(", ")}`;
+    : `${failed.length} of ${steps.length} steps failed: ${failed.map((s) => s.step).join(", ")}`)
+    + (sheet ? ` · ${sheet}` : "");
 
   await fetch(`${SB}/rest/v1/sync_runs`, {
     method: "POST",
@@ -212,5 +282,5 @@ Deno.serve(async (req) => {
 
   // 200 even on a partial failure: the body says what broke, and a non-2xx here made the
   // button report "unreachable" for a run that did most of its work.
-  return json({ ok, dry_run: dry || undefined, ms, summary, steps });
+  return json({ ok, dry_run: dry || undefined, ms, summary, sheet, steps });
 });
