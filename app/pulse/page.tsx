@@ -34,6 +34,8 @@ type Kind = 'won' | 'new' | 'lost' | 'escalation' | 'feedback' | 'email' | 'refr
 interface Item {
   key: string; kind: Kind; at: string; client: string; title: string; detail?: string
   dept?: string; owner?: string; value?: number; href: string; hrefLabel: string
+  /** Who made this call, where one person made it — not the deal's owner. */
+  actor?: string
   facts?: [string, string][]
 }
 
@@ -135,9 +137,10 @@ export default function PulsePage() {
       }
       const seen = o.first_date || o.source_date || o.created_at
       if (seen) out.push({ ...base, key: `o${o.id}`, kind: 'new', at: seen, detail: one(o.gist || o.summary) })
-      if (o.won && o.confirmed_at) out.push({ ...base, key: `w${o.id}`, kind: 'won', at: o.confirmed_at, detail: o.confirmed_by ? `Confirmed by ${who(o.confirmed_by)}` : one(o.gist) })
+      if (o.won && o.confirmed_at) out.push({ ...base, key: `w${o.id}`, kind: 'won', at: o.confirmed_at, actor: o.confirmed_by || undefined, detail: o.confirmed_by ? `Confirmed by ${who(o.confirmed_by)}` : one(o.gist) })
       const lostAt = x.email_lost_at || (o.unlikely ? x.unlikely_at : null)
-      if (!o.won && lostAt) out.push({ ...base, key: `l${o.id}`, kind: 'lost', at: lostAt, detail: one(x.email_lost_reason || x.unlikely_reason) })
+      if (!o.won && lostAt) out.push({ ...base, key: `l${o.id}`, kind: 'lost', at: lostAt,
+        actor: x.email_lost_by || x.unlikely_by || undefined, detail: one(x.email_lost_reason || x.unlikely_reason) })
     }
     // Field edits and reassignments made on the dashboard are deliberately NOT here
     // (owner's call, 9 Oct 2026). Deals shows a deal arriving and a deal moving — new,
@@ -393,6 +396,35 @@ export default function PulsePage() {
 // Nothing here is new information. It is the same items, said in prose, because a list
 // of forty rows does not tell you what the day was.
 type Section = { id: string; heading: string; rows: Item[]; line: (i: Item) => string }
+// A line of the Gist. Usually one row; sometimes one SENTENCE STANDING FOR MANY, when
+// one person made the same call over and over in a sitting.
+type Entry = { key: string; client: string; text: string; item?: Item }
+
+// One pass over the pipeline, said once.
+//
+// 22 Oct: 36 deals were marked lost inside one hour by one person — a tidy-up of stale
+// rows, not thirty-six pieces of news. The Gist printed all of them, which buried the
+// one deal that genuinely went elsewhere that day. A run of five or more of the same
+// kind, by the same person, inside the same hour, is a sweep: it gets a line of its own
+// saying how many and how much, and the individual rows stay in the list below.
+function fold(rows: Item[], line: (i: Item) => string): Entry[] {
+  const groups = new Map<string, Item[]>()
+  for (const r of rows) {
+    const k = r.actor ? `${r.actor}|${r.at.slice(0, 13)}` : `solo|${r.key}`
+    const g = groups.get(k); if (g) g.push(r); else groups.set(k, [r])
+  }
+  const out: Entry[] = []
+  for (const [k, g] of groups) {
+    if (g.length < 5) { out.push(...g.map(i => ({ key: i.key, client: i.client, text: line(i), item: i }))); continue }
+    const total = g.reduce((s, i) => s + (i.value || 0), 0)
+    const names = Array.from(new Set(g.map(i => i.client))).slice(0, 4).join(', ')
+    out.push({
+      key: `fold${k}`, client: `${g.length} in one pass`,
+      text: `${who(g[0].actor)} cleared ${g.length} of these within the hour${total ? `, ${usd(total)} between them` : ''} — ${names}${g.length > 4 ? ' and others' : ''}. One tidy-up, not ${g.length} pieces of news.`,
+    })
+  }
+  return out
+}
 
 // Mail that carries a login. Named, never quoted — the point is to get it rotated, and
 // the value must not be copied onto a dashboard that everyone can read.
@@ -406,20 +438,26 @@ function Gist({ rows, winLabel, run, openClients, loading, unitNote, onPick }: {
   const [copied, setCopied] = useState(false)
   const of = (k: Kind) => rows.filter(i => i.kind === k)
   const short = (t?: string, n = 150) => { const x = one(t); return !x ? '' : x.length > n ? `${x.slice(0, n - 1)}…` : x }
+  // "Accredit — Accredit" says nothing twice. A subject that is only the client's name
+  // carries no information, so the line drops it and shows whatever else it has.
+  const titleOf = (i: Item) => {
+    const t = one(i.title), c = one(i.client)
+    return !t || t.toLowerCase() === c.toLowerCase() ? '' : t
+  }
 
   const sections: Section[] = [
     { id: 'won', heading: 'Booked', rows: of('won'),
-      line: i => [i.title, usd(i.value), i.detail].filter(Boolean).join(' · ') },
+      line: i => [titleOf(i), usd(i.value), i.detail].filter(Boolean).join(' · ') },
     { id: 'new', heading: 'New in', rows: of('new'),
-      line: i => [i.title, i.value ? usd(i.value) : 'unpriced', i.owner].filter(Boolean).join(' · ') },
+      line: i => [titleOf(i), i.value ? usd(i.value) : 'unpriced', i.owner].filter(Boolean).join(' · ') },
     { id: 'lost', heading: 'Lost', rows: of('lost'),
-      line: i => [i.title, short(i.detail, 110)].filter(Boolean).join(' · ') },
+      line: i => [titleOf(i), i.value ? usd(i.value) : '', short(i.detail, 110)].filter(Boolean).join(' · ') || 'no reason given' },
     { id: 'esc', heading: 'Escalations', rows: of('escalation'),
-      line: i => [i.title, short(i.detail, 110)].filter(Boolean).join(' · ') },
+      line: i => [titleOf(i), short(i.detail, 110)].filter(Boolean).join(' · ') },
     { id: 'fb', heading: 'Feedback', rows: of('feedback'),
-      line: i => short(i.detail) || i.title },
+      line: i => short(i.detail) || titleOf(i) || 'feedback logged' },
     { id: 'email', heading: 'Signals', rows: of('email'),
-      line: i => [i.title, short(i.detail, 110)].filter(Boolean).join(' · ') },
+      line: i => [titleOf(i), short(i.detail, 110)].filter(Boolean).join(' · ') },
     { id: 'refresh', heading: 'From the refresh run', rows: of('refresh'),
       line: i => short(i.title, 220) },
   ].filter(s => s.rows.length > 0)
@@ -434,7 +472,13 @@ function Gist({ rows, winLabel, run, openClients, loading, unitNote, onPick }: {
   const lead = [
     of('won').length ? `${of('won').length} booked${money ? ` worth ${usd(money)}` : ''}` : '',
     of('new').length ? `${of('new').length} new${quoted ? ` at ${usd(quoted)} quoted` : ''}` : '',
-    of('lost').length ? `${of('lost').length} lost` : '',
+    // A sweep is not news in the lead either: one deal that went elsewhere reads very
+    // differently from thirty-six rows tidied up in a sitting, and the lead says which.
+    (() => {
+      const e = fold(of('lost'), () => '')
+      const real = e.filter(x => x.item).length, swept = of('lost').length - real
+      return [real ? `${real} lost` : '', swept ? `${swept} closed off in a tidy-up` : ''].filter(Boolean).join(' and ')
+    })(),
     of('escalation').length ? `${of('escalation').length} escalation${of('escalation').length > 1 ? 's' : ''}` : '',
     of('feedback').length ? `${of('feedback').length} piece${of('feedback').length > 1 ? 's' : ''} of feedback` : '',
   ].filter(Boolean)
@@ -444,7 +488,7 @@ function Gist({ rows, winLabel, run, openClients, loading, unitNote, onPick }: {
     run ? `${run.ok ? 'Last refresh' : 'Last refresh (failed)'} ${stamp(run.at)}: ${run.head}` : '',
     lead.length ? lead.join(', ') + '.' : 'Nothing moved in this window.',
     openClients ? `${openClients} client${openClients === 1 ? '' : 's'} still carrying an open escalation.` : '',
-    ...sections.map(sec => `\n${sec.heading}\n` + sec.rows.map(i => `- ${i.client}: ${sec.line(i)}`).join('\n')),
+    ...sections.map(sec => `\n${sec.heading}\n` + fold(sec.rows, sec.line).map(e => `- ${e.client}: ${e.text}`).join('\n')),
     creds.length ? `\nCredentials in mail — get them rotated: ${creds.join(', ')}.` : '',
   ].filter(Boolean).join('\n')
 
@@ -485,24 +529,31 @@ function Gist({ rows, winLabel, run, openClients, loading, unitNote, onPick }: {
             </p>
           )}
 
-          {sections.map(sec => (
-            <div key={sec.id}>
-              <h3 className="font-semibold text-mav-fg mb-1">{sec.heading}</h3>
-              <ul className="space-y-1">
-                {sec.rows.slice(0, 8).map(i => (
-                  <li key={i.key}>
-                    <button onClick={() => onPick(i)} className="text-left hover:text-mav-yellow transition">
-                      <span className="font-medium">{i.client}</span>
-                      <span className="text-mav-muted"> — {sec.line(i)}</span>
-                    </button>
-                  </li>
-                ))}
-                {sec.rows.length > 8 && (
-                  <li className="text-mav-muted">+{sec.rows.length - 8} more in the list below.</li>
-                )}
-              </ul>
-            </div>
-          ))}
+          {sections.map(sec => {
+            const entries = fold(sec.rows, sec.line)
+            return (
+              <div key={sec.id}>
+                <h3 className="font-semibold text-mav-fg mb-1">{sec.heading}</h3>
+                <ul className="space-y-1">
+                  {entries.slice(0, 8).map(e => (
+                    <li key={e.key}>
+                      {e.item ? (
+                        <button onClick={() => onPick(e.item!)} className="text-left hover:text-mav-yellow transition">
+                          <span className="font-medium">{e.client}</span>
+                          <span className="text-mav-muted">{e.text ? ` — ${e.text}` : ''}</span>
+                        </button>
+                      ) : (
+                        <span><span className="font-medium">{e.client}</span><span className="text-mav-muted"> — {e.text}</span></span>
+                      )}
+                    </li>
+                  ))}
+                  {entries.length > 8 && (
+                    <li className="text-mav-muted">+{entries.length - 8} more in the list below.</li>
+                  )}
+                </ul>
+              </div>
+            )
+          })}
         </div>
       )}
     </Panel>
