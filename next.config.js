@@ -20,6 +20,10 @@ const nextConfig = {
         trailingSlash: true,
       }
     : {}),
+  // Set by `next upgrade --agent=security` (16.4.0 → 16.4.2): tells the CLI this app
+  // takes security patches through the agent flow, so it stops interrupting builds with
+  // the advisory nudge once it is on a patched version.
+  experimental: { agentUpgrade: 'security' },
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
 }
