@@ -569,6 +569,19 @@ never "is every row I meant to write actually there".
 - Rule: when the totals disagree, re-run the writer before theorising. Forcing the job
   wrote the three rows, and a second forced run then reported nothing to do — which is
   both the fix and the proof.
+- Rule: a row can be ON the tab and still not be COUNTED by it. The same $673.76 came
+  back hours later with the row present: ZULU 8's CBHS banners carried service_dept
+  "LP/HUB", a label no other row in the table uses. The Business Overview groups LP and
+  HUB into a row it DISPLAYS as "LP/HUB", so a row actually labelled that matched neither
+  bucket and fell out of every total. The five labels the overview counts are WEB-AU,
+  WEB-UK, WEB-US, LP, HUB — nothing else. sheet-verify now fails a run when any
+  confirmed row carries something outside that set, and the field is still free text, so
+  this can recur until it is constrained at entry.
+- Rule: a manual sync had not written the sheet since the October cutover. sync-all
+  called sheet-raw and sync-web-revenue, both retired and both failing, and a failed step
+  skips the outbound write by design. Every sync-all run in the fortnight to 23 Oct
+  failed on exactly those two. They are now reported as skipped, not failed; retired=1
+  calls them for the day that sheet is republished.
 
 ### The cadence: weekly, on a Monday
 scripts/routine/weekly-hands-audit.sql holds the eight queries this audit is made of —

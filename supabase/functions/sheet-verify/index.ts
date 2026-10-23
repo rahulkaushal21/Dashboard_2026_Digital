@@ -119,17 +119,17 @@ Deno.serve(async (req) => {
     // If those ever diverge this check starts lying, so they are named here in full
     // rather than hidden behind a view.
     from = 0;
-    const oppRow = new Map<string, { company: string; usd: number | null; at: string | null }>();
+    const oppRow = new Map<string, { company: string; usd: number | null; at: string | null; dept: string | null }>();
     for (;;) {
       const { data, error } = await sb.from("opportunities")
-        .select("id, company_name, est_value, confirmed_at")
+        .select("id, company_name, est_value, confirmed_at, service_dept")
         .eq("won", true).not("confirmed_by", "is", null).is("rolled_into", null)
         .order("id").range(from, from + 999);
       if (error) throw new Error("opportunities: " + error.message);
       if (!data?.length) break;
       for (const o of data) {
         expected.add(`opp:${o.id}`);
-        oppRow.set(`opp:${o.id}`, { company: o.company_name || "—", usd: o.est_value, at: o.confirmed_at });
+        oppRow.set(`opp:${o.id}`, { company: o.company_name || "—", usd: o.est_value, at: o.confirmed_at, dept: o.service_dept });
       }
       if (data.length < 1000) break;
       from += 1000;
@@ -172,16 +172,39 @@ Deno.serve(async (req) => {
       return o ? `${o.company} ${o.usd == null ? "(no value)" : "$" + Math.round(o.usd)}` : r;
     });
 
-    const ok = missing.length === 0;
+    // ---- a row can be ON the tab and still not be COUNTED by it -----------------
+    // 23 Oct 2026, the second half of the same $673.76. ZULU 8's CBHS banners carried
+    // service_dept "LP/HUB" — a label no other row in the table uses. The tab's Business
+    // Overview groups LP and HUB into a row it DISPLAYS as "LP/HUB", so a row actually
+    // labelled that matches neither bucket and is dropped from every total while sitting
+    // in plain sight on the tab. Set membership alone cannot see this, so the department
+    // is checked against the five labels the overview knows.
+    const DEPTS = new Set(["WEB-AU", "WEB-UK", "WEB-US", "LP", "HUB"]);
+    const oddDept: string[] = [];
+    for (const [ref, o] of oppRow) {
+      if (!expected.has(ref)) continue;
+      const d = (o.dept || "").trim();
+      if (!DEPTS.has(d)) oddDept.push(`${o.company} ${d ? `"${d}"` : "(no department)"} $${Math.round(o.usd || 0)}`);
+    }
+
+    const ok = missing.length === 0 && oddDept.length === 0;
     await sb.from("sync_runs").insert({
       source: "sheet-verify", ok,
       rows_upserted: expected.size,
       message: ok
         ? `every one of the ${expected.size} rows the dashboard expects is on the tab${pending.length ? ` · ${pending.length} confirmed in the last ${GRACE_MIN} minutes and still waiting for the writer` : ""}${extra ? ` · ${extra} on the tab the dashboard no longer has` : ""}`
-        : `${missing.length} row${missing.length === 1 ? "" : "s"} missing from the tab, $${Math.round(missingUsd).toLocaleString("en-US")} between them — ${sample.join("; ")}${missing.length > 8 ? " …" : ""}${pending.length ? ` · a further ${pending.length} confirmed in the last ${GRACE_MIN} minutes, not counted` : ""}`,
+        : [
+            missing.length
+              ? `${missing.length} row${missing.length === 1 ? "" : "s"} missing from the tab, $${Math.round(missingUsd).toLocaleString("en-US")} between them — ${sample.join("; ")}${missing.length > 8 ? " …" : ""}`
+              : "",
+            oddDept.length
+              ? `${oddDept.length} row${oddDept.length === 1 ? "" : "s"} on the tab but in no department the overview counts — ${oddDept.slice(0, 6).join("; ")}${oddDept.length > 6 ? " …" : ""}`
+              : "",
+            pending.length ? `a further ${pending.length} confirmed in the last ${GRACE_MIN} minutes, not counted` : "",
+          ].filter(Boolean).join(" · "),
     });
 
-    return json({ ok, expected: expected.size, found: found.size, missing: missing.length, missing_usd: Math.round(missingUsd), pending: pending.length, extra, sample });
+    return json({ ok, expected: expected.size, found: found.size, missing: missing.length, missing_usd: Math.round(missingUsd), odd_dept: oddDept, pending: pending.length, extra, sample });
   } catch (e) {
     // A verifier that fails silently is worse than no verifier: it is a green light with
     // nothing behind it. Any failure is recorded as a failed run.
