@@ -43,6 +43,13 @@ const uniq = (xs: (string | undefined)[]) => Array.from(new Set(xs.map(x => (x |
 const monLabel = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 // An empty selection means "all" — what the old "All PMs" option meant.
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
+// The option that stands for an empty cell, in a list whose other entries are names.
+const NOBODY = '— none —'
+const keepsExpert = (picked: string[], v?: string | null) => {
+  if (picked.length === 0) return true
+  const name = (v || '').trim()
+  return name ? picked.includes(name) : picked.includes(NOBODY)
+}
 
 // The Web, Hub & LP tab's columns, in its order and under its names.
 //
@@ -192,6 +199,10 @@ export default function ProjectLedger() {
   const [fGeo, setFGeo] = useState<string[]>([])
   const [fPm, setFPm] = useState<string[]>([])
   const [fAm, setFAm] = useState<string[]>([])
+  // Who did the work. Asked for to answer one question in particular: which
+  // outsourced lines have no cost on them yet.
+  const [fExpert, setFExpert] = useState<string[]>([])
+  const [fNoOutsource, setFNoOutsource] = useState(false)
   const [fSource, setFSource] = useState('')
   // Opens on THIS MONTH rather than all 3,221 lines. The monthly job is this month's;
   // everything else is two clicks away. Set after mount, because working out "now" during
@@ -311,6 +322,10 @@ export default function ProjectLedger() {
     geo: uniq(rows.map(r => r.geo)),
     pm: uniq(rows.map(r => r.pm_owner)),
     am: uniq(rows.map(r => r.sales_person)),
+    // NOBODY is one of the answers. A line with no expert named is exactly what you are
+    // hunting when you are chasing missing outsource costs, and uniq() drops blanks, so
+    // it would otherwise be the one thing you could not filter for.
+    expert: [...(rows.some(r => !(r.expert || '').trim()) ? [NOBODY] : []), ...uniq(rows.map(r => r.expert))],
   }), [rows])
 
   // Every filter except the source split. Kept apart so the Sheet / Dashboard tabs can
@@ -324,9 +339,13 @@ export default function ProjectLedger() {
       .filter(r => keeps(fGeo, r.geo))
       .filter(r => keeps(fPm, r.pm_owner))
       .filter(r => keeps(fAm, r.sales_person))
+      .filter(r => keepsExpert(fExpert, r.expert))
+      // "Empty" means no number at all. A zero is somebody saying the work cost nothing,
+      // which is an answer; a blank is nobody having said yet.
+      .filter(r => !fNoOutsource || r.outsource_price == null)
       .filter(r => !fFrom || rowMonth(r) >= fFrom)
       .filter(r => !fTo || rowMonth(r) <= fTo)
-  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fFrom, fTo])
+  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fExpert, fNoOutsource, fFrom, fTo])
 
   const shown = useMemo(() => {
     return preSource
@@ -471,13 +490,13 @@ export default function ProjectLedger() {
     return dupes.filter(d => inUnit(dept.get(d.dashboard_row), unit) || inUnit(dept.get(d.sheet_row), unit))
   }, [dupes, rowsAll, unit])
 
-  const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFSource(''); setFFrom(''); setFTo('') }
+  const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFExpert([]); setFNoOutsource(false); setFSource(''); setFFrom(''); setFTo('') }
   // The filters behind "More filters" that are in force. A From/To that is one month is
   // what the page opens on and what the Month picker already shows, so it does not count;
   // a real span does.
-  const hiddenActive = (fGeo.length ? 1 : 0) + (fAm.length ? 1 : 0) + (fFrom !== fTo ? 1 : 0)
+  const hiddenActive = (fGeo.length ? 1 : 0) + (fAm.length ? 1 : 0) + (fExpert.length ? 1 : 0) + (fNoOutsource ? 1 : 0) + (fFrom !== fTo ? 1 : 0)
   useEffect(() => { if (hiddenActive > 0) setMoreOpen(true) }, [hiddenActive])
-  const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || [fDept, fModel, fGeo, fPm, fAm].some(x => x.length > 0)
+  const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || fNoOutsource || [fDept, fModel, fGeo, fPm, fAm, fExpert].some(x => x.length > 0)
 
   const toggle = (k: string) => setPicked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })
   // Selects the whole FILTERED set, not just this page — the point of filtering to
@@ -756,6 +775,13 @@ export default function ProjectLedger() {
           <div className="basis-full h-0" />
           <MultiSelect label="All GEOs" options={opts.geo} selected={fGeo} onChange={setFGeo} className="w-40" />
           <MultiSelect label="All AMs" options={opts.am} selected={fAm} onChange={setFAm} className="w-40" />
+          <MultiSelect label="All experts" options={opts.expert} selected={fExpert} onChange={v => { filtersTouched.current = true; setFExpert(v) }} className="w-44" />
+          <label className="inline-flex items-center gap-1.5 text-xs text-mav-muted hover:text-mav-fg cursor-pointer"
+            title="Lines with no Outsource Price at all. A zero is an answer — somebody said it cost nothing; a blank is nobody having said yet.">
+            <input type="checkbox" checked={fNoOutsource} onChange={e => { filtersTouched.current = true; setFNoOutsource(e.target.checked) }}
+              className="accent-mav-yellow" />
+            No outsource price
+          </label>
           <span className={`${lbl} ml-2`} title="A From/To range replaces the month picker. On Start Date.">Range</span>
           <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={`${sel} w-40`} title="From month — on Start Date" aria-label="From month" />
           <span className="text-xs text-mav-muted">→</span>
