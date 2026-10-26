@@ -45,6 +45,9 @@ const monLabel = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString(
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 // The option that stands for an empty cell, in a list whose other entries are names.
 const NOBODY = '— none —'
+// The sheet's own word for outsourced work: the Expert column says "Contractor" and WHICH
+// contractor is held on the dashboard. Matched loosely so "Contractor - X" counts too.
+const isContractor = (v?: string | null) => /contractor/i.test((v || '').trim())
 const keepsExpert = (picked: string[], v?: string | null) => {
   if (picked.length === 0) return true
   const name = (v || '').trim()
@@ -340,9 +343,12 @@ export default function ProjectLedger() {
       .filter(r => keeps(fPm, r.pm_owner))
       .filter(r => keeps(fAm, r.sales_person))
       .filter(r => keepsExpert(fExpert, r.expert))
-      // "Empty" means no number at all. A zero is somebody saying the work cost nothing,
-      // which is an answer; a blank is nobody having said yet.
-      .filter(r => !fNoOutsource || r.outsource_price == null)
+      // CONTRACTOR LINES ONLY. In-house work has no outsource price by definition, so
+      // without this the toggle returned the whole month — 110 of 137 October lines —
+      // and buried the handful that actually owe a number. "Empty" means no number at
+      // all: a zero is somebody saying it cost nothing, which is an answer; a blank is
+      // nobody having said yet.
+      .filter(r => !fNoOutsource || (isContractor(r.expert) && r.outsource_price == null))
       .filter(r => !fFrom || rowMonth(r) >= fFrom)
       .filter(r => !fTo || rowMonth(r) <= fTo)
   }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fExpert, fNoOutsource, fFrom, fTo])
@@ -777,10 +783,10 @@ export default function ProjectLedger() {
           <MultiSelect label="All AMs" options={opts.am} selected={fAm} onChange={setFAm} className="w-40" />
           <MultiSelect label="All experts" options={opts.expert} selected={fExpert} onChange={v => { filtersTouched.current = true; setFExpert(v) }} className="w-44" />
           <label className="inline-flex items-center gap-1.5 text-xs text-mav-muted hover:text-mav-fg cursor-pointer"
-            title="Lines with no Outsource Price at all. A zero is an answer — somebody said it cost nothing; a blank is nobody having said yet.">
+            title="Contractor lines with no Outsource Price at all — outsourced work whose cost nobody has put in yet. In-house work is left out: it has no outsource price by definition. A zero counts as an answer, a blank does not.">
             <input type="checkbox" checked={fNoOutsource} onChange={e => { filtersTouched.current = true; setFNoOutsource(e.target.checked) }}
               className="accent-mav-yellow" />
-            No outsource price
+            No outsource price <span className="text-mav-muted/70">(contractor)</span>
           </label>
           <span className={`${lbl} ml-2`} title="A From/To range replaces the month picker. On Start Date.">Range</span>
           <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={`${sel} w-40`} title="From month — on Start Date" aria-label="From month" />

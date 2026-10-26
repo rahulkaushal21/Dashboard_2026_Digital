@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 import {
-  QUIET_DAYS, PROJECT_BUCKETS, BUCKETS, localToday, dayDiff, day, isOpenProject, dealDate, quietDays,
+  QUIET_DAYS, PROJECT_BUCKETS, BUCKETS, localToday, dayDiff, day, isAwaitingDelivery, dealDate, quietDays,
   personMatcher, defaultPerson, scopeLedger, scopeDeals, projectBuckets, quoteBuckets, bucketCounts, totalOf,
   announceActionsChanged, type Bucket, type ProjectBucket, type QuoteBucket,
 } from '@/lib/actions'
@@ -52,7 +52,7 @@ const TONE = {
 const BUCKET_META: Record<Bucket, { label: string; info: string }> = {
   today: { label: 'Delivering today', info: 'Open projects whose delivery date is today.' },
   week: { label: 'Due this week', info: 'Open projects due in the next 1 to 7 days.' },
-  past: { label: 'Past undelivered', info: 'Delivery date has passed and the project is still not Delivered or Cancelled (On Hold included). Not cut at any date — anything still open is still somebody’s to close.' },
+  past: { label: 'Past undelivered', info: 'Delivery date has passed and the project is still Under Development or Under Review. On Hold and Awaiting Information are left out — those are parked, usually waiting on the client, and they are not late. Not cut at any date: anything still running is still somebody’s to close.' },
   quiet: { label: 'Quiet quotes', info: `Open quotes with no touch for ${QUIET_DAYS}+ days (from email where there is any, else the quote date). Quotes already marked “might not come” are left out.` },
   yes: { label: 'Client said yes', info: 'Still Open in the Quotes sheet, but the client has committed in writing. Confirm them on Opportunities so they count as won.' },
 }
@@ -253,7 +253,7 @@ export default function ActionsPage() {
 
   const geoOpts = useMemo(() => Array.from(new Set([...scopedLedger.map(r => r.geo || ''), ...scopedDeals.map(x => x.geo || '')].filter(Boolean))).sort(), [scopedLedger, scopedDeals])
   const deptOpts = useMemo(() => Array.from(new Set([...scopedLedger.map(r => r.service_dept || ''), ...scopedDeals.map(dealDept)].filter(Boolean))).sort(), [scopedLedger, scopedDeals, dealDept])
-  const statusOpts = useMemo(() => Array.from(new Set(scopedLedger.filter(isOpenProject).map(r => r.delivery_status || '').filter(Boolean))).sort(), [scopedLedger])
+  const statusOpts = useMemo(() => Array.from(new Set(scopedLedger.filter(isAwaitingDelivery).map(r => r.delivery_status || '').filter(Boolean))).sort(), [scopedLedger])
   const hiddenActive = (fDept.length ? 1 : 0) + (fStatus.length ? 1 : 0)
   useEffect(() => { if (hiddenActive > 0) setMoreOpen(true) }, [hiddenActive])
   const anyFilter = !!q || fGeo.length > 0 || hiddenActive > 0

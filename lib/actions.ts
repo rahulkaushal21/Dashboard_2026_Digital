@@ -32,6 +32,19 @@ export const day = (d?: string | null) => { const v = (d || '').slice(0, 10); re
 // a date in the past is exactly the one nobody is looking at.
 export const isOpenProject = (r: LedgerRow) => !/^(delivered|cancel)/i.test((r.delivery_status || '').trim())
 
+// WHAT IS ACTUALLY WAITING ON DELIVERY. Not merely "not finished": a project ON HOLD is
+// not late, it is parked, usually by the client, and chasing it is somebody's time spent
+// on a decision that is not theirs to make. Awaiting Information is the same — the ball
+// is with the client. Owner's call, 26 Oct 2026: "only project with under development or
+// under review should be visible".
+//
+// This decides all three delivery buckets, not just the overdue one. Splitting it would
+// mean a parked project sat in Due this week and then vanished the day it went late,
+// which reads as a bug however it is explained.
+const DELIVERABLE = ['under development', 'under review'];
+export const isAwaitingDelivery = (r: LedgerRow) =>
+  DELIVERABLE.includes((r.delivery_status || '').trim().toLowerCase())
+
 // Same verdict the Opportunities page reaches, kept to the open case: anything won,
 // booked, lost or on hold is not a quote waiting on anybody.
 export const isOpenDeal = (x: Opportunity) => {
@@ -73,7 +86,7 @@ export function projectBuckets(rows: LedgerRow[], today: string): Record<Project
   const out: Record<ProjectBucket, LedgerRow[]> = { today: [], week: [], past: [] }
   for (const r of rows) {
     const dd = day(r.delivery_date)
-    if (!isOpenProject(r) || !dd) continue
+    if (!isAwaitingDelivery(r) || !dd) continue
     const n = dayDiff(today, dd)
     if (n === 0) out.today.push(r)
     else if (n >= 1 && n <= 7) out.week.push(r)
