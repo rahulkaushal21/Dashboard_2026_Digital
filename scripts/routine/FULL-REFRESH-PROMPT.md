@@ -285,6 +285,33 @@ unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 >     the call outcome, append the dated decision to `journey`, write a client-health signal.
 >     A recap for a client with no opp = a new lead.
 >
+> **3b. APPROVAL SWEEP — every run, before step 4, never skipped.** A client approving a
+> quote is the one event that must never be missed, and the snippet triage in 3a is exactly
+> where it hides: the thread keeps its old subject ("Font Color Issue…", "Routine site health
+> check", "C21 stores") and reads as support or chatter. So this step does not look at
+> subjects or senders at all. Run `scripts/routine/approved-without-a-deal.sql` (14-day
+> window). It lists every thread where (a) a client wrote approval words ("approved", "go
+> ahead", "please proceed", "happy to proceed", "move forward", "green light") AND (b) a
+> Mavlers/Uplers message in the same thread named a price or hours, AND (c) NO opportunity
+> carries that `thread_id` (a `thread_id:suffix` row counts). For each hit, read the CLIENT'S
+> OWN WORDS and the figure our side quoted, then:
+>   - approval of a quote that is not on the board → create or lift the row, `rfq_status` =
+>     `Approved — <who> "<their words>" <date> (<figure>)`, `win_probability` 95, est_value in USD
+>     with the conversion stated in the gist. **Open, never Won** — confirming books revenue and
+>     the PM does that. (Agero Insights Blog, 23 Oct: USD 410 approved, no row existed;
+>     Zulu8 C21 stores, 26 Oct: AUD 10,445 approved, no row existed — USD 7,408.)
+>   - approval of work already on the board under another thread → add the thread to the
+>     existing row's journey and move on. Say which row.
+>   - a refusal ("we don't want to go ahead"), a question, or approval of something else
+>     ("approved the Arena hours" is not "approved the @Mentions work") → no row; read the
+>     object of the sentence, per the Verify-before-you-write rule.
+> **Why this is a separate query and not `web_unlogged_deal_signals`:** that detector calls a
+> thread answered if the client has ANY deal within 15% of the figure. Agero had a USD 399
+> deal and the quote was USD 410, so the miss was invisible to it. Matching on the thread
+> removes that blind spot. **Still read `web_unlogged_deal_signals` too** (82 rows on 26 Oct):
+> it finds quotes and attachments with no approval yet, which this sweep deliberately does not.
+> The pulse says how many approvals this sweep found that steps 3 and 4 had not, by client.
+>
 > **4. REVIEW EVERY OPEN OPPORTUNITY (the core).** Pull all open deals
 > (`where not won and lower(coalesce(status,'')) not in ('lost','won')`). For each:
 >   - **Won?** Confirmed in the sheet (status Confirmed) OR booked/invoiced in `bookings`
