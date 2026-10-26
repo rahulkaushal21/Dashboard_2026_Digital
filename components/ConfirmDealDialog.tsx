@@ -321,7 +321,13 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     need('Value', amt != null && amt > 0)
     need('Currency', !!currency.trim())
     need('Quote date', !!quoteDate)
-    need('Service / dept', !!serviceDept.trim())
+    // NOT MERELY FILLED IN — one of the five the revenue sheet's Business Overview
+    // counts. Twice in three days the email scan wrote "LP/HUB", which is the HEADING
+    // the overview prints over LP and HUB, not a department: the row landed on the tab,
+    // matched neither bucket and vanished from every total ($673.76 on 23 Oct, $2,386.67
+    // on 26 Oct). The select keeps an out-of-list value visible as "(not in list)", so
+    // without this the person confirming sails past it.
+    need('Service / dept', SERVICE_DEPTS.includes(serviceDept.trim() as typeof SERVICE_DEPTS[number]))
     need('Project type', !!projectType.trim())
     need('Service type', !!serviceType.trim())
     need('Technology', !!technology.trim())

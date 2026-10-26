@@ -571,6 +571,15 @@ never "is every row I meant to write actually there".
   WEB-UK, WEB-US, LP, HUB** — nothing else. `sheet-verify` now fails a run when any
   confirmed row carries something outside that set, and the field is still free text, so
   this can recur until it is constrained at entry.
+- **Rule: `service_dept` is one of FIVE values, and "LP/HUB" is not one of them.**
+  LP, HUB, WEB-AU, WEB-UK, WEB-US (plus AI & Automation, which the sheet shows at zero).
+  "LP/HUB" is the HEADING the Business Overview prints over LP and HUB combined — writing
+  it into the column produces a row that sits on the tab and is counted by nothing. It
+  has happened twice from the email scan: ZULU 8 on 23 Oct ($673.76) and Creative Coup on
+  26 Oct ($2,386.67), both `origin='email'`, both written by this routine, not typed by a
+  PM. **Banner and landing-page work is LP; HubSpot CMS/CRM work is HUB.** If the thread
+  genuinely spans both, pick the one the money is for and say so in the gist — never
+  split the difference in the label. Confirming now refuses a dept outside the five.
 - **Rule: a manual sync had not written the sheet since the October cutover.** `sync-all`
   called sheet-raw and sync-web-revenue, both retired and both failing, and a failed step
   skips the outbound write by design. Every sync-all run in the fortnight to 23 Oct
