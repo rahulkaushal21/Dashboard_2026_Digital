@@ -607,6 +607,44 @@ the system gets less wrong every month, and that only works if the evidence of b
 wrong stays written down. Where a week's findings only strengthen a rule already here,
 add the date to that rule rather than writing it twice.
 
+### Week of 19–26 Oct 2026 (read Mon 26 Oct)
+101 actions by 9 people: 53 edits, 29 confirmations, 14 creates, 5 merges. 19–23 Oct overlaps
+the first audit above, so only what is new is written here.
+
+- **Reinforces "the fields humans keep correcting"** (26 Oct): `internal_delivery` 20 edits
+  by ONE person, `sales_person` 5, `delivery_date` 4, then `project_type` 2, and `currency`,
+  `technology`, `value` once each. Nothing in the routine should be writing the first three.
+- **Reinforces "automated actors write six names"** (26 Oct): `claude` is still the actor
+  on a deal marked lost on 22 Oct, and a new automated actor, `sheet-match`, now appears in
+  `opportunity_events`. The rule stands: `refresh`, exactly that.
+- **New: the PHP outreach is becoming priced work that only the hands can see.** 13 deals
+  were hand-created this week; the pattern is maintenance and PHP-update lines for Sensen.ai,
+  Telfer Digital, Melbourne Social and Attn Cntrl, Poloko, Milk Digital and Response MS —
+  work agreed on Slack or a call, not in a thread the scan reads. **Rule: after a mass
+  outreach, expect the revenue to arrive as hand-added rows, not as mail. Do not report
+  "no priced replies" as the outcome of a campaign.** Two identical USD 496.45 Melbourne
+  Social rows two minutes apart are two different sites (Melbourne Social, Attn Cntrl), not
+  a double-add — check the subject before calling a pair a duplicate.
+- **New: merging is now in use, and almost nobody says why.** 5 merges (rahul.j 3, nitin 1,
+  gagandeep 1); 4 carry no reason. Only the project merge (Morrison Wilkes) says so
+  ("Duplicate entry already approved"). **Rule: a merge the routine makes carries a
+  reason, and the pulse names it** — a merged row otherwise disappears from the count with
+  no trail.
+- **Dismissals 19–23 Oct all fit the four kinds already written** (26 Oct): Hunter PR "client
+  is not in maintenance retainer, so we are not owning it" (that was the routine's own
+  signal of 15 Oct — a site-compromise escalation on a client with no retainer), Frogonline
+  "not our issue as this is related to pricing", Enphase and ExpressLinks "client issue" /
+  "from clients end", StrategiQ "not an esclation". No new kind. The Hunter PR case is the
+  clearest standing example of the retainer rule: **check the engagement before raising a
+  site-health escalation.**
+- **Escalations fixed without a note: 9 of 9** (26 Oct). Unchanged from the first audit.
+- **Feedback: 1 pending, 1 rejected.** Still too little to learn from.
+- **A judgement left to a human, not a rule:** Ensemble's CEO, locked out of 2FA setup across
+  23–26 Oct, wrote "very sick and tired of this authentication nonsense". The 12 Oct
+  escalation on that thread was dismissed as "this is nothing". The routine did not re-raise
+  it, because the friction is our own mandatory 2FA rather than poor work, but a CEO saying
+  that is worth a person reading once.
+
 ## Cost — what actually drives it
 Storage and hosting are not the expense; **email text read through the model is.**
 Measured 30 Jul 2026: DB 113 MB, ~465 KB per dashboard page load (gzipped), ~96 edge
