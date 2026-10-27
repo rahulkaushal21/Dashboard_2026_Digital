@@ -338,7 +338,13 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     need('Account manager', !!salesPerson.trim())
     need('PM owner', !!pmOwner.trim())
     need('Start date', !!startDate)
-    need('Delivery date', !!deliveryDate)
+    // A delivery date BEFORE the start date is not a late project, it is an impossible
+    // one, and it lands on the Actions page as overdue the moment it is saved. 2x
+    // Marketing's October retainer was confirmed on 26 Oct starting the 24th and
+    // delivering the 23rd — last month's delivery date, kept rather than rolled forward
+    // — and read as "4 days past delivery" beside September's genuine row, which is what
+    // made one retainer look like two.
+    need('Delivery date', !!deliveryDate && !(startDate && deliveryDate < startDate))
     return m
   }, [deal.company_name, amt, currency, quoteDate, serviceDept, projectType, serviceType,
       technology, clientName, clientType, geo, deliveryType, salesPerson, pmOwner,
@@ -559,8 +565,15 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
             <F label="Delivery date" need={missing.includes('Delivery date')}
               hint={RETAINER_SHAPED_TYPES.includes(projectType)
                 ? 'For a retainer, the end of the month this line covers.' : undefined}>
-              <input type="date" className={`${ctl} ${border(missing.includes('Delivery date'))}`} value={deliveryDate}
+              <input type="date" min={startDate || undefined}
+                className={`${ctl} ${border(missing.includes('Delivery date'))}`} value={deliveryDate}
                 onChange={e => setDeliveryDate(e.target.value)} />
+              {deliveryDate && startDate && deliveryDate < startDate && (
+                <p className="mt-1 text-[11px] text-red-400">
+                  That is before the start date. On a monthly retainer this is usually last
+                  month&rsquo;s date kept instead of rolled forward.
+                </p>
+              )}
             </F>
           </Section>
 
