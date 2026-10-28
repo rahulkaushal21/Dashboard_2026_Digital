@@ -178,13 +178,22 @@ Deno.serve(async (req) => {
     // Overview groups LP and HUB into a row it DISPLAYS as "LP/HUB", so a row actually
     // labelled that matches neither bucket and is dropped from every total while sitting
     // in plain sight on the tab. Set membership alone cannot see this, so the department
-    // is checked against the five labels the overview knows.
-    const DEPTS = new Set(["WEB-AU", "WEB-UK", "WEB-US", "LP", "HUB"]);
+    // is checked against the labels the overview knows.
+    //
+    // 28 Oct 2026: "AI & Automation" was missing from this list and so was reported as
+    // uncounted every 30 minutes — a false alarm. Rahul: for invoice booking it counts
+    // under Web, though it is a department in its own right and not a WEB- pod. That is
+    // already how unitOf() in lib/business-unit.ts places it, and SERVICE_DEPTS has
+    // carried it all along; only this copy of the list was stale. Keep it spelled out
+    // rather than accepting anything starting "AI", so a new label still gets flagged.
+    const DEPTS = new Set(["WEB-AU", "WEB-UK", "WEB-US", "LP", "HUB", "AI & AUTOMATION"]);
     const oddDept: string[] = [];
     for (const [ref, o] of oppRow) {
       if (!expected.has(ref)) continue;
+      // Compared upper-cased: the WEB- pods are stored upper already, but "AI & Automation"
+      // is mixed case in SERVICE_DEPTS and a case difference is not a miscount.
       const d = (o.dept || "").trim();
-      if (!DEPTS.has(d)) oddDept.push(`${o.company} ${d ? `"${d}"` : "(no department)"} $${Math.round(o.usd || 0)}`);
+      if (!DEPTS.has(d.toUpperCase())) oddDept.push(`${o.company} ${d ? `"${d}"` : "(no department)"} $${Math.round(o.usd || 0)}`);
     }
 
     const ok = missing.length === 0 && oddDept.length === 0;
