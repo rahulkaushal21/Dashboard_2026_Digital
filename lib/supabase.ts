@@ -535,10 +535,15 @@ export async function getOpportunities(opts?: { includeNotOpp?: boolean }): Prom
 // the next made the page wait four network round trips end to end for work the
 // database does in under a tenth of a second. The wait was almost entirely the
 // waiting, which is why the page took seconds to show anything.
+// `id` on all three, and not for tidiness: the opportunities table passed 1,000 rows
+// in late October, so it is read in two pages. Without a stable ORDER BY, Postgres is
+// free to order the second page differently from the first, and rows near the boundary
+// came back twice or not at all — which is how a deal entered today could be missing
+// from the page while sitting in the table. See the PAGE note on read().
 const [rowsRaw, intentRows, sheetRowRows, booked, removed] = await Promise.all([
-  read<any>('opportunities').then(r => r || []),
-  read<any>('web_quote_intent').then(r => r || []),
-  read<any>('web_quote_sheet_row').then(r => r || []),
+  read<any>('opportunities', '*', 'id').then(r => r || []),
+  read<any>('web_quote_intent', '*', 'id').then(r => r || []),
+  read<any>('web_quote_sheet_row', '*', 'id').then(r => r || []),
   read<{ company_name: string; booking_amount: number; booking_month: string }>(
     'web_revenue', 'company_name, booking_amount, booking_month', 'id').then(r => r || []),
   removedOpportunityIds(),
