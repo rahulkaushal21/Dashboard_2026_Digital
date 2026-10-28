@@ -263,6 +263,14 @@ unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 >     existing rows, `fill_opportunity_owners()` fills them (NOT the retired sync); otherwise read
 >     the thread's `from/to/cc` and assign by role. Only sheet-origin rows may carry a blank AM
 >     (that's a gap in the source Quotes sheet, not to be invented here).
+>   - **A `pm_owner` must be a name in `pm_directory`.** Being on the thread is not the same as
+>     owning the delivery: designers, QA, account staff and leads all reply to clients. DHL /
+>     Stephanie Belle (opp 2381982) was filed under Tejal Vyas, who is in no PM list anywhere,
+>     while the row's own journey recorded Nitin Mishra delivering both Marketo templates —
+>     so her deal sat outside every PM page and incentive figure for six weeks. Check the name
+>     against `pm_directory` before writing it; if no internal participant matches, prefer the
+>     PM already on that client's other rows, and say in the gist that the PM is inferred.
+>     Match on the full name — see the three Kaustubhs. (Rahul, 28 Oct 2026.)
 >   - **Write the cost — DEEP-read the whole thread for the FINAL number.** Prices move across
 >     a thread (a $2,400 estimate becomes a $4,000 confirmed scope). Read the latest messages, not
 >     the first, and set `est_value` to the confirmed/latest figure (note currency). Never leave a
