@@ -45,3 +45,37 @@ where not exists (select 1 from opportunities p
   and not exists (select 1 from deal_signal_dismissals d where d.thread_id = e.thread_id)
 order by e.last_ext desc
 limit 40;
+
+-- ---------------------------------------------------------------------------------------------
+-- Step 3b-ii: the client's message is not in the inbox, but OUR acknowledgement of it is.
+--
+-- Webiteers / Dare to Be Different, 28 Oct 2026: the dealer-map change was approved by a client
+-- whose reply was never captured. Only "Sure, Sem! We'll line this up for execution" and
+-- "Thank you for the approval" survive, and the query above reads only the client's words.
+--
+-- Wording is deliberately narrow. A looser "thanks for confirming" also matches every calendar
+-- invite and produced 20 false hits on the first try. Read each hit: the thread may already be
+-- paid for by a prepaid bucket (sforelaw.com, 22 Oct), which is hours drawn down, not a new deal.
+
+with ours as (
+  select thread_id, max(inserted_at) last_ours,
+         max(left(regexp_replace(email_new_text(body), '\s+', ' ', 'g'), 150)) ev
+  from email_inbox
+  where inserted_at > now() - interval '14 days' and not archived
+    and from_addr ~* '(mavlers\.com|uplers)'
+    and email_new_text(body) ~* '(thank(s| you) for (the |your )?(approval|approving|go-ahead|go ahead)|noted (your|the) approval|line this up for execution|we.ll go ahead with the work)'
+  group by thread_id
+)
+select o.thread_id,
+       to_char(o.last_ours, 'MM-DD') as acknowledged_on,
+       (select subject from email_inbox s where s.thread_id = o.thread_id order by inserted_at limit 1) as subject,
+       (select string_agg(p.id::text || ':' || coalesce(p.status, '') || ':' || coalesce(p.est_value::text, '-') || ':' || coalesce(left(p.rfq_status, 18), '-'), ' ')
+          from opportunities p where p.thread_id = o.thread_id or p.thread_id like o.thread_id || ':%') as rows_on_thread,
+       o.ev as our_words
+from ours o
+where not exists (select 1 from opportunities p
+                  where (p.thread_id = o.thread_id or p.thread_id like o.thread_id || ':%')
+                    and (p.won or p.rfq_status ilike '%approved%' or p.status ilike 'won'))
+  and not exists (select 1 from deal_signal_dismissals d where d.thread_id = o.thread_id)
+order by o.last_ours desc
+limit 20;

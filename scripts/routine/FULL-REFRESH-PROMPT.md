@@ -311,6 +311,19 @@ unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 > removes that blind spot. **Still read `web_unlogged_deal_signals` too** (82 rows on 26 Oct):
 > it finds quotes and attachments with no approval yet, which this sweep deliberately does not.
 > The pulse says how many approvals this sweep found that steps 3 and 4 had not, by client.
+> **3b-ii. The client's own mail is sometimes not in the inbox — read OUR acknowledgement of it.**
+> The Dealer Finder map change for Webiteers / Dare to Be Different (28 Oct 2026) had no client
+> message in `email_inbox` at all: the approval arrived by another channel and only our side's
+> replies were captured ("Sure, Sem! We'll line this up for execution", "Thank you for the
+> approval"). The sweep above reads only the client's words, so it could not see it. Run the
+> second query in `approved-without-a-deal.sql`: Mavlers/Uplers messages that acknowledge an
+> approval ("thanks for the approval", "noted your approval", "line this up for execution",
+> "we'll go ahead with the work") on a thread whose row does not yet say Approved. Treat our PM's
+> acknowledgement as evidence, say so in `rfq_status` ("client message not in the inbox"), and
+> do the same as above. **Before creating anything, check the thread is not already paid for by a
+> prepaid bucket:** sforelaw.com, 22 Oct — Jennelle said "yes lets proceed" after asking "would
+> this come out of the bucket hours?" and Baspin answered "that's correct". That is hours drawn
+> from an existing retainer, not a new deal, and a row would double-count it.
 >
 > **4. REVIEW EVERY OPEN OPPORTUNITY (the core).** Pull all open deals
 > (`where not won and lower(coalesce(status,'')) not in ('lost','won')`). For each:
@@ -475,6 +488,14 @@ Every one of these came from a real correction; treat them as standing rules.
 - **Sub-brands are not clients.** Tip Top Foodservice NZ → `GWF`; SurfStyle → `Hummingbird Ideas`;
   First Defense Supply → `Market Veep`; Fyshe → `Ink Digital`; PAH → `Underdog Digital`;
   Convello → `YLP Legal`. The end client goes in `company_note`, never in `company_name`.
+  **Webiteers is an agency, and the mail that names its clients is the same agency.** Dealer Finder,
+  product schema and blog layout work for Dare to Be Different Outdoor all arrive from
+  `sem@webiteers.nl` with Vikram Shahi as AM and Nitin Mishra as PM. On 22 Oct the three rows were
+  written as `Dare to be Different` with AM Sakshi Bissa (taken from that name's older sheet
+  rows), so the PM looking under Webiteers found nothing. **The paying client is the agency whose
+  domain is on the thread; the AM is the Mavlers sender on it. Never take the AM from a client
+  name's history when the thread names one.** Rows 3328619 and 3328620 (product schema, blog
+  layout) still carry the old name and AM — fix them when the PM next touches them.
 - **A go-ahead with no number is still a real deal — just a value-less one.** Create the row, write
   what the client actually said into the gist, and leave `est_value` AND `win_probability` null
   rather than guessing a figure. Say in the pulse that the value is missing and where it lives.
