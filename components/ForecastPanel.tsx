@@ -9,7 +9,7 @@ import { KPIRow, Panel } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit, unitLabel } from '@/lib/business-unit'
 import { useThemeInk } from '@/lib/use-theme-ink'
-import { getBookingsFull, getOpportunities, getOpportunityDepts, getInvoicesAhead, getForecastSnapshot, saveForecastSnapshot, getRevenueHistoryRows, getForecastInputs, type BookingRow, type Opportunity, type InvoiceAhead, type ForecastSnapshot, type ForecastInputRow } from '@/lib/supabase'
+import { getBookingsFull, getOpportunities, getOpportunityDepts, getInvoicesAhead, getForecastSnapshot, getForecastSnapshotsFor, saveForecastSnapshot, getRevenueHistoryRows, getForecastInputs, type BookingRow, type Opportunity, type InvoiceAhead, type ForecastSnapshot, type ForecastInputRow } from '@/lib/supabase'
 import { buildForecast, churnDrag, chooseModel, runRateAt, nowcast, combineForecasts, applySnapshot, snapshotOf, MODEL_LABEL, type Forecast, type ForecastSnapshotPayload } from '@/lib/forecast'
 import type { Unit } from '@/lib/business-unit'
 import { FY_TARGETS, WEB_GEO_TARGETS } from '@/lib/config'
@@ -116,6 +116,50 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
     return () => { gone = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unit, asOf, !!fcLive])
+  // ── What we said at the time ────────────────────────────────────────────────
+  //
+  // A settled row showed a dash where the forecast belonged, so the table could say what
+  // a month DID but never what we thought it would do — the one thing a forecast is
+  // judged on. Two sources, in this order of honesty:
+  //
+  //  1. The snapshot written at the start of that month. A number recorded before the
+  //     month happened. Only exists from the month snapshots began.
+  //  2. Otherwise the walk-forward backtest: what the model WOULD have said, fitted on
+  //     the months before it and nothing after. Marked as such, because it is hindsight
+  //     — honest hindsight, but not a promise anybody made at the time.
+  const [snaps, setSnaps] = useState<{ as_of: string; payload: ForecastSnapshotPayload }[]>([])
+  useEffect(() => { getForecastSnapshotsFor<ForecastSnapshotPayload>(unit).then(setSnaps).catch(() => setSnaps([])) }, [unit])
+  const saidThen = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const s of snaps) {
+      const k = (s.payload?.made_for || s.as_of || '').slice(0, 7)
+      const row = s.payload?.months?.find(x => x.key === k)
+      if (k && row && typeof row.value === 'number') m.set(k, row.value)
+    }
+    return m
+  }, [snaps])
+  // The backtest's held-out predictions. For "All" the two units are fitted separately
+  // and added, the same way the forecast itself is — a single fit over the combined
+  // history reads Web's seasonal shape onto LP/HUB's flat retainers.
+  const btPred = useMemo(() => {
+    const m = new Map<string, number>()
+    if (!today) return m
+    const add = (u: Exclude<Unit, 'all'>) => {
+      const rows = [...historyRows, ...bookingsAll].filter(b => inUnit(b.service_name, u))
+      const r = chooseModel(rows, today).bt?.results || []
+      for (const x of r) m.set(x.key, (m.get(x.key) || 0) + x.predicted)
+    }
+    if (unit === 'all') { add('web'); add('lp-hub') } else add(unit)
+    return m
+  }, [historyRows, bookingsAll, today, unit])
+  /** What was forecast for a settled month, and whether it was recorded or reconstructed. */
+  const forecastFor_ = (k: string): { v: number; said: boolean } | null => {
+    const rec = saidThen.get(k)
+    if (rec != null) return { v: rec, said: true }
+    const bt_ = btPred.get(k)
+    return bt_ != null ? { v: bt_, said: false } : null
+  }
+
   const snapReady = snapFor === `${unit}|${asOf}`
   const fc: Forecast | null = useMemo(
     () => (fcLive && snapReady && snap ? applySnapshot(fcLive, snap.payload) : fcLive),
@@ -368,7 +412,7 @@ export default function ForecastPanel({ embedded = false }: { embedded?: boolean
           <Panel flush className="mb-5" title="Month by month"
             info={<>Bar = forecast · red line = {usdK(fc.neededPerMonth)} pace needed for {usdK(fc.target)}. Green is settled. Index is the seasonal index: 100 is an average month, so 113 means that month historically runs 13% above one{seasonal ? '' : ' — not applied here, so every forecast month is 100'}.</>}
             right={<span className="text-xs text-mav-muted">red line = {usdK(fc.neededPerMonth)}/mo needed</span>}>
-            <MonthTable fc={fc} />
+            <MonthTable fc={fc} made={forecastFor_} />
             {fc.months.some(m => m.pipelineAdj) && (
               <p className="px-5 py-2.5 text-[11px] text-mav-muted border-t border-mav-line/60">
                 Pipeline, read against normal: {(unit === 'all' ? ['lp-hub', 'web'] : [unit]).map(u => { const i = inputs.get(u); return i ? `${unitLabel(u as Unit)} ${usdK(i.pipeline_weighted)} open at its own win chance (${i.pipeline_deals} deals of the last 120 days) vs ${usdK(i.quoted_won_avg)} usually won from quotes a month` : null }).filter(Boolean).join(' · ')}.
@@ -648,7 +692,10 @@ function SeasonChart({ seasonal }: { seasonal: Forecast['seasonal'] }) {
 }
 
 /* ------------------------------------------------------------- month table --- */
-function MonthTable({ fc }: { fc: Forecast }) {
+/** `made` answers "what did we forecast for this settled month"; see the panel's own
+ *  comment on saidThen / btPred. Passed in rather than computed here because it needs
+ *  the snapshots and the backtest, which belong to the panel. */
+function MonthTable({ fc, made: forecastFor_ }: { fc: Forecast; made: (k: string) => { v: number; said: boolean } | null }) {
   const max = Math.max(...fc.months.map(m => m.high), fc.neededPerMonth)
   return (
     <div className="overflow-x-auto">
@@ -658,9 +705,11 @@ function MonthTable({ fc }: { fc: Forecast }) {
             <th className="px-5 py-2.5 font-medium">Month</th>
             <th className="px-3 py-2.5 font-medium text-right">Index</th>
             <th className="px-3 py-2.5 font-medium w-1/3">Shape</th>
-            <th className="px-3 py-2.5 font-medium text-right" title="What the project sheet already books into the month — the Business Numbers figure. With invoices already raised in the invoice app, it is the floor the forecast never goes below.">Booked (project sheet)</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="What the project sheet books into the month. On a settled month that IS the month's revenue; on the month in progress it is what is booked so far; on a month ahead it is what is already filed into it, which with invoices already raised is the floor the forecast never goes below.">Booked (project sheet)</th>
             {fc.parts && fc.parts.map(p => <th key={p.unit} className="px-3 py-2.5 font-medium text-right">{unitLabel(p.unit as Unit)}</th>)}
-            <th className="px-3 py-2.5 font-medium text-right">Forecast</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="What was forecast for the month. Where a snapshot was written at the start of it, that is the number — recorded before the month happened. Earlier months are marked with a degree sign: the walk-forward backtest, what the model would have said fitted only on the months before it.">Forecast</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="What the month actually did. Blank until it settles; on the month in progress the booked figure is in the column to the left.">Actual</th>
+            <th className="px-3 py-2.5 font-medium text-right" title="Forecast against actual. Positive means the forecast was over.">Miss</th>
             <th className="px-5 py-2.5 font-medium text-right">Range</th>
           </tr>
         </thead>
@@ -686,9 +735,35 @@ function MonthTable({ fc }: { fc: Forecast }) {
                   )}
                 </div>
               </td>
-              <td className="px-3 py-2.5 text-right tabular-nums text-mav-muted whitespace-nowrap">{m.actual || !m.booked ? '—' : fmtUsd(Math.round(m.booked))}</td>
+              {/* A settled month's booked figure IS its revenue, so it is printed rather
+                  than dashed out — the dash read as missing data when it only meant
+                  "the same number as the one further along this row". */}
+              <td className="px-3 py-2.5 text-right tabular-nums text-mav-muted whitespace-nowrap">
+                {m.actual ? fmtUsd(Math.round(m.value)) : m.booked ? fmtUsd(Math.round(m.booked)) : '—'}
+              </td>
               {fc.parts && fc.parts.map(p => <td key={p.unit} className="px-3 py-2.5 text-right tabular-nums text-mav-muted whitespace-nowrap">{m.parts ? fmtUsd(Math.round(m.parts[p.unit || ''] || 0)) : '—'}</td>)}
-              <td className="px-3 py-2.5 text-right tabular-nums font-medium whitespace-nowrap">{fmtUsd(Math.round(m.value))}</td>
+              {(() => {
+                const made = m.actual ? forecastFor_(m.key) : null
+                const miss = made && m.value ? ((made.v - m.value) / m.value) * 100 : null
+                return <>
+                  <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${m.actual ? 'text-mav-muted' : 'font-medium'}`}>
+                    {m.actual
+                      ? (made
+                        ? <span title={made.said ? 'Recorded at the start of that month' : 'Reconstructed — what the model would have said, fitted only on the months before it'}>
+                            {fmtUsd(Math.round(made.v))}{!made.said && <span className="text-mav-muted/60">°</span>}
+                          </span>
+                        : '—')
+                      : fmtUsd(Math.round(m.value))}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums font-medium whitespace-nowrap">
+                    {m.actual ? fmtUsd(Math.round(m.value)) : '—'}
+                  </td>
+                  <td className={`px-3 py-2.5 text-right tabular-nums text-xs whitespace-nowrap ${
+                    miss == null ? 'text-mav-muted' : Math.abs(miss) <= 5 ? 'text-green-400' : Math.abs(miss) <= 12 ? 'text-amber-300' : 'text-red-400'}`}>
+                    {miss == null ? '—' : `${miss >= 0 ? '+' : ''}${miss.toFixed(1)}%`}
+                  </td>
+                </>
+              })()}
               <td className="px-5 py-2.5 text-right tabular-nums text-xs text-mav-muted whitespace-nowrap">
                 {m.actual ? '—' : `${fmtUsd(Math.round(Math.max(0, m.low)))} – ${fmtUsd(Math.round(m.high))}`}
               </td>
@@ -698,7 +773,11 @@ function MonthTable({ fc }: { fc: Forecast }) {
             <td className="px-5 py-3 font-semibold">{fc.fyLabel} total</td>
             <td /><td /><td />
             {fc.parts && fc.parts.map(p => <td key={p.unit} className="px-3 py-3 text-right tabular-nums text-mav-muted whitespace-nowrap">{usdK(fc.months.reduce((s, m) => s + (m.parts?.[p.unit || ''] || 0), 0))}</td>)}
+            {/* The year's projection under Forecast, and what is actually in under
+                Actual — settled months plus the month in progress. */}
             <td className="px-3 py-3 text-right font-semibold tabular-nums whitespace-nowrap">{usdK(fc.projected)}</td>
+            <td className="px-3 py-3 text-right tabular-nums text-mav-muted whitespace-nowrap" title="Booked so far this financial year">{usdK(fc.bookedToDate)}</td>
+            <td />
             <td className="px-5 py-3 text-right text-xs text-mav-muted tabular-nums whitespace-nowrap">
               {usdK(fc.projectedLow)} – {usdK(fc.projectedHigh)}
             </td>

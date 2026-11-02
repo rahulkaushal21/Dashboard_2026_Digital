@@ -331,6 +331,17 @@ export async function getForecastSnapshot<T = unknown>(unit: string, asOf: strin
   const { data } = await supabase.from('forecast_snapshots').select('made_at, made_by, payload').eq('unit', unit).eq('as_of', asOf).maybeSingle()
   return (data as ForecastSnapshot<T> | null) || null
 }
+/**
+ * Every snapshot this unit has, oldest first — the forecasts that were actually made,
+ * month by month. The table shows them against what the month went on to do, which is
+ * the only honest way to read "was the prediction any good": a number written down
+ * before the month happened, not one recomputed now with the answer in hand.
+ */
+export async function getForecastSnapshotsFor<T = unknown>(unit: string): Promise<{ as_of: string; payload: T }[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('forecast_snapshots').select('as_of, payload').eq('unit', unit).order('as_of', { ascending: true })
+  return (data as { as_of: string; payload: T }[] | null) || []
+}
 export async function saveForecastSnapshot<T = unknown>(unit: string, asOf: string, payload: T): Promise<ForecastSnapshot<T> | null> {
   if (!supabase) return null
   const { data, error } = await supabase.rpc('save_forecast_snapshot', { p_unit: unit, p_as_of: asOf, p_payload: payload })
