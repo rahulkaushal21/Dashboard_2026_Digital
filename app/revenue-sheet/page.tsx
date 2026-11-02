@@ -45,6 +45,21 @@ const monLabel = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString(
 const keeps = (picked: string[], v?: string | null) => picked.length === 0 || picked.includes((v || '').trim())
 // The option that stands for an empty cell, in a list whose other entries are names.
 const NOBODY = '— none —'
+// What the search box looks at. Client, project and contact are what people type; the
+// three IDs are what they paste.
+// A line nobody can judge. The work is still running and carries no delivery date at
+// all, so neither this page nor the Actions tab can say whether it is late — "overdue"
+// needs a date to be past. Delivered and cancelled lines are excluded: a finished job
+// does not need a promise on it.
+const UNDATED_STATUS = /awaiting|cancel|deliver/i
+export const hasNoDeliveryDate = (r: LedgerRow) =>
+  !r.delivery_date && !UNDATED_STATUS.test(r.delivery_status || '')
+
+const SEARCHED: ((r: LedgerRow) => string | undefined | null)[] = [
+  r => r.company_name, r => r.project_name, r => r.contact_email,
+  r => r.project_id, r => r.quote_id, r => r.invoice_no,
+]
+
 // The sheet's own word for outsourced work: the Expert column says "Contractor" and WHICH
 // contractor is held on the dashboard. Matched loosely so "Contractor - X" counts too.
 const isContractor = (v?: string | null) => /contractor/i.test((v || '').trim())
@@ -206,6 +221,9 @@ export default function ProjectLedger() {
   // outsourced lines have no cost on them yet.
   const [fExpert, setFExpert] = useState<string[]>([])
   const [fNoOutsource, setFNoOutsource] = useState(false)
+  // Lines still running with no delivery date on them. Paired with the banner above
+  // the table, which is the only place the gap is visible without hunting.
+  const [fNoDelivery, setFNoDelivery] = useState(false)
   const [fSource, setFSource] = useState('')
   // Opens on THIS MONTH rather than all 3,221 lines. The monthly job is this month's;
   // everything else is two clicks away. Set after mount, because working out "now" during
@@ -335,8 +353,12 @@ export default function ProjectLedger() {
   // each say how many lines they would show under everything else that is set.
   const preSource = useMemo(() => {
     const q = search.trim().toLowerCase()
+    // The IDs are in here on purpose. Pasting a PRJ/QUT number straight off the sheet or
+    // out of an email is how people arrive at this page, and it found nothing: the search
+    // read the client, the project and the contact only. A bare 290926194525 matches too,
+    // since this is a substring test and the prefix is the part nobody retypes.
     return rows
-      .filter(r => !q || (r.company_name || '').toLowerCase().includes(q) || (r.project_name || '').toLowerCase().includes(q) || (r.contact_email || '').toLowerCase().includes(q))
+      .filter(r => !q || SEARCHED.some(f => (f(r) || '').toLowerCase().includes(q)))
       .filter(r => keeps(fDept, r.service_dept))
       .filter(r => keeps(fModel, r.engagement_model))
       .filter(r => keeps(fGeo, r.geo))
@@ -349,9 +371,10 @@ export default function ProjectLedger() {
       // all: a zero is somebody saying it cost nothing, which is an answer; a blank is
       // nobody having said yet.
       .filter(r => !fNoOutsource || (isContractor(r.expert) && r.outsource_price == null))
+      .filter(r => !fNoDelivery || hasNoDeliveryDate(r))
       .filter(r => !fFrom || rowMonth(r) >= fFrom)
       .filter(r => !fTo || rowMonth(r) <= fTo)
-  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fExpert, fNoOutsource, fFrom, fTo])
+  }, [rows, search, fDept, fModel, fGeo, fPm, fAm, fExpert, fNoOutsource, fNoDelivery, fFrom, fTo])
 
   const shown = useMemo(() => {
     return preSource
@@ -496,13 +519,29 @@ export default function ProjectLedger() {
     return dupes.filter(d => inUnit(dept.get(d.dashboard_row), unit) || inUnit(dept.get(d.sheet_row), unit))
   }, [dupes, rowsAll, unit])
 
-  const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFExpert([]); setFNoOutsource(false); setFSource(''); setFFrom(''); setFTo('') }
+  // ── Lines nobody can judge ───────────────────────────────────────────────────
+  //
+  // The Actions tab answers "what is late", which needs a delivery date to be past. A
+  // line with NO delivery date is therefore invisible to it: not late, not delivered,
+  // just unanswerable. Nine of October's lines were in that state, $27,723 between them,
+  // and nothing on the board said so.
+  //
+  // SCOPED THE WAY OPPORTUNITIES IS. A prompt to act is only honest when the row is
+  // yours to act on, so this reads canEditLedgerRow — the same test the Edit button
+  // uses. An admin sees the lot, which is what keeps unowned lines from falling in a
+  // hole. It follows the month on screen, like every other figure on this page.
+  const undated = useMemo(
+    () => pageAllSources.filter(r => hasNoDeliveryDate(r) && canEditLedgerRow(r, me, isAdmin)),
+    [pageAllSources, me, isAdmin])
+  const undatedTotal = useMemo(() => undated.reduce((n, r) => n + (r.amount_usd || 0), 0), [undated])
+
+  const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFExpert([]); setFNoOutsource(false); setFNoDelivery(false); setFSource(''); setFFrom(''); setFTo('') }
   // The filters behind "More filters" that are in force. A From/To that is one month is
   // what the page opens on and what the Month picker already shows, so it does not count;
   // a real span does.
-  const hiddenActive = (fGeo.length ? 1 : 0) + (fAm.length ? 1 : 0) + (fExpert.length ? 1 : 0) + (fNoOutsource ? 1 : 0) + (fFrom !== fTo ? 1 : 0)
+  const hiddenActive = (fGeo.length ? 1 : 0) + (fAm.length ? 1 : 0) + (fExpert.length ? 1 : 0) + (fNoOutsource ? 1 : 0) + (fNoDelivery ? 1 : 0) + (fFrom !== fTo ? 1 : 0)
   useEffect(() => { if (hiddenActive > 0) setMoreOpen(true) }, [hiddenActive])
-  const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || fNoOutsource || [fDept, fModel, fGeo, fPm, fAm, fExpert].some(x => x.length > 0)
+  const anyFilter = !!search || !!fSource || !!fFrom || !!fTo || fNoOutsource || fNoDelivery || [fDept, fModel, fGeo, fPm, fAm, fExpert].some(x => x.length > 0)
 
   const toggle = (k: string) => setPicked(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n })
   // Selects the whole FILTERED set, not just this page — the point of filtering to
@@ -716,6 +755,29 @@ export default function ProjectLedger() {
         </div>
       )}
 
+      {undated.length > 0 && !fNoDelivery && (
+        <div className="mb-4 rounded-xl border border-amber-400/50 bg-amber-400/10 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-200 mb-2">
+            {undated.length} project{undated.length > 1 ? 's' : ''} with no delivery date — {money(undatedTotal)}
+            <InfoTip text="Still running, and nothing says when it is due. The Actions tab cannot call these late, because late needs a date to be past — so they are counted nowhere until somebody fills one in. Delivered and cancelled lines are left out." />
+            <button onClick={() => { filtersTouched.current = true; setFNoDelivery(true); setMoreOpen(true) }}
+              className={`${secBtn} ml-auto`}>Show only these</button>
+          </div>
+          <ul className="space-y-1">
+            {undated.slice(0, 8).map(r => (
+              <li key={r.row_key} className="text-xs flex flex-wrap items-baseline gap-x-2">
+                <span className="text-mav-fg">{r.company_name || '—'}</span>
+                <span className="text-mav-muted">{r.project_name || '—'}</span>
+                <span className="text-mav-muted">· {money(r.amount_usd)}</span>
+                <span className="text-mav-muted">· {r.pm_owner || 'no PM'}</span>
+                <span className="text-mav-muted">· {r.delivery_status || 'no status'}</span>
+              </li>
+            ))}
+            {undated.length > 8 && <li className="text-xs text-mav-muted">+{undated.length - 8} more</li>}
+          </ul>
+        </div>
+      )}
+
       {/* THE HEADLINE IS THE MONTH ON SCREEN — see pageTotal above. */}
       <KPIRow cols={4}>
         <KPICard tone="accent" label="Revenue" value={loading ? '…' : money(pageTotal)}
@@ -757,7 +819,7 @@ export default function ProjectLedger() {
         </span>
         {anyFilter && <button onClick={clearAll} className={secBtn}>Clear all</button>}
       </>}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project or contact…" className={`${sel} w-64`} />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, project, contact or ID…" className={`${sel} w-64`} />
         {/* The month sits with the filters, not under the table. It is the control people
             reach for most, and it was the one you had to scroll past everything to find. */}
         <select value={rangeMode ? RANGE : pageMonth}
@@ -787,6 +849,12 @@ export default function ProjectLedger() {
             <input type="checkbox" checked={fNoOutsource} onChange={e => { filtersTouched.current = true; setFNoOutsource(e.target.checked) }}
               className="accent-mav-yellow" />
             No outsource price <span className="text-mav-muted/70">(contractor)</span>
+          </label>
+          <label className="inline-flex items-center gap-1.5 text-xs text-mav-muted hover:text-mav-fg cursor-pointer"
+            title="Work still running with no delivery date on it. Nothing can call these late — overdue needs a date to be past — so they sit outside the Actions tab entirely. Delivered and cancelled lines are left out.">
+            <input type="checkbox" checked={fNoDelivery} onChange={e => { filtersTouched.current = true; setFNoDelivery(e.target.checked) }}
+              className="accent-mav-yellow" />
+            No delivery date
           </label>
           <span className={`${lbl} ml-2`} title="A From/To range replaces the month picker. On Start Date.">Range</span>
           <input type="month" value={fFrom} onChange={e => { filtersTouched.current = true; setFFrom(e.target.value) }} className={`${sel} w-40`} title="From month — on Start Date" aria-label="From month" />
