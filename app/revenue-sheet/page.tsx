@@ -9,6 +9,7 @@ import InfoTip from '@/components/InfoTip'
 import { KPIRow, Segments, FilterBar, Panel } from '@/components/PageParts'
 import { NotSplitNote } from '@/components/UnitToggle'
 import { askReason } from '@/lib/ask'
+import { isAwaitingDelivery } from '@/lib/actions'
 import MultiSelect from '@/components/MultiSelect'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import Link from 'next/link'
@@ -49,11 +50,16 @@ const NOBODY = '— none —'
 // three IDs are what they paste.
 // A line nobody can judge. The work is still running and carries no delivery date at
 // all, so neither this page nor the Actions tab can say whether it is late — "overdue"
-// needs a date to be past. Delivered and cancelled lines are excluded: a finished job
-// does not need a promise on it.
-const UNDATED_STATUS = /awaiting|cancel|deliver/i
-export const hasNoDeliveryDate = (r: LedgerRow) =>
-  !r.delivery_date && !UNDATED_STATUS.test(r.delivery_status || '')
+// needs a date to be past.
+//
+// "Still running" is isAwaitingDelivery, the same predicate the three Actions delivery
+// buckets use, rather than a second list that could drift from it. It admits Under
+// Development and Under Review and nothing else: On Hold and Cancelled are not late,
+// they are stopped; Awaiting Information leaves the ball with the client; Delivered
+// needs no promise on it; and a blank status is not a statement that work is underway.
+// A first pass here excluded only the finished and parked ones, which let an On Hold
+// line from March and a status-less row into the alert.
+const hasNoDeliveryDate = (r: LedgerRow) => !r.delivery_date && isAwaitingDelivery(r)
 
 const SEARCHED: ((r: LedgerRow) => string | undefined | null)[] = [
   r => r.company_name, r => r.project_name, r => r.contact_email,
