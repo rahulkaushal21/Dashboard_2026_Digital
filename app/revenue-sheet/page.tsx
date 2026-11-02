@@ -529,10 +529,21 @@ export default function ProjectLedger() {
   // SCOPED THE WAY OPPORTUNITIES IS. A prompt to act is only honest when the row is
   // yours to act on, so this reads canEditLedgerRow — the same test the Edit button
   // uses. An admin sees the lot, which is what keeps unowned lines from falling in a
-  // hole. It follows the month on screen, like every other figure on this page.
+  // hole.
+  //
+  // EVERY MONTH, NOT THE MONTH ON SCREEN, and deliberately not behind the search or the
+  // filters either. Every other figure on this page follows the month picker, and this
+  // one must not: a September line with no delivery date is exactly the one nobody is
+  // going to find, because nobody opens September. The whole point is that the same
+  // backlog is there every time the page loads, until it is empty.
   const undated = useMemo(
-    () => pageAllSources.filter(r => hasNoDeliveryDate(r) && canEditLedgerRow(r, me, isAdmin)),
-    [pageAllSources, me, isAdmin])
+    () => rows.filter(r => hasNoDeliveryDate(r) && canEditLedgerRow(r, me, isAdmin))
+             .sort((a, b) => (b.booking_month || '').localeCompare(a.booking_month || '')),
+    [rows, me, isAdmin])
+  // How many months the backlog is spread over — the part that says "this is not just
+  // this month being unfinished".
+  const undatedMonths = useMemo(
+    () => new Set(undated.map(r => (r.booking_month || '').slice(0, 7)).filter(Boolean)).size, [undated])
   const undatedTotal = useMemo(() => undated.reduce((n, r) => n + (r.amount_usd || 0), 0), [undated])
 
   const clearAll = () => { filtersTouched.current = true; setSearch(''); setFDept([]); setFModel([]); setFGeo([]); setFPm([]); setFAm([]); setFExpert([]); setFNoOutsource(false); setFNoDelivery(false); setFSource(''); setFFrom(''); setFTo('') }
@@ -759,9 +770,13 @@ export default function ProjectLedger() {
         <div className="mb-4 rounded-xl border border-amber-400/50 bg-amber-400/10 px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-200 mb-2">
             {undated.length} project{undated.length > 1 ? 's' : ''} with no delivery date — {money(undatedTotal)}
+            {undatedMonths > 1 && <span className="font-normal text-amber-200/70">across {undatedMonths} months</span>}
             <InfoTip text="Still running, and nothing says when it is due. The Actions tab cannot call these late, because late needs a date to be past — so they are counted nowhere until somebody fills one in. Delivered and cancelled lines are left out." />
-            <button onClick={() => { filtersTouched.current = true; setFNoDelivery(true); setMoreOpen(true) }}
-              className={`${secBtn} ml-auto`}>Show only these</button>
+            {/* The range is set alongside the filter on purpose: the table pages a month
+                at a time, so without it "show only these" would show only the ones in
+                the month that happened to be open. */}
+            <button onClick={() => { filtersTouched.current = true; setFNoDelivery(true); setMoreOpen(true); setFFrom(SHEET_START); setFTo(nextMonth()); setPage(0) }}
+              className={`${secBtn} ml-auto`}>Show all {undated.length}</button>
           </div>
           <ul className="space-y-1">
             {undated.slice(0, 8).map(r => (
@@ -771,6 +786,7 @@ export default function ProjectLedger() {
                 <span className="text-mav-muted">· {money(r.amount_usd)}</span>
                 <span className="text-mav-muted">· {r.pm_owner || 'no PM'}</span>
                 <span className="text-mav-muted">· {r.delivery_status || 'no status'}</span>
+                <span className="text-mav-muted/70">· {ym(r.booking_month) || 'no month'}</span>
               </li>
             ))}
             {undated.length > 8 && <li className="text-xs text-mav-muted">+{undated.length - 8} more</li>}
