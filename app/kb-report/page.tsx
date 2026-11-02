@@ -9,6 +9,7 @@ import { inUnit } from '@/lib/business-unit'
 
 import ClientLink from '@/components/ClientLink'
 import MultiSelect from '@/components/MultiSelect'
+import { countsAsRevenue } from '@/lib/deal-fields'
 import { getProjectLedger, getOpportunities, getOpportunityDepts, getInvoiceBookings, type LedgerRow, type Opportunity, type InvoiceBookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
@@ -34,8 +35,10 @@ const monLabel = (k: string) => { const [y, m] = k.split('-'); return `${MON[+m 
 const rowDate = (r: LedgerRow) =>
   (r.start_date || '').slice(0, 10) || (r.confirmed_at || '').slice(0, 10) || (r.booking_month || '').slice(0, 10)
 
-// Mirrors counts_as_revenue() in the database. Awaiting Information is a quote, not money.
-const isRevenue = (r: LedgerRow) => !/awaiting/i.test(r.delivery_status || '')
+// counts_as_revenue() in the database, imported rather than re-typed — this copy tested
+// only /awaiting/ and so counted On Hold as money, which is what made October read
+// $201,834 here against $196,074 everywhere else.
+const isRevenue = (r: LedgerRow) => countsAsRevenue(r.delivery_status)
 const engOf = (r: LedgerRow) => /dedicated/i.test(r.engagement_model || '') ? 'Dedicated' : 'P2P'
 const isNew = (r: LedgerRow) => /^new\b/i.test((r.business_type || '').trim()) && !/repeat/i.test(r.business_type || '')
 

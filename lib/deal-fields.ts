@@ -3,6 +3,23 @@
 // Quotes tab hard to aggregate — the same department typed six ways — so they are
 // dropdowns everywhere.
 
+/**
+ * Does a line count as revenue? The mirror of `counts_as_revenue(text)` in the database
+ * (migration 141), which `web_revenue_lines` applies — so the home page, the forecast and
+ * the PM scorecards all obey it already.
+ *
+ * Three states are NOT money. Awaiting Information is a quote; Cancelled did not happen;
+ * On Hold has not happened yet and may not.
+ *
+ * It lives here because two pages had each written their own copy testing only
+ * /awaiting/, and both therefore counted On Hold as revenue. On 2 Nov 2026 that made the
+ * KB report and the Project sheet read October as $201,834 against the $196,074 every
+ * other page showed — one Appleprint line, "CC Internal Umbraco", $5,760, On Hold.
+ * One definition, imported, so the next page cannot drift again.
+ */
+export const countsAsRevenue = (deliveryStatus?: string | null) =>
+  !/awaiting|on hold|cancel/i.test(deliveryStatus || '')
+
 /** Departments work is booked against. */
 export const SERVICE_DEPTS = ['LP', 'HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & Automation'] as const
 

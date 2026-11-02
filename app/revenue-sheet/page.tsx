@@ -14,7 +14,7 @@ import MultiSelect from '@/components/MultiSelect'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import Link from 'next/link'
 import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getLastOkSync, getSheetVocab, type SheetVocab, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
-import { SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK } from '@/lib/deal-fields'
+import { SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK, countsAsRevenue } from '@/lib/deal-fields'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile, currentEmail } from '@/lib/access'
 
@@ -499,10 +499,26 @@ export default function ProjectLedger() {
   // quote, not money. The lines STAY in the table, because somebody still has to chase
   // the missing information; they are only kept out of the money total, and the total
   // says so rather than quietly being short.
-  const mAwaiting = useMemo(() => pageRows.filter(r => /awaiting/i.test(r.delivery_status || '')), [pageRows])
-  const mCounted = useMemo(() => pageRows.filter(r => !/awaiting/i.test(r.delivery_status || '')), [pageRows])
+  // The two halves of the month, and they PARTITION it: every line is in exactly one, so
+  // Revenue + Not counted is the whole table. This used to test /awaiting/ alone, which
+  // left On Hold and Cancelled inside Revenue and disagreeing with every page that reads
+  // web_revenue_lines. See countsAsRevenue.
+  const mNotCounted = useMemo(() => pageRows.filter(r => !countsAsRevenue(r.delivery_status)), [pageRows])
+  const mCounted = useMemo(() => pageRows.filter(r => countsAsRevenue(r.delivery_status)), [pageRows])
+  // Why each excluded line is out, for the card's sub-line.
+  const notCountedWhy = useMemo(() => {
+    const n = { awaiting: 0, hold: 0, cancelled: 0 }
+    for (const r of mNotCounted) {
+      const v = (r.delivery_status || '').toLowerCase()
+      if (v.includes('awaiting')) n.awaiting++
+      else if (v.includes('hold')) n.hold++
+      else n.cancelled++
+    }
+    return [n.awaiting && `${n.awaiting} awaiting information`, n.hold && `${n.hold} on hold`,
+            n.cancelled && `${n.cancelled} cancelled`].filter(Boolean).join(' · ')
+  }, [mNotCounted])
   const pageTotal = mCounted.reduce((s, r) => s + (r.amount_usd || 0), 0)
-  const pageAwaitingTotal = mAwaiting.reduce((s, r) => s + (r.amount_usd || 0), 0)
+  const pageNotCountedTotal = mNotCounted.reduce((s, r) => s + (r.amount_usd || 0), 0)
   const pageClients = new Set(mCounted.map(r => (r.company_name || '').toLowerCase())).size
   // Confirmed here and not yet carried into the project sheet. It used to be every
   // dashboard line, for ever, which told people lines were missing from a sheet they
@@ -726,16 +742,16 @@ export default function ProjectLedger() {
       groupBy: r => r.geo || 'No GEO', groupTotal: usdSum, rowKey: r => r.row_key,
     }
   }
-  const revenueDetails = useMemo(() => ledgerDetails(`Lines counted as revenue in ${periodLabel}, Awaiting Information left out`, mCounted),
+  const revenueDetails = useMemo(() => ledgerDetails(`Lines counted as revenue in ${periodLabel} — awaiting information, on hold and cancelled left out`, mCounted),
     [mCounted, periodLabel])
   const linesDetails = useMemo(() => ledgerDetails(`Every line in ${periodLabel}, under the filters set`, pageRows),
     [pageRows, periodLabel])
   const notInSheetDetails = useMemo(() => ledgerDetails(`Confirmed in the dashboard in ${periodLabel}, not yet in the sheet`, notInSheet,
     { label: 'Days pending', of: r => r.confirmed_at }),
     [notInSheet, periodLabel])
-  const awaitingDetails = useMemo(() => ledgerDetails(`Awaiting Information in ${periodLabel} — a quote, not counted as revenue`, mAwaiting,
+  const awaitingDetails = useMemo(() => ledgerDetails(`Not counted as revenue in ${periodLabel} — awaiting information is a quote, cancelled did not happen, on hold has not happened yet`, mNotCounted,
     { label: 'Days waiting', of: r => (r.confirmed_at || r.start_date) }),
-    [mAwaiting, periodLabel])
+    [mNotCounted, periodLabel])
 
   const secBtn = 'rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs transition-colors'
   // "More filters" is a filter control, not an action, so it stays quiet.
@@ -813,10 +829,10 @@ export default function ProjectLedger() {
           sub="confirmed here, pending"
           details={loading ? undefined : notInSheetDetails}
           info="Confirmed in the dashboard since the hourly writer last ran, so the project sheet does not have the line yet. Clears on its own after the next run. The 'Confirmed here only' tab shows every line confirmed here, carried or not." />
-        <KPICard tone="yellow" label="Awaiting information" value={loading ? '…' : money(pageAwaitingTotal)}
-          sub={`${mAwaiting.length} line${mAwaiting.length === 1 ? '' : 's'} · not counted`}
+        <KPICard tone="yellow" label="Not counted as revenue" value={loading ? '…' : money(pageNotCountedTotal)}
+          sub={`${mNotCounted.length} line${mNotCounted.length === 1 ? '' : 's'}${notCountedWhy ? ` · ${notCountedWhy}` : ''}`}
           details={loading ? undefined : awaitingDetails}
-          info="The work is not agreed yet, so the figure is a quote, not money. Kept out of Revenue; still listed below." />
+          info="Three things are not money: Awaiting Information is a quote, Cancelled did not happen, and On Hold has not happened yet and may not. All three are kept out of Revenue and still listed below, so these two figures add up to the whole month. Same rule as the database's counts_as_revenue(), which the home page, the forecast and the PM scorecards already follow." />
       </KPIRow>
 
       {/* The two sources, as tabs. The "In sheet" column is the only distinction that
