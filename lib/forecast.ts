@@ -69,6 +69,25 @@ export interface ForecastMonth {
   parts?: Record<string, number>
   /** What the pipeline moved this month by, signed (see ForecastInputs.pipeline). */
   pipelineAdj?: number
+  /**
+   * How the figure was arrived at, carried rather than re-derived in the UI — the parts
+   * are not recoverable from `value` alone once a floor or a nowcast blend has bitten.
+   * Shown under each forecast month, because a number nobody can take apart is one
+   * nobody argues with until it is too late: the pipeline term was subtracting $26k a
+   * quarter and nothing on screen said so.
+   */
+  basis?: {
+    /** Level fitted on history, after the seasonal index for this calendar month. */
+    seasonal: number
+    /** Open pipeline against a usual month's quote wins, signed. */
+    pipeline: number
+    /** Already booked into the month, or invoiced for it — whichever is larger. */
+    floor: number
+    /** True when that floor, not the model, set the figure. */
+    flooredAt?: boolean
+    /** True when the month in progress was blended with its own booking pace. */
+    nowcast?: boolean
+  }
 }
 
 /** Automatic inputs beyond the revenue history — nothing typed by anybody. */
@@ -328,6 +347,7 @@ export function buildForecast(
         key: k, label: label(k), index: idx,
         value: est, low: Math.max(floor, est * (1 - e)), high: Math.max(est * (1 + e), floor),
         actual: false, partial: true, invoiced: inv, booked: sofar, pipelineAdj: pipeAdj,
+        basis: { seasonal: level * (idx / 100), pipeline: pipeAdj, floor, flooredAt: est <= floor, nowcast: !!nc },
       })
       bookedToDate += sofar
       projected += est
@@ -343,8 +363,10 @@ export function buildForecast(
     const floor = Math.max(inv, booked)
     aheadIdx++
     const pipeAdj = gap * (PIPE_SHARE[aheadIdx] || 0)
-    const v = Math.max(level * (idx / 100) + pipeAdj, floor)
-    months.push({ key: k, label: label(k), index: idx, value: v, low: Math.max(v - sd, floor), high: v + sd, actual: false, invoiced: inv, booked, pipelineAdj: pipeAdj || undefined })
+    const seasonalPart = level * (idx / 100)
+    const v = Math.max(seasonalPart + pipeAdj, floor)
+    months.push({ key: k, label: label(k), index: idx, value: v, low: Math.max(v - sd, floor), high: v + sd, actual: false, invoiced: inv, booked, pipelineAdj: pipeAdj || undefined,
+      basis: { seasonal: seasonalPart, pipeline: pipeAdj, floor, flooredAt: seasonalPart + pipeAdj < floor } })
     projected += v
     futureCount++
   }
@@ -610,6 +632,16 @@ export function combineForecasts(parts: Forecast[], target: number): Forecast | 
       invoiced: actual ? undefined : sum(m => m.invoiced),
       booked: actual ? undefined : sum(m => m.booked),
       pipelineAdj: actual ? undefined : sum(m => m.pipelineAdj),
+      // Each unit's build-up added. The seasonal part is each unit's own level against
+      // its own index — which is the whole reason the two are forecast separately — so
+      // it must be summed here rather than recomputed from the combined level.
+      basis: actual ? undefined : {
+        seasonal: sum(m => m.basis?.seasonal),
+        pipeline: sum(m => m.basis?.pipeline),
+        floor: sum(m => m.basis?.floor),
+        flooredAt: ms.some(m => m.basis?.flooredAt),
+        nowcast: ms.some(m => m.basis?.nowcast),
+      },
       parts: Object.fromEntries(ps.map(p => [p.unit || '?', (p.months.find(m => m.key === k) || { value: 0 }).value])),
     }
   })

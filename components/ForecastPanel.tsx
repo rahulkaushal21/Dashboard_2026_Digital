@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import type { CardDetails } from '@/components/CardDetail'
@@ -714,8 +714,15 @@ function MonthTable({ fc, made: forecastFor_ }: { fc: Forecast; made: (k: string
           </tr>
         </thead>
         <tbody>
+          {/* HOW EACH FORECAST MONTH WAS ARRIVED AT — the second row under each one.
+              A number nobody can take apart is one nobody argues with until it is too
+              late: the pipeline term has been subtracting $26k across the next quarter
+              and nothing on screen said so. The parts come off the month itself; they
+              cannot be re-derived from the total once a floor or a nowcast blend has
+              bitten. */}
           {fc.months.map(m => (
-            <tr key={m.key} className="border-b border-mav-line/60 hover:bg-mav-dark/40">
+            <Fragment key={m.key}>
+            <tr className="border-b border-mav-line/60 hover:bg-mav-dark/40">
               <td className="px-5 py-2.5 whitespace-nowrap">
                 {m.label}
                 {m.actual && <span className="ml-2 text-[10px] text-green-400 uppercase tracking-wide">actual</span>}
@@ -768,6 +775,36 @@ function MonthTable({ fc, made: forecastFor_ }: { fc: Forecast; made: (k: string
                 {m.actual ? '—' : `${fmtUsd(Math.round(Math.max(0, m.low)))} – ${fmtUsd(Math.round(m.high))}`}
               </td>
             </tr>
+            {!m.actual && m.basis && (() => {
+              const b = m.basis!
+              return (
+                <tr className="border-b border-mav-line/40 text-xs text-mav-muted">
+                  <td className="px-5 pb-2.5 pt-0 whitespace-nowrap">how</td>
+                  <td colSpan={99} className="px-3 pb-2.5 pt-0">
+                    <span className="whitespace-nowrap">history level at index {Math.round(m.index)} <span className="text-mav-fg/80">{fmtUsd(Math.round(b.seasonal))}</span></span>
+                    {b.pipeline !== 0 && <>
+                      <span className="mx-1.5">·</span>
+                      <span className="whitespace-nowrap" title="Open pipeline at its own win chance, against what a month usually wins from quotes. Negative means the pipeline is thinner than usual, so the month is marked down.">
+                        pipeline <span className={b.pipeline < 0 ? 'text-red-400' : 'text-green-400'}>{b.pipeline < 0 ? '−' : '+'}{fmtUsd(Math.abs(Math.round(b.pipeline)))}</span>
+                      </span>
+                    </>}
+                    {b.floor > 0 && <>
+                      <span className="mx-1.5">·</span>
+                      <span className="whitespace-nowrap" title="Already booked into this month, or invoiced for it in the invoice app — whichever is larger. The forecast never sits below it.">
+                        floor {fmtUsd(Math.round(b.floor))}{b.flooredAt && <span className="text-amber-300"> (this set the figure)</span>}
+                      </span>
+                    </>}
+                    {b.nowcast && <>
+                      <span className="mx-1.5">·</span>
+                      <span className="whitespace-nowrap" title="The month in progress is blended with what its own booking pace implies, in the proportion that has tested best at this day of the month.">blended with the month's own pace</span>
+                    </>}
+                    <span className="mx-1.5">·</span>
+                    <span className="whitespace-nowrap">= <span className="text-mav-fg/80">{fmtUsd(Math.round(m.value))}</span></span>
+                  </td>
+                </tr>
+              )
+            })()}
+            </Fragment>
           ))}
           <tr className="bg-mav-dark/30">
             <td className="px-5 py-3 font-semibold">{fc.fyLabel} total</td>
