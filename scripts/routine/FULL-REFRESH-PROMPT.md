@@ -320,10 +320,13 @@ unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 > approval ("thanks for the approval", "noted your approval", "line this up for execution",
 > "we'll go ahead with the work") on a thread whose row does not yet say Approved. Treat our PM's
 > acknowledgement as evidence, say so in `rfq_status` ("client message not in the inbox"), and
-> do the same as above. **Before creating anything, check the thread is not already paid for by a
-> prepaid bucket:** sforelaw.com, 22 Oct — Jennelle said "yes lets proceed" after asking "would
-> this come out of the bucket hours?" and Baspin answered "that's correct". That is hours drawn
-> from an existing retainer, not a new deal, and a row would double-count it.
+> do the same as above. **A prepaid-bucket answer does not mean "no row".** sforelaw.com, 22 Oct —
+> Jennelle said "yes lets proceed" after asking "would this come out of the bucket hours?" and
+> Baspin answered "that's correct". The routine left it off the board as hours already paid for.
+> That was wrong: on 29 Oct PM Malay booked it as its own line, `sforelaw.com | Maintenance`,
+> USD 250, Won (row 3333895). Bucket draw-downs ARE invoiced as maintenance lines. Look for the
+> maintenance line before deciding; if it exists, add the thread to its journey, and if it does
+> not, create the approved row and note the bucket in the gist rather than skipping the deal.
 >
 > **4. REVIEW EVERY OPEN OPPORTUNITY (the core).** Pull all open deals
 > (`where not won and lower(coalesce(status,'')) not in ('lost','won')`). For each:
@@ -692,6 +695,41 @@ the first audit above, so only what is new is written here.
   escalation on that thread was dismissed as "this is nothing". The routine did not re-raise
   it, because the friction is our own mandatory 2FA rather than poor work, but a CEO saying
   that is worth a person reading once.
+
+### Week of 26 Oct – 2 Nov 2026 (read Mon 2 Nov)
+248 actions by 13 people: 156 edits, 59 confirmations, 26 creates, 7 human merges. Only 3 deals
+were marked lost by hand this week, every one with a reason — there was no sweep like 22 Oct.
+
+- **`value` is now the most-corrected field: 14 edits by 6 people** (it was once in the last
+  audit, when it was edited once). The sort of correction matters more than the count: PMs move a figure to the RFQ or
+  invoice amount (ZULU 8 Better Homes setups AUD 1,584 → 792 each, ED Clinic 850 → 495, Response
+  MS 160 → 1,225, Bigvisionlabs 700 → 945) and walk back figures the routine inferred from a
+  quote that named hours and no price. One row was flipped twice in a day (Webiteers dealer map
+  150 → 104 → 150). **Rule: when the thread has an RFQ or invoice number, take the value from the
+  RFQ and not from a figure in the body; when only hours are quoted, leave `est_value` empty.**
+  Reinforces "nothing in the routine should write value from inference" (2 Nov).
+- **Reinforces "the fields humans keep correcting"** (2 Nov): `sales_person` 11 edits by 5
+  people (second most corrected), `internal_delivery` 5, `delivery_date` 5, `service_dept` 3.
+  `internal_delivery` fell from 20 to 5 because the one person who did 20 last week stopped.
+- **Reinforces "automated actors write six names"** (2 Nov): two merges on 30 Oct were written by
+  `web@uplers.com`, with proper reasons, and the 22 Oct sweep used `claude`. The actor is `refresh`.
+- **Reinforces "deals created by hand are scan misses"** (2 Nov): 28 rows, 10 PMs. The biggest,
+  Precision Creative and Media "Klearvol" GBP 6,142 (USD 8,189, Flintoff / Bonny, Won), has **no
+  mail from that client anywhere in `email_inbox` in 30 days** — it lives wholly off the mailbox,
+  so no scan could have raised it. **Rule: for a hand-created deal, check whether the client ever
+  appears in the inbox before writing "why the scan missed it". Often the answer is that it
+  could not have.** Fold the rest into the PHP-outreach note above: Telfer, Industrial Sonomechanics,
+  Melbourne Social and Frogonline lines are again maintenance and PHP work booked from Slack.
+- **Merging is used, still without reasons:** 9 merge events, 7 by people, none with a reason.
+  The two `web@uplers.com` merges are the only ones that say why.
+- **Dismissals 26–28 Oct fit the existing kinds, with one new shade** (2 Nov): The Rare Form
+  "external issue not mavlers" (the compromise was found by an outside SEO agency — the routine
+  had already decided not to escalate it, correctly), ZULU 8 "we explained and client found the
+  explanation right" (pricing pushback again belongs with the deal), and neondynamo "they moved
+  inhouse due to ai nothing service could do". **New: a client leaving for reasons outside our
+  service is a loss to record on the deal, not an escalation or a churn alarm.**
+- **Escalations fixed without a note: 1 of 1.** **Feedback queue: 3 pending, none reviewed** — up
+  from one pending last week. Three unreviewed items is enough to say so in the pulse.
 
 ## Cost — what actually drives it
 Storage and hosting are not the expense; **email text read through the model is.**
