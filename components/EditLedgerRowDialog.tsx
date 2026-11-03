@@ -26,19 +26,13 @@ const STATUSES = ['Under Development', 'Delivered', 'On Hold', 'Cancelled', 'Und
 // Out here, not inside the component: declared inside, each render made a new component
 // type and React rebuilt every field from scratch on every keystroke — losing focus and
 // the cursor position mid-word. Same bug as the Add dialog had.
-const F = ({ label, hint, need, wide, children }: { label: string; hint?: string; need?: boolean; wide?: boolean; children: React.ReactNode }) => (
+const F = ({ label, hint, wide, children }: { label: string; hint?: string; wide?: boolean; children: React.ReactNode }) => (
   <label className={`block ${wide ? 'sm:col-span-2' : ''}`}>
-    <span className="text-xs font-medium text-mav-fg/85">
-      {label}{need && <span className="ml-1 text-amber-400" title="Needed before this row can be saved">•</span>}
-    </span>
+    <span className="text-xs font-medium text-mav-fg/85">{label}</span>
     {children}
     {hint && <span className="mt-1 block text-[11px] text-mav-fg/50">{hint}</span>}
   </label>
 )
-
-// Same amber as the confirm dialog, so a field that still wants an answer looks the same
-// wherever somebody meets it.
-const border = (bad: boolean) => bad ? 'border-amber-400/70' : 'border-mav-fg/20'
 
 // A dropdown that can never silently change what it was given.
 //
@@ -166,7 +160,6 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const num = (v: string) => v === '' ? null : Number(v)
 
   const save = async () => {
-    if (!startDate) { setError('Start date is needed before this row can be saved.'); return }
     setSaving(true); setError('')
     // Routed by which side of the ledger the row came from: a dashboard row updates the
     // opportunity, a sheet row writes the overlay beside the spreadsheet. Both RPCs
@@ -313,16 +306,13 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
                 {expert && !experts.includes(expert) && <option value={expert}>{expert} (not in list)</option>}
               </select>
             </F>
-            {/* REQUIRED, and the only place an existing blank can be fixed. Every route
-                onto the project sheet fills this date now (163 closed the last one), but
-                the rows that came through before it do not have one, and a blank start
-                date is what the revenue sheet pages on. update_project_fields coalesces,
-                so a blank here cannot erase a date that is already there — it can only
-                leave one missing, which is what this refuses. */}
-            <F label="Start date" need={!startDate}
-              hint={!startDate ? 'This row has no start date. The day the work started, usually the day it was confirmed.' : undefined}>
-              <input type="date" className={`${ctl} ${border(!startDate)}`} value={startDate} onChange={e => setStartDate(e.target.value)} />
-            </F>
+            {/* NOT gated here, deliberately. Since 163 every route onto the project
+                sheet fills this date — the day of confirmation — so a dashboard line
+                cannot arrive without one, and blocking Save on it would only ever catch
+                the 8 pre-April sheet rows whose original spreadsheet cell was empty.
+                Refusing to save an invoice number on a 2025 line because of a date
+                nobody has is friction with no defect behind it. Rahul, 3 Nov 2026. */}
+            <F label="Start date"><input type="date" className={ctl} value={startDate} onChange={e => setStartDate(e.target.value)} /></F>
             <F label="Delivery date"><input type="date" className={ctl} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} /></F>
             <F label="Internal delivery"><input type="date" className={ctl} value={internalDelivery} onChange={e => setInternalDelivery(e.target.value)} /></F>
             <F label="Integration" hint="LP work only."><input className={ctl} value={integration} onChange={e => setIntegration(e.target.value)} /></F>
@@ -377,11 +367,9 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
 
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
           <span className="text-[11px] text-mav-fg/60">
-            {!startDate
-              ? 'Start date still needed.'
-              : fixed
-                ? 'Value, owner, month, AM and agency come from the old sheet and are changed there.'
-                : 'Whether the deal is won is not changed here; remove the line instead.'}
+            {fixed
+              ? 'Value, owner, month, AM and agency come from the old sheet and are changed there.'
+              : 'Whether the deal is won is not changed here; remove the line instead.'}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs transition-colors">Cancel</button>
