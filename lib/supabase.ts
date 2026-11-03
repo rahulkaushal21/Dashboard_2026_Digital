@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { isNbdOwner } from './nbd'
 import { VOCAB_FALLBACK, normBusinessType, type SheetVocabField } from './deal-fields'
+import { readStoredMonths, storeMonth, dropMonths, clearLedgerStore } from './ledger-store'
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 export const supabase = url && anon ? createClient(url, anon, {
@@ -182,11 +183,30 @@ export interface EmailSignal { id: number; thread_id?: string; company_name?: st
 // confirmed deal shows up immediately — the staleness that remains is another person's
 // change taking up to a minute to appear, which is what a 30-minute sheet sync already
 // implies.
-const READ_TTL_MS = 60_000
+// Two minutes, not one. The cache is already emptied the instant anybody writes from
+// this browser (see the rpc wrapper), so the only thing this window delays is SOMEBODY
+// ELSE's change showing up — against a sheet that syncs every 30 minutes. One minute
+// meant walking from Clients to Opportunities and back re-fetched every table. Rahul's
+// call, 3 Nov 2026; two is as far as it goes while a PM confirming a deal and an admin
+// watching the total are often the same conversation.
+const READ_TTL_MS = 120_000
 type CacheEntry = { at: number; rows: any[] | null; inflight?: Promise<any[] | null> }
 const readCache = new Map<string, CacheEntry>()
 /** Drop everything held. Called after any write so nobody reads their own stale data. */
-export function clearReadCache() { readCache.clear() }
+/**
+ * Drop everything held in memory. Called after any write so nobody reads their own
+ * stale data.
+ *
+ * `forgetStored` ALSO empties the months this browser has kept between visits. Writes do
+ * not need it and must not pay it: the digest already guarantees a stored month matches
+ * the server byte for byte, so an edit brings its own month down again on its own. It is
+ * for the person who has pressed Refresh because they do not believe what is on screen —
+ * the one case where the right answer is to stop trusting anything local and start over.
+ */
+export function clearReadCache(forgetStored = false) {
+  readCache.clear()
+  if (forgetStored) void clearLedgerStore()
+}
 
 /** A server-side filter, so rows the page would throw away never cross the wire. Either
  *  a simple floor (`gte` on `column`) or a raw PostgREST `or` expression for the cases
@@ -2095,8 +2115,114 @@ export async function getPossibleDoubleCounts(): Promise<DoubleCount[]> {
   return (await read<DoubleCount>('web_possible_double_count', '*', 'dashboard_row')) || []
 }
 
+/**
+ * The whole ledger — but fetched a month at a time, and only the months that moved.
+ *
+ * The signature is deliberately unchanged. Every caller still gets every row, so the
+ * Project sheet, the Actions page and the KB report are untouched, and the all-months
+ * alerts still see all months. What changed is the wire: instead of four pages of 1,000
+ * rows plus an exact count that re-ran the whole view just to count it — about 3.9 MB
+ * every single load — this asks for 23 digest rows and then only for the months whose
+ * contents actually differ from what this browser already has.
+ *
+ * In the steady state that is one small request and no rows at all. After somebody
+ * confirms a deal it is one small request and that one month, because the edit moves
+ * that month's hash and nothing else's.
+ *
+ * If the digest cannot be read, or storage is unavailable, it falls back to the old
+ * whole-table read. A slow load is a worse outcome than a wrong one here, so the
+ * fallback is the thing that used to happen rather than an error.
+ */
 export async function getProjectLedger(): Promise<LedgerRow[]> {
-  return (await read<LedgerRow>('web_project_ledger', '*', 'row_key')) || []
+  // Held in the same in-memory cache as every other read, under its own key, so moving
+  // between the Project sheet, Actions and the KB report inside two minutes costs
+  // nothing at all — not even the digest request — and one write empties it like any
+  // other. Each caller gets its own array: several pages sort what they are handed in
+  // place, and without the copy one page's sort would silently reorder another's.
+  const key = 'web_project_ledger|assembled'
+  const copy = (rows: any[] | null) => (rows ? (rows.slice() as LedgerRow[]) : [])
+  const hit = readCache.get(key)
+  if (hit?.inflight) return hit.inflight.then(copy)
+  if (hit && Date.now() - hit.at < READ_TTL_MS) return copy(hit.rows)
+  const run = assembleProjectLedger()
+  readCache.set(key, { at: Date.now(), rows: null, inflight: run })
+  const rows = await run
+  readCache.set(key, { at: Date.now(), rows })
+  return copy(rows)
+}
+
+async function assembleProjectLedger(): Promise<LedgerRow[]> {
+  const whole = () => read<LedgerRow>('web_project_ledger', '*', 'row_key').then(r => r || [])
+  if (!supabase) return []
+
+  const { data: digests, error } = await supabase
+    .from('web_ledger_month_digest').select('month, digest, n_rows')
+  if (error || !digests?.length) return whole()
+
+  const held = await readStoredMonths<LedgerRow>()
+  const wanted = digests as { month: string; digest: string; n_rows: number }[]
+
+  // A month the server no longer reports — every row in it deleted — must not survive
+  // in the browser, or the figure would stay on screen after the rows were removed.
+  const live = new Set(wanted.map(d => d.month))
+  const gone = [...held.keys()].filter(m => !live.has(m))
+  if (gone.length) { gone.forEach(m => held.delete(m)); void dropMonths(gone) }
+
+  const stale = wanted.filter(d => held.get(d.month)?.digest !== d.digest)
+  // Nothing to do: every month on the server is one this browser already holds, byte for
+  // byte. This is the common case and it costs the digest request alone.
+  if (!stale.length) return [...held.values()].flatMap(m => m.rows)
+
+  // A whole-table read is cheaper than many month requests, so on a first visit (or
+  // after a long absence) take the old path once and fill the store from it.
+  if (stale.length > 3) {
+    const all = await whole()
+    if (!all.length) return []
+    const byMonth = new Map<string, LedgerRow[]>()
+    for (const r of all) {
+      const k = r.booking_month ? r.booking_month.slice(0, 7) : 'none'
+      const bucket = byMonth.get(k)
+      if (bucket) bucket.push(r); else byMonth.set(k, [r])
+    }
+    // Store under the digest the SERVER reported, and only where the row count agrees —
+    // if a write landed between the digest and the fetch, the counts differ and that
+    // month simply is not kept, so it comes down again next time rather than being
+    // remembered wrong.
+    for (const d of wanted) {
+      const rows = byMonth.get(d.month) || []
+      if (rows.length === d.n_rows) void storeMonth(d.month, d.digest, rows)
+    }
+    return all
+  }
+
+  const fetched = await Promise.all(stale.map(async d => {
+    let q = supabase!.from('web_project_ledger').select('*').order('row_key', { ascending: true })
+    q = d.month === 'none'
+      ? q.is('booking_month', null)
+      : q.gte('booking_month', `${d.month}-01`).lt('booking_month', nextMonthStart(d.month))
+    const { data, error: e } = await q
+    return { d, rows: (e ? null : (data as LedgerRow[] | null)) }
+  }))
+  // A short month is the one failure that would not look like one. It happens if the
+  // request errored, if a write landed between the digest and the fetch, or if a month
+  // ever grows past the 1,000-row cap a single request returns — the biggest today is
+  // 192, but a silently truncated month would show wrong totals with nothing on screen
+  // to say so. The count the digest reported is the check, and anything short of it
+  // sends the whole table instead. A half-loaded revenue tab is worse than a slow one.
+  if (fetched.some(f => f.rows === null || f.rows.length !== f.d.n_rows)) return whole()
+
+  for (const f of fetched) {
+    held.set(f.d.month, { month: f.d.month, digest: f.d.digest, rows: f.rows! })
+    void storeMonth(f.d.month, f.d.digest, f.rows!)
+  }
+  return [...held.values()].flatMap(m => m.rows)
+}
+
+/** '2026-11' -> '2026-12-01', so a month filter is a half-open range and December's 1st
+ *  belongs to December. */
+function nextMonthStart(month: string): string {
+  const [y, m] = month.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
 }
 
 /**

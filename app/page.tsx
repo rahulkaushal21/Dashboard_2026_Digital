@@ -202,12 +202,17 @@ export default function Dashboard() {
   }, [])
   // "Sync now" runs the whole sync-all chain (see FN_URL above) and THEN reloads the data.
   //
-  // clearReadCache() is not optional here. Reads are held for a minute and the cache is
-  // otherwise only dropped by the supabase.rpc wrapper — a raw fetch to an edge function
-  // never goes through it. Without this line the reload below was served the copy taken
-  // BEFORE the sync, so the button pulled fresh rows into the database and then showed
-  // the old ones: 30 Sep 2026, a $300 line entered that morning stayed invisible however
-  // many times it was pressed.
+  // clearReadCache() is not optional here. Reads are held for two minutes and the cache
+  // is otherwise only dropped by the supabase.rpc wrapper — a raw fetch to an edge
+  // function never goes through it. Without this line the reload below was served the
+  // copy taken BEFORE the sync, so the button pulled fresh rows into the database and
+  // then showed the old ones: 30 Sep 2026, a $300 line entered that morning stayed
+  // invisible however many times it was pressed.
+  //
+  // It passes `true`, which also empties the ledger months this browser has kept between
+  // visits. No other caller does. The digest makes that unnecessary everywhere else, but
+  // this is the button somebody presses when they do not believe the screen, and the
+  // honest response to that is to stop trusting anything local.
   const refreshAll = async () => {
     setSyncing(true); setSyncResult(null)
     try {
@@ -234,7 +239,7 @@ export default function Dashboard() {
         setSyncResult(`Sync incomplete — ${bad.join(', ') || 'unknown step'} failed; showing what landed${j.sheet ? ` · ${j.sheet}` : ''}`)
       }
     } catch { setSyncResult('Sync unreachable — showing last data') }
-    clearReadCache()
+    clearReadCache(true)
     await load()
     setSyncing(false)
   }
