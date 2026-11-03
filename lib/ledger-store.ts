@@ -23,8 +23,21 @@
 // allowed to save a request, never to decide what the data is.
 
 const DB_NAME = 'mavlers-dashboard'
-const DB_VERSION = 1
+// 2: the key gained a dataset prefix. A browser that opened version 1 keeps ITS schema
+// unless the version moves, and keyPath cannot be altered in place — so the bump is not
+// optional, and the upgrade drops the old store rather than migrating it. Everything in
+// here is a copy of something the server will hand over again; the cost of throwing it
+// away is one slow load.
+const DB_VERSION = 2
 const STORE = 'ledger-months'
+
+// Two datasets live in this one store — the project ledger and the revenue lines — so
+// every key carries which one it belongs to. Without the prefix October's ledger rows
+// and October's revenue rows are both "2026-10" and the second to be written wins,
+// handing one page the other page's data. The prefix is in the KEY, not a field, because
+// the key is what getAll() hands back and what delete() takes.
+export type Dataset = 'ledger' | 'revenue'
+const keyOf = (set: Dataset, month: string) => `${set}:${month}`
 
 export interface StoredMonth<T> { month: string; digest: string; rows: T[] }
 
@@ -38,7 +51,8 @@ function openDb(): Promise<IDBDatabase | null> {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.onupgradeneeded = () => {
         const db = req.result
-        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'month' })
+        if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE)
+        db.createObjectStore(STORE, { keyPath: 'key' })
       }
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => resolve(null)
@@ -64,22 +78,26 @@ function tx<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest)
   }))
 }
 
-/** Every month held, as {month: digest-and-rows}. Empty when storage is unavailable. */
-export async function readStoredMonths<T>(): Promise<Map<string, StoredMonth<T>>> {
-  const all = await tx<StoredMonth<T>[]>('readonly', s => s.getAll())
+/** One dataset's months, as {month: digest-and-rows}. Empty when storage is unavailable. */
+export async function readStoredMonths<T>(set: Dataset): Promise<Map<string, StoredMonth<T>>> {
+  const all = await tx<(StoredMonth<T> & { key?: string })[]>('readonly', s => s.getAll())
   const out = new Map<string, StoredMonth<T>>()
-  for (const m of all || []) if (m && m.month && m.digest && Array.isArray(m.rows)) out.set(m.month, m)
+  const prefix = `${set}:`
+  for (const m of all || []) {
+    if (!m || typeof m.key !== 'string' || !m.key.startsWith(prefix)) continue
+    if (m.month && m.digest && Array.isArray(m.rows)) out.set(m.month, m)
+  }
   return out
 }
 
 /** Keep a month under the digest it arrived with. Silent on failure, by design. */
-export async function storeMonth<T>(month: string, digest: string, rows: T[]): Promise<void> {
-  await tx('readwrite', s => s.put({ month, digest, rows } as StoredMonth<T>))
+export async function storeMonth<T>(set: Dataset, month: string, digest: string, rows: T[]): Promise<void> {
+  await tx('readwrite', s => s.put({ key: keyOf(set, month), month, digest, rows }))
 }
 
 /** Months the server no longer reports — a deleted row can empty one. */
-export async function dropMonths(months: string[]): Promise<void> {
-  for (const m of months) await tx('readwrite', s => s.delete(m))
+export async function dropMonths(set: Dataset, months: string[]): Promise<void> {
+  for (const m of months) await tx('readwrite', s => s.delete(keyOf(set, m)))
 }
 
 /** Used by the "refresh" button: forget everything and start from the server. */

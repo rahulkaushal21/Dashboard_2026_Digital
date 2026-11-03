@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { isNbdOwner } from './nbd'
 import { VOCAB_FALLBACK, normBusinessType, type SheetVocabField } from './deal-fields'
-import { readStoredMonths, storeMonth, dropMonths, clearLedgerStore } from './ledger-store'
+import { readStoredMonths, storeMonth, dropMonths, clearLedgerStore, type Dataset } from './ledger-store'
 import { assembleLedger, nextMonthStart, type MonthDigest } from './ledger-assembly'
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -728,7 +728,25 @@ return (await import('./mockData')).mockRevenue
 // 360, Forecast, Business Trend and the quarter-over-quarter review. Same months as
 // before; the ledger's real line items rather than the merged aggregate, so their row
 // counts line up with Web, Hub & LP.
-export async function getBookingsFull(): Promise<BookingRow[]> { return (await read<BookingRow>('web_revenue_lines', 'id, company_name, booking_month, booking_date, booking_amount, service_name, technology, engagement_model, geo, sme, sales_person, contact_email', 'id')) || [] }
+//
+// Fetched the same way as the ledger: the digest first, then only the months that moved.
+// These six pages are where every total on the dashboard comes from, and they were each
+// pulling all 3,484 rows — 22 months of history — to add up one or two of them. That is
+// the cost that grew every month whether or not anything happened.
+const BOOKING_COLS = 'id, company_name, booking_month, booking_date, booking_amount, service_name, technology, engagement_model, geo, sme, sales_person, contact_email'
+export async function getBookingsFull(): Promise<BookingRow[]> {
+  const key = 'web_revenue_lines|assembled'
+  const copy = (rows: any[] | null) => (rows ? (rows.slice() as BookingRow[]) : [])
+  const hit = readCache.get(key)
+  if (hit?.inflight) return hit.inflight.then(copy)
+  if (hit && Date.now() - hit.at < READ_TTL_MS) return copy(hit.rows)
+  const run = byMonthDigest<BookingRow>(
+    'revenue', 'web_revenue_lines', 'web_revenue_lines_month_digest', BOOKING_COLS, 'id')
+  readCache.set(key, { at: Date.now(), rows: null, inflight: run })
+  const rows = await run
+  readCache.set(key, { at: Date.now(), rows })
+  return copy(rows)
+}
 export async function getFeedback(): Promise<Feedback[]> { return (await read<Feedback>('feedback', 'id, agency, nature, comments, added_date, project_names, geo, feedback_type')) || [] }
 // Feedback keyed to the PM who owns it, for the PM scorecard. Kept apart from
 // getFeedback() because that one is the Delights feed and selects a different set
@@ -2152,35 +2170,50 @@ export async function getProjectLedger(): Promise<LedgerRow[]> {
   return copy(rows)
 }
 
-async function assembleProjectLedger(): Promise<LedgerRow[]> {
-  const whole = () => read<LedgerRow>('web_project_ledger', '*', 'row_key').then(r => r || [])
+/**
+ * Fetch a month-partitioned table by its digest: one small request, then only the months
+ * whose contents actually differ from what this browser already holds.
+ *
+ * WHICH months to ask for is decided in lib/ledger-assembly.ts, where it can be — and is
+ * — run against a fresh browser, a quiet one, an edited month, a deleted month, a failed
+ * request, a short month, a dead digest and absent storage. This says only what each of
+ * those words means against the real database.
+ *
+ * The digest view must hash EVERY column, even where `cols` selects a subset. A digest
+ * narrower than the fetch would miss an edit to a column the page reads, and the browser
+ * would keep showing the old value with nothing to say so.
+ */
+async function byMonthDigest<T>(
+  set: Dataset, table: string, digestView: string, cols: string, orderBy: string,
+): Promise<T[]> {
+  const whole = () => read<T>(table, cols, orderBy).then(r => r || [])
   if (!supabase) return []
-
-  // Which months to ask for is decided in lib/ledger-assembly.ts, where it can be — and
-  // is — run against a fresh browser, a quiet one, an edited month, a deleted month, a
-  // failed request, a short month, a dead digest and absent storage. This function only
-  // says what each of those words means against the real database.
-  return assembleLedger<LedgerRow>({
+  return assembleLedger<T>({
     whole,
-    held: await readStoredMonths<LedgerRow>(),
-    store: (month, digest, rows) => { void storeMonth(month, digest, rows) },
-    drop: months => { void dropMonths(months) },
-    monthOf: r => (r.booking_month ? r.booking_month.slice(0, 7) : 'none'),
+    held: await readStoredMonths<T>(set),
+    store: (month, digest, rows) => { void storeMonth(set, month, digest, rows) },
+    drop: months => { void dropMonths(set, months) },
+    monthOf: r => {
+      const m = (r as { booking_month?: string | null }).booking_month
+      return m ? m.slice(0, 7) : 'none'
+    },
     digests: async () => {
-      const { data, error } = await supabase!
-        .from('web_ledger_month_digest').select('month, digest, n_rows')
+      const { data, error } = await supabase!.from(digestView).select('month, digest, n_rows')
       return error ? null : (data as MonthDigest[] | null)
     },
     monthRows: async d => {
-      let q = supabase!.from('web_project_ledger').select('*').order('row_key', { ascending: true })
+      let q = supabase!.from(table).select(cols).order(orderBy, { ascending: true })
       q = d.month === 'none'
         ? q.is('booking_month', null)
         : q.gte('booking_month', `${d.month}-01`).lt('booking_month', nextMonthStart(d.month))
       const { data, error } = await q
-      return error ? null : (data as LedgerRow[] | null)
+      return error ? null : (data as T[] | null)
     },
   })
 }
+
+const assembleProjectLedger = () => byMonthDigest<LedgerRow>(
+  'ledger', 'web_project_ledger', 'web_ledger_month_digest', '*', 'row_key')
 
 
 /**
