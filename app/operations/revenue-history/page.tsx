@@ -7,29 +7,21 @@ import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import { daysSince, fmtMonth, type CardDetails, type DetailCol } from '@/components/CardDetail'
 import InfoTip from '@/components/InfoTip'
-import { KPIRow, Panel, SectionTitle, Segments } from '@/components/PageParts'
+import { KPIRow, Panel, SectionTitle, Segments, FilterBar } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote } from '@/components/UnitToggle'
 import { inUnit, unplaceable } from '@/lib/business-unit'
 import { getRevenueHistory, getRevenueSources, getBookingsFull, type RevenueHistoryRow, type RevenueSource, type BookingRow } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
+import RevenueDeptView from '@/components/RevenueDeptView'
+import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
+import { type Row, SHORT, monLabel, fyOf, fyLabel, thisYm, fyStats, pctChange, fmtPct, pctTone } from '@/lib/revenue-history'
 
 // Re-reads the yearly spreadsheets on demand, the same pattern the L&D page uses.
 const SYNC_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL || '') + '/functions/v1/sync-revenue-history'
 const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-const SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const ym = (s?: string) => (s || '').slice(0, 7)
-const monLabel = (k: string) => { const p = k.split('-'); return p.length >= 2 ? `${SHORT[+p[1]]} ${p[0].slice(2)}` : k }
-// The financial year runs April-March, matching FY_TARGET on the other pages.
-// Labelling these as calendar years would make every YoY read against the wrong
-// boundary the moment this is compared with Business Trend or Forecast.
-const fyOf = (k: string) => { const [y, m] = k.split('-').map(Number); return m >= 4 ? y : y - 1 }
-const fyLabel = (fy: number) => `FY${String(fy).slice(2)}-${String(fy + 1).slice(2)}`
-// The month we are currently in is only part-billed, so it is never a fair
-// half of a like-for-like comparison — on the 1st it is a rounding error against
-// a full month last year. It stays in the chart, and out of the year-on-year.
-const thisYm = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}` }
 
 const MODEL_COLOR: Record<string, string> = {
   'Dedicated': '#FFDB2D', 'Partial Dedicated': '#f59e0b', 'New Development': '#3b82f6',
@@ -44,7 +36,6 @@ const colorFor = (m: string) => MODEL_COLOR[m] || '#9ca3af'
 // everything after. web_revenue holds 13 stray rows in Jan and Mar 2025 that the
 // history sheet also covers, so the cut has to be applied to the live side or
 // those two months double-count.
-type Row = { month: string; amount: number; client: string; model: string; dept: string; geo: string; era: 'history' | 'live' }
 // web_revenue records the department as WEB-US / WEB-AU / WEB-UK / LP / HUB;
 // revenue_history stores it already reduced to Web / HUB / LP.
 const deptOfService = (s?: string) => {
@@ -96,6 +87,24 @@ const Move = ({ label, amount, n, max }: { label: string; amount: number; n: num
   )
 }
 
+const CLIENT_COLS: ColumnDef[] = [
+  { key: 'client', label: 'Client / agency', locked: true },
+  { key: 'cur', label: 'Selected year', default: true },
+  { key: 'prev', label: 'Previous year', default: true },
+  { key: 'delta', label: 'Change in dollars' },
+  { key: 'pct', label: 'Change %', default: true },
+  { key: 'status', label: 'Status', default: true },
+  { key: 'total', label: 'All years', default: true },
+  { key: 'share', label: 'Share of all billing' },
+  { key: 'dept', label: 'Department' },
+  { key: 'model', label: 'Main engagement model' },
+  { key: 'geo', label: 'Geography' },
+  { key: 'first', label: 'First month' },
+  { key: 'last', label: 'Last month' },
+  { key: 'active', label: 'Months billed' },
+  { key: 'avg', label: 'Average per month billed' },
+]
+
 export default function RevenueHistory() {
   const ink = useThemeInk()
   const { unit } = useUnit()
@@ -105,6 +114,11 @@ export default function RevenueHistory() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [note, setNote] = useState('')
+  const [view, setView] = useState<'dept' | 'client'>('dept')
+  const [q, setQ] = useState('')
+  const [status, setStatus] = useState<string>('all')
+  const [showAllClients, setShowAllClients] = useState(false)
+  const cols = useColumns('revenue-history-clients', CLIENT_COLS)
 
   const load = () => Promise.all([getRevenueHistory(), getRevenueSources(), getBookingsFull()])
     .then(([r, s, w]) => { setRows(r); setSources(s); setLive(w) }).finally(() => setLoading(false))
@@ -285,6 +299,53 @@ export default function RevenueHistory() {
     }
   }, [all, selFy, d.fys])
 
+  // Every client, set against the selected year and the one before it over the same months
+  // the bridge above uses, so a row here adds up to the bridge.
+  const cl = useMemo(() => {
+    const now = thisYm()
+    const wnd = new Set<number>()
+    for (const r of all) if (fyOf(r.month) === ya.cur && r.month !== now) wnd.add(+r.month.slice(5, 7))
+    if (!wnd.size) for (const r of all) if (fyOf(r.month) === ya.cur) wnd.add(+r.month.slice(5, 7))
+    type C = { key: string; name: string; cur: number; prev: number; total: number; months: Set<string>; first: string; last: string
+      depts: Map<string, number>; models: Map<string, number>; geos: Map<string, number> }
+    const m = new Map<string, C>()
+    const top = (mp: Map<string, number>) => [...mp.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '\u2014'
+    for (const r of all) {
+      const k = r.client.trim().toLowerCase()
+      const c = m.get(k) || { key: k, name: r.client, cur: 0, prev: 0, total: 0, months: new Set<string>(), first: r.month, last: r.month,
+        depts: new Map(), models: new Map(), geos: new Map() }
+      c.total += r.amount; c.months.add(r.month)
+      if (r.month < c.first) c.first = r.month
+      if (r.month > c.last) c.last = r.month
+      const f = fyOf(r.month), inW = wnd.has(+r.month.slice(5, 7))
+      if (inW && f === ya.cur) c.cur += r.amount
+      if (inW && f === ya.cur - 1) c.prev += r.amount
+      c.depts.set(r.dept, (c.depts.get(r.dept) || 0) + r.amount)
+      c.models.set(r.model, (c.models.get(r.model) || 0) + r.amount)
+      c.geos.set(r.geo, (c.geos.get(r.geo) || 0) + r.amount)
+      m.set(k, c)
+    }
+    const list = [...m.values()].map(c => ({
+      ...c, delta: c.cur - c.prev, pct: pctChange(c.cur, c.prev),
+      status: c.prev <= 0 && c.cur > 0 ? 'New' : c.prev > 0 && c.cur <= 0 ? 'Stopped' : c.prev <= 0 && c.cur <= 0 ? 'Inactive'
+        : c.cur > c.prev ? 'Growing' : c.cur < c.prev ? 'Shrinking' : 'Steady',
+      dept: top(c.depts), model: top(c.models), geo: top(c.geos), active: c.months.size,
+      avg: c.months.size ? c.total / c.months.size : 0,
+    })).sort((a, b) => b.cur - a.cur || b.total - a.total)
+    const counts: Record<string, number> = {}
+    for (const c of list) counts[c.status] = (counts[c.status] || 0) + 1
+    return { list, counts, wnd }
+  }, [all, ya.cur])
+
+  const STATUS_TONE: Record<string, string> = { New: 'text-blue-400', Growing: 'text-green-400', Shrinking: 'text-red-400', Stopped: 'text-red-400' }
+  const shownClients = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return cl.list.filter(c => (status === 'all' || c.status === status) && (!needle || c.name.toLowerCase().includes(needle)))
+  }, [cl.list, q, status])
+  const fyAll = useMemo(() => fyStats(all, every, ya.years), [all, every, ya.years])
+  const curFy = fyAll.find(f => f.fy === ya.cur)
+  const latestMix = ya.mix.find(m => m.fy === ya.cur)
+
   // ── What sits behind each headline card ─────────────────────────────────────────
   // Every card reads `all` — the department-filtered rows — so each panel adds up to its
   // card. Total billed and Rows list the billing lines themselves (by GEO, and by
@@ -371,20 +432,33 @@ export default function RevenueHistory() {
             <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Reloading…' : 'Reload from sheets'}
           </button>
         } />
-      <UnplacedNote n={unplaced} noun="revenue rows" className="-mt-3 mb-4" />
+      {view === 'client' && <UnplacedNote n={unplaced} noun="revenue rows" className="-mt-3 mb-4" />}
       {note && <p className={`-mt-2 mb-4 text-xs ${note.startsWith('Failed') ? 'text-red-400' : 'text-mav-muted'}`}>{note}</p>}
 
       {loading ? <p className="text-mav-muted text-sm">Loading…</p> : rows.length === 0 ? (
         <p className="text-mav-muted text-sm">No historical revenue loaded yet.</p>
-      ) : all.length === 0 ? (
-        <p className="text-mav-muted text-sm">No revenue recorded for this department.</p>
       ) : (
         <div className="space-y-5">
+          <Segments<'dept' | 'client'>
+            items={[
+              { id: 'dept', label: 'Department view', title: 'WEB against LP/HUB, year by year, by engagement model' },
+              { id: 'client', label: 'Client view', title: 'Agency by agency, with the sidebar department switch applied' },
+            ]}
+            value={view} onChange={setView} className="!mb-0" />
+          {view === 'dept' ? <RevenueDeptView every={every} /> : all.length === 0 ? (
+            <p className="text-mav-muted text-sm">No revenue recorded for this department.</p>
+          ) : <>
           <KPIRow cols={4}>
             <KPICard tone="accent" label="Total billed" value={fmtUsd(d.total)} sub={`${d.months.length} months`} details={cardDetails.total} />
             <KPICard label="Period" value={`${monLabel(d.months[0])} → ${monLabel(d.months[d.months.length - 1])}`} sub="by confirmation month" details={cardDetails.period} />
             <KPICard label="Clients" value={String(d.clientCount)} sub="distinct agencies" details={cardDetails.clients} />
             <KPICard label="Rows" value={all.length.toLocaleString()} sub={`${histN.toLocaleString()} sheet · ${(all.length - histN).toLocaleString()} live`} details={cardDetails.lines} />
+          </KPIRow>
+          <KPIRow cols={4}>
+            <KPICard label="Per client" value={fmtUsd(d.clientCount ? d.total / d.clientCount : 0)} sub="average billed over the period" />
+            <KPICard label={`Top 10 share, ${fyLabel(ya.cur)}`} value={latestMix ? `${latestMix.top10Pct.toFixed(0)}%` : '\u2014'} sub={latestMix ? `${latestMix.big} clients at $50k or more` : ''} />
+            <KPICard label="Net revenue retention" value={ya.hasPrev && ya.nrr ? `${ya.nrr.toFixed(0)}%` : '\u2014'} sub={`${fyLabel(ya.cur)} on last year's clients`} />
+            <KPICard label={`${fyLabel(ya.cur)} vs ${fyLabel(ya.prev)}`} value={curFy && ya.hasPrev ? fmtPct(curFy.pct, 1) : '\u2014'} sub={curFy?.partial ? `${curFy.windowLabel} like-for-like` : 'full year'} />
           </KPIRow>
 
           <Panel title="Monthly billing"
@@ -535,6 +609,73 @@ export default function RevenueHistory() {
             </Panel>
           </div>
 
+          <Panel title="Every client" flush
+            info="Each agency set against the selected year and the one before it, over the same months as the bridge above, so the rows add up to it. New: billed nothing last year. Stopped: billed nothing this year. Over a part-year window, Stopped can mean quiet rather than lost."
+            right={<ColumnPicker cols={cols} />}>
+            <div className="px-4 pt-3">
+              <FilterBar className="!mb-3">
+                <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client"
+                  className="h-9 px-3 w-56 rounded-full border border-mav-line bg-mav-panel text-sm outline-none focus:border-mav-yellow/60" />
+                {['all', 'New', 'Growing', 'Steady', 'Shrinking', 'Stopped'].map(st => (
+                  <button key={st} onClick={() => setStatus(st)}
+                    className={`h-9 px-3 rounded-full border text-[13px] font-medium ${status === st ? 'bg-mav-yellow/15 border-mav-yellow/60 text-mav-fg' : 'border-mav-line text-mav-muted hover:text-mav-fg'}`}>
+                    {st === 'all' ? 'All' : st}{st !== 'all' && <span className="ml-1.5 text-[11px] text-mav-muted">{cl.counts[st] || 0}</span>}
+                  </button>
+                ))}
+              </FilterBar>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className="text-left px-4 py-2">Client / agency</th>
+                    {cols.on('cur') && <th className="text-right px-3 py-2 whitespace-nowrap">{fyLabel(ya.cur)}</th>}
+                    {cols.on('prev') && <th className="text-right px-3 py-2 whitespace-nowrap">{fyLabel(ya.prev)}</th>}
+                    {cols.on('delta') && <th className="text-right px-3 py-2">Change</th>}
+                    {cols.on('pct') && <th className="text-right px-3 py-2">Change %</th>}
+                    {cols.on('status') && <th className="text-left px-3 py-2">Status</th>}
+                    {cols.on('total') && <th className="text-right px-3 py-2 whitespace-nowrap">All years</th>}
+                    {cols.on('share') && <th className="text-right px-3 py-2">Share</th>}
+                    {cols.on('dept') && <th className="text-left px-3 py-2">Department</th>}
+                    {cols.on('model') && <th className="text-left px-3 py-2">Main model</th>}
+                    {cols.on('geo') && <th className="text-left px-3 py-2">Geography</th>}
+                    {cols.on('first') && <th className="text-left px-3 py-2 whitespace-nowrap">First month</th>}
+                    {cols.on('last') && <th className="text-left px-3 py-2 whitespace-nowrap">Last month</th>}
+                    {cols.on('active') && <th className="text-right px-3 py-2">Months</th>}
+                    {cols.on('avg') && <th className="text-right px-4 py-2 whitespace-nowrap">Per month</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(showAllClients ? shownClients : shownClients.slice(0, 50)).map(c => (
+                    <tr key={c.key} className="border-t border-mav-line/60">
+                      <td className="py-2 px-4 max-w-[260px] truncate">{c.name}</td>
+                      {cols.on('cur') && <td className="py-2 px-3 text-right tabular-nums">{c.cur > 0 ? fmtUsd(c.cur) : <span className="text-mav-muted">{'\u2014'}</span>}</td>}
+                      {cols.on('prev') && <td className="py-2 px-3 text-right tabular-nums">{c.prev > 0 ? fmtUsd(c.prev) : <span className="text-mav-muted">{'\u2014'}</span>}</td>}
+                      {cols.on('delta') && <td className={`py-2 px-3 text-right tabular-nums ${c.delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>{c.delta >= 0 ? '+' : '\u2212'}{fmtUsd(Math.abs(c.delta))}</td>}
+                      {cols.on('pct') && <td className={`py-2 px-3 text-right tabular-nums ${pctTone(c.pct)}`}>{fmtPct(c.pct)}</td>}
+                      {cols.on('status') && <td className={`py-2 px-3 whitespace-nowrap ${STATUS_TONE[c.status] || 'text-mav-muted'}`}>{c.status}</td>}
+                      {cols.on('total') && <td className="py-2 px-3 text-right tabular-nums">{fmtUsd(c.total)}</td>}
+                      {cols.on('share') && <td className="py-2 px-3 text-right tabular-nums">{d.total ? ((c.total / d.total) * 100).toFixed(1) : 0}%</td>}
+                      {cols.on('dept') && <td className="py-2 px-3 whitespace-nowrap">{c.dept}</td>}
+                      {cols.on('model') && <td className="py-2 px-3 whitespace-nowrap">{c.model}</td>}
+                      {cols.on('geo') && <td className="py-2 px-3 whitespace-nowrap">{c.geo}</td>}
+                      {cols.on('first') && <td className="py-2 px-3 whitespace-nowrap text-mav-muted">{monLabel(c.first)}</td>}
+                      {cols.on('last') && <td className="py-2 px-3 whitespace-nowrap text-mav-muted">{monLabel(c.last)}</td>}
+                      {cols.on('active') && <td className="py-2 px-3 text-right tabular-nums">{c.active}</td>}
+                      {cols.on('avg') && <td className="py-2 px-4 text-right tabular-nums">{fmtUsd(c.avg)}</td>}
+                    </tr>
+                  ))}
+                  {shownClients.length === 0 && <tr><td className="py-4 px-4 text-mav-muted" colSpan={16}>No client matches.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {shownClients.length > 50 && (
+              <button onClick={() => setShowAllClients(v => !v)} className="w-full py-2 text-xs text-mav-muted border-t border-mav-line hover:text-mav-fg">
+                {showAllClients ? 'Show the top 50' : `Show all ${shownClients.length} clients`}
+              </button>
+            )}
+          </Panel>
+
           <Panel title="Engagement model by year" flush
             info="Years marked * do not cover a full Apr–Mar span, so no percentage is shown into or out of them. Model names are reproduced as the source spreadsheet spells them."
             right={<span className="text-[11px] text-mav-muted">full financial years</span>}>
@@ -622,25 +763,19 @@ export default function RevenueHistory() {
               <Split rows={d.models} total={d.total} color={colorFor} />
             </Panel>
             <Panel title="By financial year"
-              info="A year is marked partial when the data does not cover its full Apr–Mar span — FY26-27 is still in progress. Year-on-year is shown only between two complete years, so a part-finished year never produces a growth figure that is really just a shorter window."
+              info="A year is marked partial when the data does not cover its full Apr–Mar span — FY26-27 is still in progress. Where a year is still running, its percentage compares the completed months so far with the same months of the year before, so a shorter window never passes for growth."
               right={<span className="text-[11px] text-mav-muted">Apr–Mar</span>}>
               <div className="space-y-2">
-                {d.fys.map((f, i) => {
-                  const prev = i > 0 ? d.fys[i - 1] : null
-                  // Only compare complete year against complete year. Against a
-                  // partial FY22-23 the next year reads +196%, which is an
-                  // artefact of the window, not growth.
-                  const comparable = !!prev && prev.complete && f.complete && prev.amount > 0
-                  const delta = comparable ? ((f.amount - prev!.amount) / prev!.amount) * 100 : null
+                {d.fys.map(f => {
+                  const st = fyAll.find(x => x.fy === f.fy)
+                  const delta = st?.pct ?? null
                   return (
                     <div key={f.fy} className="flex items-center gap-3 text-sm border-b border-mav-line/60 last:border-0 py-2">
                       <span className="w-20 shrink-0 font-medium">{fyLabel(f.fy)}</span>
                       <span className="flex-1 text-mav-muted text-xs">{f.clients} clients</span>
                       <span className="tabular-nums">{fmtUsd(f.amount)}</span>
-                      <span className={`w-16 text-right text-xs tabular-nums ${delta == null ? 'text-mav-muted' : delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {delta == null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(0)}%`}
-                      </span>
-                      {!f.complete && <span className="text-[10px] px-1.5 py-0.5 rounded bg-mav-line text-mav-muted shrink-0">partial</span>}
+                      <span className={`w-16 text-right text-xs tabular-nums ${pctTone(delta)}`}>{fmtPct(delta)}</span>
+                      {!f.complete && <span className="text-[10px] px-1.5 py-0.5 rounded bg-mav-line text-mav-muted shrink-0">{st?.windowLabel || 'partial'}</span>}
                     </div>
                   )
                 })}
@@ -715,6 +850,7 @@ export default function RevenueHistory() {
               </span>
             </div>
           </Panel>
+          </>}
         </div>
       )}
     </div>
