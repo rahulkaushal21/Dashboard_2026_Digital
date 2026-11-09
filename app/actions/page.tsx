@@ -62,7 +62,7 @@ const BUCKET_META: Record<Bucket, { label: string; info: string }> = {
   quiet: { label: 'Quiet quotes', info: `Open quotes with no touch for ${QUIET_DAYS}+ days (from email where there is any, else the quote date). Quotes already marked “might not come” are left out.` },
   yes: { label: 'Client said yes', info: 'Still Open in the Quotes sheet, but the client has committed in writing. Confirm them on Opportunities so they count as won.' },
   internal: { label: 'Pending internal dates', info: `Booked projects with no internal delivery date on them. Delivered rows are included — that is where most of these are, because the gap is noticed after the job is done — but Cancelled ones are not. From ${fmtFrom(GAP_FROM)} on: anything earlier came off the frozen spreadsheet and nobody is going back to fill it in.` },
-  outsource: { label: 'Contractor, no cost', info: `Projects whose expert is "Contractor" but which carry no outsourcing cost — a blank or a zero. The work was given away and what it cost us is not on the books, so the margin on that line is overstated. From ${fmtFrom(GAP_FROM)} on, Cancelled rows excluded.` },
+  outsource: { label: 'Contractor, no cost', info: `Projects whose expert is "Contractor" but which carry no outsourcing cost — a blank or a zero. The work was given away and what it cost us is not on the books, so the margin on that line is overstated. Enter the cost in INR, which is what contractors are paid in; the currency is saved with it, so the figure is never read as dollars by mistake. From ${fmtFrom(GAP_FROM)} on, Cancelled rows excluded.` },
 }
 
 const statusTint = (s?: string) => {
@@ -455,19 +455,29 @@ export default function ActionsPage() {
         // A zero is what the row already says, so saving one would tick the job off the
         // list without recording anything. Say so rather than accepting it.
         if (!v || !Number.isFinite(n) || n <= 0) { setErr(r.row_key, 'Enter the cost — a number above zero.'); return }
-        saveProject(r, { outsource_price: n })
+        // THE CURRENCY IS WRITTEN WITH IT, ALWAYS. Contractors are paid in rupees — 266
+        // of the priced rows carry an INR-sized figure with the currency cell left blank
+        // — but a blank does not mean the same thing everywhere: sheet-writer reads it as
+        // INR on a sheet line (`|| "INR"`) and as USD on a dashboard line (`|| "USD"`).
+        // Five of these rows are dashboard lines, so a bare 72,000 would be converted as
+        // dollars and land on the sheet about eighty times too big. Stamping INR here
+        // makes the row say what was meant instead of inheriting a default.
+        saveProject(r, { outsource_price: n, outsource_currency: 'INR' })
       }
       return (
         <span className="inline-flex items-center gap-1.5">
+          {/* The unit is on screen, not implied, so nobody types dollars into a rupee
+              field and only finds out when the sheet shows the converted figure. */}
+          {!dateMode && <span className="text-[11px] font-semibold text-mav-muted">₹ INR</span>}
           <input autoFocus type={dateMode ? 'date' : 'number'} value={ed.value} disabled={b}
             min={dateMode ? undefined : '0'} step={dateMode ? undefined : '0.01'}
-            placeholder={dateMode ? undefined : `Cost${r.outsource_currency ? ` (${r.outsource_currency})` : ''}`}
+            placeholder={dateMode ? undefined : 'Cost in INR'}
             onChange={e => setEditing({ ...ed, value: e.target.value })}
             onKeyDown={e => {
               if (e.key === 'Enter') { e.preventDefault(); commit() }
               if (e.key === 'Escape') { e.preventDefault(); setEditing(null); setErr(r.row_key) }
             }}
-            className={`${inlineInput} w-36`} aria-label={dateMode ? 'Internal delivery date' : 'Outsourcing cost'} />
+            className={`${inlineInput} w-32`} aria-label={dateMode ? 'Internal delivery date' : 'Outsourcing cost in INR'} />
           <button onClick={commit} disabled={b} className={primary}>{b ? 'Saving…' : 'Save'}</button>
           <button onClick={() => { setEditing(null); setErr(r.row_key) }} disabled={b} className={secondary}>Cancel</button>
         </span>
@@ -477,7 +487,7 @@ export default function ActionsPage() {
       <span className="inline-flex items-center gap-1.5">
         <button onClick={() => setEditing({ key: r.row_key, value: dateMode ? (day(r.delivery_date) || today) : '' })}
           disabled={b} className={primary}>
-          {dateMode ? 'Set internal date' : 'Add cost'}
+          {dateMode ? 'Set internal date' : 'Add INR cost'}
         </button>
       </span>
     )
