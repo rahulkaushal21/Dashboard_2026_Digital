@@ -4,9 +4,11 @@ import Link from 'next/link'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 import {
-  QUIET_DAYS, PROJECT_BUCKETS, BUCKETS, localToday, dayDiff, day, isAwaitingDelivery, dealDate, quietDays,
-  personMatcher, defaultPerson, scopeLedger, scopeDeals, projectBuckets, quoteBuckets, bucketCounts, totalOf,
-  announceActionsChanged, type Bucket, type ProjectBucket, type QuoteBucket,
+  QUIET_DAYS, PROJECT_BUCKETS, GAP_BUCKETS, BUCKETS, ALL_BUCKETS, GAP_FROM, isLedgerBucket,
+  localToday, dayDiff, day, isAwaitingDelivery, dealDate, quietDays,
+  personMatcher, defaultPerson, scopeLedger, scopeDeals, projectBuckets, quoteBuckets, gapBuckets,
+  bucketCounts, totalOf,
+  announceActionsChanged, type Bucket, type ProjectBucket, type QuoteBucket, type GapBucket,
 } from '@/lib/actions'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
@@ -37,6 +39,10 @@ import {
 
 const money = (n?: number | null) => n == null ? '—' : `$${Math.round(Number(n) || 0).toLocaleString('en-US')}`
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+// Fixed locale and timezone: this page is statically exported, so a date formatted from
+// the visitor's own locale would differ from the prerendered HTML and warn on hydration.
+const fmtFrom = (d: string) =>
+  new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
 
 // One cell can name several people ("Malav Modi / Kalgi Shah") — the same separators
 // lib/supabase's ownerMatches splits on, so the dropdown lists people, not cells.
@@ -55,6 +61,8 @@ const BUCKET_META: Record<Bucket, { label: string; info: string }> = {
   past: { label: 'Past undelivered', info: 'Delivery date has passed and the project is still Under Development or Under Review. On Hold and Awaiting Information are left out — those are parked, usually waiting on the client, and they are not late. Not cut at any date: anything still running is still somebody’s to close.' },
   quiet: { label: 'Quiet quotes', info: `Open quotes with no touch for ${QUIET_DAYS}+ days (from email where there is any, else the quote date). Quotes already marked “might not come” are left out.` },
   yes: { label: 'Client said yes', info: 'Still Open in the Quotes sheet, but the client has committed in writing. Confirm them on Opportunities so they count as won.' },
+  internal: { label: 'Pending internal dates', info: `Booked projects with no internal delivery date on them. Delivered rows are included — that is where most of these are, because the gap is noticed after the job is done — but Cancelled ones are not. From ${fmtFrom(GAP_FROM)} on: anything earlier came off the frozen spreadsheet and nobody is going back to fill it in.` },
+  outsource: { label: 'Contractor, no cost', info: `Projects whose expert is "Contractor" but which carry no outsourcing cost — a blank or a zero. The work was given away and what it cost us is not on the books, so the margin on that line is overstated. From ${fmtFrom(GAP_FROM)} on, Cancelled rows excluded.` },
 }
 
 const statusTint = (s?: string) => {
@@ -78,6 +86,10 @@ const PCOLS: ColumnDef[] = [
   { key: 'dept', label: 'Department' },
   { key: 'pid', label: 'Project ID' },
   { key: 'month', label: 'Booking month' },
+  // Off by default, and there for the two record-keeping lists: the field each one is
+  // about, so you can see what is already filled in on the rows around it.
+  { key: 'internal', label: 'Internal date' },
+  { key: 'contractor', label: 'Contractor' },
 ]
 const QCOLS: ColumnDef[] = [
   { key: 'when', label: 'When', locked: true },
@@ -168,8 +180,14 @@ export default function ActionsPage() {
   const scopedDeals = useMemo(() => scopeDeals(deals, scope), [deals, scope])
   const pb = useMemo(() => projectBuckets(scopedLedger, today), [scopedLedger, today])
   const qb = useMemo(() => quoteBuckets(scopedDeals, today), [scopedDeals, today])
-  const counts = bucketCounts(pb, qb)
+  const gb = useMemo(() => gapBuckets(scopedLedger), [scopedLedger])
+  const counts = bucketCounts(pb, qb, gb)
+  // The headline counts the five "today" lists only — see totalOf.
   const total = totalOf(counts)
+  // Both ledger-backed collections in one lookup, so the table does not care which kind
+  // of list it is drawing.
+  const ledgerRowsOf = (b: Bucket): LedgerRow[] =>
+    (GAP_BUCKETS.includes(b) ? gb[b as GapBucket] : pb[b as ProjectBucket]) || []
 
   // A selection belongs to one list; switching lists starts clean.
   useEffect(() => { setPicked(new Set()); setBulkDate(null); setBulkNote('') }, [bucket])
@@ -183,7 +201,11 @@ export default function ActionsPage() {
   }, [loading, bucketTouched, total])
 
   // ── The WHEN cell: what makes each row worth acting on, in words and a colour.
-  const projectWhen = (r: LedgerRow): { text: string; tone: keyof typeof TONE } => {
+  // The gap lists are not about a date at all, so they say what is missing instead —
+  // "Due in 0 days" against a delivered job would be nonsense.
+  const projectWhen = (r: LedgerRow, b: Bucket): { text: string; tone: keyof typeof TONE } => {
+    if (b === 'internal') return { text: 'No internal date', tone: 'amber' }
+    if (b === 'outsource') return { text: 'No cost on it', tone: 'red' }
     const n = dayDiff(today, day(r.delivery_date))
     if (n === 0) return { text: 'Delivering today', tone: 'amber' }
     if (n > 0) return { text: `Due in ${plural(n, 'day')}`, tone: 'sky' }
@@ -196,10 +218,11 @@ export default function ActionsPage() {
   }
 
   // ── Card side panels: exactly the rows each card counts.
-  const projectDetails = (b: ProjectBucket): CardDetails<LedgerRow> => {
+  const projectDetails = (b: Bucket): CardDetails<LedgerRow> => {
+    const gap = GAP_BUCKETS.includes(b)
     const cols: DetailCol<LedgerRow>[] = [
-      { key: 'when', label: 'When', value: r => { const w = projectWhen(r); return <span className={TONE[w.tone]}>{w.text}</span> },
-        sort: r => day(r.delivery_date) },
+      { key: 'when', label: 'When', value: r => { const w = projectWhen(r, b); return <span className={TONE[w.tone]}>{w.text}</span> },
+        sort: r => gap ? day(r.booking_month) : day(r.delivery_date) },
       { key: 'project', label: 'Project / agency', wide: true, value: r => r.project_name || r.company_name || '—', sort: r => r.project_name || r.company_name || '' },
       { key: 'agency', label: 'Agency', wide: true, value: r => r.company_name || '—', sort: r => r.company_name || '' },
       { key: 'amount', label: 'Amount', align: 'right', value: r => money(r.amount_usd), sort: r => r.amount_usd || 0,
@@ -209,7 +232,7 @@ export default function ActionsPage() {
     ]
     return {
       subtitle: BUCKET_META[b].info,
-      rows: pb[b],
+      rows: ledgerRowsOf(b),
       groupBy: r => r.geo || 'No GEO',
       groupTotal: rs => money(rs.reduce((s, r) => s + (r.amount_usd || 0), 0)),
       rowKey: r => r.row_key,
@@ -237,14 +260,16 @@ export default function ActionsPage() {
   })
 
   // ── Table: the chosen bucket, narrowed by the filter box.
-  const isProject = PROJECT_BUCKETS.includes(bucket)
+  const isProject = isLedgerBucket(bucket)
+  const isGap = GAP_BUCKETS.includes(bucket)
   const q = search.trim().toLowerCase()
-  const projRows = useMemo(() => !isProject ? [] : (pb[bucket as ProjectBucket] || []).filter(r =>
+  const projRows = useMemo(() => !isProject ? [] : ledgerRowsOf(bucket).filter(r =>
     (!q || [r.project_name, r.company_name, r.pm_owner, r.project_id, r.client_name].some(v => (v || '').toLowerCase().includes(q)))
     && (!fGeo.length || fGeo.includes(r.geo || ''))
     && (!fDept.length || fDept.includes(r.service_dept || ''))
     && (!fStatus.length || fStatus.includes(r.delivery_status || ''))
-  ), [isProject, pb, bucket, q, fGeo, fDept, fStatus])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [isProject, pb, gb, bucket, q, fGeo, fDept, fStatus])
   const dealRows = useMemo(() => isProject ? [] : qb[bucket as QuoteBucket].filter(x =>
     (!q || [x.company_name, x.source_subject, x.summary, x.pm_owner, x.sales_person].some(v => (v || '').toLowerCase().includes(q)))
     && (!fGeo.length || fGeo.includes(x.geo || ''))
@@ -253,7 +278,14 @@ export default function ActionsPage() {
 
   const geoOpts = useMemo(() => Array.from(new Set([...scopedLedger.map(r => r.geo || ''), ...scopedDeals.map(x => x.geo || '')].filter(Boolean))).sort(), [scopedLedger, scopedDeals])
   const deptOpts = useMemo(() => Array.from(new Set([...scopedLedger.map(r => r.service_dept || ''), ...scopedDeals.map(dealDept)].filter(Boolean))).sort(), [scopedLedger, scopedDeals, dealDept])
-  const statusOpts = useMemo(() => Array.from(new Set(scopedLedger.filter(isAwaitingDelivery).map(r => r.delivery_status || '').filter(Boolean))).sort(), [scopedLedger])
+  // The statuses actually present in the list on screen. The delivery buckets only ever
+  // hold Under Development and Under Review; the gap lists are mostly Delivered, so a
+  // fixed list built from isAwaitingDelivery would offer no option that matched anything.
+  const statusOpts = useMemo(() => Array.from(new Set(
+    (isGap ? ledgerRowsOf(bucket) : scopedLedger.filter(isAwaitingDelivery)).map(r => r.delivery_status || '').filter(Boolean),
+  )).sort(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedLedger, gb, isGap, bucket])
   const hiddenActive = (fDept.length ? 1 : 0) + (fStatus.length ? 1 : 0)
   useEffect(() => { if (hiddenActive > 0) setMoreOpen(true) }, [hiddenActive])
   const anyFilter = !!q || fGeo.length > 0 || hiddenActive > 0
@@ -309,7 +341,11 @@ export default function ActionsPage() {
   // ── Bulk. The same writes as the row buttons, one after another so a refusal is
   // pinned to its own row and the count on screen is honest. Every ticked row changes at
   // once; each failure is put back and says why, on the row, as a single write would.
-  const canBulk = bucket !== 'yes'   // confirming needs the per-deal dialog on Opportunities
+  // Confirming needs the per-deal dialog on Opportunities. The gap lists are per-row by
+  // design too: one internal date or one outsourcing cost is a fact about THAT job, and a
+  // bar that wrote the same figure across forty of them would be a way to make the books
+  // tidy and wrong at the same time.
+  const canBulk = bucket !== 'yes' && !isGap
   const actionableProj = useMemo(() => projRows.filter(r => canEditLedgerRow(r, me, isAdmin)), [projRows, me, isAdmin])
   const pickableKeys = isProject ? actionableProj.map(r => r.row_key) : canBulk ? dealRows.map(x => `q${x.id}`) : []
   const pickedProj = isProject ? actionableProj.filter(r => picked.has(r.row_key)) : []
@@ -400,7 +436,55 @@ export default function ActionsPage() {
     </span>
   )
 
+  // The gap lists fill in the one field they are about, in place. Same write path as the
+  // Project sheet, so an entry here is the same act as an entry there.
+  const gapAction = (r: LedgerRow) => {
+    if (!canEditLedgerRow(r, me, isAdmin)) return ownerNote(r.pm_owner)
+    const b = busy === r.row_key || !!bulk
+    const ed = editing?.key === r.row_key ? editing : null
+    const dateMode = bucket === 'internal'
+    if (ed) {
+      const commit = () => {
+        const v = ed.value.trim()
+        if (dateMode) {
+          if (!v) { setErr(r.row_key, 'Pick a date first.'); return }
+          saveProject(r, { internal_delivery: v })
+          return
+        }
+        const n = Number(v)
+        // A zero is what the row already says, so saving one would tick the job off the
+        // list without recording anything. Say so rather than accepting it.
+        if (!v || !Number.isFinite(n) || n <= 0) { setErr(r.row_key, 'Enter the cost — a number above zero.'); return }
+        saveProject(r, { outsource_price: n })
+      }
+      return (
+        <span className="inline-flex items-center gap-1.5">
+          <input autoFocus type={dateMode ? 'date' : 'number'} value={ed.value} disabled={b}
+            min={dateMode ? undefined : '0'} step={dateMode ? undefined : '0.01'}
+            placeholder={dateMode ? undefined : `Cost${r.outsource_currency ? ` (${r.outsource_currency})` : ''}`}
+            onChange={e => setEditing({ ...ed, value: e.target.value })}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commit() }
+              if (e.key === 'Escape') { e.preventDefault(); setEditing(null); setErr(r.row_key) }
+            }}
+            className={`${inlineInput} w-36`} aria-label={dateMode ? 'Internal delivery date' : 'Outsourcing cost'} />
+          <button onClick={commit} disabled={b} className={primary}>{b ? 'Saving…' : 'Save'}</button>
+          <button onClick={() => { setEditing(null); setErr(r.row_key) }} disabled={b} className={secondary}>Cancel</button>
+        </span>
+      )
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <button onClick={() => setEditing({ key: r.row_key, value: dateMode ? (day(r.delivery_date) || today) : '' })}
+          disabled={b} className={primary}>
+          {dateMode ? 'Set internal date' : 'Add cost'}
+        </button>
+      </span>
+    )
+  }
+
   const projectAction = (r: LedgerRow) => {
+    if (isGap) return gapAction(r)
     if (!canEditLedgerRow(r, me, isAdmin)) return ownerNote(r.pm_owner)
     const b = busy === r.row_key || !!bulk
     const ed = editing?.key === r.row_key ? editing : null
@@ -506,7 +590,7 @@ export default function ActionsPage() {
       </KPIRow>
 
       <Segments<Bucket> value={bucket} onChange={b => { setBucketTouched(true); setBucket(b); setEditing(null) }}
-        items={BUCKETS.map(b => ({ id: b, label: BUCKET_META[b].label, count: counts[b], title: BUCKET_META[b].info }))} />
+        items={ALL_BUCKETS.map(b => ({ id: b, label: BUCKET_META[b].label, count: counts[b], title: BUCKET_META[b].info }))} />
 
       <FilterBar right={<>
         <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">
@@ -580,6 +664,8 @@ export default function ActionsPage() {
                   {pcols.on('dept') && <th className={th}>Department</th>}
                   {pcols.on('pid') && <th className={th}>Project ID</th>}
                   {pcols.on('month') && <th className={th}>Booking month</th>}
+                  {pcols.on('internal') && <th className={th}>Internal date</th>}
+                  {pcols.on('contractor') && <th className={th}>Contractor</th>}
                   <th className={`${th} sticky-action text-right`}>Action</th>
                 </tr>
               ) : (
@@ -601,7 +687,7 @@ export default function ActionsPage() {
             </thead>
             <tbody>
               {isProject && projRows.map(r => {
-                const w = projectWhen(r)
+                const w = projectWhen(r, bucket)
                 const err = rowErr[r.row_key]
                 return (
                   <tr key={r.row_key} className={`border-b border-mav-line/60 ${picked.has(r.row_key) ? 'bg-mav-yellow/5' : ''}`}>
@@ -629,6 +715,8 @@ export default function ActionsPage() {
                     {pcols.on('dept') && <td className={td}>{r.service_dept || '—'}</td>}
                     {pcols.on('pid') && <td className={td}>{r.project_id || '—'}</td>}
                     {pcols.on('month') && <td className={td}>{r.booking_month ? r.booking_month.slice(0, 7) : '—'}</td>}
+                    {pcols.on('internal') && <td className={td}>{day(r.internal_delivery) ? <DateCell d={r.internal_delivery} /> : <span className="text-mav-muted">—</span>}</td>}
+                    {pcols.on('contractor') && <td className={`${td} max-w-[10rem] truncate`} title={r.contractor_name || ''}>{r.contractor_name || '—'}</td>}
                     <td className={`${td} sticky-action text-right`}>
                       {projectAction(r)}
                       {err && <div className="mt-1 text-[11px] text-red-400 whitespace-normal max-w-[18rem] ml-auto">{err}</div>}
