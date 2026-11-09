@@ -489,8 +489,19 @@ Every one of these came from a real correction; treat them as standing rules.
   is where the quoted figure and currency actually live, and an RFQ being raised points at
   invoicing/confirmation. Parse them every run before clearing that sender (step 3).
 - **Sub-brands are not clients.** Tip Top Foodservice NZ → `GWF`; SurfStyle → `Hummingbird Ideas`;
-  First Defense Supply → `Market Veep`; Fyshe → `Ink Digital`; PAH → `Underdog Digital`;
+  First Defense Supply → `Market Veep`; Williamson IR / WilliamsonIR / WIR → `Market Veep`;
+  Fyshe → `Ink Digital`; PAH → `Underdog Digital`;
   Convello → `YLP Legal`. The end client goes in `company_note`, never in `company_name`.
+  **This rule covers `email_signals` too, and there it is the whole rule** — the table has no
+  `company_note`, so `company_name` must be the exact billing client's name and nothing else. Not
+  the end client, and NOT the `End Client (Agency)` form either: Client 360 would match that one,
+  but the pulse reads the department with `clientDepts.get(clientKey(company_name))`, an exact
+  key, so any decoration drops the row out of the LP-Hub/Web switch. Which site or brand it was
+  about is already in `source_subject`, `summary` and `client_quote` — that is where it belongs.
+  Signal 777 on 3 Nov is the worked example: Sara West (`swest@marketveep.com`, Market Veep's
+  signature and socials on the mail) reported the WilliamsonIR blog down, and it was logged as
+  company `Williamson IR` with a mistyped `swest@marketview.com`. `williamsonir` keys to nothing,
+  so a live complaint from a paying agency appeared on no client's 360 and in no department.
   **Webiteers is an agency, and the mail that names its clients is the same agency.** Dealer Finder,
   product schema and blog layout work for Dare to Be Different Outdoor all arrive from
   `sem@webiteers.nl` with Vikram Shahi as AM and Nitin Mishra as PM. On 22 Oct the three rows were
