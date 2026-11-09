@@ -869,6 +869,35 @@ were marked lost by hand this week, every one with a reason — there was no swe
 - **Escalations fixed without a note: 1 of 1.** **Feedback queue: 3 pending, none reviewed** — up
   from one pending last week. Three unreviewed items is enough to say so in the pulse.
 
+### Week of 2 – 9 Nov 2026 (read Mon 9 Nov)
+207 actions by 13 people (Pratik's first week: 17). Only 1 deal marked lost by hand, USD 5,000 by
+Bonny on 6 Nov with no reason, and no sweep.
+
+- **`value` fell from 14 corrections to 3 (3 people).** The rule from 2 Nov (take the figure from
+  the RFQ, leave it empty when only hours are quoted) is working; keep it. The most corrected
+  fields are now **`delivery_date` 24 (8 people) and `start_date` 13 (5)**, then `internal_delivery`
+  10, `pm_owner` 5 (the Pratik move, one actor) and `sales_person` 5. **Rule unchanged: never
+  write dates or `internal_delivery` from email inference. Leave them null.**
+- **Dismissals 3–5 Nov are all one person (Rahul K) and name the same kind of miss again:**
+  ZULU 8 three times "again not an escalation, it's feedback" (a bug report and a blocked-delivery
+  note on work the client was reviewing), Fabrik Brands "more like feedback", ESS Software
+  "client side", Williamson IR "it was client" (the blog outage I wrote up as a Complaint on 3 Nov
+  was caused on the client's side), Design+Marketing "deal lost, not an escalation", Plan9
+  "AI shift", ClickJump "basically on price". **Rule: a client reviewing delivered work and listing
+  defects is feedback, not an escalation. Before writing a Negative signal on an outage, say whose
+  side it was on. ZULU 8 in particular: review comments, price pushback and scope questions go on the
+  deal and the project, not to Critical Escalations.**
+- **Deals created by hand, 8 rows (Bonny, Paryusha, Gagandeep, Rahul J).** Sambucol font GBP 280 was
+  approved by the client on 2 Nov and hand-added the same day, so the scan was one run behind.
+  Telfer Digital (3 lines), Conceptual Minds, Fabrik Brands and Design by Temple are maintenance and
+  small fixes booked off Slack. ICG "8 Websites" USD 3,200 duplicated the GWF row I recorded
+  on 3 Nov; it was merged on 5 Nov.
+- **A second automated session merged 19 rows on 5 Nov as `web@uplers.com`**, every one with a proper
+  reason ("Already booked: …", "Duplicate: …"). They are routine ledger clean-up, not team activity,
+  so they stay out of the people counts. The routine's own actor is still `refresh`.
+- **Escalations fixed without a note: 6 of 6.** None of them can be reused next time. **Feedback
+  queue is empty again** (0 pending, down from 3).
+
 ## Cost — what actually drives it
 Storage and hosting are not the expense; **email text read through the model is.**
 Measured 30 Jul 2026: DB 113 MB, ~465 KB per dashboard page load (gzipped), ~96 edge
