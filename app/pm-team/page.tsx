@@ -29,6 +29,8 @@ const qMonths = (f: FQ) => {
 
 const totalColour = (t: number) => (t >= 70 ? 'text-green-400' : t >= 45 ? 'text-mav-yellow' : 'text-red-400')
 
+const selCls = 'bg-mav-panel border border-mav-line rounded-full px-3.5 py-2 text-sm outline-none focus:border-mav-yellow'
+
 // What the numbers mean, stated once, in plain terms — behind the ⓘ on each rule card.
 const HOW = {
   growth: 'The quarter’s average monthly booking against the PM’s base. The base is their last-year monthly average and it only moves up: beat it in a quarter and that quarter’s average becomes the new base. Miss it and the old base stands. The last-year average is a single hand-typed figure per PM, so it is not split by department.',
@@ -63,6 +65,13 @@ export default function PmTeam() {
   // year still one tap away, or all of them stacked the way the KPI sheet does.
   const [pick, setPick] = useState<string>(fqId(CUR_FQ))
 
+  // Whose column to show. The whole team by default; one PM when you are sharing a
+  // screen and only that person's numbers are anyone else's business. It filters the
+  // rendered cells rather than the roster, so every PM's figures stay computed and
+  // switching between them costs nothing — and so a one-PM view is the SAME number
+  // the team view shows, not a recomputation that could drift from it.
+  const [who, setWho] = useState<string>('all')
+
   // One cell per PM per quarter, computed once so the table only has to read it.
   const grid = useMemo(() => QUARTERS.map(fq => ({
     fq,
@@ -75,7 +84,13 @@ export default function PmTeam() {
     }),
   })), [stats, roster])
 
-  const shownGrid = pick === 'all' ? grid : grid.filter(g => fqId(g.fq) === pick)
+  const byQuarter = pick === 'all' ? grid : grid.filter(g => fqId(g.fq) === pick)
+  // A PM who has left the roster between renders would leave `who` pointing at nobody
+  // and the table empty, so an unknown pick falls back to the whole team.
+  const someone = who !== 'all' && roster.some(p => p.slug === who)
+  const shownGrid = someone
+    ? byQuarter.map(g => ({ ...g, cells: g.cells.filter(c => c.pm.slug === who) }))
+    : byQuarter
   const segs = [
     ...QUARTERS.map(f => ({ id: fqId(f), label: qLabel(f), count: f.q === CUR_FQ.q ? 'now' : undefined, title: qMonths(f) })),
     { id: 'all', label: 'All quarters', count: QUARTERS.length },
@@ -112,7 +127,21 @@ export default function PmTeam() {
 
       <UnplacedNote n={unplaced} noun="quote and feedback rows" className="-mt-3 mb-4" />
 
-      <Segments items={segs} value={pick} onChange={setPick} />
+      <div className="flex flex-wrap items-center gap-3">
+        <Segments items={segs} value={pick} onChange={setPick} />
+        {/* Only an admin has more than their own column to hide, so a PM never sees a
+            one-option dropdown. */}
+        {roster.length > 1 && (
+          <label className="flex items-center gap-2 mb-4">
+            <span className="text-sm text-mav-muted">Show</span>
+            <select value={someone ? who : 'all'} onChange={e => setWho(e.target.value)} className={selCls}
+              title="Narrow the table to one PM — for sharing a screen where only that person's numbers should be on it.">
+              <option value="all">Whole team ({roster.length})</option>
+              {roster.map(p => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
 
       {loading && <p className="text-sm text-mav-muted mb-4">Loading…</p>}
 
