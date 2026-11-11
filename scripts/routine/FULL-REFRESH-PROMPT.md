@@ -490,8 +490,13 @@ Every one of these came from a real correction; treat them as standing rules.
   invoicing/confirmation. Parse them every run before clearing that sender (step 3).
 - **Sub-brands are not clients.** Tip Top Foodservice NZ → `GWF`; SurfStyle → `Hummingbird Ideas`;
   First Defense Supply → `Market Veep`; Williamson IR / WilliamsonIR / WIR → `Market Veep`;
-  Fyshe → `Ink Digital`; PAH → `Underdog Digital`;
+  Fyshe → `Ink Digital`; PAH → `Underdog Digital`; Expo Evolution → `Frogonline`;
   Convello → `YLP Legal`. The end client goes in `company_note`, never in `company_name`.
+  **FrogOnline's people are FrogOnline, whoever the job is for.** Janine Stuart (Project
+  Co-ordinator, `studio@frogonline.net.au`) and Andrew Mandaglio (`webit@frogonline.net.au`)
+  brief every job, and the AM on them is Saquib Khan. Deal 3333955 on 2 Nov was written as
+  `Expo Evolution` with no AM at all, off a thread Janine sent and that Rahul Jain's own quote
+  describes as "the scope and brief shared by FrogOnline". Retagged 11 Nov.
   **This rule covers `email_signals` too, and there it is the whole rule** — the table has no
   `company_note`, so `company_name` must be the exact billing client's name and nothing else. Not
   the end client, and NOT the `End Client (Agency)` form either: Client 360 would match that one,
