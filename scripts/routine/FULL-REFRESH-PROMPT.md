@@ -492,6 +492,8 @@ Every one of these came from a real correction; treat them as standing rules.
   First Defense Supply → `Market Veep`; Williamson IR / WilliamsonIR / WIR → `Market Veep`;
   Fyshe → `Ink Digital`; PAH → `Underdog Digital`; Expo Evolution → `Frogonline`;
   ATD / AutoTransportDirect → `Sprung` (billing name is exactly `Sprung`, not "Sprung Interactive");
+  Rivieras USA → `Kandkbrands`; West Texas Blending → `Q2Technologies`;
+  Gingerly Skincare → `The Rare Reform`;
   Convello → `YLP Legal`. The end client goes in `company_note`, never in `company_name`.
   **A personal address on the thread does not make a new client.** Mike Rupers writes from
   `mrupers@gmail.com` and is ATD's own man ("our ATD Admin"), but Clay Johnston
@@ -499,6 +501,27 @@ Every one of these came from a real correction; treat them as standing rules.
   Deal 3333932 on 30 Oct was written as `ATD` with no AM; signal 749 as `Sprung Interactive`.
   Both retagged 11 Nov. Deal 2961931 already carried "End client: AutoTransportDirect (ATD)"
   in its note — when a note on an older row names the end client, that IS the mapping.
+- **An RFQ's "Client Name" is a PERSON, not a company.** `Quote ( QUT… ) Request` lays out
+  `Client Name : Renu-Wasal ()` and `Client EmailId : renu@happykidshq.com`. The company is the
+  EMAIL DOMAIN; the Client Name field is the contact. Rows 3333891 and 3333892 were created on
+  29 Oct as companies called `Renu Wasal` and `Aggie Sikora` — two people invented as clients.
+  Take the company from the domain (`Happy Kids HQ`, `Vici Trading Solutions`), the person into
+  `client_name`. Both retagged 11 Nov.
+- **An abbreviation is not an identification.** Deal 3335717 was filed under `RTR Sports
+  Marketing` — a real client with six revenue lines — off a thread whose only client address is
+  `rtulley@renttherunway.com` and whose subject is "RTR Rental Rewind". RTR was Rent the Runway.
+  This is worse than inventing a name: it puts one client's deal on another client's record, and
+  both sides of it look plausible on screen. When a name is an acronym, confirm it against the
+  DOMAIN before using it.
+- **A thread with no client address still has a PM.** The scan sets `pm_owner` from the thread
+  and leaves it null when the opening sender is one of ours. That is how six open deals reached
+  23 Oct with no PM at all, so they belonged to nobody on the Actions page and nobody's
+  scorecard. If no client wrote, the PM is the Mavlers person ANSWERING the thread, not the one
+  who opened it — Gagandeep Singh on Rivieras USA and West Texas Blending, Nitin Mishra on Renew
+  Behavioral, Pratik Bhatt on Neighborly. Never leave `pm_owner` null; say who you picked and why.
+- **`service_dept` has five values: `WEB-US`, `WEB-AU`, `WEB-UK`, `LP`, `HUB`.** Not `LP/HUB`,
+  not `Web`. Row 3332104 is the only `LP/HUB` in the table and it drops out of the business-unit
+  switch silently. A pod spanning both is still one department on the row — ask which.
   **FrogOnline's people are FrogOnline, whoever the job is for.** Janine Stuart (Project
   Co-ordinator, `studio@frogonline.net.au`) and Andrew Mandaglio (`webit@frogonline.net.au`)
   brief every job, and the AM on them is Saquib Khan. Deal 3333955 on 2 Nov was written as
