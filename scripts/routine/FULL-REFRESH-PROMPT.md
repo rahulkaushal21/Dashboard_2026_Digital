@@ -532,8 +532,13 @@ Every one of these came from a real correction; treat them as standing rules.
   who opened it — Gagandeep Singh on Rivieras USA and West Texas Blending, Nitin Mishra on Renew
   Behavioral, Pratik Bhatt on Neighborly. Never leave `pm_owner` null; say who you picked and why.
 - **`service_dept` has five values: `WEB-US`, `WEB-AU`, `WEB-UK`, `LP`, `HUB`.** Not `LP/HUB`,
-  not `Web`. Row 3332104 is the only `LP/HUB` in the table and it drops out of the business-unit
-  switch silently. A pod spanning both is still one department on the row — ask which.
+  not `Web`. A row carrying anything else drops out of the business-unit switch silently — it is
+  not filtered OUT, it simply never matches, which is why nobody notices. Row 3332104 (Infinity
+  Partners) was the only `LP/HUB` ever written; the owner set it to `WEB-US` on 11 Nov, with
+  "at the moment" said out loud, because the pod spans LP, HUB and paid media and the split is
+  not decided. A pod is still ONE department on the row: ask which, never invent a pair.
+  `AI & Automation` is NOT in this list but is correct and deliberate — it counts as Web in the
+  switch. Four Won rows carry it. Leave them.
   **FrogOnline's people are FrogOnline, whoever the job is for.** Janine Stuart (Project
   Co-ordinator, `studio@frogonline.net.au`) and Andrew Mandaglio (`webit@frogonline.net.au`)
   brief every job, and the AM on them is Saquib Khan. Deal 3333955 on 2 Nov was written as
