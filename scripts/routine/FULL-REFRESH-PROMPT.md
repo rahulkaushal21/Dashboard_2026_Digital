@@ -501,6 +501,18 @@ Every one of these came from a real correction; treat them as standing rules.
   Deal 3333932 on 30 Oct was written as `ATD` with no AM; signal 749 as `Sprung Interactive`.
   Both retagged 11 Nov. Deal 2961931 already carried "End client: AutoTransportDirect (ATD)"
   in its note — when a note on an older row names the end client, that IS the mapping.
+- **ICG, SCG and GWF are three names for one chain, and `ICG` is the one we keep.** Soar
+  Communications Group (`scg.net.nz`, Ritchie Harvey, Account Director) is ICG's CHILD COMPANY,
+  and GWF is the end client the work is for. The thread domain therefore disagrees with the
+  company name on purpose: do not "fix" ICG to SCG or to GWF. ICG carries 17 revenue lines,
+  SCG none. Confirmed by the owner 11 Nov; deal 1115853 and signal 637 both set to `ICG`.
+  A CHILD COMPANY IS NOT AN AGENCY — the parent we invoice is the name, one level up, and the
+  domain check below will flag these every time it runs. It is right to flag and wrong to act.
+- **An RFQ's budget carries its own currency, and it is often INR.** `Currency : INR` sits at
+  the BOTTOM of the mail, after the budget. RFQ QUT271026112159 reads Budget 5446 with Geo
+  AU/NZ, which looks like a missing thousand until you reach the currency line: 5,446 INR is
+  USD 56.73 at 96/USD, which is exactly what the row holds. Read to the end of the mail before
+  calling a value wrong — Geo is where the client is, not what they are billed in.
 - **An RFQ's "Client Name" is a PERSON, not a company.** `Quote ( QUT… ) Request` lays out
   `Client Name : Renu-Wasal ()` and `Client EmailId : renu@happykidshq.com`. The company is the
   EMAIL DOMAIN; the Client Name field is the contact. Rows 3333891 and 3333892 were created on
