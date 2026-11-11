@@ -491,7 +491,14 @@ Every one of these came from a real correction; treat them as standing rules.
 - **Sub-brands are not clients.** Tip Top Foodservice NZ → `GWF`; SurfStyle → `Hummingbird Ideas`;
   First Defense Supply → `Market Veep`; Williamson IR / WilliamsonIR / WIR → `Market Veep`;
   Fyshe → `Ink Digital`; PAH → `Underdog Digital`; Expo Evolution → `Frogonline`;
+  ATD / AutoTransportDirect → `Sprung` (billing name is exactly `Sprung`, not "Sprung Interactive");
   Convello → `YLP Legal`. The end client goes in `company_note`, never in `company_name`.
+  **A personal address on the thread does not make a new client.** Mike Rupers writes from
+  `mrupers@gmail.com` and is ATD's own man ("our ATD Admin"), but Clay Johnston
+  (`clay@madebysprung.com`) is on every one of those mails and Sprung is who we invoice.
+  Deal 3333932 on 30 Oct was written as `ATD` with no AM; signal 749 as `Sprung Interactive`.
+  Both retagged 11 Nov. Deal 2961931 already carried "End client: AutoTransportDirect (ATD)"
+  in its note — when a note on an older row names the end client, that IS the mapping.
   **FrogOnline's people are FrogOnline, whoever the job is for.** Janine Stuart (Project
   Co-ordinator, `studio@frogonline.net.au`) and Andrew Mandaglio (`webit@frogonline.net.au`)
   brief every job, and the AM on them is Saquib Khan. Deal 3333955 on 2 Nov was written as
