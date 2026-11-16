@@ -54,19 +54,27 @@ that domain was captured in the last six months:
 
 | | Clients billed in 6mo | Mail captured | Coverage | Escalated | Of those watched |
 |---|---|---|---|---|---|
-| Web (US/AU/UK) | 159 | 111 | 70% | 25 | **22.5%** |
-| HUB | 25 | 15 | 60% | 1 | **6.7%** |
-| LP | 31 | 17 | 55% | 0 | **0%** |
+| Web (US/AU/UK) | 159 | 151 | **95%** | 25 | 16.6% |
+| LP | 31 | 28 | **90%** | 0 | 0% |
+| HUB | 25 | 21 | **84%** | 1 | 4.8% |
 
-Coverage on LP/HUB is somewhat lower than Web — 55–60% against 70%, worth knowing and
-worth improving — but nowhere near enough to explain the difference in escalations. A gap
-of 70 versus 57 cannot produce 22.5% versus 3%. **After adjusting for what is watched,
-LP and HUB genuinely escalate far less than Web.** That is a real result about those
-teams, not an artefact of the plumbing, and it should be reported as the good news it is.
+Capture is near complete for every team. **LP and HUB genuinely escalate far less than
+Web** — a real result about those teams, and good news to report as such.
 
-Where this still bites: roughly 40% of clients in EVERY team have no captured mail at all,
-so no team's escalation count is a complete census. Say that when the number carries
-weight — but do not single out LP/HUB for it, because Web has the same hole.
+**MATCH AN EMAIL DOMAIN WITH A WILDCARD ON BOTH SIDES.** The first pass at this table said
+55–70% coverage and "40% of clients have no mail", and it was wrong — the pattern was
+`'%@'||dom` with no trailing `%`. Addresses are stored as `Name <user@domain>`, so they
+end in `>` and nothing ever matched. Frogonline, whose thread I had read that morning,
+came back as having no captured mail: 0 hits against 10. Some `contact_email` values also
+carry a trailing `\r`, so btrim the domain before using it. Use
+`e.from_addr ilike '%@'||dom||'%'`, and sanity-check any coverage figure against one
+client you KNOW has mail before believing the aggregate.
+
+Only 15 clients across all teams have no captured mail at all — 8 Web, 4 HUB, 3 LP — and
+most are small or last billed months ago. The ones worth a look if the question returns:
+Pure Flix (HUB, $21.9k), Caddie (WEB-AU, $20.1k), Precision Creative and Media (WEB-UK,
+$12.7k). Likely agency-billed under a different corresponding domain, or run over Slack
+or a portal rather than mail.
 
 ---
 
