@@ -149,27 +149,27 @@ export default function BusinessTrendPage() {
     return true
   }).length, [revenueSeries, fromMonth, toMonth])
 
-  const last6Mo = useMemo(() => {
+  // The months the analysis tables and the quotes KPIs read. With no range picked it is
+  // the last six months of revenue; with a From/To set it is exactly the months in view,
+  // so the pickers move the table and not just the bars above it. Both used to disagree:
+  // the chart would show Apr 2025 – Mar 2026 while the table stayed on the latest six.
+  const analysisMonths = useMemo(() => {
     const byMonth = revenueByMonthYear(revenue)
     if (byMonth.length === 0) return []
-    const [lastMonthStr] = byMonth[byMonth.length - 1].month.split('-')
-    const lastYear = +lastMonthStr
-    const lastMo = +byMonth[byMonth.length - 1].month.split('-')[1]
-    let year = lastYear, mo = lastMo
-    const sixMonthsBack: string[] = []
-    for (let i = 0; i < 6; i++) {
-      sixMonthsBack.unshift(`${year}-${String(mo).padStart(2, '0')}`)
-      mo--
-      if (mo < 1) {
-        mo = 12
-        year--
-      }
+    if (fromMonth || toMonth) {
+      return byMonth.filter(r => {
+        const k = ym(r.month)
+        if (fromMonth && k < fromMonth) return false
+        if (toMonth && k > toMonth) return false
+        return true
+      })
     }
-    return byMonth.filter(item => {
-      const itemMonth = ym(item.month)
-      return sixMonthsBack.includes(itemMonth)
-    })
-  }, [revenue])
+    return byMonth.slice(-6)
+  }, [revenue, fromMonth, toMonth])
+  const ranged = Boolean(fromMonth || toMonth)
+  const rangeLabel = ranged && analysisMonths.length
+    ? `${analysisMonths[0].monthLabel} – ${analysisMonths[analysisMonths.length - 1].monthLabel}`
+    : 'last 6 months'
 
   // The target for whatever unit is on screen. The page used to measure every unit
   // against the whole company's $3.2M and footnote the fact — so LP/HUB, which is
@@ -361,20 +361,14 @@ export default function BusinessTrendPage() {
     return { name: pushSel, slip, deal: lastDealBy.get(k) || null, tech: techBy.get(k) || null, techMix }
   }, [pushSel, plan, lastDealBy, techBy, bookings])
 
+  // Quotes dated inside the months on screen, so the KPI row adds up to the table under it.
   const quotesAnalysis = useMemo(() => {
-    const lastMonthStr = last6Mo.length > 0 ? ym(last6Mo[last6Mo.length - 1].month) : ''
-    const sixMonthsAgo = lastMonthStr
-      ? (() => {
-          const [y, m] = lastMonthStr.split('-')
-          let year = +y, mo = +m - 6
-          if (mo < 1) { mo += 12; year-- }
-          return `${year}-${String(mo).padStart(2, '0')}`
-        })()
-      : ''
-    const relevant = opportunities.filter(opp => {
+    const first = analysisMonths.length ? ym(analysisMonths[0].month) : ''
+    const last = analysisMonths.length ? ym(analysisMonths[analysisMonths.length - 1].month) : ''
+    const relevant = first ? opportunities.filter(opp => {
       const oppDate = ymd(opp.source_date)
-      return oppDate && oppDate >= (sixMonthsAgo + '-01') && oppDate <= (lastMonthStr + '-31')
-    })
+      return oppDate && oppDate >= (first + '-01') && oppDate <= (last + '-31')
+    }) : []
     const wonRows = relevant.filter(isWon)
     const confirmed = wonRows.length
     return {
@@ -383,7 +377,7 @@ export default function BusinessTrendPage() {
       confirmed,
       rate: relevant.length > 0 ? Math.round((confirmed / relevant.length) * 100) : 0,
     }
-  }, [opportunities, last6Mo])
+  }, [opportunities, analysisMonths])
 
   const getMonthQuotes = (monthStr: string) => {
     const monthQuotes = opportunities.filter(opp => {
@@ -504,7 +498,7 @@ export default function BusinessTrendPage() {
         : { key: 'age', label: 'Days so far', value: o => daysSince(o.source_date) ?? '—', align: 'right', sort: o => daysSince(o.source_date) ?? -1 },
       { key: 'owner', label: 'Owner', value: o => o.sales_person || '—', sort: o => o.sales_person || '' },
     ]
-    const qSub = 'Quotes dated in the last six months of revenue, one per client'
+    const qSub = `Quotes dated ${ranged ? rangeLabel : 'in the last six months of revenue'}, one per client`
     const byGeo = (o: Opp) => o.geo || 'No GEO'
     const quotes: CardDetails<Opp> = { subtitle: qSub, rows: quotesAnalysis.rows, rowKey: o => o.id, groupBy: byGeo, defaultSort: 'date', columns: oppCols(true) }
     const confirmed: CardDetails<Opp> = { subtitle: `${qSub}, confirmed`, rows: quotesAnalysis.wonRows, rowKey: o => o.id, groupBy: byGeo, defaultSort: 'date', columns: oppCols(true) }
@@ -513,7 +507,7 @@ export default function BusinessTrendPage() {
       rows: quotesAnalysis.rows, rowKey: o => o.id, groupBy: o => (isWon(o) ? 'Confirmed' : 'Not confirmed'), defaultSort: 'date', columns: oppCols(true),
     }
     return { avg, projected, remaining, booked, runRate, needed, quotes, confirmed, rate }
-  }, [fy26Analysis, revenue, thisMonth, plan, quotesAnalysis])
+  }, [fy26Analysis, revenue, thisMonth, plan, quotesAnalysis, ranged, rangeLabel])
 
   if (loading) return <div className="p-6 text-mav-muted">Loading business trend data...</div>
 
@@ -547,8 +541,8 @@ export default function BusinessTrendPage() {
         <KPICard tone="amber" label="Remaining months" value={fy26Analysis.monthsRemaining.toString()} details={cardDetails.remaining} />
       </KPIRow>
 
-      {/* The From/To pickers only narrow the chart; everything else below reads the
-          whole series. */}
+      {/* The From/To pickers narrow the chart, the analysis table and the quotes section.
+          The FY forecast and the plan below read the whole series regardless. */}
       <FilterBar right={<span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">{monthsInView} month(s) in view</span>}>
         <label className="flex items-center gap-2">
           <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-mav-muted">From</span>
@@ -563,9 +557,9 @@ export default function BusinessTrendPage() {
           Reset
         </button>
       </FilterBar>
-      <RevenueChart data={revenueSeries} title="Revenue trend" from={fromMonth} to={toMonth} />
+      <RevenueChart data={revenueSeries} title="Revenue trend" from={fromMonth} to={toMonth} current={thisMonth} />
 
-      <Panel flush className="mb-5" title="Last 6 months analysis">
+      <Panel flush className="mb-5" title={ranged ? `${rangeLabel} analysis (${analysisMonths.length} month${analysisMonths.length === 1 ? '' : 's'})` : 'Last 6 months analysis'}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm min-w-[720px]">
             <thead className="text-left text-mav-muted border-b border-mav-line">
@@ -579,8 +573,8 @@ export default function BusinessTrendPage() {
               </tr>
             </thead>
             <tbody>
-              {last6Mo.length > 0 ? last6Mo.map((item, idx) => {
-                const prev = idx > 0 ? last6Mo[idx - 1].revenue : item.revenue
+              {analysisMonths.length > 0 ? analysisMonths.map((item, idx) => {
+                const prev = idx > 0 ? analysisMonths[idx - 1].revenue : item.revenue
                 const growth = prev > 0 ? Math.round(((item.revenue - prev) / prev) * 1000) / 10 : 0
                 const monthKey = ym(item.month)
                 const monthData = getMonthQuotes(monthKey)
@@ -770,7 +764,7 @@ export default function BusinessTrendPage() {
         </Panel>
       </div>
 
-      <SectionTitle>Quotes &amp; confirmations (last 6 months)</SectionTitle>
+      <SectionTitle>Quotes &amp; confirmations ({rangeLabel})</SectionTitle>
       <KPIRow cols={3}>
         <KPICard tone="accent" label="Total quotes" value={String(quotesAnalysis.total)} details={cardDetails.quotes} />
         <KPICard tone="green" label="Confirmed" value={String(quotesAnalysis.confirmed)} details={cardDetails.confirmed} />
@@ -788,7 +782,7 @@ export default function BusinessTrendPage() {
               </tr>
             </thead>
             <tbody>
-              {last6Mo.map(month => {
+              {analysisMonths.map(month => {
                 const monthKey = ym(month.month)
                 const monthData = getMonthQuotes(monthKey)
                 return (

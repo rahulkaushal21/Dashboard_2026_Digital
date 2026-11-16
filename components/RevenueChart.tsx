@@ -2,7 +2,7 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts'
 import { useThemeInk } from '@/lib/use-theme-ink'
 type Pt = { month: string; revenue: number; monthLabel?: string }
-export default function RevenueChart({ data, title = 'Revenue — last 6 months', note, from, to }: { data: Pt[]; title?: string; note?: string; from?: string; to?: string }) {
+export default function RevenueChart({ data, title = 'Revenue — last 6 months', note, from, to, current }: { data: Pt[]; title?: string; note?: string; from?: string; to?: string; current?: string }) {
   const ink = useThemeInk()
   // from/to are 'YYYY-MM' month keys (from <input type="month">); compare against the raw month key.
   const inRange = (p: Pt) => {
@@ -17,6 +17,10 @@ export default function RevenueChart({ data, title = 'Revenue — last 6 months'
   // than matched on a date — this component's callers put the PRINTED label in `month`
   // ("Sep 2026"), so comparing it against a YYYY-MM key would never match and the bar
   // would quietly never dim. The series is always trailing months ending with today's.
+  // A caller that passes `current` (YYYY-MM) and raw month keys opts out of that: the last
+  // bar dims only when it really is this month, so a range ending in Mar 2026 is not
+  // drawn as if March were still billing.
+  const lastIsPartial = current ? (view.length > 0 && (view[view.length - 1].month || '').slice(0, 7) === current) : true
   return (
     <div className="bg-mav-panel border border-mav-line rounded-xl p-5">
       <div className="text-sm font-medium">{title}</div>
@@ -38,7 +42,7 @@ export default function RevenueChart({ data, title = 'Revenue — last 6 months'
             formatter={(v: number) => [`$${Number(v).toLocaleString('en-US')}`, 'Revenue']} />
           <Bar dataKey="revenue" fill="#FFDB2D" radius={[4, 4, 0, 0]}>
             {view.map((p, i) => (
-              <Cell key={p.month} fill="#FFDB2D" fillOpacity={i === view.length - 1 ? 0.45 : 1} />
+              <Cell key={p.month} fill="#FFDB2D" fillOpacity={lastIsPartial && i === view.length - 1 ? 0.45 : 1} />
             ))}
           </Bar>
         </BarChart>
