@@ -16,9 +16,10 @@ import MultiSelect from '@/components/MultiSelect'
 import { useMine } from '@/lib/mine'
 import MineFilter from '@/components/MineFilter'
 import { useCloseOnNav } from '@/lib/use-close-on-nav'
-import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation, getClientDepts, clientKey } from '@/lib/supabase'
+import { getCriticalEscalations, markEscalationStatus, dismissEscalation, type CriticalEscalation, getClientDepts, clientKey,
+  getEscalationLearnings, saveEscalationLearning, type EscalationLearning } from '@/lib/supabase'
 import { askReason } from '@/lib/ask'
-import { currentEmail } from '@/lib/access'
+import { currentEmail, canWriteLearning } from '@/lib/access'
 
 const sel = 'bg-mav-panel border border-mav-line rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -60,6 +61,93 @@ const COLS: ColumnDef[] = [
 ]
 
 const badge = 'text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap'
+const who = (email?: string) => (email || '').split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+/**
+ * The learning on one escalation: what we took from it, and whether it held.
+ *
+ * Shown to everyone, writable by the three named in ESCALATION_LEARNING_EMAILS. The box
+ * is not hidden from the rest — a lesson nobody else can read is a lesson that was not
+ * learned — but for them it renders as the text, without the editor.
+ *
+ * The AI summary is written by the refresh, not on save, so between the two it is
+ * explicitly "waiting for the next refresh" rather than silently blank. A revision
+ * clears the old summary in the database, so what is on screen always describes the
+ * sentence above it.
+ */
+function LearningBox({ threadId, learning, mayWrite, onSaved }: {
+  threadId: string; learning?: EscalationLearning; mayWrite: boolean; onSaved: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(learning?.learning || '')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  useEffect(() => { setText(learning?.learning || '') }, [learning?.learning])
+
+  const save = async () => {
+    setSaving(true); setErr('')
+    const res = await saveEscalationLearning(threadId, text)
+    setSaving(false)
+    if (!res.ok) { setErr(res.error || 'Could not save that.'); return }
+    setEditing(false); onSaved()
+  }
+
+  if (!learning && !mayWrite) return null
+  return (
+    <div className="mt-3 pt-3 border-t border-mav-line">
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <span className="text-xs uppercase tracking-wide text-mav-yellow/90">Learning</span>
+        {learning && !editing && mayWrite && (
+          <button onClick={() => setEditing(true)} className="text-[11px] text-mav-muted hover:text-mav-fg underline underline-offset-2">Edit</button>
+        )}
+      </div>
+
+      {editing || (!learning && mayWrite) ? (<>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={3} disabled={saving}
+          placeholder="What went wrong underneath, and what we change so it does not happen again."
+          className="w-full bg-mav-dark border border-mav-line rounded-md px-2.5 py-2 text-sm outline-none focus:border-mav-yellow resize-y" />
+        <div className="mt-2 flex items-center gap-2">
+          <button onClick={save} disabled={saving || !text.trim()} className={btnPrimary}>
+            {saving ? 'Saving…' : learning ? 'Save revision' : 'Save learning'}
+          </button>
+          {(editing && learning) && <button onClick={() => { setEditing(false); setText(learning.learning); setErr('') }} disabled={saving} className={btnSecondary}>Cancel</button>}
+          <span className="text-[11px] text-mav-muted">Summary and action steps are written at the next refresh.</span>
+        </div>
+      </>) : learning ? (<>
+        <p className="text-sm leading-relaxed whitespace-pre-line">{learning.learning}</p>
+        <div className="mt-1 text-[11px] text-mav-muted">
+          {who(learning.author_email)} · {fmtDay(learning.updated_at)}
+          {learning.updated_at !== learning.created_at && ' (revised)'}
+        </div>
+
+        {learning.ai_summary ? (
+          <div className="mt-2 rounded-md border border-mav-line/70 bg-mav-dark/40 p-2.5">
+            <div className="text-[11px] uppercase tracking-wide text-mav-muted mb-1">Summary</div>
+            <p className="text-sm leading-relaxed">{learning.ai_summary}</p>
+            {!!learning.ai_actions?.length && (
+              <ul className="mt-2 space-y-1">
+                {learning.ai_actions.map((a, i) => (
+                  <li key={i} className="text-sm text-mav-fg/90 flex gap-2"><span className="text-mav-yellow">→</span><span>{a}</span></li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <div className="mt-2 text-[11px] text-mav-muted">Summary and action steps pending — written at the next refresh.</div>
+        )}
+
+        {learning.still_escalating && (
+          <div className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-2.5 py-2 text-xs text-red-300">
+            Escalated {learning.repeats_since === 1 ? 'once' : `${learning.repeats_since} times`} since this was written
+            {learning.last_repeat ? `, most recently ${fmtDay(learning.last_repeat)}` : ''}. The lesson has not held.
+          </div>
+        )}
+      </>) : null}
+
+      {err && <p className="mt-2 text-[11px] text-red-400">{err}</p>}
+    </div>
+  )
+}
 
 // Part A's three action looks: primary (filled), secondary (yellow outline), destructive (red outline).
 const btnPrimary = 'rounded-full bg-mav-fill text-black font-semibold px-3 py-1 text-xs hover:brightness-95 whitespace-nowrap disabled:opacity-50'
@@ -162,6 +250,27 @@ export default function CriticalEscalations() {
   const [more, setMore] = useState(false)
 
   useEffect(() => { getCriticalEscalations().then(r => { setRows(r); setLoading(false) }) }, [])
+
+  // ── Learnings ───────────────────────────────────────────────────────────────
+  // Keyed by thread so the drawer can show one per escalation, and rolled up by client
+  // for the row badge and the watch card.
+  const [learnings, setLearnings] = useState<Map<string, EscalationLearning>>(new Map())
+  const loadLearnings = useCallback(() => {
+    getEscalationLearnings().then(ls => setLearnings(new Map(ls.map(l => [l.thread_id, l]))))
+  }, [])
+  useEffect(() => { loadLearnings() }, [loadLearnings])
+  const mayWrite = canWriteLearning(currentEmail())
+  // The watch: a lesson was written down and the client escalated anyway. One entry per
+  // client, carrying the worst case, because the question is about the client not the row.
+  const stillEscalating = useMemo(() => {
+    const byClient = new Map<string, EscalationLearning>()
+    for (const l of learnings.values()) {
+      if (!l.still_escalating || !l.company_name) continue
+      const prev = byClient.get(l.company_name)
+      if (!prev || l.repeats_since > prev.repeats_since) byClient.set(l.company_name, l)
+    }
+    return [...byClient.values()].sort((a, b) => b.repeats_since - a.repeats_since)
+  }, [learnings])
   useEffect(() => { const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSel(null) }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [])
 
   const geos = useMemo(() => uniq(rows.map(r => r.geo)), [rows])
@@ -273,6 +382,34 @@ export default function CriticalEscalations() {
       <SectionTitle info={<>One entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="font-semibold">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-400">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-400">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="font-semibold">Not an issue</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.</>}>
         How this works
       </SectionTitle>
+
+      {/* THE WATCH. A learnings log nobody checks is a diary; this is the check. Above
+          the tabs and not behind one, because it is the thing you would otherwise never
+          go looking for — everything else on this page is about escalations that are
+          open, and these are about ones that were closed and came back anyway. */}
+      {stillEscalating.length > 0 && (
+        <Panel className="mb-4" title="Learnings that did not hold"
+          info="A learning was written on an earlier escalation for this client, and the client escalated again afterwards. Counted from the day the learning was written, with no time limit — the worst cases are the ones that come back months later."
+          right={<span className="text-xs text-red-300">{stillEscalating.length} client{stillEscalating.length === 1 ? '' : 's'}</span>}>
+          <div className="space-y-2">
+            {stillEscalating.map(l => (
+              <button key={l.thread_id}
+                onClick={() => { const r = rowsAll.find(x => x.company_name === l.company_name); if (r) setSel(r) }}
+                className="w-full text-left rounded-lg border border-red-500/30 bg-red-500/5 hover:bg-red-500/10 px-3 py-2.5 transition-colors">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="font-medium">{l.company_name}</span>
+                  <span className={`${badge} bg-red-500/20 text-red-300`}>
+                    {l.repeats_since} since the learning
+                  </span>
+                  {l.last_repeat && <span className="text-[11px] text-mav-muted">last {fmtDay(l.last_repeat)}</span>}
+                  <span className="text-[11px] text-mav-muted">· {who(l.author_email)}, {fmtDay(l.created_at)}</span>
+                </div>
+                <p className="mt-1 text-xs text-mav-muted line-clamp-2">{l.ai_summary || l.learning}</p>
+              </button>
+            ))}
+          </div>
+        </Panel>
+      )}
 
       {/* Status is the page's main split. Each count is what that tab would show under
           every other filter as it stands. */}
@@ -425,6 +562,8 @@ export default function CriticalEscalations() {
                     </div>
                   )}
                   {it.source_subject && <div className="mt-2 text-[11px] text-mav-muted">Subject: {it.source_subject}{it.client_email ? ` · ${it.client_email}` : ''}</div>}
+                  <LearningBox threadId={it.thread_id} learning={learnings.get(it.thread_id)}
+                    mayWrite={mayWrite} onSaved={loadLearnings} />
                 </div>
               ))}
             </div>

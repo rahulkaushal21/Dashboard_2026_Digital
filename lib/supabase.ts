@@ -939,6 +939,56 @@ export async function markEscalationStatus(threadIds: string[], status: 'open' |
   const { error } = await supabase.rpc('mark_escalations_status', { p_thread_ids: threadIds, p_status: status, p_actor: opts?.actor ?? null, p_note: opts?.note ?? null })
   return !error
 }
+// ── Escalation learnings ─────────────────────────────────────────────────────────────
+//
+// What Krunal Shah, Hiren Purohit and Pratik Bhatt took away from a critical escalation,
+// and whether the same client escalated again afterwards. See migration 170.
+
+export interface EscalationLearning {
+  thread_id: string
+  company_name?: string
+  learning: string
+  author_email: string
+  created_at: string
+  updated_at: string
+  /** Written by the refresh, not on save. Null means "not summarised yet", which the UI
+   *  says out loud rather than rendering as an empty summary. */
+  ai_summary?: string | null
+  ai_actions?: string[] | null
+  ai_at?: string | null
+  /** How many times this client escalated AFTER the learning was written. */
+  repeats_since: number
+  first_repeat?: string | null
+  last_repeat?: string | null
+  repeat_threads?: string[] | null
+  still_escalating: boolean
+  summary_pending: boolean
+}
+
+/** Every learning, with its repeat count. Read from the watch view so the page and the
+ *  card can never disagree about what "still escalating" means. */
+export async function getEscalationLearnings(): Promise<EscalationLearning[]> {
+  return (await read<EscalationLearning>('web_escalation_learning_watch', '*')) || []
+}
+
+/**
+ * Save or revise the learning on one escalation thread.
+ *
+ * The writer is NOT sent — the database takes it from the signed-in token, so the browser
+ * cannot put somebody else's name on a conclusion. A refusal comes back as its message
+ * rather than a silent no-op, because "only these three may write" is something the
+ * person pressing Save needs told, not hidden.
+ */
+export async function saveEscalationLearning(threadId: string, learning: string): Promise<{ ok: boolean; row?: EscalationLearning; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Supabase not configured' }
+  const { data, error } = await supabase.rpc('save_escalation_learning', { p_thread_id: threadId, p_learning: learning })
+  if (error) return { ok: false, error: error.message || 'Could not save that learning.' }
+  // The learning is saved but the watch counts are computed by the view, so the caller
+  // re-reads rather than trusting this row for repeats_since.
+  clearReadCache()
+  return { ok: true, row: data as EscalationLearning }
+}
+
 // Flag/unflag an open quote as "might not come". Reversible; never changes the deal's
 // real status — Won/Lost still come from the sheet and email evidence alone.
 // Goes through an RPC, not a table update: `opportunities` has RLS enabled with a

@@ -53,6 +53,30 @@ export const INCENTIVE_EMAILS = [
   'hiren@mavlers.com',
   'pratik@mavlers.com',
 ]
+/**
+ * Who writes the learning on a critical escalation.
+ *
+ * Same shape as INCENTIVE_EMAILS above and for the same reason: this list only decides
+ * whether to SHOW the box. The real gate is escalation_learning_authors in the database,
+ * which save_escalation_learning() checks against jwt_email() and refuses anyone else —
+ * and it must, because this is a static export, so anything decided here alone is a
+ * check written in public JavaScript.
+ *
+ * KEEP THE TWO IN STEP. Someone here but not in the table presses Save and is refused;
+ * someone in the table but not here never sees a box to press.
+ *
+ * KRUNAL IS TWO PEOPLE. krunal.s@ is Krunal Shah, who is on this list; krunal@ is Krunal
+ * Bakraniya, who is not. The obvious guess is the wrong one.
+ */
+export const ESCALATION_LEARNING_EMAILS = [
+  'krunal.s@mavlers.com',
+  'hiren@mavlers.com',
+  'pratik@mavlers.com',
+  OWNER_EMAIL,
+]
+export const canWriteLearning = (email?: string | null) =>
+  ESCALATION_LEARNING_EMAILS.includes((email || '').trim().toLowerCase())
+
 /** Deliberately NOT in PAGES: that list is what every signed-in person may see. */
 export const INCENTIVE_PATH = '/pm-team/incentive'
 export const canSeeIncentive = (email?: string | null) =>

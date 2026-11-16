@@ -460,6 +460,36 @@ unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 
 ---
 
+## Escalation learnings — summarise what the three of them wrote
+
+Krunal Shah, Hiren Purohit and Pratik Bhatt write a learning on each critical escalation,
+in the drawer on `/critical-escalations`. There is no model wired into the dashboard: the
+summary and the action steps are YOUR job, on each refresh. Added 16 Nov 2026.
+
+**Find the ones waiting.** `select thread_id, company_name, learning, created_at from
+escalation_learnings where ai_summary is null order by created_at` — a revision clears the
+old summary, so an edited learning comes back round and must be re-read, not skipped.
+
+**Write two things per row**, through the write guard
+(`with u as (update escalation_learnings set … returning *) select * from u`):
+- `ai_summary` — one or two sentences: the CAUSE underneath, not a retelling of the
+  incident. The person reading it already knows what happened; they want to know what it
+  was really about.
+- `ai_actions` — a `text[]` of concrete steps, each one something a named person could do
+  this week. Not "improve communication". If the learning does not support any, write an
+  empty array rather than inventing one — a made-up action step is worse than none,
+  because somebody will be asked about it.
+- `ai_at = now()`, `ai_by` = the model name.
+
+**Read the escalation, not just the learning.** Join `critical_escalations` on `thread_id`
+for `escalation_summary` and the thread, so the summary is grounded in what actually
+happened rather than in one person's sentence about it.
+
+**And check the watch.** `select * from web_escalation_learning_watch where
+still_escalating` lists clients who escalated again AFTER a lesson was written. Say these
+in the pulse by name — a learning that did not hold is worth more attention than a new
+escalation, and nobody will go looking for it. Say nothing when the list is empty.
+
 ## Currency
 The board is USD. A quote in another currency (NZD/AUD/GBP/EUR) must be converted before it goes
 in `est_value`, and the **original amount + the rate used** must be written into the gist, with
