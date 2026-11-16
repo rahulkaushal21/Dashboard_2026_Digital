@@ -875,23 +875,43 @@ export async function getClientDepts(): Promise<Map<string, string>> {
 }
 
 const ckey = (s?: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/**
+ * Region by client key: web_clients where the client has been billed, their open deals
+ * where they have not. A client is praised, escalated and quoted long before they are
+ * ever invoiced, and web_clients is built FROM web_revenue — so for that whole window
+ * the page showed "—". Key Funding Partners had four US/Canada opportunities and no
+ * region anywhere. See migration 173; the view already prefers a billed region over a
+ * quoted one, so this only ever ADDS clients, never overrules one.
+ */
+async function clientGeoMap(): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (!supabase) return out
+  const { data } = await supabase.from('web_client_geo').select('client_key, geo')
+  for (const g of (data as { client_key: string; geo: string }[]) || [])
+    if (g.client_key && g.geo) out.set(g.client_key, g.geo)
+  return out
+}
+
 // The table stores 'open' | 'unresolved' | 'fixed' | 'positive'; the board shows the last
 // two as one settled state. RANK orders them worst-first for the roll-up and the sort.
 const rollUp = (s?: string): 'open' | 'unresolved' | 'resolved' => s === 'open' ? 'open' : s === 'unresolved' ? 'unresolved' : 'resolved'
 const RANK: Record<'open' | 'unresolved' | 'resolved', number> = { open: 0, unresolved: 1, resolved: 2 }
 export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
   if (!supabase) return []
-  const [escRes, sigRes, clients, ctx] = await Promise.all([
+  const [escRes, sigRes, clients, ctx, geoFallback] = await Promise.all([
     supabase.from('critical_escalations').select('thread_id, company_name, client_email, signal_type, escalation_summary, source_subject, first_flagged_date, status, resolution_note, resolved_at, resolved_by').eq('dismissed', false).order('first_flagged_date', { ascending: false }),
     supabase.from('email_signals').select('thread_id, summary, sentiment, source_date'),
     getClients(),
     getClientContext(),
+    clientGeoMap(),
   ])
   const rows = (escRes.data as (EscalationItem & { company_name?: string })[]) || []
   const latest = new Map<string, { summary?: string; sentiment?: string; source_date?: string }>()
   for (const s of (sigRes.data as { thread_id: string; summary?: string; sentiment?: string; source_date?: string }[]) || []) if (s.thread_id) latest.set(s.thread_id, s)
   const geoBy = new Map<string, string>()
   for (const c of clients) { const k = ckey(c.company_name); if (k && c.geo) geoBy.set(k, c.geo) }
+  for (const [k, g] of geoFallback) if (!geoBy.has(k)) geoBy.set(k, g)
   const geoFor = (name?: string): string => {
     const k = ckey(name); if (!k) return ''
     if (geoBy.has(k)) return geoBy.get(k) as string
@@ -1119,11 +1139,12 @@ export async function getDelights(): Promise<Delight[]> {
   // "did this client praise us". web_real_feedback is now the only answer, scored by
   // feedback_quality(): see migration 070 for what the score rewards and punishes, and
   // why length alone could never be the rule.
-  const [rowsRes, clients, owners] = await Promise.all([
+  const [rowsRes, clients, owners, geoFallback] = await Promise.all([
     supabase.from('web_real_feedback')
       .select('source, id, company_name, client_email, quote, evidence, project, at, feedback_type, geo, score'),
     getClients(),
     getClientOwners(),
+    clientGeoMap(),
   ])
   // The PM shown is the one the scorecard credits: the client's primary owner, by
   // revenue, not whoever typed the feedback row up (see pm-metrics, "Feedback follows
@@ -1131,6 +1152,7 @@ export async function getDelights(): Promise<Delight[]> {
   const pmFor = (name?: string): string | undefined => (owners.get(ckey(name)) || [])[0]
   const geoBy = new Map<string, string>()
   for (const c of clients) { const k = ckey(c.company_name); if (k && c.geo) geoBy.set(k, c.geo) }
+  for (const [k, g] of geoFallback) if (!geoBy.has(k)) geoBy.set(k, g)
   const geoFor = (name?: string, fallback?: string): string => {
     const k = ckey(name)
     if (k && geoBy.has(k)) return geoBy.get(k) as string
