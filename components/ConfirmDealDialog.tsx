@@ -345,10 +345,17 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     // — and read as "4 days past delivery" beside September's genuine row, which is what
     // made one retainer look like two.
     need('Delivery date', !!deliveryDate && !(startDate && deliveryDate < startDate))
+    // Only once a cost is actually being claimed. The contractor may genuinely not be
+    // chosen on the day a deal confirms — but a figure with nobody's name against it is
+    // money going out to an unnamed party, which the invoice report counts as contractor
+    // work and nobody can reconcile against a bill. Migration 174 refuses it in the
+    // database too, so this is the same rule said earlier rather than a softer one.
+    need('Contractor', !(expert === CONTRACTOR && outsourcePrice !== '' && Number(outsourcePrice) !== 0
+      && !contractorName.trim()))
     return m
   }, [deal.company_name, amt, currency, quoteDate, serviceDept, projectType, serviceType,
       technology, clientName, clientType, geo, deliveryType, salesPerson, pmOwner,
-      startDate, deliveryDate])
+      startDate, deliveryDate, expert, outsourcePrice, contractorName])
 
   const ready = missing.length === 0
 
@@ -593,11 +600,13 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
                 about money that is not true. */}
             {expert === CONTRACTOR && (
               <>
-                <F label="Contractor" hint="Add one in Settings — any PM or admin can.">
+                <F label="Contractor" need={missing.includes('Contractor')}
+                   hint="Add one in Settings — any PM or admin can.">
                   {/* Choosing a contractor sets the cost currency to the one they invoice
                       in, so it is right by default rather than right if someone remembers.
                       It stays editable: a contractor can bill in something else once. */}
-                  <Pick value={contractorName} options={contractors.map(c => c.name)} bad={false}
+                  <Pick value={contractorName} options={contractors.map(c => c.name)}
+                    bad={missing.includes('Contractor')}
                     onChange={v => {
                       setContractorName(v)
                       const c = contractors.find(x => x.name === v)

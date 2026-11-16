@@ -159,7 +159,27 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
 
   const num = (v: string) => v === '' ? null : Number(v)
 
+  // A contractor cost with nobody's name on it is a payment that cannot be reconciled
+  // against anybody's invoice, and the invoice report still counts it as contractor work
+  // (099: expert = 'Contractor' OR a non-zero cost). So the name is required the moment
+  // this edit puts a cost there.
+  //
+  // Only on what THIS edit changes, not on the row as it stands. 302 lines from the old
+  // sheet and 4 from the dashboard already carry a cost with no name; refusing them all
+  // would mean a 2025 line could never have its invoice number typed in. Same reasoning
+  // as the start date above. Migration 174 enforces exactly this rule in the database.
+  const origCost = row.outsource_price != null ? String(row.outsource_price) : ''
+  const origContractor = (row.contractor_name || '').trim()
+  const costNow = Number(outsource)
+  const claimsCost = outsource !== '' && Number.isFinite(costNow) && costNow !== 0
+  const contractorMissing = expert === CONTRACTOR && claimsCost && !contractorName.trim()
+    && (outsource !== origCost || origContractor !== '')
+
   const save = async () => {
+    if (contractorMissing) {
+      setError('Choose the contractor before saving a cost against them. A contractor cost with no name on it cannot be reconciled against anybody’s invoice.')
+      return
+    }
     setSaving(true); setError('')
     // Routed by which side of the ledger the row came from: a dashboard row updates the
     // opportunity, a sheet row writes the overlay beside the spreadsheet. Both RPCs
@@ -327,10 +347,14 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
                 the expert changes back to somebody in-house. */}
             {expert === CONTRACTOR && (
               <>
-                <F label="Contractor" hint="Managed in Settings.">
+                <F label="Contractor"
+                   hint={contractorMissing
+                     ? 'Required — this line is claiming a contractor cost. Managed in Settings.'
+                     : 'Managed in Settings.'}>
                   {/* Picking a contractor sets the cost currency to the one they invoice
                       in — right by default rather than right if someone remembers. */}
-                  <select className={ctl} value={contractorName} onChange={e => {
+                  <select className={`${ctl} ${contractorMissing ? 'border-red-500/70' : ''}`}
+                    value={contractorName} onChange={e => {
                     setContractorName(e.target.value)
                     const c = contractors.find(x => x.name === e.target.value)
                     if (c?.default_currency) setOutsourceCur(c.default_currency)
@@ -366,14 +390,16 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         </div>
 
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
-          <span className="text-[11px] text-mav-fg/60">
-            {fixed
+          <span className={`text-[11px] ${contractorMissing ? 'text-red-300' : 'text-mav-fg/60'}`}>
+            {contractorMissing
+              ? 'Name the contractor before saving this cost.'
+              : fixed
               ? 'Value, owner, month, AM and agency come from the old sheet and are changed there.'
               : 'Whether the deal is won is not changed here; remove the line instead.'}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs transition-colors">Cancel</button>
-            <button onClick={save} disabled={saving}
+            <button onClick={save} disabled={saving || contractorMissing}
               className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-40 hover:brightness-95 transition">
               {saving ? 'Saving…' : 'Save'}
             </button>
