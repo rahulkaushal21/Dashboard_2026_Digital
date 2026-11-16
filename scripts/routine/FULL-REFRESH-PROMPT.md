@@ -36,6 +36,36 @@ Disabled pg_cron jobs: 1, 2, 7, 10. **DELETED (gone from `cron.job` entirely): 3
 unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 `select jobid, jobname, active from cron.job order by jobid;` rather than guessing.
 
+### LP and HUB are a BLIND SPOT, not a quiet quarter
+
+Asked 16 Nov 2026 — "are we reviewing everything from Pratik's team?" — and measured. No.
+
+Capture reads `reviewweb@uplers.com` (live) and `web@uplers.com` (retired, history kept).
+**Both are Web review mailboxes.** `lp@mavlers.com` and `hub@mavlers.com` have never been
+connected, so LP and HUB mail is only ever seen when somebody cc's or forwards it in:
+1,204 of 70,320 captured messages, 1.7%.
+
+What that does to the numbers, over the six months to 16 Nov:
+
+| | Active clients | Revenue | Clients with an escalation |
+|---|---|---|---|
+| Web (US/AU/UK) | 160 | $1,013,718 | 25 — **16%** |
+| LP | 31 | $131,844 | **0** |
+| HUB | 26 | $109,147 | **1** |
+
+LP and HUB are **$241k, 19% of booked revenue, with one escalation between them**. A Web
+client is NINE TIMES more likely to show an escalation than an LP or HUB one. Clients do
+not differ by that much; mailboxes do. Signals say the same: 43% of Web clients have
+produced one against 7.6% of LP clients.
+
+**So never write "no escalations for LP/HUB" as if it were good news, and never compare
+escalation counts across departments** — the comparison is between what two mailboxes can
+see, not between how two teams are doing. Say the blind spot out loud whenever a pulse or
+a review covers LP or HUB. The ingest function accepts any mailbox and filters nothing;
+this is a connection nobody has made, not a bug. Fixing it means pointing the capture at
+`lp@` and `hub@` — and that is a Gmail quota decision (~5–6k messages/day, shared across
+every script), so it needs the owner's go-ahead, not a quiet change.
+
 ---
 
 ## THE PROMPT
