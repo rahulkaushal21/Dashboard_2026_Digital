@@ -905,6 +905,32 @@ Bonny on 6 Nov with no reason, and no sweep.
 - **Escalations fixed without a note: 6 of 6.** None of them can be reused next time. **Feedback
   queue is empty again** (0 pending, down from 3).
 
+### Week of 9 – 16 Nov 2026 (read Mon 16 Nov)
+136 actions by 11 people. Two deals marked lost by hand (Rahul J, 12 Nov, USD 1,021 and one unpriced),
+both with a reason, and no sweep.
+
+- **`internal_delivery` is back: 61 edits by ONE person (krunal.s), 45% of everything the hands did.**
+  `sales_person` 12 (3 people), `value` 7 (3), then single edits of `company_name`, `delivery_date`,
+  `start_date`. **Rule unchanged: never write `internal_delivery` or dates from inference.** The one
+  person who does this does it in runs, so a week with 61 is not a week the routine got worse.
+- **Deals created by hand, 6 rows** (Bonny 2, Rahul J 3, Paryusha 1): Brandhouzz "Graft Linken posts
+  and videos" USD 906.67, Design by Temple pin functionality, Poloko, Melbourne Social blog page, Fabrik
+  QR code, Frogonline Zap Connect. All small maintenance or ad-hoc lines agreed on Slack; the same
+  pattern as the PHP outreach note above. None had a thread the scan could have read.
+- **Two approvals the scan was a run behind on, found by the sweep, not by triage** (16 Nov):
+  Smile Marketing "Please proceed with the $70 job" (15 Nov, AUD 70, thread subject unchanged from the
+  quote), and two QBFox / Australian Ballet rounds that the user had to point out on 13 Nov (LYBALVI
+  revision round at USD 280, Copland star-reviews update AUD 366). **Rule: a thread whose subject says
+  "Quote…" or "Quote request…" and where our side already named a price is where the approval will
+  arrive, days later and from a weekend. Run the 3b sweep before the triage, not after.**
+- **A value copied from the client's other row is not a value.** Kirrilee Studio's Pittwater scoping row
+  carried USD 1,046 with no currency, which is the figure of her own website job. Replaced on 16 Nov
+  with the ballpark Maitri actually gave (AUD 4,000 to 6,000). Remark Practice (row 3336630) carries the
+  same 1,046; check it when Maitri's price arrives.
+- **Dismissals 9–13 Nov: two, both the known kinds.** Milk Digital "these are CRs not bugs" (Rahul K) is
+  feedback again, not an escalation; Market Veep "Client was looking from wrong report" (Pratik) is the
+  client side. Merges: 9 by people (Rahul K 6, Nitin 2, Maitri 1). Escalations fixed: 0. Feedback: 3.
+
 ## Cost — what actually drives it
 Storage and hosting are not the expense; **email text read through the model is.**
 Measured 30 Jul 2026: DB 113 MB, ~465 KB per dashboard page load (gzipped), ~96 edge

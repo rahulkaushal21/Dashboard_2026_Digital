@@ -502,8 +502,71 @@ Every one of these came from a real correction; treat them as standing rules.
   is where the quoted figure and currency actually live, and an RFQ being raised points at
   invoicing/confirmation. Parse them every run before clearing that sender (step 3).
 - Sub-brands are not clients. Tip Top Foodservice NZ → GWF; SurfStyle → Hummingbird Ideas;
-  First Defense Supply → Market Veep; Fyshe → Ink Digital; PAH → Underdog Digital;
+  First Defense Supply → Market Veep; Williamson IR / WilliamsonIR / WIR → Market Veep;
+  Fyshe → Ink Digital; PAH → Underdog Digital; Expo Evolution → Frogonline;
+  ATD / AutoTransportDirect → Sprung (billing name is exactly Sprung, not "Sprung Interactive");
+  Rivieras USA → Kandkbrands; West Texas Blending → Q2Technologies;
+  Gingerly Skincare → The Rare Reform;
   Convello → YLP Legal. The end client goes in company_note, never in company_name.
+  A personal address on the thread does not make a new client. Mike Rupers writes from
+  mrupers@gmail.com and is ATD's own man ("our ATD Admin"), but Clay Johnston
+  (clay@madebysprung.com) is on every one of those mails and Sprung is who we invoice.
+  Deal 3333932 on 30 Oct was written as ATD with no AM; signal 749 as Sprung Interactive.
+  Both retagged 11 Nov. Deal 2961931 already carried "End client: AutoTransportDirect (ATD)"
+  in its note — when a note on an older row names the end client, that IS the mapping.
+- ICG, SCG and GWF are three names for one chain, and ICG is the one we keep. Soar
+  Communications Group (scg.net.nz, Ritchie Harvey, Account Director) is ICG's CHILD COMPANY,
+  and GWF is the end client the work is for. The thread domain therefore disagrees with the
+  company name on purpose: do not "fix" ICG to SCG or to GWF. ICG carries 17 revenue lines,
+  SCG none. Confirmed by the owner 11 Nov; deal 1115853 and signal 637 both set to ICG.
+  A CHILD COMPANY IS NOT AN AGENCY — the parent we invoice is the name, one level up, and the
+  domain check below will flag these every time it runs. It is right to flag and wrong to act.
+- An RFQ's budget carries its own currency, and it is often INR. Currency : INR sits at
+  the BOTTOM of the mail, after the budget. RFQ QUT271026112159 reads Budget 5446 with Geo
+  AU/NZ, which looks like a missing thousand until you reach the currency line: 5,446 INR is
+  USD 56.73 at 96/USD, which is exactly what the row holds. Read to the end of the mail before
+  calling a value wrong — Geo is where the client is, not what they are billed in.
+- An RFQ's "Client Name" is a PERSON, not a company. Quote ( QUT… ) Request lays out
+  Client Name : Renu-Wasal () and Client EmailId : renu@happykidshq.com. The company is the
+  EMAIL DOMAIN; the Client Name field is the contact. Rows 3333891 and 3333892 were created on
+  29 Oct as companies called Renu Wasal and Aggie Sikora — two people invented as clients.
+  Take the company from the domain (Happy Kids HQ, Vici Trading Solutions), the person into
+  client_name. Both retagged 11 Nov.
+- An abbreviation is not an identification. Deal 3335717 was filed under RTR Sports
+  Marketing — a real client with six revenue lines — off a thread whose only client address is
+  rtulley@renttherunway.com and whose subject is "RTR Rental Rewind". RTR was Rent the Runway.
+  This is worse than inventing a name: it puts one client's deal on another client's record, and
+  both sides of it look plausible on screen. When a name is an acronym, confirm it against the
+  DOMAIN before using it.
+- A thread with no client address still has a PM. The scan sets pm_owner from the thread
+  and leaves it null when the opening sender is one of ours. That is how six open deals reached
+  23 Oct with no PM at all, so they belonged to nobody on the Actions page and nobody's
+  scorecard. If no client wrote, the PM is the Mavlers person ANSWERING the thread, not the one
+  who opened it — Gagandeep Singh on Rivieras USA and West Texas Blending, Nitin Mishra on Renew
+  Behavioral, Pratik Bhatt on Neighborly. Never leave pm_owner null; say who you picked and why.
+- service_dept has five values: WEB-US, WEB-AU, WEB-UK, LP, HUB. Not LP/HUB,
+  not Web. A row carrying anything else drops out of the business-unit switch silently — it is
+  not filtered OUT, it simply never matches, which is why nobody notices. Row 3332104 (Infinity
+  Partners) was the only LP/HUB ever written; the owner set it to WEB-US on 11 Nov, with
+  "at the moment" said out loud, because the pod spans LP, HUB and paid media and the split is
+  not decided. A pod is still ONE department on the row: ask which, never invent a pair.
+  AI & Automation is NOT in this list but is correct and deliberate — it counts as Web in the
+  switch. Four Won rows carry it. Leave them.
+  FrogOnline's people are FrogOnline, whoever the job is for. Janine Stuart (Project
+  Co-ordinator, studio@frogonline.net.au) and Andrew Mandaglio (webit@frogonline.net.au)
+  brief every job, and the AM on them is Saquib Khan. Deal 3333955 on 2 Nov was written as
+  Expo Evolution with no AM at all, off a thread Janine sent and that Rahul Jain's own quote
+  describes as "the scope and brief shared by FrogOnline". Retagged 11 Nov.
+  This rule covers email_signals too, and there it is the whole rule — the table has no
+  company_note, so company_name must be the exact billing client's name and nothing else. Not
+  the end client, and NOT the End Client (Agency) form either: Client 360 would match that one,
+  but the pulse reads the department with clientDepts.get(clientKey(company_name)), an exact
+  key, so any decoration drops the row out of the LP-Hub/Web switch. Which site or brand it was
+  about is already in source_subject, summary and client_quote — that is where it belongs.
+  Signal 777 on 3 Nov is the worked example: Sara West (swest@marketveep.com, Market Veep's
+  signature and socials on the mail) reported the WilliamsonIR blog down, and it was logged as
+  company Williamson IR with a mistyped swest@marketview.com. williamsonir keys to nothing,
+  so a live complaint from a paying agency appeared on no client's 360 and in no department.
   Webiteers is an agency, and the mail that names its clients is the same agency. Dealer Finder,
   product schema and blog layout work for Dare to Be Different Outdoor all arrive from
   sem@webiteers.nl with Vikram Shahi as AM and Nitin Mishra as PM. On 22 Oct the three rows were
@@ -772,6 +835,32 @@ Bonny on 6 Nov with no reason, and no sweep.
   so they stay out of the people counts. The routine's own actor is still refresh.
 - Escalations fixed without a note: 6 of 6. None of them can be reused next time. Feedback
   queue is empty again (0 pending, down from 3).
+
+### Week of 9 – 16 Nov 2026 (read Mon 16 Nov)
+136 actions by 11 people. Two deals marked lost by hand (Rahul J, 12 Nov, USD 1,021 and one unpriced),
+both with a reason, and no sweep.
+
+- internal_delivery is back: 61 edits by ONE person (krunal.s), 45% of everything the hands did.
+  sales_person 12 (3 people), value 7 (3), then single edits of company_name, delivery_date,
+  start_date. Rule unchanged: never write internal_delivery or dates from inference. The one
+  person who does this does it in runs, so a week with 61 is not a week the routine got worse.
+- Deals created by hand, 6 rows (Bonny 2, Rahul J 3, Paryusha 1): Brandhouzz "Graft Linken posts
+  and videos" USD 906.67, Design by Temple pin functionality, Poloko, Melbourne Social blog page, Fabrik
+  QR code, Frogonline Zap Connect. All small maintenance or ad-hoc lines agreed on Slack; the same
+  pattern as the PHP outreach note above. None had a thread the scan could have read.
+- Two approvals the scan was a run behind on, found by the sweep, not by triage (16 Nov):
+  Smile Marketing "Please proceed with the $70 job" (15 Nov, AUD 70, thread subject unchanged from the
+  quote), and two QBFox / Australian Ballet rounds that the user had to point out on 13 Nov (LYBALVI
+  revision round at USD 280, Copland star-reviews update AUD 366). Rule: a thread whose subject says
+  "Quote…" or "Quote request…" and where our side already named a price is where the approval will
+  arrive, days later and from a weekend. Run the 3b sweep before the triage, not after.
+- A value copied from the client's other row is not a value. Kirrilee Studio's Pittwater scoping row
+  carried USD 1,046 with no currency, which is the figure of her own website job. Replaced on 16 Nov
+  with the ballpark Maitri actually gave (AUD 4,000 to 6,000). Remark Practice (row 3336630) carries the
+  same 1,046; check it when Maitri's price arrives.
+- Dismissals 9–13 Nov: two, both the known kinds. Milk Digital "these are CRs not bugs" (Rahul K) is
+  feedback again, not an escalation; Market Veep "Client was looking from wrong report" (Pratik) is the
+  client side. Merges: 9 by people (Rahul K 6, Nitin 2, Maitri 1). Escalations fixed: 0. Feedback: 3.
 
 ## Cost — what actually drives it
 Storage and hosting are not the expense; email text read through the model is.
