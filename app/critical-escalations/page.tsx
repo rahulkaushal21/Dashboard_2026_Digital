@@ -46,14 +46,15 @@ const COLS: ColumnDef[] = [
   { key: 'last', label: 'Date', locked: true },
   { key: 'client', label: 'Client', locked: true },
   { key: 'status', label: 'Status', default: true },
+  // Straight after Status, because it answers the question Status raises: this one is
+  // still open / was closed — and did we take anything from it? On by default and on
+  // purpose: the point of the log is that anyone scanning the page sees which
+  // escalations have had a lesson taken from them. Behind the column picker it would
+  // answer that only for people who already knew to ask.
+  { key: 'learning', label: 'Learning', default: true },
   { key: 'kind', label: 'Type', default: true },
   { key: 'geo', label: 'GEO', default: true },
   { key: 'what', label: 'What happened', default: true },
-  // On by default and on purpose: the whole point of the learnings log is that anyone
-  // scanning this page can see at a glance which escalations have had a lesson taken
-  // from them and which have not. Hidden behind the column picker it would answer that
-  // question only for people who already knew to ask it.
-  { key: 'learning', label: 'Learning', default: true },
   { key: 'pm', label: 'PM', default: true },
   { key: 'first', label: 'First flagged' },
   { key: 'count', label: 'Escalations' },
@@ -466,10 +467,10 @@ export default function CriticalEscalations() {
                 <th className="px-3 py-2.5">Date</th>
                 <th className="px-3 py-2.5">Client</th>
                 {cols.on('status') && <th className="px-3 py-2.5">Status</th>}
+                {cols.on('learning') && <th className="px-3 py-2.5">Learning</th>}
                 {cols.on('kind') && <th className="px-3 py-2.5">Type</th>}
                 {cols.on('geo') && <th className="px-3 py-2.5">GEO</th>}
                 {cols.on('what') && <th className="px-3 py-2.5">What happened</th>}
-                {cols.on('learning') && <th className="px-3 py-2.5">Learning</th>}
                 {cols.on('pm') && <th className="px-3 py-2.5">PM</th>}
                 {cols.on('first') && <th className="px-3 py-2.5">First flagged</th>}
                 {cols.on('count') && <th className="px-3 py-2.5 text-right">Escalations</th>}
@@ -495,9 +496,6 @@ export default function CriticalEscalations() {
                         {turnedPositive && <span className={`${badge} bg-green-500/15 text-green-400`} title="The client's latest reply reads positive — it may be ready to mark fixed">Now positive</span>}
                       </div>
                     </td>}
-                    {cols.on('kind') && <td className="px-3 py-2.5"><span className={`${badge} ${kindTone(r.signal_type)}`}>{kindLabel(r.signal_type)}</span></td>}
-                    {cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.geo || '—'}</td>}
-                    {cols.on('what') && <td className="px-3 py-2.5"><p className="max-w-[380px] truncate text-mav-fg/90" title={r.headline || ''}>{r.headline || '(no detail)'}</p></td>}
                     {/* The row already opens the drawer, where the learning is in full —
                         so this cell truncates and the title carries the rest on hover.
                         "No learning added" is muted but not hidden: an empty cell reads
@@ -517,6 +515,9 @@ export default function CriticalEscalations() {
                         </td>
                       )
                     })()}
+                    {cols.on('kind') && <td className="px-3 py-2.5"><span className={`${badge} ${kindTone(r.signal_type)}`}>{kindLabel(r.signal_type)}</span></td>}
+                    {cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.geo || '—'}</td>}
+                    {cols.on('what') && <td className="px-3 py-2.5"><p className="max-w-[380px] truncate text-mav-fg/90" title={r.headline || ''}>{r.headline || '(no detail)'}</p></td>}
                     {/* The PM is a default column — it is the one thing that decides
                         whether a row is yours. */}
                     {cols.on('pm') && <td className="px-3 py-2.5 whitespace-nowrap">{r.pm_owner || '—'}</td>}
