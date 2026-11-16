@@ -466,7 +466,11 @@ Krunal Shah, Hiren Purohit and Pratik Bhatt write a learning on each critical es
 in the drawer on `/critical-escalations`. There is no model wired into the dashboard: the
 summary and the action steps are YOUR job, on each refresh. Added 16 Nov 2026.
 
-**Find the ones waiting.** `select thread_id, company_name, learning, created_at from
+**ONE LEARNING PER CLIENT**, keyed on `client_key` — the canonical name key, lowercase and
+alphanumeric only, the same one the listing groups its rows by. Not one per thread: a
+client's escalations are usually the same story told again.
+
+**Find the ones waiting.** `select client_key, company_name, learning, created_at from
 escalation_learnings where ai_summary is null order by created_at` — a revision clears the
 old summary, so an edited learning comes back round and must be re-read, not skipped.
 
@@ -481,9 +485,10 @@ old summary, so an edited learning comes back round and must be re-read, not ski
   because somebody will be asked about it.
 - `ai_at = now()`, `ai_by` = the model name.
 
-**Read the escalation, not just the learning.** Join `critical_escalations` on `thread_id`
-for `escalation_summary` and the thread, so the summary is grounded in what actually
-happened rather than in one person's sentence about it.
+**Read the escalations, not just the learning.** Join `critical_escalations` on
+`client_key(company_name) = l.client_key` — that is ALL of the client's escalations, which
+is the point: the lesson is about the pattern, and the summary should be grounded in what
+actually happened rather than in one person's sentence about it.
 
 **And check the watch.** `select * from web_escalation_learning_watch where
 still_escalating` lists clients who escalated again AFTER a lesson was written. Say these

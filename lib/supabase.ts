@@ -945,8 +945,11 @@ export async function markEscalationStatus(threadIds: string[], status: 'open' |
 // and whether the same client escalated again afterwards. See migration 170.
 
 export interface EscalationLearning {
-  thread_id: string
-  company_name?: string
+  /** One learning per CLIENT, not per thread — the same canonical key the escalation
+   *  listing groups its rows by (ckey), so a learning belongs to exactly the row it was
+   *  written on however many threads that row rolls up. */
+  client_key: string
+  company_name: string
   learning: string
   author_email: string
   created_at: string
@@ -979,9 +982,9 @@ export async function getEscalationLearnings(): Promise<EscalationLearning[]> {
  * rather than a silent no-op, because "only these three may write" is something the
  * person pressing Save needs told, not hidden.
  */
-export async function saveEscalationLearning(threadId: string, learning: string): Promise<{ ok: boolean; row?: EscalationLearning; error?: string }> {
+export async function saveEscalationLearning(companyName: string, learning: string): Promise<{ ok: boolean; row?: EscalationLearning; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase not configured' }
-  const { data, error } = await supabase.rpc('save_escalation_learning', { p_thread_id: threadId, p_learning: learning })
+  const { data, error } = await supabase.rpc('save_client_learning', { p_company_name: companyName, p_learning: learning })
   if (error) return { ok: false, error: error.message || 'Could not save that learning.' }
   // The learning is saved but the watch counts are computed by the view, so the caller
   // re-reads rather than trusting this row for repeats_since.

@@ -49,6 +49,11 @@ const COLS: ColumnDef[] = [
   { key: 'kind', label: 'Type', default: true },
   { key: 'geo', label: 'GEO', default: true },
   { key: 'what', label: 'What happened', default: true },
+  // On by default and on purpose: the whole point of the learnings log is that anyone
+  // scanning this page can see at a glance which escalations have had a lesson taken
+  // from them and which have not. Hidden behind the column picker it would answer that
+  // question only for people who already knew to ask it.
+  { key: 'learning', label: 'Learning', default: true },
   { key: 'pm', label: 'PM', default: true },
   { key: 'first', label: 'First flagged' },
   { key: 'count', label: 'Escalations' },
@@ -75,8 +80,8 @@ const who = (email?: string) => (email || '').split('@')[0].replace(/[._]/g, ' '
  * clears the old summary in the database, so what is on screen always describes the
  * sentence above it.
  */
-function LearningBox({ threadId, learning, mayWrite, onSaved }: {
-  threadId: string; learning?: EscalationLearning; mayWrite: boolean; onSaved: () => void
+function LearningBox({ companyName, learning, mayWrite, onSaved }: {
+  companyName: string; learning?: EscalationLearning; mayWrite: boolean; onSaved: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(learning?.learning || '')
@@ -86,15 +91,25 @@ function LearningBox({ threadId, learning, mayWrite, onSaved }: {
 
   const save = async () => {
     setSaving(true); setErr('')
-    const res = await saveEscalationLearning(threadId, text)
+    const res = await saveEscalationLearning(companyName, text)
     setSaving(false)
     if (!res.ok) { setErr(res.error || 'Could not save that.'); return }
     setEditing(false); onSaved()
   }
 
-  if (!learning && !mayWrite) return null
+  // Everyone sees the learning; only the three can write one. When there is none and the
+  // reader cannot add one, say so rather than showing nothing — "no learning yet" is the
+  // thing most worth knowing on a client that keeps escalating.
+  if (!learning && !mayWrite) {
+    return (
+      <div className="rounded-lg border border-mav-line bg-mav-dark/30 p-3">
+        <div className="text-xs uppercase tracking-wide text-mav-yellow/90 mb-1">Learning</div>
+        <p className="text-sm text-mav-muted">No learning added.</p>
+      </div>
+    )
+  }
   return (
-    <div className="mt-3 pt-3 border-t border-mav-line">
+    <div className="rounded-lg border border-mav-line bg-mav-dark/30 p-3">
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <span className="text-xs uppercase tracking-wide text-mav-yellow/90">Learning</span>
         {learning && !editing && mayWrite && (
@@ -256,21 +271,15 @@ export default function CriticalEscalations() {
   // for the row badge and the watch card.
   const [learnings, setLearnings] = useState<Map<string, EscalationLearning>>(new Map())
   const loadLearnings = useCallback(() => {
-    getEscalationLearnings().then(ls => setLearnings(new Map(ls.map(l => [l.thread_id, l]))))
+    getEscalationLearnings().then(ls => setLearnings(new Map(ls.map(l => [l.client_key, l]))))
   }, [])
   useEffect(() => { loadLearnings() }, [loadLearnings])
   const mayWrite = canWriteLearning(currentEmail())
   // The watch: a lesson was written down and the client escalated anyway. One entry per
   // client, carrying the worst case, because the question is about the client not the row.
-  const stillEscalating = useMemo(() => {
-    const byClient = new Map<string, EscalationLearning>()
-    for (const l of learnings.values()) {
-      if (!l.still_escalating || !l.company_name) continue
-      const prev = byClient.get(l.company_name)
-      if (!prev || l.repeats_since > prev.repeats_since) byClient.set(l.company_name, l)
-    }
-    return [...byClient.values()].sort((a, b) => b.repeats_since - a.repeats_since)
-  }, [learnings])
+  const stillEscalating = useMemo(
+    () => [...learnings.values()].filter(l => l.still_escalating).sort((a, b) => b.repeats_since - a.repeats_since),
+    [learnings])
   useEffect(() => { const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSel(null) }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [])
 
   const geos = useMemo(() => uniq(rows.map(r => r.geo)), [rows])
@@ -393,8 +402,8 @@ export default function CriticalEscalations() {
           right={<span className="text-xs text-red-300">{stillEscalating.length} client{stillEscalating.length === 1 ? '' : 's'}</span>}>
           <div className="space-y-2">
             {stillEscalating.map(l => (
-              <button key={l.thread_id}
-                onClick={() => { const r = rowsAll.find(x => x.company_name === l.company_name); if (r) setSel(r) }}
+              <button key={l.client_key}
+                onClick={() => { const r = rowsAll.find(x => clientKey(x.company_name) === l.client_key); if (r) setSel(r) }}
                 className="w-full text-left rounded-lg border border-red-500/30 bg-red-500/5 hover:bg-red-500/10 px-3 py-2.5 transition-colors">
                 <div className="flex flex-wrap items-baseline gap-2">
                   <span className="font-medium">{l.company_name}</span>
@@ -460,6 +469,7 @@ export default function CriticalEscalations() {
                 {cols.on('kind') && <th className="px-3 py-2.5">Type</th>}
                 {cols.on('geo') && <th className="px-3 py-2.5">GEO</th>}
                 {cols.on('what') && <th className="px-3 py-2.5">What happened</th>}
+                {cols.on('learning') && <th className="px-3 py-2.5">Learning</th>}
                 {cols.on('pm') && <th className="px-3 py-2.5">PM</th>}
                 {cols.on('first') && <th className="px-3 py-2.5">First flagged</th>}
                 {cols.on('count') && <th className="px-3 py-2.5 text-right">Escalations</th>}
@@ -488,6 +498,25 @@ export default function CriticalEscalations() {
                     {cols.on('kind') && <td className="px-3 py-2.5"><span className={`${badge} ${kindTone(r.signal_type)}`}>{kindLabel(r.signal_type)}</span></td>}
                     {cols.on('geo') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{r.geo || '—'}</td>}
                     {cols.on('what') && <td className="px-3 py-2.5"><p className="max-w-[380px] truncate text-mav-fg/90" title={r.headline || ''}>{r.headline || '(no detail)'}</p></td>}
+                    {/* The row already opens the drawer, where the learning is in full —
+                        so this cell truncates and the title carries the rest on hover.
+                        "No learning added" is muted but not hidden: an empty cell reads
+                        as a missing column, a stated absence reads as a job to do. */}
+                    {cols.on('learning') && (() => {
+                      const l = learnings.get(clientKey(r.company_name))
+                      return (
+                        <td className="px-3 py-2.5">
+                          {l ? (
+                            <p className="max-w-[320px] truncate text-mav-fg/90" title={`${l.learning}\n\n— ${who(l.author_email)}, ${fmtDay(l.updated_at)}${l.still_escalating ? `\n\nEscalated ${l.repeats_since}× since.` : ''}\n\nClick the row to read it in full.`}>
+                              {l.still_escalating && <span className="text-red-400 mr-1" title={`Escalated ${l.repeats_since}× since this was written`}>!</span>}
+                              {l.learning}
+                            </p>
+                          ) : (
+                            <span className="text-mav-muted/70 italic">No learning added</span>
+                          )}
+                        </td>
+                      )
+                    })()}
                     {/* The PM is a default column — it is the one thing that decides
                         whether a row is yours. */}
                     {cols.on('pm') && <td className="px-3 py-2.5 whitespace-nowrap">{r.pm_owner || '—'}</td>}
@@ -562,10 +591,17 @@ export default function CriticalEscalations() {
                     </div>
                   )}
                   {it.source_subject && <div className="mt-2 text-[11px] text-mav-muted">Subject: {it.source_subject}{it.client_email ? ` · ${it.client_email}` : ''}</div>}
-                  <LearningBox threadId={it.thread_id} learning={learnings.get(it.thread_id)}
-                    mayWrite={mayWrite} onSaved={loadLearnings} />
                 </div>
               ))}
+            </div>
+
+            {/* ONE learning for the client, under all of their escalations rather than on
+                each. A client's escalations are usually the same story told again, and a
+                box per thread asked the same three people to write the same lesson four
+                times — which is how a log stops being filled in. */}
+            <div className="mt-4">
+              <LearningBox companyName={sel_.company_name} learning={learnings.get(clientKey(sel_.company_name))}
+                mayWrite={mayWrite} onSaved={loadLearnings} />
             </div>
 
             <div className="mt-6 border-t border-mav-line pt-4 space-y-3">
