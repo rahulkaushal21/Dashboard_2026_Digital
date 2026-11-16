@@ -2,7 +2,7 @@
 // individual PM page both read from here so they cannot drift apart — the bug
 // that had Business Trend and Forecast quoting two different FY targets.
 
-import type { BookingRow, EmailSignal, Opportunity, PmFeedbackRow, Quote } from './supabase'
+import type { BookingRow, EmailSignal, ManualFeedback, Opportunity, PmFeedbackRow, Quote } from './supabase'
 import { PM_TEAM, pmOf, qRange, qStartMonth, qCalYear, baselineFor, PM_REASSIGN, Q1_FY2026_ACTUALS, type FQ, type PmMember } from './pm-team'
 
 export const monthKey = (d?: string) => (d || '').slice(0, 7)
@@ -142,6 +142,8 @@ export interface PmQuarter {
   /** Feedbacks split by where they were found. */
   feedbackFromSheet: number
   feedbackFromEmail: number
+  /** Approved rows a person added by hand on Delights — praise that reached us off-channel. */
+  feedbackFromManual: number
   /** Confirmed ÷ decided among New-development quotes, as a percentage. */
   q2c: number | null
   feedback: number
@@ -155,6 +157,8 @@ export interface PmStats {
   opps: Opportunity[]
   quotes: Quote[]
   feedback: PmFeedbackRow[]
+  /** Approved hand-added praise, credited the same way as a sheet row. */
+  manual: ManualFeedback[]
   /** Praise picked out of email and attributed to this PM via their client list. */
   praise: EmailSignal[]
   /** Email-origin deals this PM owns that read as New Development. */
@@ -175,11 +179,16 @@ export function buildPmStats(
   // so a caller with nothing to pass still gets the old behaviour rather than an empty
   // scorecard.
   clientOwners?: Map<string, string[]>,
+  // Praise somebody typed in on Delights and an approver signed off. Last, and
+  // defaulted, so every existing caller keeps working unchanged. It is its own list
+  // rather than more sheet rows because it is the only source carrying the date the
+  // client actually SAID it (happened_on) instead of the date a row got created.
+  manual: ManualFeedback[] = [],
 ): Map<string, PmStats> {
   const out = new Map<string, PmStats>()
   for (const pm of PM_TEAM) {
     out.set(pm.slug, {
-      pm, byMonth: new Map(), bookings: [], opps: [], quotes: [], feedback: [],
+      pm, byMonth: new Map(), bookings: [], opps: [], quotes: [], feedback: [], manual: [],
       praise: [], emailNewDevOpps: [],
       quarter: () => EMPTY_Q, baseline: () => pm.lastYearAvg,
     })
@@ -237,11 +246,30 @@ export function buildPmStats(
   // Praise found in email, attributed to the PM who owns that client. Threads
   // already captured as a feedback row are skipped so nothing counts twice.
   const ownerOf = clientOwnerMap(quotes, bookings)
+
+  // Approved hand-added praise, credited by the same rule as everything else: the
+  // client's recorded owner, then whoever the Quotes tab and revenue sheet say owns
+  // them, and only then the pm_owner the submitter typed. Nothing read this table at
+  // all before, so an approved row showed on Delights with a PM's name against it and
+  // was worth nothing on that PM's scorecard — Key Funding Partners, approved 23 Oct,
+  // was Malay's. The derived map is the middle step because web_client_owners does not
+  // know every client, and dropping to the submitter's own typing straight away is how
+  // a shared account lands on whoever happened to file the row.
+  for (const m of manual) {
+    if (m.status !== 'approved') continue
+    const owners = clientOwners?.get(ckey(m.company_name)) || []
+    let pm = pmOf(owners[0])
+    if (!pm) for (const k of ownerKeys(m.company_name)) { pm = pmOf(ownerOf.get(k)); if (pm) break }
+    if (!pm) pm = pmOf(m.pm_owner)
+    if (pm) out.get(pm.slug)!.manual.push(m)
+  }
+
   const seenThreads = new Set(feedback.map(f => f.thread_id).filter(Boolean) as string[])
   for (const sig of signals) {
     if (!isPraise(sig)) continue
     if (sig.thread_id && seenThreads.has(sig.thread_id)) continue
-    const pm = pmOf(ownerOf.get(norm(sig.company_name)))
+    let pm: PmMember | undefined
+    for (const k of ownerKeys(sig.company_name)) { pm = pmOf(ownerOf.get(k)); if (pm) break }
     if (!pm) continue
     out.get(pm.slug)!.praise.push(sig)
   }
@@ -263,39 +291,80 @@ export function buildPmStats(
 
 const EMPTY_Q: PmQuarter = {
   booked: 0, avg: 0, monthsElapsed: 0, shared: 0, won: 0, lost: 0, open: 0,
-  sharedFromEmail: 0, feedbackFromSheet: 0, feedbackFromEmail: 0, q2c: null, feedback: 0,
+  sharedFromEmail: 0, feedbackFromSheet: 0, feedbackFromEmail: 0, feedbackFromManual: 0, q2c: null, feedback: 0,
 }
 
 /**
  * Which signal types count as a client feedback. Positive sentiment alone is too
  * loose — a cheerful "commercial" or "sales" note is not the client praising the
- * work — so only the explicitly appreciative types count.
+ * work — so the type has to say appreciation, and must not be a pipeline note.
+ *
+ * This WAS a set of five exact strings, which silently dropped every signal the scan
+ * wrote in its own words: 'praise — recovered account' (Underdog Digital, 16 Sep) and
+ * 'Project praise' (23 Sep) both read as praise to a human, both show on Delights, and
+ * both counted for nobody's KPI. The scan writes a free-text label, so matching it
+ * exactly was never going to hold.
+ *
+ * The two regexes are migration 133's rule for web_real_feedback, deliberately: that
+ * migration already decided where this bar sits, and the scorecard disagreeing with
+ * the Delights page about the same email is the bug being fixed here.
  */
-const PRAISE_TYPES = new Set(['praise', 'feedback', 'positive_feedback', 'delight', 'testimonial'])
-export const isPraise = (s: EmailSignal) =>
-  norm(s.sentiment) === 'positive' && PRAISE_TYPES.has(norm(s.signal_type))
+const PRAISE_WORD = /praise|delight|testimonial|feedback|compliment|kudos/i
+const PIPELINE_WORD = /expansion|deal|pipeline|new business|upsell|opportunit|sales|commercial|interest|referral|enquiry|quote|contract|scope/i
+export const isPraise = (s: EmailSignal) => {
+  const t = s.signal_type || ''
+  return norm(s.sentiment) === 'positive' && PRAISE_WORD.test(t) && !PIPELINE_WORD.test(t)
+}
+
+/**
+ * Every way a signal might name a client, most specific first, so a praise email can be
+ * matched against the owner map. The scan names the thread's subject, which is often
+ * 'Agency (End client)' or 'End client (Agency)' — 'Underdog Digital (PAH)' is the
+ * agency plus the project it was about. Only one side of that is ever in the Quotes tab
+ * or the revenue sheet, so matching the whole string found nothing and the praise was
+ * credited to nobody at all. Both sides are tried.
+ */
+export function ownerKeys(name?: string): string[] {
+  const raw = (name || '').trim()
+  if (!raw) return []
+  const keys = [ckey(raw)]
+  const m = raw.match(/^(.*?)\s*\(([^)]+)\)\s*$/)
+  if (m) { keys.push(ckey(m[1])); keys.push(ckey(m[2])) }
+  return keys.filter(k => k.length >= 3)
+}
 
 /**
  * Client name → the PM who owns them, so a praise email that names only the
  * client can still be credited. Built from the two places ownership is recorded,
  * the Quotes tab and the revenue sheet, taking whoever appears against that
  * client most often.
+ *
+ * Keyed on ckey, not on the raw lowercase name, so 'ZULU 8' and 'Zulu8' are one client
+ * here exactly as they are everywhere else. Votes are tallied on the PM's SLUG where the
+ * name resolves to someone on the team: the Quotes tab spells him 'Malay Shrivastava'
+ * and the revenue sheet 'Malay Srivastava', and counting those as two different people
+ * split his own clients' votes between them — enough of that and a co-owner with fewer
+ * rows wins a client outright.
  */
 function clientOwnerMap(quotes: Quote[], bookings: BookingRow[]): Map<string, string> {
   const tally = new Map<string, Map<string, number>>()
   const add = (co?: string, who?: string) => {
-    const c = norm(co), w = (who || '').trim()
+    const c = ckey(co), w = (who || '').trim()
     if (!c || !w) return
+    // One vote per person, however their name is spelled on the row.
+    const voter = pmOf(w)?.name || w
     if (!tally.has(c)) tally.set(c, new Map())
     const m = tally.get(c)!
-    m.set(w, (m.get(w) || 0) + 1)
+    m.set(voter, (m.get(voter) || 0) + 1)
   }
   for (const q of quotes) add(q.agency, q.pc_sme)
   for (const b of bookings) add(b.company_name, b.sme)
   const out = new Map<string, string>()
   for (const [co, m] of tally) {
+    // A tie used to go to whichever row the loop happened to see first. Alphabetical is
+    // no more meaningful, but it is at least the same answer every time the page loads.
     let best = '', n = 0
-    for (const [who, c] of m) if (c > n) { best = who; n = c }
+    for (const [who, c] of [...m].sort((a, b) => a[0].localeCompare(b[0]))) if (c > n) { best = who; n = c }
     if (best) out.set(co, best)
   }
   return out
@@ -352,6 +421,7 @@ function quarterOf(s: PmStats, f: FQ, today: Date): PmQuarter {
   // added_date covers the rest, so nothing in the feed goes uncounted.
   const fbSheet = s.feedback.filter(x => inQ(monthKey(x.month_year || x.added_date), f)).length
   const fbEmail = s.praise.filter(x => inQ(monthKey(x.source_date), f)).length
+  const fbManual = s.manual.filter(x => inQ(monthKey(x.happened_on), f)).length
 
   const decided = w + l
   return {
@@ -366,7 +436,8 @@ function quarterOf(s: PmStats, f: FQ, today: Date): PmQuarter {
     q2c: shared > 0 ? (w / shared) * 100 : null,
     feedbackFromSheet: fbSheet,
     feedbackFromEmail: fbEmail,
-    feedback: fbSheet + fbEmail,
+    feedbackFromManual: fbManual,
+    feedback: fbSheet + fbEmail + fbManual,
   }
 }
 

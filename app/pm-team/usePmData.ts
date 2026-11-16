@@ -4,8 +4,9 @@ import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit, unitOf } from '@/lib/business-unit'
 import {
   getBookingsFull, getOpportunities, getOpportunityDepts, getQuotes, getPmFeedback, getEmailSignals,
-  getClientOwners, getClientDepts, clientKey,
+  getClientOwners, getClientDepts, clientKey, getManualFeedback,
   type BookingRow, type Opportunity, type Quote, type PmFeedbackRow, type EmailSignal,
+  type ManualFeedback,
 } from '@/lib/supabase'
 import { buildPmStats } from '@/lib/pm-metrics'
 
@@ -28,6 +29,7 @@ export function usePmData() {
   const [quotesAll, setQuotes] = useState<Quote[]>([])
   const [fbAll, setFb] = useState<PmFeedbackRow[]>([])
   const [sigsAll, setSigs] = useState<EmailSignal[]>([])
+  const [manualAll, setManual] = useState<ManualFeedback[]>([])
   const [clientDepts, setClientDepts] = useState<Map<string, string>>(new Map())
   // Who owns each client. Feedback is credited to the client's owner rather than to
   // whoever typed the row up, so a shared account lands on the right scorecard.
@@ -38,6 +40,9 @@ export function usePmData() {
     Promise.all([getBookingsFull(), getOpportunities(), getQuotes(), getPmFeedback(), getEmailSignals(), getClientOwners(), getOpportunityDepts()])
       .then(([b, o, qs, f, sg, ow, od]) => { setBookings(b); setOpps(o); setQuotes(qs); setFb(f); setSigs(sg); setOwners(ow); setOppDepts(od) })
       .finally(() => setLoading(false))
+    // Separate, like the client context: hand-added praise is a small table and a slow
+    // read of it must not hold up the whole scorecard.
+    getManualFeedback().then(setManual).catch(() => {})
     // Separate so a slow client-context read never holds the scorecard back.
     getClientDepts().then(setClientDepts).catch(() => {})
   }, [])
@@ -48,6 +53,11 @@ export function usePmData() {
   const quotes = useMemo(() => quotesAll.filter(q => inUnit(deptOfClient(q.agency), unit)), [quotesAll, deptOfClient, unit])
   const fb = useMemo(() => fbAll.filter(f => inUnit(deptOfClient(f.agency), unit)), [fbAll, deptOfClient, unit])
   const sigs = useMemo(() => sigsAll.filter(s => inUnit(deptOfClient(s.company_name), unit)), [sigsAll, deptOfClient, unit])
+  // Manual rows carry their own service_dept, typed by the submitter; the client's
+  // department is the fallback for the ones left blank.
+  const manual = useMemo(
+    () => manualAll.filter(m => inUnit(m.service_dept || deptOfClient(m.company_name), unit)),
+    [manualAll, deptOfClient, unit])
 
   // Rows that could not be placed in either unit, stated on the page rather than hidden.
   const unplaced = useMemo(() => {
@@ -56,6 +66,8 @@ export function usePmData() {
       + fbAll.filter(f => unitOf(deptOfClient(f.agency)) === null).length
   }, [quotesAll, fbAll, deptOfClient, unit])
 
-  const stats = useMemo(() => buildPmStats(bookings, opps, quotes, fb, sigs, undefined, owners), [bookings, opps, quotes, fb, sigs, owners])
+  const stats = useMemo(
+    () => buildPmStats(bookings, opps, quotes, fb, sigs, undefined, owners, manual),
+    [bookings, opps, quotes, fb, sigs, owners, manual])
   return { stats, loading, unplaced, unit }
 }

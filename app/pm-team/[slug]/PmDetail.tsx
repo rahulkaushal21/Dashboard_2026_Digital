@@ -142,7 +142,7 @@ export default function PmDetail({ slug }: { slug: string }) {
       { key: 'status', label: 'Status', value: x => <StatusPill s={x.status} />, sort: x => x.status || '' },
     ],
   }
-  type Fb = { key: string; client?: string; date: string; source: 'sheet' | 'email'; kind?: string; text?: string }
+  type Fb = { key: string; client?: string; date: string; source: 'sheet' | 'email' | 'manual'; kind?: string; text?: string }
   const fbRows: Fb[] = [
     ...(s?.feedback || []).filter(x => inThisQ(x.month_year || x.added_date)).map(x => ({
       key: `f${x.id}`, client: x.agency, date: x.added_date || x.month_year || '', source: 'sheet' as const,
@@ -150,10 +150,15 @@ export default function PmDetail({ slug }: { slug: string }) {
     ...(s?.praise || []).filter(x => inThisQ(x.source_date)).map(x => ({
       key: `p${x.id}`, client: x.company_name, date: x.source_date || '', source: 'email' as const,
       kind: x.signal_type, text: x.summary || x.source_subject })),
+    ...(s?.manual || []).filter(x => inThisQ(x.happened_on)).map(x => ({
+      key: `m${x.id}`, client: x.company_name, date: x.happened_on || '', source: 'manual' as const,
+      kind: x.channel, text: x.quote })),
   ]
   const fbDetails: CardDetails<Fb> = {
     subtitle: `Client feedback credited to ${pm.name} in ${qLabel(fq)} — the feedback sheet and praise found in email`,
-    rows: fbRows, rowKey: x => x.key, groupBy: x => (x.source === 'sheet' ? 'Feedback sheet' : 'Email'), defaultSort: 'date',
+    rows: fbRows, rowKey: x => x.key,
+    groupBy: x => (x.source === 'sheet' ? 'Feedback sheet' : x.source === 'manual' ? 'Added by hand' : 'Email'),
+    defaultSort: 'date',
     columns: [
       { key: 'client', label: 'Client / agency', value: x => <ClientLink name={x.client} />, sort: x => x.client || '' },
       { key: 'date', label: 'Date', value: x => fmtDay(x.date), sort: x => x.date },
@@ -161,6 +166,14 @@ export default function PmDetail({ slug }: { slug: string }) {
       { key: 'text', label: 'Comment', value: x => x.text || '—', wide: true },
     ],
   }
+  // Manual only earns a place in the caption when there is some — it is the rarest
+  // source and an always-present "0 added" reads like something is broken.
+  const fbSplit = [
+    `${q?.feedbackFromSheet ?? 0} sheet`,
+    `${q?.feedbackFromEmail ?? 0} email`,
+    ...((q?.feedbackFromManual ?? 0) > 0 ? [`${q?.feedbackFromManual} added by hand`] : []),
+  ].join(' · ')
+
   const inProgress = fq.q === CUR_FQ.q
 
   return (
@@ -188,7 +201,7 @@ export default function PmDetail({ slug }: { slug: string }) {
         <KPICard label="Growth" tone={growth == null ? 'default' : growth >= 0 ? 'green' : 'red'}
           value={growth == null ? '—' : `${growth.toFixed(1)}%`} sub={`${money(q?.avg || 0)}/mo vs ${money(base)} base`} details={growthDetails} />
         <KPICard label="Q2C" value={q?.q2c == null ? '—' : `${q.q2c.toFixed(0)}%`} sub={`${q?.won ?? 0} of ${q?.shared ?? 0} confirmed`} details={q2cDetails} />
-        <KPICard label="Feedback" value={String(q?.feedback ?? 0)} sub={`${q?.feedbackFromSheet ?? 0} sheet · ${q?.feedbackFromEmail ?? 0} email`} details={fbDetails} />
+        <KPICard label="Feedback" value={String(q?.feedback ?? 0)} sub={fbSplit} details={fbDetails} />
         <KPICard label="Base / month" tone={raised ? 'yellow' : 'default'} value={money(base)} sub={raised ? `raised from ${money(pm.lastYearAvg)}` : 'last-year average'}
           info="The last-year monthly average is one hand-typed figure per PM, so it is not split by department." />
       </KPIRow>
@@ -216,7 +229,7 @@ export default function PmDetail({ slug }: { slug: string }) {
               note={`${q?.won ?? 0} confirmed in this quarter of ${q?.shared ?? 0} in play · ${q?.lost ?? 0} cancelled, ${q?.open ?? 0} unconverted`}
               raw={q?.q2c ?? null} target={TARGETS.q2c} targetLabel={`${TARGETS.q2c}%`} weight={WEIGHTS.q2c} />
             <KpiRow measure="Feedback" result={String(q?.feedback ?? 0)}
-              note={`${q?.feedbackFromSheet ?? 0} from the feedback sheet · ${q?.feedbackFromEmail ?? 0} found in email`}
+              note={fbSplit}
               raw={q?.feedback ?? 0} target={TARGETS.feedback} targetLabel={String(TARGETS.feedback)} weight={WEIGHTS.feedback} />
           </tbody>
           <tfoot>
