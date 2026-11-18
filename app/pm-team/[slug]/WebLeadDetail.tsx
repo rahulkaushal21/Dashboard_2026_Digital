@@ -7,7 +7,7 @@ import KPICard from '@/components/KPICard'
 import { KPIRow, Panel } from '@/components/PageParts'
 import { useAuth } from '@/components/AuthProvider'
 import { getWebLeadKpis, type WebLeadKpi } from '@/lib/supabase'
-import { type PmMember } from '@/lib/pm-team'
+import { isMember, type PmMember } from '@/lib/pm-team'
 
 // The Web lead's scorecard.
 //
@@ -40,13 +40,14 @@ const Delta = ({ now, before, suffix = '' }: { now?: number | null; before?: num
 }
 
 export default function WebLeadDetail({ pm }: { pm: PmMember }) {
-  const { email, profile } = useAuth()
+  const { email } = useAuth()
   const [rows, setRows] = useState<WebLeadKpi[]>([])
   const [loading, setLoading] = useState(true)
-  // The same gate the PM scorecard uses: an admin may open it, and so may the person it
-  // belongs to. Declared after the hooks above so the gate never changes how many run.
-  const mine = (email || '').trim().toLowerCase() === pm.email
-  const blocked = !profile?.is_admin && !mine
+  // ONLY the lead. Deliberately not an is_admin check, which is how every other
+  // scorecard on this page is gated: Pratik is a dashboard admin AND an LP/HUB PM, so
+  // admin would have let a PM team member read the lead's numbers. Declared after the
+  // hooks above so the gate never changes how many run.
+  const blocked = !isMember(pm, email)
 
   useEffect(() => {
     let live = true
@@ -78,7 +79,7 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
       <Header title={pm.name} subtitle="Web lead — the Web PM team's numbers, not a personal scorecard"
         chip={cur?.qlabel} />
 
-      {blocked ? <p className="text-sm text-mav-muted">This scorecard is not yours to open.</p>
+      {blocked ? <p className="text-sm text-mav-muted">This scorecard belongs to someone else.</p>
         : loading ? <p className="text-sm text-mav-muted">Loading…</p> : !cur ? (
         <p className="text-sm text-mav-muted">No quarters with any activity yet.</p>
       ) : (

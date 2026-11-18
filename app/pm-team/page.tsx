@@ -8,7 +8,7 @@ import { UnplacedNote } from '@/components/UnitToggle'
 import { useAuth } from '@/components/AuthProvider'
 import { OWNER_EMAIL } from '@/lib/access'
 import { growthPct, type PmQuarter } from '@/lib/pm-metrics'
-import { PM_TEAM, pmByEmail, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, GROWTH_BANDS, Q2C_BANDS, FEEDBACK_BANDS, type Band, type FQ, type PmMember } from '@/lib/pm-team'
+import { PM_TEAM, pmByEmail, isMember, fqOf, qLabel, totalPct, TARGETS, WEIGHTS, GROWTH_BANDS, Q2C_BANDS, FEEDBACK_BANDS, type Band, type FQ, type PmMember } from '@/lib/pm-team'
 import { usePmData } from './usePmData'
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US')
@@ -76,6 +76,17 @@ export default function PmTeam() {
   // the team view shows, not a recomputation that could drift from it.
   const [who, setWho] = useState<string>('all')
 
+  // ── The lead's own KPI ──────────────────────────────────────────────────────
+  // A link, not a filter. It is deliberately NOT one of the "whose column" options
+  // above: those pick a PM out of the same grid, and the lead's three numbers are a
+  // different scorecard entirely, computed from the whole team rather than from rows
+  // carrying their name.
+  //
+  // GATED ON THE PERSON, NOT ON ADMIN. Pratik is a dashboard admin AND an LP/HUB PM, so
+  // an is_admin check would have shown a PM team member the lead's figures. Only the
+  // lead themselves, by any address they sign in with.
+  const lead = useMemo(() => PM_TEAM.find(m => m.lead && isMember(m, email)), [email])
+
   // One cell per PM per quarter, computed once so the table only has to read it.
   const grid = useMemo(() => QUARTERS.map(fq => ({
     fq,
@@ -108,6 +119,18 @@ export default function PmTeam() {
         subtitle={isAdmin
           ? 'Quarterly KPI scorecard — growth, quote conversion and client feedback'
           : 'Your quarterly KPI — growth, quote conversion and client feedback'} />
+
+      {lead && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-mav-line bg-mav-panel px-4 py-3">
+          <span className="text-sm text-mav-fg/80">
+            You lead Web. Your KPIs are the team&rsquo;s numbers, not a personal scorecard.
+          </span>
+          <Link href={`/pm-team/${lead.slug}`}
+            className="ml-auto rounded-md bg-mav-yellow px-3 py-1.5 text-xs font-medium text-black hover:opacity-90">
+            Show my KPIs
+          </Link>
+        </div>
+      )}
 
       {roster.length === 0 ? (
         <div className="max-w-lg mt-10">

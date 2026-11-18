@@ -19,6 +19,12 @@ export interface PmMember {
    * first-name guess would have shown one of them the other's numbers.
    */
   email: string
+  /**
+   * Other addresses the same person signs in with. Rahul Kaushal reaches the dashboard
+   * as rahul.k@mavlers.com and as web@uplers.com; one `email` field matched only one of
+   * them, so he saw the team grid with himself missing from it.
+   */
+  altEmails?: string[]
   aliases: string[]
   /**
    * The PM's LAST-YEAR MONTHLY AVERAGE booking in USD — the `Base Data` column of
@@ -64,7 +70,7 @@ export const PM_TEAM: PmMember[] = [
   // the note on Rahul Jain above; a bare first-name match would move deals between two
   // different people. lastYearAvg is 0 because the Growth KPI on this page is the Web
   // business quarter over quarter, not a personal booking average.
-  { name: 'Rahul Kaushal', slug: 'rahul-kaushal', email: 'web@uplers.com', aliases: ['rahul kaushal'], lastYearAvg: 0, lead: true, leads: 'web' },
+  { name: 'Rahul Kaushal', slug: 'rahul-kaushal', email: 'rahul.k@mavlers.com', altEmails: ['web@uplers.com'], aliases: ['rahul kaushal'], lastYearAvg: 0, lead: true, leads: 'web' },
 ]
 
 /**
@@ -114,8 +120,22 @@ export const pmOf = (raw?: string): PmMember | undefined =>
  * measured by this page and sees the whole team. That is the whole rule; there
  * is no separate list of who is allowed to see everything.
  */
-export const pmByEmail = (email?: string | null): PmMember | undefined =>
-  email ? PM_TEAM.find(m => m.email === email.trim().toLowerCase()) : undefined
+export const pmByEmail = (email?: string | null): PmMember | undefined => {
+  const e = (email || '').trim().toLowerCase()
+  return e ? PM_TEAM.find(m => m.email === e || (m.altEmails || []).includes(e)) : undefined
+}
+
+/**
+ * Is this viewer that member, by any address they sign in with?
+ *
+ * Used to gate a LEAD's scorecard, which is deliberately NOT admin-gated: Pratik is an
+ * admin and an LP/HUB PM at the same time, so "admin" would have shown a PM the lead's
+ * numbers. Only the person themselves.
+ */
+export const isMember = (m: PmMember, email?: string | null): boolean => {
+  const e = (email || '').trim().toLowerCase()
+  return !!e && (m.email === e || (m.altEmails || []).includes(e))
+}
 
 export const pmBySlug = (slug: string): PmMember | undefined => PM_TEAM.find(m => m.slug === slug)
 
