@@ -2949,7 +2949,12 @@ export interface WebLeadKpi {
   qkey: string
   qlabel: string
   quarter_start: string
+  /**
+   * CLIENTS, not quotes. Four quotes to BOLT Marketing in one quarter is one chance to
+   * win BOLT; see migration 184. nbd_raw_quotes is the underlying quote count.
+   */
   nbd_quotes: number
+  nbd_raw_quotes: number
   nbd_booked: number
   nbd_lost: number
   nbd_open: number

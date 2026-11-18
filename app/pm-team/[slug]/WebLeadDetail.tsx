@@ -140,10 +140,10 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
               sub={<>
                 <Delta now={q?.nbd_pct_raised} before={prev?.nbd_pct_raised} suffix=" vs last Q" /><br />
                 <span className="text-[11px]">
-                  {q?.nbd_booked ?? 0} of {q?.nbd_quotes ?? 0} booked · {q?.nbd_open ?? 0} open · {pct(q?.nbd_pct_decided)} of decided
+                  {q?.nbd_booked ?? 0} of {q?.nbd_quotes ?? 0} clients booked · {q?.nbd_open ?? 0} open · {pct(q?.nbd_pct_decided)} of decided
                 </span>
               </>}
-              info="Opportunities introduced by Malav Modi, Dhruti Dave or Nevilson Christian, whatever the project type, where the PM is a Web PM. Booked means won. LP/HUB excluded." />
+              info="Prospects introduced by Malav Modi, Dhruti Dave or Nevilson Christian, whatever the project type, where the PM is a Web PM. Counted once per client, not once per quote — four quotes to the same prospect is one chance to win it, and a client counts as booked if any of its quotes won. LP/HUB excluded." />
             <KPICard tone="green" label="Repeat Q2C"
               value={pct(q?.rep_pct_raised)}
               sub={<>
@@ -178,7 +178,7 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
               </thead>
               <tbody>
                 <KpiRow measure="NBD conversion" result={pct(q?.nbd_pct_raised)}
-                  note={`${q?.nbd_booked ?? 0} booked of ${q?.nbd_quotes ?? 0} raised · ${q?.nbd_lost ?? 0} lost, ${q?.nbd_open ?? 0} still open`}
+                  note={`${q?.nbd_booked ?? 0} booked of ${q?.nbd_quotes ?? 0} clients quoted · ${q?.nbd_lost ?? 0} lost, ${q?.nbd_open ?? 0} still open`}
                   quoted={money(q?.nbd_quoted_usd)} converted={money(q?.nbd_booked_usd)} />
                 <KpiRow measure="Repeat Q2C" result={pct(q?.rep_pct_raised)}
                   note={`${q?.rep_won ?? 0} won of ${q?.rep_quotes ?? 0} raised · ${q?.rep_lost ?? 0} lost, ${q?.rep_open ?? 0} still open`}
@@ -194,7 +194,14 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
                 <p>This quarter is still running. Losses are recorded late, so both conversion rates read high until it closes, and the revenue is a part-quarter figure.</p>
               )}
               {(q?.nbd_quotes ?? 0) > 0 && (q?.nbd_quotes ?? 0) < 10 && (
-                <p>NBD is {q?.nbd_quotes} quote{q?.nbd_quotes === 1 ? '' : 's'} this quarter — one deal moves the rate by about {Math.round(100 / (q?.nbd_quotes || 1))} points, so read the count beside the percentage.</p>
+                <p>NBD is {q?.nbd_quotes} client{q?.nbd_quotes === 1 ? '' : 's'} this quarter — one deal moves the rate by about {Math.round(100 / (q?.nbd_quotes || 1))} points, so read the count beside the percentage.</p>
+              )}
+              {/* Said out loud, because the denominator here is smaller than the deal
+                  list on Opportunities and the difference should not look like a bug. */}
+              {(q?.nbd_raw_quotes ?? 0) > (q?.nbd_quotes ?? 0) && (
+                <p>{q?.nbd_raw_quotes} NBD quotes went to {q?.nbd_quotes} prospects this quarter. A prospect quoted more
+                than once counts once, and counts as booked if any of its quotes won — otherwise a revised scope would
+                push the rate down for doing more work on the same deal.</p>
               )}
               {(q?.nbd_quotes ?? 0) === 0 && (
                 <p className="text-amber-400">No new-business opportunity was introduced this quarter, so NBD conversion has nothing to measure.</p>
@@ -214,7 +221,7 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
                   <tr>
                     <th className={th}>Quarter</th>
                     <th className={`${th} text-right`}>NBD</th>
-                    <th className={`${th} text-right`}>NBD booked</th>
+                    <th className={`${th} text-right`}>NBD clients</th>
                     <th className={`${th} text-right`}>Repeat</th>
                     <th className={`${th} text-right`}>Repeat won</th>
                     <th className={`${th} text-right`}>Web revenue</th>
