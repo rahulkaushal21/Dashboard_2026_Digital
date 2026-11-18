@@ -2899,7 +2899,7 @@ export async function getBookingTargets(fromMonth: string, toMonth: string): Pro
 
 // ── Cross-sells ───────────────────────────────────────────────────────────────────
 // Business a PM opened from their own mailbox. Hand-attributed rather than derived: see
-// migration 175 for why a query cannot tell a cross-sell from a client who happened to
+// migration 176 for why a query cannot tell a cross-sell from a client who happened to
 // buy something in the same fortnight.
 
 export interface CrossSell {
@@ -2938,6 +2938,33 @@ export async function getCrossSells(fromMonth: string, toMonth: string): Promise
     .gte('booking_month', fromMonth).lte('booking_month', toMonth)
     .order('booking_month', { ascending: false }).order('amount_usd', { ascending: false })
   return ((data as any[]) || []).map(r => ({ ...r, amount_usd: Number(r.amount_usd ?? 0) })) as CrossSell[]
+}
+
+/**
+ * Possible cross-sells the refresh chain found, newest mail first.
+ *
+ * A QUESTION, not a record. The finder spots that a PM opened a thread with a commercial
+ * subject and that the client booked within 60 days; it cannot tell whether the booked
+ * line is the work the mail pitched, which is the whole of the judgement. Nothing here is
+ * counted anywhere until somebody writes it into cross_sells. See migration 179.
+ */
+export interface CrossSellCandidate {
+  pm: string
+  client: string
+  service_dept?: string | null
+  mail_subject: string
+  mail_date: string
+  client_domain?: string | null
+  /** Everything that client booked in the window — NOT the value of this cross-sell. */
+  client_booked_usd: number
+  last_booking?: string | null
+}
+
+export async function getCrossSellCandidates(limit = 100): Promise<CrossSellCandidate[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('cross_sell_candidates').select('*')
+    .order('mail_date', { ascending: false }).limit(limit)
+  return ((data as any[]) || []).map(r => ({ ...r, client_booked_usd: Number(r.client_booked_usd ?? 0) })) as CrossSellCandidate[]
 }
 
 export async function saveBookingTarget(month: string, dept: TargetDept, usd: number, updatedBy: string, note?: string): Promise<{ error?: string }> {

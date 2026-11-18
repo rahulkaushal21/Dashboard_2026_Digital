@@ -2,10 +2,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
-import { KPIRow, Segments, Panel } from '@/components/PageParts'
+import { KPIRow, Segments, Panel, FilterBar } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
-import { getCrossSells, type CrossSell } from '@/lib/supabase'
+import { getCrossSells, getCrossSellCandidates, type CrossSell, type CrossSellCandidate } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Cross Sell — business a PM opened from their own mailbox.
@@ -19,29 +19,32 @@ import { fmtUsd } from '@/lib/metrics'
 // WHAT COUNTS. A mail a PM sent first, to a client who had not asked, that a booked line
 // can be traced to. The attribution is hand-written in the cross_sells table, not derived:
 // no column anywhere says "a PM sold this", and a join on "mailed, then bought something"
-// credits a campaign with every retainer that was already running. See migration 175.
+// credits a campaign with every retainer that was already running. See migration 176.
 //
-// THE COLUMNS ARE THE TRACKER'S COLUMNS, in the tracker's order, so a copy lands in A-J
+// THE COLUMNS ARE THE TRACKER'S COLUMNS, in the tracker's order, so a copy lands in A-K
 // with nothing to rearrange. Table, clipboard and CSV all read XSELL_COLS, so what is on
-// screen is exactly what gets pasted.
+// screen is exactly what gets pasted — and the FILTERS narrow all three together, so a
+// filtered view copies the filtered rows and nothing else.
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const monthKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-// The tracker dates a row by its month, written out as a day — 01-10-2026.
-const dmy = (v?: string) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || '')
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : ''
+/** 1st, 2nd, 3rd, 4th … 21st. The teens are all "th", which is what the 11-13 case is for. */
+const ord = (n: number) => {
+  const v = n % 100
+  if (v >= 11 && v <= 13) return `${n}th`
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`
 }
 
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const monLabel = (v?: string) => {
+/** 2026-10-01 → "1st Oct 2026". The format the tracker is kept in. */
+const pretty = (v?: string | null) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || '')
+  return m ? `${ord(+m[3])} ${MON[+m[2] - 1]} ${m[1]}` : ''
+}
+const monLabel = (v?: string | null) => {
   const m = /^(\d{4})-(\d{2})/.exec(v || '')
   return m ? `${MON[+m[2] - 1]} ${m[1]}` : '—'
-}
-const dayLabel = (v?: string) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || '')
-  return m ? `${+m[3]} ${MON[+m[2] - 1]}` : ''
 }
 
 /** The financial year runs April to March, so April decides which year you are in. */
@@ -56,14 +59,18 @@ const RANGES = (n: Date) => [
 ]
 
 /**
- * The cross-sell tracker's ten columns, in its order.
+ * The cross-sell tracker's columns, in its order.
  *
  * Defined once and read by the table, the clipboard and the CSV, so what is on screen is
  * exactly what gets pasted. A separate export builder is how an export quietly drifts
  * from the page it claims to export.
+ *
+ * Closed date is column K, after the billable figure, so adding it cannot shift any of
+ * the ten columns the tracker already has — an existing sheet keeps working and gains a
+ * column on the end rather than having its values move sideways.
  */
 const XSELL_COLS: { label: string; get: (r: CrossSell) => string; num?: boolean; wide?: boolean }[] = [
-  { label: 'Month (DD-MM-YYYY)', get: r => dmy(r.booking_month) },
+  { label: 'Month', get: r => pretty(r.booking_month) },
   { label: 'Company Name', get: r => r.client },
   { label: 'Client Name', get: r => r.client_name || '' },
   { label: 'Client Email ID', get: r => r.client_email || '' },
@@ -74,37 +81,83 @@ const XSELL_COLS: { label: string; get: (r: CrossSell) => string; num?: boolean;
   { label: 'Email Subject line', get: r => r.mail_subject, wide: true },
   // Plain digits, no $ and no thousands separator: the cell has to arrive as a number.
   { label: 'Invoice Billable (USD) - RFQ', get: r => r.amount_usd.toFixed(2), num: true },
+  { label: 'Closed date', get: r => pretty(r.confirmed_on) },
 ]
+
+const ALL = '__all__'
 
 export default function CrossSellPage() {
   const { unit } = useUnit()
   const [all, setAll] = useState<CrossSell[]>([])
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState('')
+  const [cands, setCands] = useState<CrossSellCandidate[]>([])
 
   const now = useMemo(() => new Date(), [])
   const ranges = useMemo(() => RANGES(now), [now])
   // Opens on the last three months: a single month is usually three or four rows, which
   // is too little to tell you anything about who is selling.
-  const [range, setRange] = useState('q')
-  const active = ranges.find(r => r.key === range) || ranges[1]
+  const [from, setFrom] = useState(() => monthKey(new Date(now.getFullYear(), now.getMonth() - 2, 1)))
+  const [to, setTo] = useState(() => monthKey(now))
+
+  // Column filters. ALL rather than '' so an empty string stays a real, selectable value.
+  const [q, setQ] = useState('')
+  const [fPm, setFPm] = useState(ALL)
+  const [fBu, setFBu] = useState(ALL)
+  const [fType, setFType] = useState(ALL)
+  const [fClient, setFClient] = useState(ALL)
 
   useEffect(() => {
+    if (from > to) return
     let live = true
     setLoading(true)
-    getCrossSells(active.from, active.to)
+    getCrossSells(from, to)
       .then(r => { if (live) setAll(r) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [active.from, active.to])
+  }, [from, to])
+
+  // Candidates do not follow the date window: they are a to-do list, and a cross-sell
+  // nobody has written up is worth seeing whichever months you happen to be looking at.
+  // Fetched separately so a slow read never holds the figures back.
+  useEffect(() => { getCrossSellCandidates().then(setCands).catch(() => setCands([])) }, [])
 
   // Each row carries its own department, so the business-unit switch applies the same way
   // it does to a booked line.
-  const rows = useMemo(() => all.filter(r => inUnit(r.service_dept, unit)), [all, unit])
+  const inScope = useMemo(() => all.filter(r => inUnit(r.service_dept, unit)), [all, unit])
+
+  // The dropdowns are built from what is in the window, not from a fixed list, so they
+  // never offer a PM or a BU with nothing behind it.
+  const opts = useMemo(() => {
+    const uniq = (xs: (string | null | undefined)[]) =>
+      [...new Set(xs.map(x => (x || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    return {
+      pm: uniq(inScope.map(r => r.pm)),
+      bu: uniq(inScope.map(r => r.service_dept)),
+      type: uniq(inScope.map(r => r.client_type)),
+      client: uniq(inScope.map(r => r.client)),
+    }
+  }, [inScope])
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return inScope.filter(r => {
+      if (fPm !== ALL && r.pm !== fPm) return false
+      if (fBu !== ALL && (r.service_dept || '') !== fBu) return false
+      if (fType !== ALL && (r.client_type || '') !== fType) return false
+      if (fClient !== ALL && r.client !== fClient) return false
+      if (!needle) return true
+      // Search spans every column the tracker carries, so a subject line or an address
+      // finds its row as readily as a company name does.
+      return XSELL_COLS.some(c => c.get(r).toLowerCase().includes(needle))
+    })
+  }, [inScope, q, fPm, fBu, fType, fClient])
+
   const closed = useMemo(() => rows.filter(r => r.status === 'closed'), [rows])
   const open = useMemo(() => rows.filter(r => r.status === 'open'), [rows])
   const total = useMemo(() => closed.reduce((a, r) => a + r.amount_usd, 0), [closed])
   const clients = useMemo(() => new Set(closed.map(r => r.client)).size, [closed])
+  const filtered = rows.length !== inScope.length
 
   // Per PM, biggest first: whose mailbox it came from is the question this page is read
   // for. Kept above the table rather than as group headers inside it — a header row would
@@ -120,6 +173,9 @@ export default function CrossSellPage() {
     }
     return [...m.values()].sort((a, b) => b.usd - a.usd)
   }, [closed])
+
+  const activeRange = ranges.find(r => r.from === from && r.to === to)?.key || ''
+  const clearAll = () => { setQ(''); setFPm(ALL); setFBu(ALL); setFType(ALL); setFClient(ALL) }
 
   // Copy pastes the ROWS ONLY, tab-separated — the tracker already has its header, and a
   // header pasted under one becomes a data row somebody has to delete. Tabs rather than
@@ -148,7 +204,7 @@ export default function CrossSellPage() {
     const blob = new Blob(['﻿' + [head, ...body].join('\r\n')], { type: 'text/csv;charset=utf-8' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `cross-sell-${active.from.slice(0, 7)}-to-${active.to.slice(0, 7)}.csv`
+    a.download = `cross-sell-${from.slice(0, 7)}-to-${to.slice(0, 7)}.csv`
     a.click()
     URL.revokeObjectURL(a.href)
   }
@@ -156,6 +212,8 @@ export default function CrossSellPage() {
   const td = 'px-3 py-3 whitespace-nowrap'
   const th = 'px-3 py-2 font-medium whitespace-nowrap'
   const btn = 'rounded-md border border-mav-line px-2.5 py-1 text-xs hover:bg-mav-dark disabled:opacity-40'
+  const ctl = 'bg-mav-dark border border-mav-line rounded-md px-2 py-1.5 text-sm text-mav-fg [color-scheme:dark]'
+  const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
 
   const basis = (
     <>
@@ -167,11 +225,23 @@ export default function CrossSellPage() {
     </>
   )
 
+  const Pick = ({ label, value, onChange, options }: {
+    label: string; value: string; onChange: (v: string) => void; options: string[]
+  }) => (
+    <>
+      <span className={lbl}>{label}</span>
+      <select className={ctl} value={value} onChange={e => onChange(e.target.value)} aria-label={label}>
+        <option value={ALL}>All</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </>
+  )
+
   return (
     <div>
       <Header title="Cross Sell"
         subtitle="Business a PM opened from their own mailbox"
-        chip={active.label} />
+        chip={ranges.find(r => r.key === activeRange)?.label || `${monLabel(from)} – ${monLabel(to)}`} />
 
       <KPIRow cols={4}>
         <KPICard tone="accent" label="Closed" value={loading ? '…' : fmtUsd(total)}
@@ -184,14 +254,48 @@ export default function CrossSellPage() {
           sub={loading ? undefined : <span className="text-[11px]">proposals still unanswered</span>} />
       </KPIRow>
 
-      <Segments<string> value={range} onChange={setRange}
-        items={ranges.map(r => ({ id: r.key, label: r.label }))} />
+      {/* Outside the loading gate on purpose: changing a date refetches, and controls that
+          vanish while the numbers reload are controls you cannot correct a typo in. */}
+      <Segments<string>
+        value={activeRange}
+        onChange={k => { const r = ranges.find(x => x.key === k); if (r) { setFrom(r.from); setTo(r.to) } }}
+        items={[
+          ...ranges.map(r => ({ id: r.key, label: r.label })),
+          ...(activeRange ? [] : [{ id: '', label: 'Custom range' }]),
+        ]} />
+
+      <FilterBar right={
+        <>
+          <span className="text-xs text-mav-muted">
+            {filtered ? `${rows.length} of ${inScope.length}` : `${inScope.length} rows`}
+          </span>
+          {(filtered || q) && <button onClick={clearAll} className={btn}>Clear all</button>}
+        </>}>
+        {/* Months, not days: a cross-sell is dated by the month its revenue lands in, and
+            a day picker would promise a precision the row does not have. */}
+        <span className={lbl}>From</span>
+        <input type="month" value={from.slice(0, 7)} max={to.slice(0, 7)}
+          onChange={e => e.target.value && setFrom(`${e.target.value}-01`)} className={ctl} aria-label="From month" />
+        <span className="text-xs text-mav-muted">→</span>
+        <span className={lbl}>To</span>
+        <input type="month" value={to.slice(0, 7)} min={from.slice(0, 7)}
+          onChange={e => e.target.value && setTo(`${e.target.value}-01`)} className={ctl} aria-label="To month" />
+        {from > to && <span className="text-xs text-red-400">From is after To.</span>}
+
+        <Pick label="PM" value={fPm} onChange={setFPm} options={opts.pm} />
+        <Pick label="BU" value={fBu} onChange={setFBu} options={opts.bu} />
+        <Pick label="Type" value={fType} onChange={setFType} options={opts.type} />
+        <Pick label="Client" value={fClient} onChange={setFClient} options={opts.client} />
+
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search any column…"
+          className={`${ctl} min-w-[12rem]`} aria-label="Search" />
+      </FilterBar>
 
       {loading ? <p className="text-sm text-mav-muted">Loading…</p> : (
         <>
           {byPm.length > 0 && (
-            <Panel flush className="mb-6 mt-4" title="By PM"
-              info="Who opened the business. A PM with nothing here did not fail to sell — they may simply have nothing written down yet; this table only knows what has been attributed.">
+            <Panel flush className="mb-6" title="By PM"
+              info="Who opened the business. A PM with nothing here did not fail to sell — they may simply have nothing written down yet; this table only knows what has been attributed. It follows the filters above, so narrowing to one BU shows that BU's picture.">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead className="text-left text-mav-fg/70 border-b border-mav-line">
@@ -231,7 +335,7 @@ export default function CrossSellPage() {
           <Panel flush title="For the tracker" info={basis}
             right={
               <span className="flex flex-wrap items-center gap-3 text-xs text-mav-muted">
-                <span>Copy pastes rows only, under your existing header</span>
+                <span>{filtered ? 'Copies the filtered rows only' : 'Copy pastes rows only, under your existing header'}</span>
                 <button onClick={copy} disabled={closed.length === 0} className={btn}>{copied || 'Copy rows'}</button>
                 <button onClick={exportCsv} disabled={closed.length === 0} className={btn}>CSV</button>
               </span>}>
@@ -259,13 +363,14 @@ export default function CrossSellPage() {
                   ))}
                   {closed.length === 0 && (
                     <tr><td colSpan={XSELL_COLS.length} className="px-3 py-6 text-center text-mav-muted">
-                      Nothing closed in this window.
+                      {filtered ? 'Nothing matches these filters.' : 'Nothing closed in this window.'}
                     </td></tr>
                   )}
                   {closed.length > 0 && (
                     <tr className="bg-mav-dark/40">
-                      <td className={`${td} font-semibold`} colSpan={XSELL_COLS.length - 1}>Total</td>
+                      <td className={`${td} font-semibold`} colSpan={XSELL_COLS.length - 2}>Total</td>
                       <td className={`${td} text-right tabular-nums font-semibold`}>{fmtUsd(total)}</td>
+                      <td className={td} />
                     </tr>
                   )}
                 </tbody>
@@ -284,13 +389,61 @@ export default function CrossSellPage() {
                   {open.map(r => (
                     <li key={r.id} className="text-mav-muted">
                       <span className="text-mav-fg">{r.client}</span> · {r.project} — {r.pm},
-                      &ldquo;{r.mail_subject}&rdquo; {dayLabel(r.mail_date)} · {monLabel(r.booking_month)}
+                      &ldquo;{r.mail_subject}&rdquo; {pretty(r.mail_date)}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
           </Panel>
+
+          {/* Found by the refresh chain, judged by nobody yet.
+
+              This is the half that keeps the page from aging into a snapshot: the chain
+              re-runs the finder on every refresh, so a cross-sell made next month shows
+              up here without anyone going looking. What it CANNOT do is the judgement —
+              it knows a PM opened a commercial thread and that the client booked soon
+              after, not whether the booking is the work the mail pitched. In October
+              twelve clients got the security mail, bought nothing from it, and booked
+              $29k of retainers that were already running; all twelve would appear here.
+              So candidates sit outside every total on this page and are never copied into
+              the tracker. Confirming one means writing it into cross_sells, which also
+              removes it from this list. */}
+          {cands.length > 0 && (
+            <Panel flush className="mt-6" title="Candidates — not counted"
+              info={<>A PM opened a thread with a commercial subject and that client booked within 60 days. That is a <b>question</b>, not a cross-sell: the finder cannot tell whether what they booked is the work the mail pitched, which is the judgement the list exists to record. Nothing here is in any figure above, and nothing here is copied to the tracker. The refresh chain rebuilds this on every run, so new ones appear on their own.</>}
+              right={<span className="text-xs text-mav-muted">{cands.length} to look at · rebuilt each refresh</span>}>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-mav-fg/70 border-b border-mav-line">
+                    <tr>
+                      <th className={th}>PM</th>
+                      <th className={th}>Client</th>
+                      <th className={th}>BU</th>
+                      <th className={th}>Mail</th>
+                      <th className={th}>Sent</th>
+                      <th className={`${th} text-right`}>Client booked</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cands.map(c => (
+                      <tr key={`${c.pm}|${c.client}|${c.mail_subject}|${c.mail_date}`}
+                        className="border-b border-mav-line/60 last:border-0 align-top">
+                        <td className={td}>{c.pm}</td>
+                        <td className={td}>{c.client}</td>
+                        <td className={`${td} text-mav-muted`}>{c.service_dept || '—'}</td>
+                        <td className="px-3 py-3"><div className="max-w-lg break-words">&ldquo;{c.mail_subject}&rdquo;</div></td>
+                        <td className={`${td} text-mav-muted`}>{pretty(c.mail_date)}</td>
+                        {/* The client's whole booking in the window, NOT the value of this
+                            cross-sell — which is unknown until somebody judges it. */}
+                        <td className={`${td} text-right tabular-nums text-mav-muted`}>{fmtUsd(c.client_booked_usd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          )}
         </>
       )}
     </div>

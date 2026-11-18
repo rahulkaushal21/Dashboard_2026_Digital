@@ -28,7 +28,7 @@ alter table public.cross_sells add column if not exists client_email text;
 alter table public.cross_sells add column if not exists client_type  text;
 
 comment on column public.cross_sells.client_name is
-  'The person mailed, as the tracker''s "Client Name" column wants it. Copied from the booked line at the time, not joined — see migration 176.';
+  'The person mailed, as the tracker''s "Client Name" column wants it. Copied from the booked line at the time, not joined — see migration 177.';
 comment on column public.cross_sells.client_email is
   'Their address, the tracker''s "Client Email ID".';
 comment on column public.cross_sells.client_type is
