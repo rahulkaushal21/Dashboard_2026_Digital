@@ -109,6 +109,29 @@ const XSELL_COLS: {
 
 const ALL = '__all__'
 
+/**
+ * One filter dropdown.
+ *
+ * Declared at module scope, NOT inside the page: a component created during render is a
+ * new type on every render, so React unmounts and remounts it each time and it loses
+ * anything it was holding.
+ */
+function Pick({ label, value, onChange, options }: {
+  label: string; value: string; onChange: (v: string) => void; options: string[]
+}) {
+  const lbl = 'font-mono text-[10.5px] uppercase tracking-[0.1em] text-mav-muted'
+  const ctl = 'bg-mav-dark border border-mav-line rounded-md px-2 py-1.5 text-sm text-mav-fg [color-scheme:dark]'
+  return (
+    <>
+      <span className={lbl}>{label}</span>
+      <select className={ctl} value={value} onChange={e => onChange(e.target.value)} aria-label={label}>
+        <option value={ALL}>All</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </>
+  )
+}
+
 export default function CrossSellPage() {
   const { unit } = useUnit()
   const [all, setAll] = useState<CrossSell[]>([])
@@ -171,7 +194,9 @@ export default function CrossSellPage() {
       // finds its row as readily as a company name does.
       return XSELL_COLS.some(c => c.get(r).toLowerCase().includes(needle))
     })
-  }, [inScope, q, fPm, fBu, fType, fClient])
+    // Every filter this reads must be listed, or the memo keeps a stale answer and the
+    // control looks broken: fStatus was missing and selecting Pending changed nothing.
+  }, [inScope, q, fPm, fBu, fType, fClient, fStatus])
 
   const closed = useMemo(() => rows.filter(r => r.status === 'closed'), [rows])
   const open = useMemo(() => rows.filter(r => r.status === 'open'), [rows])
@@ -242,18 +267,6 @@ export default function CrossSellPage() {
       revenue is booked, so every figure here is also a line in the project ledger. Attribution is written down by
       hand, not derived: a row is kept only where a booked line names the work the mail pitched,
       because &ldquo;mailed, then bought something&rdquo; credits a campaign with retainers that were already running.
-    </>
-  )
-
-  const Pick = ({ label, value, onChange, options }: {
-    label: string; value: string; onChange: (v: string) => void; options: string[]
-  }) => (
-    <>
-      <span className={lbl}>{label}</span>
-      <select className={ctl} value={value} onChange={e => onChange(e.target.value)} aria-label={label}>
-        <option value={ALL}>All</option>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
     </>
   )
 
