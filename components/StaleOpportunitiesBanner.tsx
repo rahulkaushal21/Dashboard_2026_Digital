@@ -122,10 +122,14 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
       {open && (
         <div className="border-t border-amber-500/30">
           <div className="overflow-auto max-h-[50vh]">
-            <table className="w-full text-sm min-w-[760px]">
+            <table className="w-full text-sm min-w-[860px]">
               <thead className="text-left text-mav-muted">
                 <tr>
-                  {['', 'Company', 'Pipeline USD', 'Opened', 'App record', 'App says', 'App USD'].map((h, i) => (
+                  {/* PM sits beside the company because an admin sees everybody's rows
+                      and otherwise has to open each deal to find out whose it is. The
+                      value was already on the row — it is what the per-person scoping
+                      below matches on — it was just never shown. */}
+                  {['', 'Company', 'PM', 'Pipeline USD', 'Opened', 'App record', 'App says', 'App USD'].map((h, i) => (
                     <th key={i} className="sticky top-0 z-10 bg-mav-panel px-3 py-2 font-medium border-b border-mav-line whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -137,6 +141,17 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
                       aria-label={`Clear ${r.company_name || 'opportunity'}`} />
                   </td>
                   <td className="px-3 py-2">{r.company_name || '—'}</td>
+                  {/* An unowned row says so rather than showing a blank: "no PM" is the
+                      thing an admin most needs to see, and a dash reads as a rendering
+                      slip. The AM is the fallback, because a deal with no PM yet usually
+                      still has the person who sold it on it. */}
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {r.pm_owner
+                      ? r.pm_owner
+                      : r.sales_person
+                        ? <span className="text-mav-muted">{r.sales_person} <span className="text-[10px]">(AM)</span></span>
+                        : <span className="text-amber-400/80">no PM</span>}
+                  </td>
                   <td className="px-3 py-2 tabular-nums">{usd(r.est_value)}</td>
                   <td className="px-3 py-2 text-mav-muted whitespace-nowrap">{r.opened || '—'}</td>
                   <td className="px-3 py-2 font-mono text-[11px] text-mav-muted whitespace-nowrap">{r.app_opportunity_no || '—'}</td>
