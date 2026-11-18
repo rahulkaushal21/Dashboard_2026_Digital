@@ -5,7 +5,7 @@ import KPICard from '@/components/KPICard'
 import { KPIRow, Segments, Panel, FilterBar } from '@/components/PageParts'
 import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
-import { getCrossSells, getCrossSellCandidates, type CrossSell, type CrossSellCandidate } from '@/lib/supabase'
+import { getCrossSells, type CrossSell } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Cross Sell — business a PM opened from their own mailbox.
@@ -91,7 +91,6 @@ export default function CrossSellPage() {
   const [all, setAll] = useState<CrossSell[]>([])
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState('')
-  const [cands, setCands] = useState<CrossSellCandidate[]>([])
 
   const now = useMemo(() => new Date(), [])
   const ranges = useMemo(() => RANGES(now), [now])
@@ -117,10 +116,6 @@ export default function CrossSellPage() {
     return () => { live = false }
   }, [from, to])
 
-  // Candidates do not follow the date window: they are a to-do list, and a cross-sell
-  // nobody has written up is worth seeing whichever months you happen to be looking at.
-  // Fetched separately so a slow read never holds the figures back.
-  useEffect(() => { getCrossSellCandidates().then(setCands).catch(() => setCands([])) }, [])
 
   // Each row carries its own department, so the business-unit switch applies the same way
   // it does to a booked line.
@@ -250,8 +245,8 @@ export default function CrossSellPage() {
           sub={loading ? undefined : <span className="text-[11px]">across {clients} {clients === 1 ? 'client' : 'clients'}</span>} />
         <KPICard tone="default" label="PMs selling" value={loading ? '…' : String(byPm.length)}
           sub={loading ? undefined : <span className="text-[11px]">{byPm[0] ? `${byPm[0].pm} leads with ${fmtUsd(byPm[0].usd)}` : 'nobody yet'}</span>} />
-        <KPICard tone="amber" label="Sent, no answer" value={loading ? '…' : String(open.length)}
-          sub={loading ? undefined : <span className="text-[11px]">proposals still unanswered</span>} />
+        <KPICard tone="amber" label="Pitched, not bought" value={loading ? '…' : String(open.length)}
+          sub={loading ? undefined : <span className="text-[11px]">offered, no sale yet</span>} />
       </KPIRow>
 
       {/* Outside the loading gate on purpose: changing a date refetches, and controls that
@@ -376,20 +371,23 @@ export default function CrossSellPage() {
                 </tbody>
               </table>
             </div>
-            {/* Proposals a PM sent that nobody has answered. Kept beside the closed ones
-                because an unanswered cross-sell is the thing worth chasing, and on its own
-                page it would never be looked at. Deliberately outside the table: they have
-                no billable figure, so they must not be pasted into the tracker. */}
+            {/* A cross-sell that was made and did not land. Kept beside the ones that
+                did, because the effort was the same and an unsold pitch is the thing
+                worth chasing; on a page of its own it would never be looked at. Outside
+                the table on purpose: there is nothing to bill, so it must not reach the
+                tracker. */}
             {open.length > 0 && (
               <div className="border-t border-mav-line px-4 py-3 text-xs">
-                <div className="text-mav-fg/80 font-medium mb-1">
-                  Sent, no answer yet — {open.length}. Not in the copy: there is nothing to bill yet.
+                <div className="text-mav-fg/80 font-medium mb-1.5">
+                  Pitched, not bought — {open.length}. Not in the copy: there is nothing to bill yet.
                 </div>
-                <ul className="space-y-0.5">
+                <ul className="space-y-1.5">
                   {open.map(r => (
                     <li key={r.id} className="text-mav-muted">
-                      <span className="text-mav-fg">{r.client}</span> · {r.project} — {r.pm},
-                      &ldquo;{r.mail_subject}&rdquo; {pretty(r.mail_date)}
+                      <span className="text-mav-fg">{r.pm}</span> → <span className="text-mav-fg">{r.client}</span>
+                      {' · '}{r.project}
+                      {' — '}&ldquo;{r.mail_subject}&rdquo; {pretty(r.mail_date)}
+                      {r.note ? <div className="opacity-70">{r.note}</div> : null}
                     </li>
                   ))}
                 </ul>
@@ -397,53 +395,6 @@ export default function CrossSellPage() {
             )}
           </Panel>
 
-          {/* Found by the refresh chain, judged by nobody yet.
-
-              This is the half that keeps the page from aging into a snapshot: the chain
-              re-runs the finder on every refresh, so a cross-sell made next month shows
-              up here without anyone going looking. What it CANNOT do is the judgement —
-              it knows a PM opened a commercial thread and that the client booked soon
-              after, not whether the booking is the work the mail pitched. In October
-              twelve clients got the security mail, bought nothing from it, and booked
-              $29k of retainers that were already running; all twelve would appear here.
-              So candidates sit outside every total on this page and are never copied into
-              the tracker. Confirming one means writing it into cross_sells, which also
-              removes it from this list. */}
-          {cands.length > 0 && (
-            <Panel flush className="mt-6" title="Candidates — not counted"
-              info={<>A PM opened a thread with a commercial subject and that client booked within 60 days. That is a <b>question</b>, not a cross-sell: the finder cannot tell whether what they booked is the work the mail pitched, which is the judgement the list exists to record. Nothing here is in any figure above, and nothing here is copied to the tracker. The refresh chain rebuilds this on every run, so new ones appear on their own.</>}
-              right={<span className="text-xs text-mav-muted">{cands.length} to look at · rebuilt each refresh</span>}>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="text-left text-mav-fg/70 border-b border-mav-line">
-                    <tr>
-                      <th className={th}>PM</th>
-                      <th className={th}>Client</th>
-                      <th className={th}>BU</th>
-                      <th className={th}>Mail</th>
-                      <th className={th}>Sent</th>
-                      <th className={`${th} text-right`}>Client booked</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cands.map(c => (
-                      <tr key={`${c.pm}|${c.client}|${c.mail_subject}|${c.mail_date}`}
-                        className="border-b border-mav-line/60 last:border-0 align-top">
-                        <td className={td}>{c.pm}</td>
-                        <td className={td}>{c.client}</td>
-                        <td className={`${td} text-mav-muted`}>{c.service_dept || '—'}</td>
-                        <td className="px-3 py-3"><div className="max-w-lg break-words">&ldquo;{c.mail_subject}&rdquo;</div></td>
-                        <td className={`${td} text-mav-muted`}>{pretty(c.mail_date)}</td>
-                        {/* The client's whole booking in the window, NOT the value of this
-                            cross-sell — which is unknown until somebody judges it. */}
-                        <td className={`${td} text-right tabular-nums text-mav-muted`}>{fmtUsd(c.client_booked_usd)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-          )}
         </>
       )}
     </div>

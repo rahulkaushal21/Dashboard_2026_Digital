@@ -984,6 +984,43 @@ Process it in batches: `email_inbox where processed=false and has_external=true 
 oldest-first by thread — same classify/dedup rules as the live scan. Heartbeat those runs under
 source `gmail-backfill-classify` so the live freshness clock stays clean.
 
+## Cross-sell — clear the queue, every run
+
+`cross_sell_queue` is business a PM opened from their OWN mailbox that nobody has judged
+yet. The refresh chain refills it; **you empty it**. The page shows answers, never the
+queue, so a row left unjudged is simply invisible — it does not sit there looking at
+anybody.
+
+```sql
+select pm, client, service_dept, mail_subject, mail_date, client_booked_usd
+from public.cross_sell_queue order by mail_date desc;
+```
+
+For each row, read the thread and the client's booked lines in the 60 days after, then
+write ONE of three things. Never leave it.
+
+**It is a cross-sell only if the PM offered something the client had not asked for.** An
+advisory, an audit, a proposal, a plan, a chase on their own unanswered quote. A routine
+monthly maintenance report is NOT a pitch, nor is a delivery note, an access request or
+minutes of a meeting — those are the bulk of what the finder turns up, because it only
+sees the subject line.
+
+| Judgement | Where it goes |
+|---|---|
+| Pitched **and bought** — a booked line is the work the mail pitched | `cross_sells`, `status='closed'`, `amount_usd` = the booked figure, one row per booked line |
+| Pitched and **not** bought | `cross_sells`, `status='open'`, `amount_usd=0`, `project` = what was offered |
+| Not a pitch at all | `cross_sell_dismissals` with a `reason` |
+
+**The trap, and it is the whole job:** a client who was mailed and then booked something
+has usually booked a retainer that was already running. In October twelve clients got the
+same security advisory, bought none of it, and booked $29k of standing retainers inside
+the window. Crediting those would have tripled the figure and meant nothing. Ask *"is the
+booked line the work the mail pitched?"* — not *"did they buy something afterwards?"*
+
+Fill `client_name`, `client_email` and `client_type` from the booked line, and spell
+`service_dept` as WEB-US / WEB-AU / WEB-UK / LP / HUB or the row drops out of the business-
+unit switch. Judging a row removes it from the queue immediately.
+
 ## What feeds each dashboard surface
 | Surface | Table | Step |
 |---|---|---|
@@ -998,6 +1035,7 @@ source `gmail-backfill-classify` so the live freshness clock stays clean.
 | Forecast | `web_revenue` + `quotes` (computed in-page) | nothing — live on load |
 | Client-name merges | `client_aliases` kind='merge' | 1 `canonicalise_client_names()` |
 | Freshness clock | `sync_runs` | 8 heartbeat |
+| Cross Sell | `cross_sells` (+ `cross_sell_dismissals`) | this step, from `cross_sell_queue` |
 
 ## Tokens (keep private, never echo)
 sheet-sync `syncWebHubLP_8f3a91` · scan-api `scanApiHub_5d9c31` · ingest `ingestWebHub_a7c2e9`
