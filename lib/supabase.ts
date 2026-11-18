@@ -2940,6 +2940,51 @@ export async function getCrossSells(fromMonth: string, toMonth: string): Promise
   return ((data as any[]) || []).map(r => ({ ...r, amount_usd: Number(r.amount_usd ?? 0) })) as CrossSell[]
 }
 
+/**
+ * The Web lead's scorecard — the Web PM team's work read three ways, one row per
+ * financial quarter. Defined in SQL (migration 183) rather than here, so the definitions
+ * of NBD and Repeat live in one place instead of being restated in TypeScript.
+ */
+export interface WebLeadKpi {
+  qkey: string
+  qlabel: string
+  quarter_start: string
+  nbd_quotes: number
+  nbd_booked: number
+  nbd_lost: number
+  nbd_open: number
+  /** The headline: booked ÷ everything raised. Null when nothing was raised. */
+  nbd_pct_raised: number | null
+  nbd_pct_decided: number | null
+  nbd_quoted_usd: number | null
+  nbd_booked_usd: number | null
+  rep_quotes: number
+  rep_won: number
+  rep_lost: number
+  rep_open: number
+  rep_pct_raised: number | null
+  rep_pct_decided: number | null
+  rep_quoted_usd: number | null
+  rep_won_usd: number | null
+  /** Quotes whose AM matched no directory spelling. Should be 0; if not, Repeat is short. */
+  rep_unmatched: number
+  web_usd: number | null
+}
+
+export async function getWebLeadKpis(): Promise<WebLeadKpi[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('web_lead_kpis').select('*').order('quarter_start')
+  const n = (v: any) => (v === null || v === undefined ? null : Number(v))
+  return ((data as any[]) || []).map(r => ({
+    ...r,
+    nbd_pct_raised: n(r.nbd_pct_raised), nbd_pct_decided: n(r.nbd_pct_decided),
+    nbd_quoted_usd: n(r.nbd_quoted_usd), nbd_booked_usd: n(r.nbd_booked_usd),
+    rep_pct_raised: n(r.rep_pct_raised), rep_pct_decided: n(r.rep_pct_decided),
+    rep_quoted_usd: n(r.rep_quoted_usd), rep_won_usd: n(r.rep_won_usd),
+    web_usd: n(r.web_usd),
+  })) as WebLeadKpi[]
+}
+
 export async function saveBookingTarget(month: string, dept: TargetDept, usd: number, updatedBy: string, note?: string): Promise<{ error?: string }> {
   if (!supabase) return { error: 'Supabase not configured' }
   if (!(usd >= 0)) return { error: 'A target cannot be negative.' }

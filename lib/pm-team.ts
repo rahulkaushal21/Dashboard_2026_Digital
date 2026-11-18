@@ -33,6 +33,15 @@ export interface PmMember {
    * Replace with that feed rather than re-typing when it is wired up.
    */
   lastYearAvg: number
+  /**
+   * A LEAD, not a PM: no deal carries their name, so the PM scorecard would read as a
+   * row of zeros. Their page shows the team's numbers instead (web_lead_kpis) and the
+   * comparison grid leaves them out, or the team average would be dragged by a member
+   * who was never meant to carry deals.
+   */
+  lead?: true
+  /** Which team a lead reads. Only meaningful with `lead`. */
+  leads?: 'web'
 }
 
 export const PM_TEAM: PmMember[] = [
@@ -51,6 +60,11 @@ export const PM_TEAM: PmMember[] = [
   // his rows to Rahul Jain. Confirmed by the user: keep them apart.
   { name: 'Rahul Jain', slug: 'rahul-jain', email: 'rahul.j@mavlers.com', aliases: ['rahul jain'], lastYearAvg: 5738 },
   { name: 'Sankalp Waman Bhoyar', slug: 'sankalp-waman-bhoyar', email: 'sankalp@mavlers.com', aliases: ['sankalp waman bhoyar', 'sankalp bhoyar', 'sankalp'], lastYearAvg: 16224 },
+  // The Web lead. Deliberately last, and deliberately WITHOUT 'rahul' as an alias — see
+  // the note on Rahul Jain above; a bare first-name match would move deals between two
+  // different people. lastYearAvg is 0 because the Growth KPI on this page is the Web
+  // business quarter over quarter, not a personal booking average.
+  { name: 'Rahul Kaushal', slug: 'rahul-kaushal', email: 'web@uplers.com', aliases: ['rahul kaushal'], lastYearAvg: 0, lead: true, leads: 'web' },
 ]
 
 /**

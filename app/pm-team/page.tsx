@@ -55,7 +55,11 @@ export default function PmTeam() {
   // Admins see the whole team; a PM sees only themselves; anyone who is neither
   // sees nothing here. Memoised — a fresh array each render would re-run the
   // whole grid computation.
-  const roster = useMemo(() => (isAdmin ? PM_TEAM : me ? [me] : []), [isAdmin, me])
+  // Leads are left out of the comparison grid: they carry no deals, so a row for them
+  // would be zeros and would drag the team average. Their own page has their numbers.
+  const roster = useMemo(
+    () => (isAdmin ? PM_TEAM.filter(m => !m.lead) : me && !me.lead ? [me] : []),
+    [isAdmin, me])
 
   // ── Business unit ───────────────────────────────────────────────────────────
   // Scoped at the source (see usePmData), so every scorecard figure follows the switch.
