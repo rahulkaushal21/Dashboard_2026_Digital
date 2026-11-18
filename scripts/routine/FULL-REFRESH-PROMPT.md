@@ -287,6 +287,19 @@ or a portal rather than mail.
 >     carried a AUD 390 HubSpot thank-you landing page quoted by LP — it was wrongly skipped as
 >     "email team" work.)
 >     Only track a genuine NEW paid scope. When unsure, leave it **off** the board.
+>   - **A recurring monthly line is NEVER an opportunity.** Monthly maintenance, Dedicated resources,
+>     hour blocks and retainers already live as `origin='recurring'` rows that the PMs roll forward
+>     each month (99 of them for Oct and Nov 2026, all Won, each feeding `web_project_ledger`). A
+>     thread about one of them ("Maintenance Nov", "Dedicated", "10 hrs/month", "Package 1", a PM
+>     asking for the month's invoice) is not a quote, so the scan must not raise a row for it and
+>     must not add one on the thread's approval. It overlaps the real quotes and counts a monthly
+>     line as a deal twice. Check `select id, source_subject from opportunities where origin='recurring'
+>     and lower(company_name)=lower('<client>')` first; if the line is there, add nothing and say
+>     "recurring line, no row" in the heartbeat. Only a FIRST-TIME retainer proposal (the client has
+>     no recurring row yet) may be raised, and only while it is still a proposal. Found on 18 Nov
+>     2026: Telfer Digital "JCB Maintainence 22 website" USD 3,125 (3290409) was the Nov set of
+>     recurring lines (2,750 + 125 x 3) raised again as one quote, and Hunter PR "Package 1, 10 h a
+>     month" (3332118) was the Nov line 3333959. (Pratik, 18 Nov 2026.)
 >   - **A work request that reaches `lp@mavlers.com` or `hub@mavlers.com` IS an opportunity.**
 >     These are the shared team inboxes, so a request landing there (To or Cc) is put on the
 >     board whether the client sent it directly or an internal AM/CSM/other team forwarded it.

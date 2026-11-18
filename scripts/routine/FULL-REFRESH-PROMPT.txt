@@ -42,6 +42,46 @@ Disabled pg_cron jobs: 1, 2, 7, 10. DELETED (gone from cron.job entirely): 3 and
 unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 select jobid, jobname, active from cron.job order by jobid; rather than guessing.
 
+### LP and HUB ARE being scanned — their quiet is real
+
+Asked 16 Nov 2026: "are we reviewing everything from Pratik's team?" Measured twice,
+because the first measurement was wrong and said no.
+
+The wrong way to measure it. Capture reads reviewweb@uplers.com and the retired
+web@uplers.com, and lp@mavlers.com / hub@mavlers.com have never been connected —
+only 1.7% of messages touch those two aliases. Reading that as "LP/HUB are invisible" is
+the error: the alias is not how their mail arrives. The PMs are on the threads, and
+their own traffic lands in reviewweb in volume — Nitin 1,031 sent / 4,044 received,
+Pratik 249 / 4,732, Madhav 463 / 1,802, all current to today. Never judge coverage by a
+mailbox NAME; judge it by whether the clients' own domains appear.
+
+The right way. Take each active client's contact domain and ask whether any mail on
+that domain was captured in the last six months:
+
+| | Clients billed in 6mo | Mail captured | Coverage | Escalated | Of those watched |
+|---|---|---|---|---|---|
+| Web (US/AU/UK) | 159 | 151 | 95% | 25 | 16.6% |
+| LP | 31 | 28 | 90% | 0 | 0% |
+| HUB | 25 | 21 | 84% | 1 | 4.8% |
+
+Capture is near complete for every team. LP and HUB genuinely escalate far less than
+Web — a real result about those teams, and good news to report as such.
+
+MATCH AN EMAIL DOMAIN WITH A WILDCARD ON BOTH SIDES. The first pass at this table said
+55–70% coverage and "40% of clients have no mail", and it was wrong — the pattern was
+'%@'||dom with no trailing %. Addresses are stored as Name <user@domain>, so they
+end in > and nothing ever matched. Frogonline, whose thread I had read that morning,
+came back as having no captured mail: 0 hits against 10. Some contact_email values also
+carry a trailing \r, so btrim the domain before using it. Use
+e.from_addr ilike '%@'||dom||'%', and sanity-check any coverage figure against one
+client you KNOW has mail before believing the aggregate.
+
+Only 15 clients across all teams have no captured mail at all — 8 Web, 4 HUB, 3 LP — and
+most are small or last billed months ago. The ones worth a look if the question returns:
+Pure Flix (HUB, $21.9k), Caddie (WEB-AU, $20.1k), Precision Creative and Media (WEB-UK,
+$12.7k). Likely agency-billed under a different corresponding domain, or run over Slack
+or a portal rather than mail.
+
 ---
 
 ## THE PROMPT
@@ -253,6 +293,19 @@ Vendors never tracked: granth.info, granth.in, atharvasystem.com.
     carried a AUD 390 HubSpot thank-you landing page quoted by LP — it was wrongly skipped as
     "email team" work.)
     Only track a genuine NEW paid scope. When unsure, leave it off the board.
+  - A recurring monthly line is NEVER an opportunity. Monthly maintenance, Dedicated resources,
+    hour blocks and retainers already live as origin='recurring' rows that the PMs roll forward
+    each month (99 of them for Oct and Nov 2026, all Won, each feeding web_project_ledger). A
+    thread about one of them ("Maintenance Nov", "Dedicated", "10 hrs/month", "Package 1", a PM
+    asking for the month's invoice) is not a quote, so the scan must not raise a row for it and
+    must not add one on the thread's approval. It overlaps the real quotes and counts a monthly
+    line as a deal twice. Check select id, source_subject from opportunities where origin='recurring'
+    and lower(company_name)=lower('<client>') first; if the line is there, add nothing and say
+    "recurring line, no row" in the heartbeat. Only a FIRST-TIME retainer proposal (the client has
+    no recurring row yet) may be raised, and only while it is still a proposal. Found on 18 Nov
+    2026: Telfer Digital "JCB Maintainence 22 website" USD 3,125 (3290409) was the Nov set of
+    recurring lines (2,750 + 125 x 3) raised again as one quote, and Hunter PR "Package 1, 10 h a
+    month" (3332118) was the Nov line 3333959. (Pratik, 18 Nov 2026.)
   - A work request that reaches lp@mavlers.com or hub@mavlers.com IS an opportunity.
     These are the shared team inboxes, so a request landing there (To or Cc) is put on the
     board whether the client sent it directly or an internal AM/CSM/other team forwarded it.
@@ -472,6 +525,41 @@ not yet pushed), and any figure you converted or inferred rather than read — n
 derived number as if the client sent it.
 
 ---
+
+## Escalation learnings — summarise what the three of them wrote
+
+Krunal Shah, Hiren Purohit and Pratik Bhatt write a learning on each critical escalation,
+in the drawer on /critical-escalations. There is no model wired into the dashboard: the
+summary and the action steps are YOUR job, on each refresh. Added 16 Nov 2026.
+
+ONE LEARNING PER CLIENT, keyed on client_key — the canonical name key, lowercase and
+alphanumeric only, the same one the listing groups its rows by. Not one per thread: a
+client's escalations are usually the same story told again.
+
+Find the ones waiting. select client_key, company_name, learning, created_at from
+escalation_learnings where ai_summary is null order by created_at — a revision clears the
+old summary, so an edited learning comes back round and must be re-read, not skipped.
+
+Write two things per row, through the write guard
+(with u as (update escalation_learnings set … returning *) select * from u):
+- ai_summary — one or two sentences: the CAUSE underneath, not a retelling of the
+  incident. The person reading it already knows what happened; they want to know what it
+  was really about.
+- ai_actions — a text[] of concrete steps, each one something a named person could do
+  this week. Not "improve communication". If the learning does not support any, write an
+  empty array rather than inventing one — a made-up action step is worse than none,
+  because somebody will be asked about it.
+- ai_at = now(), ai_by = the model name.
+
+Read the escalations, not just the learning. Join critical_escalations on
+client_key(company_name) = l.client_key — that is ALL of the client's escalations, which
+is the point: the lesson is about the pattern, and the summary should be grounded in what
+actually happened rather than in one person's sentence about it.
+
+And check the watch. select * from web_escalation_learning_watch where
+still_escalating lists clients who escalated again AFTER a lesson was written. Say these
+in the pulse by name — a learning that did not hold is worth more attention than a new
+escalation, and nobody will go looking for it. Say nothing when the list is empty.
 
 ## Currency
 The board is USD. A quote in another currency (NZD/AUD/GBP/EUR) must be converted before it goes
