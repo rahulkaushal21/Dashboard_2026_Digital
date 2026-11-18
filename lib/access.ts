@@ -103,6 +103,7 @@ export const PAGES: { href: string; label: string }[] = [
   { href: '/sql-leads', label: 'SQL / Leads' },
   { href: '/invoices', label: 'Invoices & Reconciliation' },
   { href: '/business-numbers', label: 'Business Numbers' },
+  { href: '/cross-sell', label: 'Cross Sell' },
   // Forecast is no longer offered on its own — it is a tab inside Business Trend. The
   // route stays in this list so an old bookmark still resolves rather than bouncing
   // somebody to the dashboard, and so the route guard keeps covering it.

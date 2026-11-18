@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator, Receipt, Activity, MessageSquare, ClipboardList, Coins } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Briefcase, Users, AlertTriangle, Siren, Sparkles, Target, TrendingUp, LineChart, History, Archive, LogOut, BarChart3, GraduationCap, ChevronDown, ChevronRight, UserCog, Settings, Table2, PieChart, Zap, Wrench, Calculator, Receipt, Activity, MessageSquare, ClipboardList, Coins, Handshake } from 'lucide-react'
 import { useAuth } from './AuthProvider'
 import { canSee } from '@/lib/access'
 import ThemeToggle from './ThemeToggle'
@@ -64,6 +64,7 @@ const nav: Entry[] = [
     label: 'Business Reports', icon: BarChart3, children: [
       { href: '/invoices', label: 'Invoices & Reconciliation', icon: Receipt },
       { href: '/business-numbers', label: 'Business Numbers', icon: LineChart },
+      { href: '/cross-sell', label: 'Cross Sell', icon: Handshake },
       { href: '/business-trend', label: 'Business Trend', icon: TrendingUp },
       { href: '/last-year', label: 'Comparison', icon: History },
       { href: '/sql-leads', label: 'SQL / Leads', icon: Target },

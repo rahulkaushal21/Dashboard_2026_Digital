@@ -1,5 +1,5 @@
 'use client'
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
 import type { CardDetails, DetailCol } from '@/components/CardDetail'
@@ -10,7 +10,7 @@ import { useUnit } from '@/components/BusinessUnitProvider'
 import { inUnit } from '@/lib/business-unit'
 
 import Link from 'next/link'
-import { getBusinessNumbers, getBigOpenDeals, getOpportunityDepts, getMonthDateMismatches, getBookingTargets, getCrossSells, BIZ_ORDER, type BizRow, type MonthDateMismatch, type Opportunity, type BookingTarget, type CrossSell } from '@/lib/supabase'
+import { getBusinessNumbers, getBigOpenDeals, getOpportunityDepts, getMonthDateMismatches, getBookingTargets, BIZ_ORDER, type BizRow, type MonthDateMismatch, type Opportunity, type BookingTarget } from '@/lib/supabase'
 import { fmtUsd } from '@/lib/metrics'
 
 // Business Numbers — the month, by service, for somebody who runs the business.
@@ -110,33 +110,6 @@ const Against = ({ now, target }: { now: number; target: number | null }) => {
 
 // The first day of every month the window touches, so a two-month range reads against
 // two months of target.
-// The cross-sell tracker dates a row by its month, written out as a day — 01-10-2026.
-const dmy = (v?: string) => {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v || '')
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : ''
-}
-
-/**
- * The cross-sell tracker's ten columns, in its order.
- *
- * Defined once and read by the table, the clipboard and the CSV, so what is on screen is
- * exactly what gets pasted. A separate export builder is how an export quietly drifts
- * from the page it claims to export.
- */
-const XSELL_COLS: { label: string; get: (r: CrossSell) => string; num?: boolean; wide?: boolean }[] = [
-  { label: 'Month (DD-MM-YYYY)', get: r => dmy(r.booking_month) },
-  { label: 'Company Name', get: r => r.client },
-  { label: 'Client Name', get: r => r.client_name || '' },
-  { label: 'Client Email ID', get: r => r.client_email || '' },
-  { label: 'Agency / Direct', get: r => r.client_type || '' },
-  { label: 'PC/SME Name', get: r => r.pm },
-  { label: 'BU Name', get: r => r.service_dept || '' },
-  { label: 'Cross Sell Service Name', get: r => r.project, wide: true },
-  { label: 'Email Subject line', get: r => r.mail_subject, wide: true },
-  // Plain digits, no $ and no thousands separator: the cell has to arrive as a number.
-  { label: 'Invoice Billable (USD) - RFQ', get: r => r.amount_usd.toFixed(2), num: true },
-]
-
 const monthsIn = (from: string, to: string): string[] => {
   const out: string[] = []
   const a = new Date(+from.slice(0, 4), +from.slice(5, 7) - 1, 1)
@@ -165,7 +138,6 @@ export default function BusinessNumbers() {
   // The month's booking targets, typed in Settings → Targets. Fetched for every month the
   // window touches; a service with no row has no target and the table says so.
   const [targets, setTargets] = useState<BookingTarget[]>([])
-  const [xsellAll, setXsellAll] = useState<CrossSell[]>([])
   // Normally empty, and then this renders nothing at all.
   const [mismatchAll, setMismatch] = useState<MonthDateMismatch[]>([])
   // The sheet rows carry their service department, so the warning follows the switch too.
@@ -193,10 +165,6 @@ export default function BusinessNumbers() {
     if (!from || !to || from > to) return
     const ms = monthsIn(from, to)
     getBookingTargets(ms[0], ms[ms.length - 1]).then(setTargets).catch(() => setTargets([]))
-    // A cross-sell is dated by the month its revenue lands in, so it follows the same
-    // window as everything else on the page — but by whole months, since that is the only
-    // date it has. A narrow window inside one month shows that month's cross-sells.
-    getCrossSells(ms[0], ms[ms.length - 1]).then(setXsellAll).catch(() => setXsellAll([]))
   }, [from, to])
 
   // Sum of the window's months for a service, or null when none of them has a target.
@@ -240,62 +208,6 @@ export default function BusinessNumbers() {
   const thisLabel = w ? `${dayLabel(w.this_start)} – ${dayLabel(w.this_end)}` : ''
   const prevLabel = w ? `${dayLabel(w.prev_start)} – ${dayLabel(w.prev_end)}` : ''
   const maxRev = Math.max(...shown.map(r => Math.max(r.this_revenue, r.prev_revenue)), 1)
-
-  // ── Cross-sells ───────────────────────────────────────────────────────────────
-  // Each row carries its own department, so the business-unit switch applies the same
-  // way it does to a booked line.
-  const xsell = useMemo(() => xsellAll.filter(r => inUnit(r.service_dept, unit)), [xsellAll, unit])
-  const xsellClosed = useMemo(() => xsell.filter(r => r.status === 'closed'), [xsell])
-  const xsellOpen = useMemo(() => xsell.filter(r => r.status === 'open'), [xsell])
-  const xsellTotal = useMemo(() => xsellClosed.reduce((a, r) => a + r.amount_usd, 0), [xsellClosed])
-  // Grouped by PM, biggest first: whose mailbox it came from is the question this panel
-  // is read for. Within a PM, biggest line first.
-  const xsellByPm = useMemo(() => {
-    const m = new Map<string, { pm: string; usd: number; rows: CrossSell[] }>()
-    for (const r of xsellClosed) {
-      const e = m.get(r.pm) || { pm: r.pm, usd: 0, rows: [] as CrossSell[] }
-      e.usd += r.amount_usd
-      e.rows.push(r)
-      m.set(r.pm, e)
-    }
-    return [...m.values()]
-      .map(e => ({ ...e, rows: [...e.rows].sort((a, b) => b.amount_usd - a.amount_usd) }))
-      .sort((a, b) => b.usd - a.usd)
-  }, [xsellClosed])
-  const xsellClients = useMemo(() => new Set(xsellClosed.map(r => r.client)).size, [xsellClosed])
-
-  // Copy pastes the ROWS ONLY, tab-separated — the tracker already has its header, and a
-  // header pasted under one becomes a data row somebody has to delete. Tabs rather than
-  // commas because a paste into Sheets or Excel splits on tabs without an import step,
-  // and three of these columns (service name, subject) routinely contain a comma.
-  const [copied, setCopied] = useState('')
-  const copyXsell = async () => {
-    const clean = (v: string) => v.replace(/[\t\r\n]+/g, ' ').trim()
-    const tsv = xsellClosed.map(r => XSELL_COLS.map(c => clean(c.get(r))).join('\t')).join('\n')
-    try {
-      await navigator.clipboard.writeText(tsv)
-      setCopied(`${xsellClosed.length} copied`)
-    } catch {
-      // Clipboard is blocked without https or a user gesture in some browsers; say so
-      // rather than leaving a button that silently does nothing.
-      setCopied('Copy blocked — use CSV')
-    }
-    setTimeout(() => setCopied(''), 2500)
-  }
-
-  const exportXsell = () => {
-    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
-    const head = XSELL_COLS.map(c => esc(c.label)).join(',')
-    const body = xsellClosed.map(r => XSELL_COLS.map(c => esc(c.get(r))).join(','))
-    // The BOM is what makes Excel read the em dashes and accented names as UTF-8 rather
-    // than as mojibake.
-    const blob = new Blob(['﻿' + [head, ...body].join('\r\n')], { type: 'text/csv;charset=utf-8' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `cross-sell-${from}-to-${to}.csv`
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
 
   const activeRange = ranges.find(r => r.from === from && r.to === to)?.key || ''
 
@@ -496,99 +408,6 @@ export default function BusinessNumbers() {
             </table>
           </div>
           </Panel>
-
-          {/* Business the delivery side opened. Silent when there is none in the window:
-              an empty panel on a leadership page reads as a failure rather than as a
-              month nobody has written up yet.
-
-              THE COLUMNS ARE THE TRACKER'S COLUMNS, in the tracker's order, so a copy
-              lands in the right cells with nothing to rearrange. Table, clipboard and CSV
-              all read XSELL_COLS, so what is on screen is exactly what gets pasted. */}
-          {xsell.length > 0 && (
-          <Panel flush className="mb-6" title="Cross-sell"
-            info={<>Work a <b>PM</b> opened from their own mailbox, not the account manager &mdash; a proposal, a health check or a security advisory sent to a client who had not asked. <b>Done and closed</b> means the client said yes and the revenue is booked, so every figure here is also a line in the project ledger. Attribution is written down by hand, not derived: it is kept only where a booked line names the work the mail pitched, because &ldquo;mailed, then bought something&rdquo; credits a campaign with retainers that were already running.</>}
-            right={
-              <span className="flex flex-wrap items-center gap-3 text-xs text-mav-muted">
-                <span>
-                  {fmtUsd(xsellTotal)} closed &middot; {xsellClosed.length} {xsellClosed.length === 1 ? 'line' : 'lines'} across {xsellClients} {xsellClients === 1 ? 'client' : 'clients'}
-                  {xsellOpen.length > 0 && <> &middot; {xsellOpen.length} still open</>}
-                </span>
-                <button onClick={copyXsell} disabled={xsellClosed.length === 0}
-                  className="rounded-md border border-mav-line px-2 py-1 hover:bg-mav-dark disabled:opacity-40">
-                  {copied || 'Copy rows'}
-                </button>
-                <button onClick={exportXsell} disabled={xsellClosed.length === 0}
-                  className="rounded-md border border-mav-line px-2 py-1 hover:bg-mav-dark disabled:opacity-40">
-                  CSV
-                </button>
-              </span>}>
-          {/* Per PM, since the rows themselves are flat — grouping headers inside the
-              table would be copied along with the data and land in the sheet as junk. */}
-          {xsellByPm.length > 0 && (
-            <div className="px-4 pt-3 text-xs text-mav-muted">
-              {xsellByPm.map((g, i) => (
-                <span key={g.pm}>
-                  {i > 0 && <span className="mx-1.5">&middot;</span>}
-                  <span className="text-mav-fg">{g.pm}</span> {fmtUsd(g.usd)}
-                  {xsellTotal > 0 && <span className="opacity-70"> ({Math.round((g.usd / xsellTotal) * 100)}%)</span>}
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="text-left text-mav-fg/70 border-b border-mav-line">
-                <tr>
-                  {XSELL_COLS.map(c => (
-                    <th key={c.label} className={`${th} ${c.num ? 'text-right' : ''}`}>{c.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {xsellClosed.map(r => (
-                  <tr key={r.id} className="border-b border-mav-line/60 last:border-0 align-top">
-                    {XSELL_COLS.map(c => (
-                      <td key={c.label}
-                        className={c.wide ? 'px-3 py-3' : `${td} ${c.num ? 'text-right tabular-nums' : ''}`}>
-                        {c.wide
-                          ? <div className="max-w-sm break-words">{c.get(r)}</div>
-                          : c.get(r) || <span className="text-mav-muted">&mdash;</span>}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-                {xsellClosed.length === 0 && (
-                  <tr><td colSpan={XSELL_COLS.length} className="px-3 py-6 text-center text-mav-muted">Nothing closed in this window.</td></tr>
-                )}
-                {xsellClosed.length > 0 && (
-                  <tr className="bg-mav-dark/40">
-                    <td className={`${td} font-semibold`} colSpan={XSELL_COLS.length - 1}>Total</td>
-                    <td className={`${td} text-right tabular-nums font-semibold`}>{fmtUsd(xsellTotal)}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          {/* Proposals a PM sent that nobody has answered. Kept beside the closed ones
-              because an unanswered cross-sell is the thing worth chasing, and on its own
-              panel it would never be looked at. Deliberately outside the table: they have
-              no billable figure, so they must not be pasted into the tracker. */}
-          {xsellOpen.length > 0 && (
-            <div className="border-t border-mav-line px-4 py-3 text-xs">
-              <div className="text-mav-fg/80 font-medium mb-1">
-                Sent, no answer yet &mdash; {xsellOpen.length}. Not in the copy: there is nothing to bill yet.
-              </div>
-              <ul className="space-y-0.5">
-                {xsellOpen.map(r => (
-                  <li key={r.id} className="text-mav-muted">
-                    <span className="text-mav-fg">{r.client}</span> &middot; {r.project} &mdash; {r.pm}, &ldquo;{r.mail_subject}&rdquo; {dayLabel(r.mail_date)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          </Panel>
-          )}
 
           {/* Where the next month comes from. Open, priced, biggest first. */}
           <Panel flush title="Biggest open opportunities"
