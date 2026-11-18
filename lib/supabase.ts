@@ -2897,6 +2897,49 @@ export async function getBookingTargets(fromMonth: string, toMonth: string): Pro
   return ((data as any[]) || []).map(r => ({ ...r, target_usd: Number(r.target_usd ?? 0) })) as BookingTarget[]
 }
 
+// ── Cross-sells ───────────────────────────────────────────────────────────────────
+// Business a PM opened from their own mailbox. Hand-attributed rather than derived: see
+// migration 175 for why a query cannot tell a cross-sell from a client who happened to
+// buy something in the same fortnight.
+
+export interface CrossSell {
+  id: number
+  /** First day of the month the revenue lands in, YYYY-MM-DD. */
+  booking_month: string
+  /** The tracker's "PC/SME Name". */
+  pm: string
+  /** The tracker's "Company Name". */
+  client: string
+  /** The person mailed — the tracker's "Client Name". */
+  client_name?: string | null
+  client_email?: string | null
+  /** 'Agency' or 'Direct', spelled as the tracker spells it. */
+  client_type?: string | null
+  /** The tracker's "BU Name". */
+  service_dept?: string | null
+  /** The tracker's "Cross Sell Service Name". */
+  project: string
+  engagement?: string | null
+  /** The BOOKED figure, USD. Zero on an open proposal. */
+  amount_usd: number
+  confirmed_on?: string | null
+  /** The subject line that earned it. */
+  mail_subject: string
+  mail_date: string
+  /** 'closed' is done and booked; 'open' is a proposal with no answer yet. */
+  status: 'closed' | 'open'
+  note?: string | null
+}
+
+/** Cross-sells whose revenue lands between two months (YYYY-MM-01), newest first. */
+export async function getCrossSells(fromMonth: string, toMonth: string): Promise<CrossSell[]> {
+  if (!supabase) return []
+  const { data } = await supabase.from('cross_sells').select('*')
+    .gte('booking_month', fromMonth).lte('booking_month', toMonth)
+    .order('booking_month', { ascending: false }).order('amount_usd', { ascending: false })
+  return ((data as any[]) || []).map(r => ({ ...r, amount_usd: Number(r.amount_usd ?? 0) })) as CrossSell[]
+}
+
 export async function saveBookingTarget(month: string, dept: TargetDept, usd: number, updatedBy: string, note?: string): Promise<{ error?: string }> {
   if (!supabase) return { error: 'Supabase not configured' }
   if (!(usd >= 0)) return { error: 'A target cannot be negative.' }
