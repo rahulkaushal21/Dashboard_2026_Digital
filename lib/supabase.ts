@@ -1482,6 +1482,31 @@ export async function confirmOpportunityFull(id: number, f: ConfirmFields): Prom
   return { ok: false, error: error.message, missing: m ? m[1].split(',').map(x => x.trim()) : undefined }
 }
 
+/**
+ * Fields a person fills in on a deal that is still open, because the email scan could not
+ * read them. undefined = leave alone; an empty string clears a text field. The database
+ * logs each change and marks the field as hand-set (migration 175). A Won deal is refused.
+ */
+export interface OpportunityEdits {
+  subject?: string; local_value?: number | null; currency?: string; win_probability?: number | null
+  service_dept?: string; project_type?: string; technology?: string; business_type?: string
+  geo?: string; sales_person?: string; pm_owner?: string; contact_email?: string
+  service_type?: string; delivery_type?: string; client_type?: string
+}
+export async function updateOpportunityFields(id: number, f: OpportunityEdits): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase || !id) return { ok: false, error: 'Supabase not configured' }
+  const t = (v?: string) => v === undefined ? null : v
+  const { error } = await supabase.rpc('update_opportunity_fields', {
+    p_id: id, p_subject: t(f.subject), p_local_value: f.local_value ?? null, p_currency: t(f.currency),
+    p_win_probability: f.win_probability ?? null,
+    p_service_dept: t(f.service_dept), p_project_type: t(f.project_type), p_technology: t(f.technology),
+    p_business_type: t(f.business_type), p_geo: t(f.geo), p_sales_person: t(f.sales_person),
+    p_pm_owner: t(f.pm_owner), p_contact_email: t(f.contact_email),
+    p_service_type: t(f.service_type), p_delivery_type: t(f.delivery_type), p_client_type: t(f.client_type),
+  })
+  return error ? { ok: false, error: error.message } : { ok: true }
+}
+
 /** What this deal still needs before it can be confirmed. Empty = ready. */
 export async function opportunityMissingFields(id: number): Promise<string[]> {
   if (!supabase || !id) return []

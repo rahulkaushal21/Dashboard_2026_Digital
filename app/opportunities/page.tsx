@@ -13,7 +13,7 @@ import KPICard from '@/components/KPICard'
 import CardDetail, { daysSince, fmtDay, type CardDetails } from '@/components/CardDetail'
 import { KPIRow, Segments, FilterBar, Panel, SectionTitle } from '@/components/PageParts'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
-import { ChevronDown, ChevronRight, Check, Pause, TrendingDown, XCircle, Ban, EyeOff, PanelRightOpen, Merge } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Pause, TrendingDown, XCircle, Ban, EyeOff, PanelRightOpen, Merge, Pencil } from 'lucide-react'
 import InfoTip from '@/components/InfoTip'
 import DateCell from '@/components/DateCell'
 import { getOpportunities, getOpportunityDepts, getCombineHistory, serviceOf, setOpportunityConfirmed, setOpportunityLost, setOpportunityUnlikely, setOpportunityState, mergeOpportunity, unmergeOpportunity, canConfirmLocally, getDirectoryMember, getClientOwners, ownerMatches, clientKey, type DirectoryMember, type Opportunity } from '@/lib/supabase'
@@ -23,6 +23,7 @@ import UnloggedQuotesBanner from '@/components/UnloggedQuotesBanner'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import BillTogetherDialog from '@/components/BillTogetherDialog'
 import MergeDealDialog from '@/components/MergeDealDialog'
+import EditOpportunityDialog from '@/components/EditOpportunityDialog'
 import type { DealSignal } from '@/lib/supabase'
 import MultiSelect from '@/components/MultiSelect'
 import { currentEmail, getStoredProfile } from '@/lib/access'
@@ -736,6 +737,7 @@ const [fromSignal, setFromSignal] = useState<DealSignal | null>(null)
 // merges outright (a confirmed deal carrying revenue, a project ID that does not exist)
 // and the refusal is the useful part, so the row only moves once the merge has landed.
 const [merging, setMerging] = useState<Opportunity | null>(null)
+const [editing, setEditing] = useState<Opportunity | null>(null)
 const doMerge = async (target: { into?: number; project?: string }, reason: string): Promise<string | null> => {
 const x = merging
 if (!x) return 'Nothing selected.'
@@ -1053,6 +1055,10 @@ return (
       // on the invoice rather than on one job's share of it.
       setConfirming({ ...primary, value: total, local_value: total, est_value: total })
     }} />
+)}
+{editing && (
+  <EditOpportunityDialog deal={editing} onClose={() => setEditing(null)}
+    onSaved={() => { setEditing(null); reload() }} />
 )}
 {merging && (
   <MergeDealDialog deal={merging}
@@ -1375,6 +1381,7 @@ return (
 {/* Deliberately beside Cancel, because it is the thing people were reaching for
     Cancel to do. A merged deal shows it filled, and clicking undoes the merge. */}
 {(live || x.merged) && <IconAction icon={Merge} tone="merge" label={x.merged ? (x.merged_project ? `Merged into project ${x.merged_project} — click to undo` : 'Merged as a duplicate — click to undo') : 'Merge — the same work as another deal or an existing project'} active={!!x.merged} disabled={busy} onClick={() => x.merged ? undoMerge(x) : setMerging(x)} />}
+{canPick(x) && <IconAction icon={Pencil} tone="open" label="Edit — fill in costing, project type, business type and other details the scan could not read" onClick={() => setEditing(x)} />}
 <IconAction icon={PanelRightOpen} tone="open" label="Open the full record" onClick={() => setSel(x)} />
 </div>
 )

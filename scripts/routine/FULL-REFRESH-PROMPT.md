@@ -344,6 +344,12 @@ or a portal rather than mail.
 >     Fyxer recaps of CLIENT calls (skip internal standups/scrums). Move `win_probability` by
 >     the call outcome, append the dated decision to `journey`, write a client-health signal.
 >     A recap for a client with no opp = a new lead.
+>   - **A field a PM set by hand is not yours to overwrite.** The Edit button on the Opportunities page
+>     (`update_opportunity_fields`, 18 Nov 2026) lets a PM fill in costing, project type, business type,
+>     technology, geography, win % and the rest. Each one is named in `opportunities.manual_fields` and logged
+>     in `opportunity_events` (event `edited`). Before you UPDATE an open deal, `select manual_fields from
+>     opportunities where id=...`: leave any field it lists exactly as it is, and mention in the heartbeat
+>     only if the email now disagrees (e.g. a newer RFQ price than the hand-set value). Blank fields are still yours to fill.
 >
 > **3b. APPROVAL SWEEP — every run, before step 4, never skipped.** A client approving a
 > quote is the one event that must never be missed, and the snippet triage in 3a is exactly
