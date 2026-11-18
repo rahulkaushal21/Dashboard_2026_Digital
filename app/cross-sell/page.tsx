@@ -69,7 +69,16 @@ const RANGES = (n: Date) => [
  * the ten columns the tracker already has — an existing sheet keeps working and gains a
  * column on the end rather than having its values move sideways.
  */
-const XSELL_COLS: { label: string; get: (r: CrossSell) => string; num?: boolean; wide?: boolean }[] = [
+const XSELL_COLS: {
+  label: string
+  /** The text. Used by the clipboard, the CSV and the search — never styled. */
+  get: (r: CrossSell) => string
+  /** Optional on-screen rendering. The copy still sends get(), so a coloured pill on the
+      page cannot change what lands in the spreadsheet. */
+  cell?: (r: CrossSell) => React.ReactNode
+  num?: boolean
+  wide?: boolean
+}[] = [
   { label: 'Month', get: r => pretty(r.booking_month) },
   { label: 'Company Name', get: r => r.client },
   { label: 'Client Name', get: r => r.client_name || '' },
@@ -81,7 +90,21 @@ const XSELL_COLS: { label: string; get: (r: CrossSell) => string; num?: boolean;
   { label: 'Email Subject line', get: r => r.mail_subject, wide: true },
   // Plain digits, no $ and no thousands separator: the cell has to arrive as a number.
   { label: 'Invoice Billable (USD) - RFQ', get: r => r.amount_usd.toFixed(2), num: true },
+  // The day the line was confirmed — the date it entered the revenue ledger. Empty on a
+  // pending row on purpose: nothing has been booked, so there is no date to give.
   { label: 'Closed date', get: r => pretty(r.confirmed_on) },
+  {
+    label: 'Status',
+    get: r => (r.status === 'closed' ? 'Closed' : 'Pending'),
+    cell: r => (
+      <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${
+        r.status === 'closed'
+          ? 'text-green-400 border-green-500/40'
+          : 'text-amber-400 border-amber-500/40'}`}>
+        {r.status === 'closed' ? 'Closed' : 'Pending'}
+      </span>
+    ),
+  },
 ]
 
 const ALL = '__all__'
@@ -105,6 +128,7 @@ export default function CrossSellPage() {
   const [fBu, setFBu] = useState(ALL)
   const [fType, setFType] = useState(ALL)
   const [fClient, setFClient] = useState(ALL)
+  const [fStatus, setFStatus] = useState(ALL)
 
   useEffect(() => {
     if (from > to) return
@@ -141,6 +165,7 @@ export default function CrossSellPage() {
       if (fBu !== ALL && (r.service_dept || '') !== fBu) return false
       if (fType !== ALL && (r.client_type || '') !== fType) return false
       if (fClient !== ALL && r.client !== fClient) return false
+      if (fStatus !== ALL && (r.status === 'closed' ? 'Closed' : 'Pending') !== fStatus) return false
       if (!needle) return true
       // Search spans every column the tracker carries, so a subject line or an address
       // finds its row as readily as a company name does.
@@ -170,7 +195,7 @@ export default function CrossSellPage() {
   }, [closed])
 
   const activeRange = ranges.find(r => r.from === from && r.to === to)?.key || ''
-  const clearAll = () => { setQ(''); setFPm(ALL); setFBu(ALL); setFType(ALL); setFClient(ALL) }
+  const clearAll = () => { setQ(''); setFPm(ALL); setFBu(ALL); setFType(ALL); setFClient(ALL); setFStatus(ALL) }
 
   // Copy pastes the ROWS ONLY, tab-separated — the tracker already has its header, and a
   // header pasted under one becomes a data row somebody has to delete. Tabs rather than
@@ -178,10 +203,10 @@ export default function CrossSellPage() {
   // and two of these columns (service name, subject) routinely contain a comma.
   const copy = async () => {
     const clean = (v: string) => v.replace(/[\t\r\n]+/g, ' ').trim()
-    const tsv = closed.map(r => XSELL_COLS.map(c => clean(c.get(r))).join('\t')).join('\n')
+    const tsv = rows.map(r => XSELL_COLS.map(c => clean(c.get(r))).join('\t')).join('\n')
     try {
       await navigator.clipboard.writeText(tsv)
-      setCopied(`${closed.length} copied`)
+      setCopied(`${rows.length} copied`)
     } catch {
       // Clipboard is blocked without https or a user gesture in some browsers; say so
       // rather than leaving a button that silently does nothing.
@@ -193,7 +218,7 @@ export default function CrossSellPage() {
   const exportCsv = () => {
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`
     const head = XSELL_COLS.map(c => esc(c.label)).join(',')
-    const body = closed.map(r => XSELL_COLS.map(c => esc(c.get(r))).join(','))
+    const body = rows.map(r => XSELL_COLS.map(c => esc(c.get(r))).join(','))
     // The BOM is what makes Excel read the em dashes and accented names as UTF-8 rather
     // than as mojibake.
     const blob = new Blob(['﻿' + [head, ...body].join('\r\n')], { type: 'text/csv;charset=utf-8' })
@@ -281,6 +306,7 @@ export default function CrossSellPage() {
         <Pick label="BU" value={fBu} onChange={setFBu} options={opts.bu} />
         <Pick label="Type" value={fType} onChange={setFType} options={opts.type} />
         <Pick label="Client" value={fClient} onChange={setFClient} options={opts.client} />
+        <Pick label="Status" value={fStatus} onChange={setFStatus} options={['Closed', 'Pending']} />
 
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search any column…"
           className={`${ctl} min-w-[12rem]`} aria-label="Search" />
@@ -330,9 +356,9 @@ export default function CrossSellPage() {
           <Panel flush title="For the tracker" info={basis}
             right={
               <span className="flex flex-wrap items-center gap-3 text-xs text-mav-muted">
-                <span>{filtered ? 'Copies the filtered rows only' : 'Copy pastes rows only, under your existing header'}</span>
-                <button onClick={copy} disabled={closed.length === 0} className={btn}>{copied || 'Copy rows'}</button>
-                <button onClick={exportCsv} disabled={closed.length === 0} className={btn}>CSV</button>
+                <span>{filtered ? `Copies the ${rows.length} filtered rows` : 'Copy pastes rows only, under your existing header'}</span>
+                <button onClick={copy} disabled={rows.length === 0} className={btn}>{copied || 'Copy rows'}</button>
+                <button onClick={exportCsv} disabled={rows.length === 0} className={btn}>CSV</button>
               </span>}>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -344,55 +370,38 @@ export default function CrossSellPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {closed.map(r => (
+                  {rows.map(r => (
                     <tr key={r.id} className="border-b border-mav-line/60 last:border-0 align-top">
                       {XSELL_COLS.map(c => (
                         <td key={c.label}
                           className={c.wide ? 'px-3 py-3' : `${td} ${c.num ? 'text-right tabular-nums' : ''}`}>
-                          {c.wide
-                            ? <div className="max-w-sm break-words">{c.get(r)}</div>
-                            : c.get(r) || <span className="text-mav-muted">—</span>}
+                          {c.cell
+                            ? c.cell(r)
+                            : c.wide
+                              ? <div className="max-w-sm break-words">{c.get(r)}</div>
+                              : c.get(r) || <span className="text-mav-muted">—</span>}
                         </td>
                       ))}
                     </tr>
                   ))}
-                  {closed.length === 0 && (
+                  {rows.length === 0 && (
                     <tr><td colSpan={XSELL_COLS.length} className="px-3 py-6 text-center text-mav-muted">
-                      {filtered ? 'Nothing matches these filters.' : 'Nothing closed in this window.'}
+                      {filtered ? 'Nothing matches these filters.' : 'Nothing in this window.'}
                     </td></tr>
                   )}
-                  {closed.length > 0 && (
+                  {rows.length > 0 && (
                     <tr className="bg-mav-dark/40">
-                      <td className={`${td} font-semibold`} colSpan={XSELL_COLS.length - 2}>Total</td>
+                      {/* Closed money only. A pending row is worth 0 by definition, so the
+                          total is the same number either way — but saying "closed" keeps
+                          anyone from reading it as the value of the pitches too. */}
+                      <td className={`${td} font-semibold`} colSpan={9}>Total closed</td>
                       <td className={`${td} text-right tabular-nums font-semibold`}>{fmtUsd(total)}</td>
-                      <td className={td} />
+                      <td className={td} colSpan={2} />
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
-            {/* A cross-sell that was made and did not land. Kept beside the ones that
-                did, because the effort was the same and an unsold pitch is the thing
-                worth chasing; on a page of its own it would never be looked at. Outside
-                the table on purpose: there is nothing to bill, so it must not reach the
-                tracker. */}
-            {open.length > 0 && (
-              <div className="border-t border-mav-line px-4 py-3 text-xs">
-                <div className="text-mav-fg/80 font-medium mb-1.5">
-                  Pitched, not bought — {open.length}. Not in the copy: there is nothing to bill yet.
-                </div>
-                <ul className="space-y-1.5">
-                  {open.map(r => (
-                    <li key={r.id} className="text-mav-muted">
-                      <span className="text-mav-fg">{r.pm}</span> → <span className="text-mav-fg">{r.client}</span>
-                      {' · '}{r.project}
-                      {' — '}&ldquo;{r.mail_subject}&rdquo; {pretty(r.mail_date)}
-                      {r.note ? <div className="opacity-70">{r.note}</div> : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </Panel>
 
         </>
