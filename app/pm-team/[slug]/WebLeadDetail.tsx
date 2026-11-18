@@ -4,26 +4,39 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/Header'
 import KPICard from '@/components/KPICard'
-import { KPIRow, Panel } from '@/components/PageParts'
+import { KPIRow, Segments, Panel } from '@/components/PageParts'
 import { useAuth } from '@/components/AuthProvider'
 import { getWebLeadKpis, type WebLeadKpi } from '@/lib/supabase'
-import { isMember, type PmMember } from '@/lib/pm-team'
+import { isMember, fqOf, qLabel, type FQ, type PmMember } from '@/lib/pm-team'
 
 // The Web lead's scorecard.
 //
-// Not a PM scorecard: no deal carries Rahul Kaushal's name, so bookings, feedback and
-// escalations — everything the PM page is built from — would read as zeros. His three
-// KPIs are the Web PM team's work, and they come from web_lead_kpis (migration 183) so
-// the definitions of NBD and Repeat live in SQL rather than being restated here.
+// SAME PAGE AS A PM'S, different measures. The quarter picker, the card row, the
+// `<quarter> scorecard` table and the history panel underneath are the shapes PmDetail
+// uses, in the same order, because this is read alongside those pages and a second
+// layout for one person would make the two hard to compare.
 //
-// THE HEADLINE IS % OF RAISED, his choice: won ÷ everything raised. Of-decided sits
-// underneath, because on a six-quote quarter one loss moves it fifty points and the pair
-// says more than either alone.
+// What it is NOT is a PM scorecard: no deal carries Rahul Kaushal's name, so bookings,
+// feedback and escalations would all read zero. His three measures are the Web PM team's
+// work and come from web_lead_kpis (migration 183), so the definitions of NBD and Repeat
+// live in SQL rather than being restated here.
+//
+// NO TOTAL, AND NO WEIGHTS. A PM's quarter scores against published targets and weights;
+// these three have none set, so the scorecard shows the result and what it is made of and
+// stops there. Inventing a target to fill the column would be a number nobody agreed.
+//
+// THE HEADLINE IS % OF RAISED, his choice: won over everything raised. Of-decided sits
+// beside it because on a six-quote quarter one loss moves it fifty points.
 
 const money = (n?: number | null) => (n === null || n === undefined ? '—' : '$' + Math.round(n).toLocaleString('en-US'))
 const pct = (n?: number | null) => (n === null || n === undefined ? '—' : `${n}%`)
 
-/** Rounded to one place, the way the rest of the dashboard states a change. */
+const NOW = new Date()
+const CUR_FQ = fqOf(NOW.getFullYear(), NOW.getMonth() + 1)
+/** This financial year to date — the same window the PM pages offer. */
+const QUARTERS: FQ[] = Array.from({ length: CUR_FQ.q }, (_, i) => ({ fy: CUR_FQ.fy, q: i + 1 }))
+const keyOf = (f: FQ) => `${f.fy}Q${f.q}`
+
 const change = (now?: number | null, before?: number | null) => {
   if (now === null || now === undefined || !before) return null
   return Math.round(((now - before) / before) * 1000) / 10
@@ -39,15 +52,24 @@ const Delta = ({ now, before, suffix = '' }: { now?: number | null; before?: num
   )
 }
 
+/** One line of the scorecard table — the same shape PmDetail's KpiRow renders. */
+const KpiRow = ({ measure, result, note, quoted, converted }: {
+  measure: string; result: string; note: string; quoted?: string; converted?: string
+}) => (
+  <tr className="border-b border-mav-line/60 last:border-0">
+    <td className="px-5 py-3 font-medium whitespace-nowrap">{measure}</td>
+    <td className="px-5 py-3 tabular-nums font-semibold whitespace-nowrap">{result}</td>
+    <td className="px-5 py-3 text-mav-muted">{note}</td>
+    <td className="px-5 py-3 text-right tabular-nums whitespace-nowrap">{quoted ?? '—'}</td>
+    <td className="px-5 py-3 text-right tabular-nums text-mav-muted whitespace-nowrap">{converted ?? '—'}</td>
+  </tr>
+)
+
 export default function WebLeadDetail({ pm }: { pm: PmMember }) {
   const { email } = useAuth()
   const [rows, setRows] = useState<WebLeadKpi[]>([])
   const [loading, setLoading] = useState(true)
-  // ONLY the lead. Deliberately not an is_admin check, which is how every other
-  // scorecard on this page is gated: Pratik is a dashboard admin AND an LP/HUB PM, so
-  // admin would have let a PM team member read the lead's numbers. Declared after the
-  // hooks above so the gate never changes how many run.
-  const blocked = !isMember(pm, email)
+  const [qi, setQi] = useState(QUARTERS.length - 1)
 
   useEffect(() => {
     let live = true
@@ -57,171 +79,176 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
     return () => { live = false }
   }, [])
 
-  // A quarter with nothing in it at all is the future, and the future is not a row.
-  const shown = useMemo(
+  const byKey = useMemo(() => new Map(rows.map(r => [r.qkey, r])), [rows])
+  const fq = QUARTERS[qi]
+  const q = byKey.get(keyOf(fq))
+
+  // The quarter before the selected one. Taken from the full series rather than from
+  // QUARTERS, so Q1 compares against last year's Q4 instead of showing nothing.
+  const prev = useMemo(() => {
+    const i = rows.findIndex(r => r.qkey === keyOf(fq))
+    return i > 0 ? rows[i - 1] : undefined
+  }, [rows, fq])
+
+  // Oldest first, dropping quarters with nothing in them at all — those are the future,
+  // and the future is not a row.
+  const history = useMemo(
     () => rows.filter(r => r.nbd_quotes > 0 || r.rep_quotes > 0 || (r.web_usd ?? 0) > 0),
     [rows])
-  const cur = shown[shown.length - 1]
-  const prev = shown[shown.length - 2]
+  const unmatched = history.reduce((a, r) => a + (r.rep_unmatched || 0), 0)
 
-  const td = 'px-3 py-3 whitespace-nowrap'
-  const th = 'px-3 py-2 font-medium whitespace-nowrap'
+  const inProgress = fq.q === CUR_FQ.q && fq.fy === CUR_FQ.fy
 
-  // Should always be zero. If an AM is ever spelled a way the directory does not know,
-  // those quotes vanish from Repeat silently — so the page says so rather than hiding it.
-  const unmatched = shown.reduce((a, r) => a + (r.rep_unmatched || 0), 0)
+  // ONLY the lead. Deliberately not an is_admin check, which is how every other scorecard
+  // here is gated: Pratik is a dashboard admin AND an LP/HUB PM, so admin would have let
+  // a PM team member read these. Declared after the hooks so the gate never changes how
+  // many run.
+  const blocked = !isMember(pm, email)
+
+  const td = 'px-5 py-3 whitespace-nowrap'
+  const th = 'px-5 py-2 font-medium whitespace-nowrap'
+
+  if (blocked) return (
+    <div>
+      <Header title="Not your scorecard" />
+      <p className="text-sm text-mav-muted mb-3">This scorecard belongs to someone else.</p>
+      <Link href="/pm-team" className="text-mav-yellow text-sm hover:underline underline-offset-2">← PM Team</Link>
+    </div>
+  )
 
   return (
     <div>
-      <Link href="/pm-team" className="inline-flex items-center gap-1.5 text-xs text-mav-muted hover:text-mav-fg mb-3">
+      <Link href="/pm-team" className="inline-flex items-center gap-1 text-sm text-mav-yellow hover:underline underline-offset-2 mb-3">
         <ArrowLeft size={14} /> PM Team
       </Link>
-      <Header title={pm.name} subtitle="Web lead — the Web PM team's numbers, not a personal scorecard"
-        chip={cur?.qlabel} />
+      <Header title={pm.name} chip={qLabel(fq)}
+        subtitle="Web lead — quarterly KPI across the Web PM team" />
 
-      {blocked ? <p className="text-sm text-mav-muted">This scorecard belongs to someone else.</p>
-        : loading ? <p className="text-sm text-mav-muted">Loading…</p> : !cur ? (
-        <p className="text-sm text-mav-muted">No quarters with any activity yet.</p>
-      ) : (
+      {/* The quarter picker, as the page's main split — the same control the PM pages use. */}
+      <Segments
+        items={QUARTERS.map((f, i) => ({
+          id: String(i), label: qLabel(f),
+          count: f.q === CUR_FQ.q ? 'in progress' : undefined,
+        }))}
+        value={String(qi)} onChange={v => setQi(Number(v))} />
+
+      {loading ? <p className="text-sm text-mav-muted">Loading…</p> : (
         <>
           <KPIRow cols={3}>
             <KPICard tone="accent" label="NBD conversion"
-              value={pct(cur.nbd_pct_raised)}
+              value={pct(q?.nbd_pct_raised)}
               sub={<>
-                <Delta now={cur.nbd_pct_raised} before={prev?.nbd_pct_raised} suffix=" vs last Q" /><br />
+                <Delta now={q?.nbd_pct_raised} before={prev?.nbd_pct_raised} suffix=" vs last Q" /><br />
                 <span className="text-[11px]">
-                  {cur.nbd_booked} of {cur.nbd_quotes} booked · {cur.nbd_open} open · {pct(cur.nbd_pct_decided)} of decided
+                  {q?.nbd_booked ?? 0} of {q?.nbd_quotes ?? 0} booked · {q?.nbd_open ?? 0} open · {pct(q?.nbd_pct_decided)} of decided
                 </span>
-              </>} />
+              </>}
+              info="Opportunities introduced by Malav Modi, Dhruti Dave or Nevilson Christian, whatever the project type, where the PM is a Web PM. Booked means won. LP/HUB excluded." />
             <KPICard tone="green" label="Repeat Q2C"
-              value={pct(cur.rep_pct_raised)}
+              value={pct(q?.rep_pct_raised)}
               sub={<>
-                <Delta now={cur.rep_pct_raised} before={prev?.rep_pct_raised} suffix=" vs last Q" /><br />
+                <Delta now={q?.rep_pct_raised} before={prev?.rep_pct_raised} suffix=" vs last Q" /><br />
                 <span className="text-[11px]">
-                  {cur.rep_won} of {cur.rep_quotes} won · {cur.rep_open} open · {pct(cur.rep_pct_decided)} of decided
+                  {q?.rep_won ?? 0} of {q?.rep_quotes ?? 0} won · {q?.rep_open ?? 0} open · {pct(q?.rep_pct_decided)} of decided
                 </span>
-              </>} />
+              </>}
+              info="New Development quotes only, from an account manager who is not one of those three. Project type, not business type — business type marks new client vs repeat client and is unfilled on a fifth of recent rows." />
             <KPICard tone="amber" label="Web growth"
-              value={money(cur.web_usd)}
+              value={money(q?.web_usd)}
               sub={<>
-                <Delta now={cur.web_usd} before={prev?.web_usd} suffix=" vs last Q" /><br />
-                <span className="text-[11px]">{prev ? `${money(prev.web_usd)} in ${prev.qlabel.slice(-9)}` : 'no prior quarter'}</span>
-              </>} />
+                <Delta now={q?.web_usd} before={prev?.web_usd} suffix=" vs last Q" /><br />
+                <span className="text-[11px]">{prev ? `${money(prev.web_usd)} the quarter before` : 'no prior quarter'}</span>
+              </>}
+              info="Booked Web revenue — WEB-AU, WEB-UK, WEB-US and AI & Automation. LP and HUB excluded." />
           </KPIRow>
 
-          {/* The current quarter is always part-done. Saying so once, here, is better than
-              a caveat on each of the three cards. */}
-          <p className="text-xs text-mav-muted mb-4">
-            The newest quarter is still running, so its figures are a quarter in progress — losses in
-            particular are recorded late, which flatters both conversion rates until it closes.
-          </p>
+          {/* ---- The quarter, and what each measure is made of ---------------- */}
+          <Panel flush className="mb-6" title={`${qLabel(fq)} scorecard`}
+            info="The three measures the Web lead is read on. No weighted total: these have no agreed targets, so the page shows the result and what it is made of rather than inventing a bar."
+            right={<span className="text-xs text-mav-muted">{inProgress ? 'quarter in progress' : 'closed quarter'}</span>}>
+            <table className="w-full text-sm">
+              <thead className="text-left text-mav-muted border-b border-mav-line">
+                <tr>
+                  <th className={th}>Measure</th>
+                  <th className={th}>Result</th>
+                  <th className={th}>What it is made of</th>
+                  <th className={`${th} text-right`}>Quoted</th>
+                  <th className={`${th} text-right`}>Converted</th>
+                </tr>
+              </thead>
+              <tbody>
+                <KpiRow measure="NBD conversion" result={pct(q?.nbd_pct_raised)}
+                  note={`${q?.nbd_booked ?? 0} booked of ${q?.nbd_quotes ?? 0} raised · ${q?.nbd_lost ?? 0} lost, ${q?.nbd_open ?? 0} still open`}
+                  quoted={money(q?.nbd_quoted_usd)} converted={money(q?.nbd_booked_usd)} />
+                <KpiRow measure="Repeat Q2C" result={pct(q?.rep_pct_raised)}
+                  note={`${q?.rep_won ?? 0} won of ${q?.rep_quotes ?? 0} raised · ${q?.rep_lost ?? 0} lost, ${q?.rep_open ?? 0} still open`}
+                  quoted={money(q?.rep_quoted_usd)} converted={money(q?.rep_won_usd)} />
+                <KpiRow measure="Web growth" result={money(q?.web_usd)}
+                  note={prev ? `${money(prev.web_usd)} the quarter before` : 'no prior quarter to compare'} />
+              </tbody>
+            </table>
 
-          <Panel flush className="mb-6" title="NBD conversion by quarter"
-            info={<>Opportunities introduced by the three new-business people — <b>Malav Modi, Dhruti Dave and Nevilson Christian</b> — whatever the project type, where the PM is a Web PM. Booked means won. LP/HUB is excluded, so a new-business deal that lands on an LP PM is not counted here.</>}>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="text-left text-mav-fg/70 border-b border-mav-line">
-                  <tr>
-                    <th className={th}>Quarter</th>
-                    <th className={`${th} text-right`}>Quotes</th>
-                    <th className={`${th} text-right`}>Booked</th>
-                    <th className={`${th} text-right`}>Lost</th>
-                    <th className={`${th} text-right`}>Open</th>
-                    <th className={`${th} text-right`}>% of raised</th>
-                    <th className={`${th} text-right`}>% of decided</th>
-                    <th className={`${th} text-right`}>Quoted</th>
-                    <th className={`${th} text-right`}>Booked $</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map(r => (
-                    <tr key={r.qkey} className="border-b border-mav-line/60 last:border-0">
-                      <td className={td}>{r.qlabel}</td>
-                      <td className={`${td} text-right tabular-nums`}>{r.nbd_quotes}</td>
-                      <td className={`${td} text-right tabular-nums`}>{r.nbd_booked}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{r.nbd_lost}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{r.nbd_open}</td>
-                      <td className={`${td} text-right tabular-nums font-semibold`}>{pct(r.nbd_pct_raised)}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{pct(r.nbd_pct_decided)}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{money(r.nbd_quoted_usd)}</td>
-                      <td className={`${td} text-right tabular-nums`}>{money(r.nbd_booked_usd)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {/* Caveats that change how the quarter reads — one line each, as PmDetail does. */}
+            <div className="px-5 py-3 border-t border-mav-line text-xs text-mav-muted space-y-1">
+              {inProgress && (
+                <p>This quarter is still running. Losses are recorded late, so both conversion rates read high until it closes, and the revenue is a part-quarter figure.</p>
+              )}
+              {(q?.nbd_quotes ?? 0) > 0 && (q?.nbd_quotes ?? 0) < 10 && (
+                <p>NBD is {q?.nbd_quotes} quote{q?.nbd_quotes === 1 ? '' : 's'} this quarter — one deal moves the rate by about {Math.round(100 / (q?.nbd_quotes || 1))} points, so read the count beside the percentage.</p>
+              )}
+              {(q?.nbd_quotes ?? 0) === 0 && (
+                <p className="text-amber-400">No new-business opportunity was introduced this quarter, so NBD conversion has nothing to measure.</p>
+              )}
+              {(q?.rep_open ?? 0) > 0 && (
+                <p>{q?.rep_open} New Development quote{(q?.rep_open ?? 0) === 1 ? '' : 's'} raised this quarter and not yet decided — they count against the % of raised here, and a win next quarter lands there, not back in this one.</p>
+              )}
             </div>
           </Panel>
 
-          <Panel flush className="mb-6" title="Repeat Q2C by quarter"
-            info={<>New Development quotes only, from an account manager who is <b>not</b> one of the three new-business people, where the PM is a Web PM. Project type, not business type — business type marks new client vs repeat client and is unfilled on a fifth of recent rows. This is the same cohort the PM Q2C tab uses.</>}>
+          {/* ---- Every quarter, the way PmDetail shows month over month -------- */}
+          <Panel flush title="Quarter over quarter"
+            info="Every quarter with activity, oldest first — the three measures side by side, so a trend is one glance rather than three clicks. The selected quarter is highlighted.">
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="text-left text-mav-fg/70 border-b border-mav-line">
+              <table className="w-full text-sm">
+                <thead className="text-left text-mav-muted border-b border-mav-line">
                   <tr>
                     <th className={th}>Quarter</th>
-                    <th className={`${th} text-right`}>Quotes</th>
-                    <th className={`${th} text-right`}>Won</th>
-                    <th className={`${th} text-right`}>Lost</th>
-                    <th className={`${th} text-right`}>Open</th>
-                    <th className={`${th} text-right`}>% of raised</th>
-                    <th className={`${th} text-right`}>% of decided</th>
-                    <th className={`${th} text-right`}>Quoted</th>
-                    <th className={`${th} text-right`}>Won $</th>
+                    <th className={`${th} text-right`}>NBD</th>
+                    <th className={`${th} text-right`}>NBD booked</th>
+                    <th className={`${th} text-right`}>Repeat</th>
+                    <th className={`${th} text-right`}>Repeat won</th>
+                    <th className={`${th} text-right`}>Web revenue</th>
+                    <th className={`${th} text-right`}>vs prior Q</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map(r => (
-                    <tr key={r.qkey} className="border-b border-mav-line/60 last:border-0">
-                      <td className={td}>{r.qlabel}</td>
-                      <td className={`${td} text-right tabular-nums`}>{r.rep_quotes}</td>
-                      <td className={`${td} text-right tabular-nums`}>{r.rep_won}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{r.rep_lost}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{r.rep_open}</td>
+                  {history.map((r, i) => (
+                    <tr key={r.qkey}
+                      className={`border-b border-mav-line/60 last:border-0 ${r.qkey === keyOf(fq) ? 'bg-mav-dark/40' : ''}`}>
+                      <td className={td}>
+                        {r.qlabel}
+                        {i === history.length - 1 && <span className="ml-2 text-[10px] text-amber-400">in progress</span>}
+                      </td>
+                      <td className={`${td} text-right tabular-nums font-semibold`}>{pct(r.nbd_pct_raised)}</td>
+                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{r.nbd_booked} of {r.nbd_quotes}</td>
                       <td className={`${td} text-right tabular-nums font-semibold`}>{pct(r.rep_pct_raised)}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{pct(r.rep_pct_decided)}</td>
-                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{money(r.rep_quoted_usd)}</td>
-                      <td className={`${td} text-right tabular-nums`}>{money(r.rep_won_usd)}</td>
+                      <td className={`${td} text-right tabular-nums text-mav-muted`}>{r.rep_won} of {r.rep_quotes}</td>
+                      <td className={`${td} text-right tabular-nums`}>{money(r.web_usd)}</td>
+                      <td className={`${td} text-right`}>
+                        <Delta now={r.web_usd} before={history[i - 1]?.web_usd} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             {unmatched > 0 && (
-              <div className="border-t border-mav-line px-4 py-2 text-xs text-amber-400">
+              <div className="border-t border-mav-line px-5 py-3 text-xs text-amber-400">
                 {unmatched} New Development {unmatched === 1 ? 'quote is' : 'quotes are'} under an account-manager
-                spelling the directory does not know, so they are missing from the figures above. Add the spelling as
-                an alias in Settings.
+                spelling the directory does not know, so they are missing from Repeat above. Add the spelling as an
+                alias in Settings.
               </div>
             )}
-          </Panel>
-
-          <Panel flush title="Web growth, quarter over quarter"
-            info={<>Booked Web revenue by financial quarter — WEB-AU, WEB-UK, WEB-US and AI &amp; Automation. LP and HUB are excluded. The newest quarter is partial, so its change against the last full one understates the run rate.</>}>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="text-left text-mav-fg/70 border-b border-mav-line">
-                  <tr>
-                    <th className={th}>Quarter</th>
-                    <th className={`${th} text-right`}>Web revenue</th>
-                    <th className={`${th} text-right`}>vs prior quarter</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map((r, i) => (
-                    <tr key={r.qkey} className="border-b border-mav-line/60 last:border-0">
-                      <td className={td}>
-                        {r.qlabel}
-                        {i === shown.length - 1 && <span className="ml-2 text-[10px] text-amber-400">in progress</span>}
-                      </td>
-                      <td className={`${td} text-right tabular-nums`}>{money(r.web_usd)}</td>
-                      <td className={`${td} text-right`}>
-                        <Delta now={r.web_usd} before={shown[i - 1]?.web_usd} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </Panel>
         </>
       )}
