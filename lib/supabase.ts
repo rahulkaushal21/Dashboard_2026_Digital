@@ -3445,6 +3445,12 @@ export interface OpenOppEvidence {
   app_final_stage?: string | null
   app_usd?: number | null
   app_created?: string | null
+  /**
+   * What the app record was FOR. Shown in the banner because a $400 SEO retainer used to
+   * close a $400 Web deal on amount alone; the match now requires our work (migration 186).
+   */
+  app_service?: string | null
+  app_project?: string | null
   client_booked_since?: number | null
   client_booked_rows?: number | null
   /** 'app won' | 'app lost' | 'client booked' | null */

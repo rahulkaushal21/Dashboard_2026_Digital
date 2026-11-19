@@ -154,7 +154,16 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
                   </td>
                   <td className="px-3 py-2 tabular-nums">{usd(r.est_value)}</td>
                   <td className="px-3 py-2 text-mav-muted whitespace-nowrap">{r.opened || '—'}</td>
-                  <td className="px-3 py-2 font-mono text-[11px] text-mav-muted whitespace-nowrap">{r.app_opportunity_no || '—'}</td>
+                  {/* The service is on the row because the number alone proves nothing.
+                      Q2Technologies' $400-a-month SEO retainer matched a $400 Web deal on
+                      amount and date, and the only way to see it was wrong was to open the
+                      invoice app. The match is now restricted to our own work, and what it
+                      matched is printed underneath so a wrong one can be spotted here. */}
+                  <td className="px-3 py-2 text-[11px] text-mav-muted whitespace-nowrap"
+                      title={r.app_project || undefined}>
+                    <span className="font-mono">{r.app_opportunity_no || '—'}</span>
+                    {r.app_service && <div className="text-[10px] text-mav-muted/70">{r.app_service}</div>}
+                  </td>
                   <td className="px-3 py-2">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
                       r.evidence === 'app won'
