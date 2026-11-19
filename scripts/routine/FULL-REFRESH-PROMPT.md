@@ -350,6 +350,12 @@ or a portal rather than mail.
 >     in `opportunity_events` (event `edited`). Before you UPDATE an open deal, `select manual_fields from
 >     opportunities where id=...`: leave any field it lists exactly as it is, and mention in the heartbeat
 >     only if the email now disagrees (e.g. a newer RFQ price than the hand-set value). Blank fields are still yours to fill.
+>   - **A thread that already has a row can still carry a NEW quote.** The sweeps match on `thread_id`, so
+>     a Won row on the thread hides everything quoted after it. HBFA Aria (Kovach Marketing) was booked Won
+>     on 4 Nov for the Webflow port (3333972); on 18 Nov Baspin quoted USD 550 for a contact form, features
+>     accordion and blog pages on the SAME thread and nothing raised it (Pratik, 19 Nov 2026). For every
+>     thread you read that has a row, ask whether our side has named a price or hours since that row was
+>     created or confirmed, for work the row does not describe. If so, add a second row on `<thread_id>:<slug>`.
 >
 > **3b. APPROVAL SWEEP — every run, before step 4, never skipped.** A client approving a
 > quote is the one event that must never be missed, and the snippet triage in 3a is exactly
