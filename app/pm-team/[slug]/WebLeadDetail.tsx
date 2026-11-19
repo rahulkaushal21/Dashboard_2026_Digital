@@ -122,7 +122,7 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
         <ArrowLeft size={14} /> PM Team
       </Link>
       <Header title={pm.name} chip={qLabel(fq)}
-        subtitle="Web lead — quarterly KPI across the Web PM team" />
+        subtitle="Web lead — quarterly KPI across the Web PM team, your own deals included" />
 
       {/* The quarter picker, as the page's main split — the same control the PM pages use. */}
       <Segments
@@ -143,7 +143,7 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
                   {q?.nbd_booked ?? 0} of {q?.nbd_quotes ?? 0} clients booked · {q?.nbd_open ?? 0} open · {pct(q?.nbd_pct_decided)} of decided
                 </span>
               </>}
-              info="Prospects introduced by Malav Modi, Dhruti Dave or Nevilson Christian, whatever the project type, where the PM is a Web PM. Counted once per client, not once per quote — four quotes to the same prospect is one chance to win it, and a client counts as booked if any of its quotes won. LP/HUB excluded." />
+              info="Prospects introduced by Malav Modi, Dhruti Dave or Nevilson Christian, whatever the project type, on a deal run by a Web PM or by you — including a deal shared with someone outside the team. Counted once per client, not once per quote: four quotes to the same prospect is one chance to win it, and a client counts as booked if any of its quotes won. LP/HUB excluded." />
             <KPICard tone="green" label="Repeat Q2C"
               value={pct(q?.rep_pct_raised)}
               sub={<>
@@ -152,7 +152,7 @@ export default function WebLeadDetail({ pm }: { pm: PmMember }) {
                   {q?.rep_won ?? 0} of {q?.rep_quotes ?? 0} won · {q?.rep_open ?? 0} open · {pct(q?.rep_pct_decided)} of decided
                 </span>
               </>}
-              info="New Development quotes only, from an account manager who is not one of those three. Project type, not business type — business type marks new client vs repeat client and is unfilled on a fifth of recent rows." />
+              info="New Development quotes only, from an account manager who is not one of those three, on a deal run by a Web PM or by you. Project type, not business type — business type marks new client vs repeat client and is unfilled on a fifth of recent rows." />
             <KPICard tone="amber" label="Web growth"
               value={money(q?.web_usd)}
               sub={<>
