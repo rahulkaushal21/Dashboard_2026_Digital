@@ -595,6 +595,15 @@ Every one of these came from a real correction; treat them as standing rules.
 - RFQ mails are evidence, not noise. Quote ( QUT… ) Request from notifications@uplers.com
   is where the quoted figure and currency actually live, and an RFQ being raised points at
   invoicing/confirmation. Parse them every run before clearing that sender (step 3).
+- AN RFQ NUMBER MUST BE FOR OUR SERVICE. A client who buys from two Uplers teams raises
+  RFQs for both, and the mail for another team's work is not this deal's quote. Q2Technologies
+  buys $400 of SEO every month, all called "west texas". Deal 3332105 — the West Texas Blending
+  WordPress migration, unpriced on the mail — was given QUT291026061844 and $400 from the
+  October SEO RFQ, which also made it 70% likely and put it in the stale-deals banner as
+  already Won. Stripped 19 Nov. Check quote_api_opportunities.service on the matching
+  OPP before taking a value from an RFQ: it must name Development - Web, Development - LP/Hub
+  or AI & Automation. A repeating monthly figure at the same amount is the tell. An unpriced
+  deal stays unpriced — see the hours rule below.
 - Sub-brands are not clients. Tip Top Foodservice NZ → GWF; SurfStyle → Hummingbird Ideas;
   First Defense Supply → Market Veep; Williamson IR / WilliamsonIR / WIR → Market Veep;
   Fyshe → Ink Digital; PAH → Underdog Digital; Expo Evolution → Frogonline;
