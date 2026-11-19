@@ -5,7 +5,7 @@ import { useUnit } from '@/components/BusinessUnitProvider'
 import { UnplacedNote } from '@/components/UnitToggle'
 import { inUnit, unitOf } from '@/lib/business-unit'
 import { getNeedsInput, getOpportunityDepts, getOpportunities, canConfirmLocally, getDirectoryMember, type DirectoryMember, type NeedsInputRow, type NeedsReason, type Opportunity } from '@/lib/supabase'
-import { currentEmail, getStoredProfile } from '@/lib/access'
+import { currentEmail, getStoredProfile, isManagerView } from '@/lib/access'
 import ConfirmDealDialog from '@/components/ConfirmDealDialog'
 import KPICard, { type KPITone } from '@/components/KPICard'
 import InfoTip from '@/components/InfoTip'
@@ -61,7 +61,7 @@ export default function NeedsInput() {
       setMe(m)
       // An admin who is not on the directory owns nothing, so "mine" would read as empty
       // and look broken. Show them everything by default instead.
-      if (!m) setMineOnly(false)
+      if (!m || isManagerView(currentEmail())) setMineOnly(false)
     })
     load()
   }, [])

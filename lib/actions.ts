@@ -4,6 +4,7 @@
 // shows how many there are beside "Actions". They used to be able to disagree only if
 // somebody edited one and not the other — so the rules live here and nowhere else.
 
+import { isManagerView } from './access'
 import { inUnit, type Unit } from './business-unit'
 import {
   ownerMatches, getProjectLedger, getOpportunities, getOpportunityDepts, getDirectoryMember,
@@ -86,7 +87,8 @@ export function personMatcher(person: string, me: DirectoryMember | null): (cell
 }
 
 /** Whose list the page opens on: a PM their own, an admin (or anyone not on the directory) everybody's. */
-export const defaultPerson = (me: DirectoryMember | null, isAdmin: boolean) => (!isAdmin && me?.name) ? me.name : ''
+export const defaultPerson = (me: DirectoryMember | null, isAdmin: boolean) =>
+  (!isAdmin && me?.name && !isManagerView(me.email)) ? me.name : ''
 
 export interface Scope { unit: Unit; isPerson: (cell?: string) => boolean; deptById: Map<number, string> }
 

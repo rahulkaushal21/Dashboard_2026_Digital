@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Receipt, ChevronDown, ChevronRight, Paperclip, ExternalLink } from 'lucide-react'
 import { useAuth } from './AuthProvider'
-import { currentEmail, getStoredProfile } from '@/lib/access'
+import { currentEmail, getStoredProfile, isManagerView } from '@/lib/access'
 import {
   getDealSignals, dismissDealSignal, getDirectoryMember, ownerMatches,
   type DealSignal, type DirectoryMember,
@@ -45,7 +45,7 @@ export default function UnloggedQuotesBanner({ onAdd }: { onAdd?: (s: DealSignal
     getDealSignals().then(setAll).catch(() => setFailed(true))
   }, [])
   useEffect(() => {
-    setIAmAdmin(!!getStoredProfile()?.is_admin)
+    setIAmAdmin(!!getStoredProfile()?.is_admin || isManagerView(currentEmail()))
     getDirectoryMember(currentEmail()).then(m => { setMe(m); setScoped(true) })
   }, [])
 

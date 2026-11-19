@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import { useAuth } from './AuthProvider'
-import { currentEmail, getStoredProfile } from '@/lib/access'
+import { currentEmail, getStoredProfile, isManagerView } from '@/lib/access'
 import {
   getStaleOpportunities, setOpportunityConfirmed, setOpportunityLost,
   getDirectoryMember, ownerMatches, type DirectoryMember,
@@ -60,7 +60,7 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
   useEffect(load, [])
 
   useEffect(() => {
-    setIAmAdmin(!!getStoredProfile()?.is_admin)
+    setIAmAdmin(!!getStoredProfile()?.is_admin || isManagerView(currentEmail()))
     getDirectoryMember(currentEmail()).then(m => { setMe(m); setScoped(true) })
   }, [])
 

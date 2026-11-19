@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getLastOkSync, getSheetVocab, type SheetVocab, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
 import { SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK, countsAsRevenue } from '@/lib/deal-fields'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
-import { getStoredProfile, currentEmail } from '@/lib/access'
+import { getStoredProfile, currentEmail, isManagerView } from '@/lib/access'
 
 // Web, Hub & LP — the whole ledger, in the revenue sheet's own columns.
 //
@@ -337,7 +337,7 @@ export default function ProjectLedger() {
       setMe(m)
       // A PM opens this page to work their own lines, so it starts on theirs. Only if
       // nobody has touched the filter, so a deliberate choice is never overwritten.
-      if (m?.name) setFPm(prev => (prev.length === 0 && !filtersTouched.current) ? [m.name] : prev)
+      if (m?.name && !isManagerView(currentEmail())) setFPm(prev => (prev.length === 0 && !filtersTouched.current) ? [m.name] : prev)
     })
     load()
     loadGone()

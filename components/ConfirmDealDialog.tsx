@@ -8,7 +8,7 @@ import {
   listDirectory, getDirectoryMember, type DirectoryMember,
   type FxRate, type Opportunity, type SheetVocab, type SheetClientDefaults,
 } from '@/lib/supabase'
-import { currentEmail } from '@/lib/access'
+import { currentEmail, isManagerView } from '@/lib/access'
 import {
   SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL,
   VOCAB_FALLBACK, RETAINER_SHAPED_TYPES, normBusinessType,
@@ -219,7 +219,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     listDirectory().then(list => { if (live) setPms(list.filter(m => m.active)) })
     getDirectoryMember(currentEmail()).then(m => {
       if (!live || !m) return
-      setMePm(m); setPmOwner(m.name)
+      setMePm(m); if (!isManagerView(m.email)) setPmOwner(m.name)
     })
     return () => { live = false }
   }, [])

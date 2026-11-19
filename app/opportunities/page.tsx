@@ -26,7 +26,7 @@ import MergeDealDialog from '@/components/MergeDealDialog'
 import EditOpportunityDialog from '@/components/EditOpportunityDialog'
 import type { DealSignal } from '@/lib/supabase'
 import MultiSelect from '@/components/MultiSelect'
-import { currentEmail, getStoredProfile } from '@/lib/access'
+import { currentEmail, getStoredProfile, isManagerView } from '@/lib/access'
 import { NBD_TEAM } from '@/lib/nbd'
 
 const uniq = (arr: (string | undefined)[]) => Array.from(new Set(arr.map(x => (x || '').trim()).filter(Boolean))).sort()
@@ -497,7 +497,8 @@ getDirectoryMember(currentEmail()).then(m => {
   // everybody's. Only on first load, and only if nobody has touched the filter — a deep
   // link that names a PM, or a filter already changed, is left exactly as it is.
   // Admins are not defaulted: they come here to see the whole board.
-  if (m?.name) setFPM(prev => (prev.length === 0 && !pmTouched.current) ? [m.name] : prev)
+  // A manager on the directory (Pratik) is not defaulted either: he reads the whole team.
+  if (m?.name && !isManagerView(currentEmail())) setFPM(prev => (prev.length === 0 && !pmTouched.current) ? [m.name] : prev)
 })
 }, [])
 const canEnter = iAmAdmin || !!me

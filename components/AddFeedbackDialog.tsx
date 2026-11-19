@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { submitManualFeedback, getFeedbackApprovers, getClients, getDirectoryMember, type FeedbackApprover } from '@/lib/supabase'
-import { currentEmail } from '@/lib/access'
+import { currentEmail, isManagerView } from '@/lib/access'
 import { SERVICE_DEPTS } from '@/lib/deal-fields'
 
 // Feedback that arrived on Slack, a call, or across a table.
@@ -58,7 +58,7 @@ export default function AddFeedbackDialog({ onClose, onAdded }: { onClose: () =>
   // is about, and retyping your own name is the kind of small friction that ends with
   // the field left blank. Still editable — you can log praise for somebody else.
   useEffect(() => {
-    getDirectoryMember(currentEmail()).then(m => { if (m?.name) setPm(prev => prev || m.name) }).catch(() => {})
+    getDirectoryMember(currentEmail()).then(m => { if (m?.name && !isManagerView(m.email)) setPm(prev => prev || m.name) }).catch(() => {})
   }, [])
 
   // Named before it is sent, not after. Knowing who has to agree changes how people write.

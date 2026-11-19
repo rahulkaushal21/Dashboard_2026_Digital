@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { getClientOwners, getDirectoryMember, ownerMatches, clientKey, type DirectoryMember } from './supabase'
-import { currentEmail, getStoredProfile } from './access'
+import { currentEmail, getStoredProfile, isManagerView } from './access'
 
 // "Mine" — which rows belong to the person looking.
 //
@@ -64,7 +64,7 @@ export function useMine(): Mine {
     // Somebody not in the PM directory has no "mine" to scope to — an admin who owns no
     // accounts, a viewer. They get everything, which is the only sensible default when
     // the answer to "which of these are yours" is none of them.
-    canScope: !!me,
+    canScope: !!me && !isManagerView(me.email),
     ownsPm: (cell?: string) => !!me && ownerMatches(cell, me.aliases),
     ownsClient: (name?: string) => myClients.has(key(name)),
   }

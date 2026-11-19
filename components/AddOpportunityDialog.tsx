@@ -8,7 +8,7 @@ import {
 } from '@/lib/supabase'
 import { isNbdOwner } from '@/lib/nbd'
 import { SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, CHANNELS, VOCAB_FALLBACK } from '@/lib/deal-fields'
-import { currentEmail } from '@/lib/access'
+import { currentEmail, isManagerView } from '@/lib/access'
 
 // Adding a deal the email scan did not catch — a referral, an upsell raised on a call,
 // work that came out of an event.
@@ -111,7 +111,7 @@ export default function AddOpportunityDialog({ onClose, onAdded, prefill }: {
     // Default the PM to whoever is filling the form, when they are a PM. They are the
     // likeliest owner, and an owner is what decides who can confirm it later — a deal
     // saved with nobody on it can only be confirmed by an admin.
-    getDirectoryMember(currentEmail()).then(m => { if (m) setPmOwner(prev => prev || m.name) })
+    getDirectoryMember(currentEmail()).then(m => { if (m && !isManagerView(m.email)) setPmOwner(prev => prev || m.name) })
   }, [])
 
   const matches = useMemo(() => searchClients(clients, company), [clients, company])

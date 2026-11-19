@@ -27,6 +27,21 @@ export const ALLOWED_DOMAINS = ['mavlers.com', 'uplers.com']
  * everybody out of admin management.
  */
 export const OWNER_EMAIL = 'web@uplers.com'
+
+/**
+ * People who are on the PM directory but are managers, not PMs, and so see the whole team
+ * in every module rather than starting on their own deals.
+ *
+ * Pratik is on the directory only so a line with no expert has somewhere to sit. Every
+ * "start on my own list" default (Opportunities, Revenue sheet, Actions, Needs input,
+ * Home, Clients, Escalations, Delights, the two deal banners) used to read that as "this
+ * person is a PM", and opened on a filter of his own name that hid his team's work.
+ * A NAMED LIST on purpose, like INCENTIVE_EMAILS: a role would also catch real PMs.
+ * (Pratik, 19 Nov 2026.)
+ */
+export const MANAGER_VIEW_EMAILS = ['pratik@mavlers.com']
+export const isManagerView = (email?: string | null) =>
+  MANAGER_VIEW_EMAILS.includes((email || '').trim().toLowerCase())
 export const isOwner = (email?: string | null) => (email || '').trim().toLowerCase() === OWNER_EMAIL
 
 /**
