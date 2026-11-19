@@ -362,6 +362,20 @@ Vendors never tracked: granth.info, granth.in, atharvasystem.com.
     accordion and blog pages on the SAME thread and nothing raised it (Pratik, 19 Nov 2026). For every
     thread you read that has a row, ask whether our side has named a price or hours since that row was
     created or confirmed, for work the row does not describe. If so, add a second row on <thread_id>:<slug>.
+  - Set service_dept on every row you create, and LP/HUB is decided by who is on the thread. The
+    business-unit switch (All / LP/HUB / WEB) places a deal by web_opportunity_dept, so a blank or wrong
+    department hides the deal from the unit it belongs to. Map LP or HUB when ANY of these holds: (a) the
+    PM is Nitin Mishra or Madhav Maheshwari (both are LP/HUB), (b) either of them is the sender or a direct
+    recipient of the thread, (c) lp@mavlers.com is on the To or Cc, even when neither PM is looped in
+    (lp@ = LP), (d) hub@mavlers.com is on the To or Cc (hub@ = HUB). Both on one thread: pick by the
+    work, HubSpot CMS/CRM = HUB, banners and landing pages = LP. Being cc'd on a Web PM's thread does not
+    count (Terrace Boating: Maitri's deal, Nitin and Madhav appear elsewhere in the window). Only fill a BLANK
+    department; never overwrite one a person set. A deal labelled LP/HUB and not yet Won is in LP/HUB even
+    with a Web PM on it (Andersondd, PM Gagandeep Singh; migration 185). (Pratik, 19 Nov 2026.)
+  - Refresh the department copy before you finish. The Opportunities page reads opportunity_dept_mv,
+    which only refreshes at :52 each hour, so a deal you create is missing from it and shows under All but
+    under neither LP/HUB nor WEB until then. After step 7, run
+    refresh materialized view concurrently public.opportunity_dept_mv; and say so in the heartbeat.
 
 3b. APPROVAL SWEEP — every run, before step 4, never skipped. A client approving a
 quote is the one event that must never be missed, and the snippet triage in 3a is exactly
