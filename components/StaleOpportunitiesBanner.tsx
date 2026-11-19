@@ -88,9 +88,16 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
     let ok = 0
     for (const r of rows) {
       if (!picked.has(r.id)) continue
-      const why = `Invoice app records ${r.app_opportunity_no} as ${r.app_final_stage}`
-        + (r.app_usd != null ? ` ($${Math.round(r.app_usd).toLocaleString()}` : '')
-        + (r.app_created ? `, ${r.app_created})` : r.app_usd != null ? ')' : '')
+      // The reason names the INVOICE where there is one, because that is the evidence
+      // being acted on. A Won stage with no invoice no longer reaches this banner.
+      const why = r.app_invoice_no
+        ? `Invoice ${r.app_invoice_no} raised ${r.app_invoice_at || '-'}`
+          + (r.app_invoice_usd != null ? ` for $${Math.round(r.app_invoice_usd).toLocaleString()}` : '')
+          + ((r.app_invoice_count || 1) > 1 ? ` (${r.app_invoice_count} invoices on this deal)` : '')
+          + ` against ${r.app_opportunity_no}`
+        : `Invoice app records ${r.app_opportunity_no} as ${r.app_final_stage}`
+          + (r.app_usd != null ? ` ($${Math.round(r.app_usd).toLocaleString()}` : '')
+          + (r.app_created ? `, ${r.app_created})` : r.app_usd != null ? ')' : '')
       const fn = r.evidence === 'app won' ? setOpportunityConfirmed : setOpportunityLost
       if (await fn(r.id, true, { actor: email || undefined, reason: why })) ok++
     }
@@ -111,7 +118,7 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
           <span className="font-medium">{rows.length} open deal{rows.length === 1 ? '' : 's'}</span>
           {' '}the invoice app has already closed
           <span className="text-mav-muted">
-            {' '}— {won.length} won, {lost.length} lost, {usd(rows.reduce((n, r) => n + (r.est_value || 0), 0))} of pipeline
+            {' '}— {won.length} invoiced, {lost.length} lost, {usd(rows.reduce((n, r) => n + (r.est_value || 0), 0))} of pipeline
           </span>
         </span>
         <span className="ml-auto flex items-center gap-1 text-xs text-mav-muted shrink-0">
@@ -129,7 +136,7 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
                       and otherwise has to open each deal to find out whose it is. The
                       value was already on the row — it is what the per-person scoping
                       below matches on — it was just never shown. */}
-                  {['', 'Company', 'PM', 'Pipeline USD', 'Opened', 'App record', 'App says', 'App USD'].map((h, i) => (
+                  {['', 'Company', 'PM', 'Pipeline USD', 'Opened', 'Invoice', 'App says', 'Invoiced USD'].map((h, i) => (
                     <th key={i} className="sticky top-0 z-10 bg-mav-panel px-3 py-2 font-medium border-b border-mav-line whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -154,15 +161,24 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
                   </td>
                   <td className="px-3 py-2 tabular-nums">{usd(r.est_value)}</td>
                   <td className="px-3 py-2 text-mav-muted whitespace-nowrap">{r.opened || '—'}</td>
-                  {/* The service is on the row because the number alone proves nothing.
-                      Q2Technologies' $400-a-month SEO retainer matched a $400 Web deal on
-                      amount and date, and the only way to see it was wrong was to open the
-                      invoice app. The match is now restricted to our own work, and what it
-                      matched is printed underneath so a wrong one can be spotted here. */}
+                  {/* THE INVOICE IS THE HEADLINE, not the opportunity number. An OPP is a
+                      deal record and 'Won' is a stage someone set on it; an INV is money
+                      billed. The opportunity and the service sit underneath so a wrong
+                      match can be spotted here rather than by opening the invoice app -
+                      which is how Q2Technologies' $400-a-month SEO retainer was caught
+                      closing a $400 Web deal. A lost row has no invoice and says so. */}
                   <td className="px-3 py-2 text-[11px] text-mav-muted whitespace-nowrap"
                       title={r.app_project || undefined}>
-                    <span className="font-mono">{r.app_opportunity_no || '—'}</span>
-                    {r.app_service && <div className="text-[10px] text-mav-muted/70">{r.app_service}</div>}
+                    {r.app_invoice_no
+                      ? <span className="font-mono text-mav-fg">{r.app_invoice_no}</span>
+                      : <span className="text-amber-400/70">no invoice</span>}
+                    {(r.app_invoice_count || 0) > 1 && (
+                      <span className="ml-1 text-[10px] text-mav-muted/70">+{(r.app_invoice_count || 1) - 1} more</span>
+                    )}
+                    <div className="text-[10px] text-mav-muted/70">
+                      <span className="font-mono">{r.app_opportunity_no || '—'}</span>
+                      {r.app_service ? ` · ${r.app_service}` : ''}
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <span className={`text-[11px] px-2 py-0.5 rounded-full border ${
@@ -172,7 +188,12 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
                       {r.app_final_stage}
                     </span>
                   </td>
-                  <td className="px-3 py-2 tabular-nums text-mav-muted">{usd(r.app_usd)}</td>
+                  <td className="px-3 py-2 tabular-nums text-mav-muted">
+                    {usd(r.app_invoice_usd ?? r.app_usd)}
+                    {r.app_invoice_status && (
+                      <div className="text-[10px] text-mav-muted/70">{r.app_invoice_status}</div>
+                    )}
+                  </td>
                 </tr>
               ))}</tbody>
             </table>
@@ -189,7 +210,7 @@ export default function StaleOpportunitiesBanner({ onChanged }: { onChanged?: ()
             {/* Said plainly, because a bulk write on someone else's pipeline should never
                 feel one-way. */}
             <span className="text-[11px] text-mav-muted/80 ml-auto">
-              Won deals are confirmed, lost ones marked Lost. Both are reversible and record why.
+              Invoiced deals are confirmed, lost ones marked Lost. Both are reversible and record why.
             </span>
           </div>
         </div>

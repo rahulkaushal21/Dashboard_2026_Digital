@@ -3451,6 +3451,17 @@ export interface OpenOppEvidence {
    */
   app_service?: string | null
   app_project?: string | null
+  /**
+   * The INVOICE behind the Won stage. 'app won' is not raised without one: Won is a
+   * dropdown someone sets, and 60 of this year's 1,768 Won records have no invoice
+   * (migration 187). A retainer bills many times, so app_invoice_no is the earliest and
+   * app_invoice_count says how many. Null on an 'app lost' row, which needs no invoice.
+   */
+  app_invoice_no?: string | null
+  app_invoice_usd?: number | null
+  app_invoice_at?: string | null
+  app_invoice_status?: string | null
+  app_invoice_count?: number | null
   client_booked_since?: number | null
   client_booked_rows?: number | null
   /** 'app won' | 'app lost' | 'client booked' | null */
