@@ -137,6 +137,21 @@ function toSerial(v: string): number | null {
   return Math.round((ms - Date.UTC(1899, 11, 30)) / 86400000);
 }
 
+// "20-Aug-2025" -> "Aug-2025", for a source line whose Month-Year cell was left empty.
+//
+// Seven of the revenue tab's rows reached the new sheet with column AI blank, because the
+// old sheet was typed by hand and nothing ever required that cell. A blank month is not
+// cosmetic: Month-Year is what the monthly reports group on, so the line's money sits
+// outside every month while its Confirmation Date says plainly which month it belongs to.
+// Derived, never invented — a row with no confirmation date either stays blank, because
+// the alternative is filing revenue in a month nobody chose.
+function monthFromSheetDate(v: string): string {
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec((v || "").trim());
+  if (!m) return "";
+  const mo = MON_INDEX[m[2].toLowerCase()];
+  return mo === undefined ? "" : `${MONS[mo]}-${m[3]}`;
+}
+
 // "Sep 2026 Week 3". Read off the sheet's own rows rather than assumed: the week runs
 // from the START DATE, not the confirmation date, and the boundaries are days 1-7, 8-14,
 // 15-21, 22-end — a plain ceil(day/7), not ISO week numbering, which would disagree with
@@ -608,6 +623,11 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
   // status column — the one the team filters and reports on — says the same thing as
   // the Deleted flag at the far right. Rahul, 5 Oct 2026.
   const statusCol = indexOfHeader(headers, "Project Status");
+  // Month-Year (column AI) and the Confirmation Date it is derived from when a source
+  // line left it empty. Needed before the passthrough loop below, which is why they are
+  // not read from the `col` map the dashboard block builds further down.
+  const monthCol = indexOfHeader(headers, "Month-Year");
+  const confCol = indexOfHeader(headers, "Confirmation Date");
 
   const deletions = await readDeletions(sb);
   // Applied on every row, both the sheet-origin ones and the dashboard-origin ones, so a
@@ -746,6 +766,12 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
           }
         }
       }
+      // A source line with no Month-Year gets it from its own Confirmation Date, and the
+      // nameless trailing column keeps repeating whatever Month-Year says — the same rule
+      // the dashboard block below already follows. Only ever fills a BLANK: a month
+      // somebody typed is theirs, even where it disagrees with the date beside it.
+      if (monthCol >= 0 && !row[monthCol] && confCol >= 0) row[monthCol] = monthFromSheetDate(row[confCol]);
+      if (trailingMonth >= 0 && !row[trailingMonth] && monthCol >= 0) row[trailingMonth] = row[monthCol];
       const ref = `raw:${r.row_index}`;
       row[refCol] = ref;
       keepInvoice(row, ref);
