@@ -24,11 +24,20 @@ import { currentEmail, canWriteLearning } from '@/lib/access'
 const sel = 'bg-mav-panel border border-mav-line rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-mav-yellow'
 const uniq = (a: (string | undefined)[]) => Array.from(new Set(a.map(x => (x || '').trim()).filter(Boolean))).sort()
 const day = (s?: string) => (s || '').slice(0, 10)
-// open = nobody has triaged it · unresolved = looked at, still broken · resolved = done
-const statusLabel = (s: string) => s === 'resolved' ? 'Resolved' : s === 'unresolved' ? 'Unresolved' : 'Open'
-// Amber, not red and not green: an Unresolved escalation is still live — it stays in the
-// list and keeps counting — but someone has already worked it, so it should never be
-// mistaken at a glance for one nobody has touched.
+// open = nobody has triaged it · unresolved = THE CLIENT WAS LOST over it · resolved = done
+//
+// The middle state reads LOST, not "Unresolved". An escalation does not sit unresolved
+// forever: either it gets fixed, or the client goes. This tag is the second outcome, and
+// calling it Unresolved made a closed story look like an open task nobody had finished.
+//
+// The stored value is still 'unresolved' everywhere in the database and in this file's
+// types, deliberately: nothing is migrated, nothing is re-tagged, and the four buttons
+// still write the same four values. Only what a human reads has changed. Rename the
+// stored value only if 'lost' ever has to mean something different from this.
+const statusLabel = (s: string) => s === 'resolved' ? 'Resolved' : s === 'unresolved' ? 'Lost' : 'Open'
+// Amber, not red and not green: red is Open (nobody has triaged it) and a lost client is
+// not an untriaged alert. It keeps counting here and on the Clients board, because a
+// client lost to a complaint is the one worth remembering longest.
 const statusTone = (s: string) => s === 'resolved' ? 'bg-green-500/20 text-green-300' : s === 'unresolved' ? 'bg-amber-500/20 text-amber-300' : 'bg-red-500/20 text-red-300'
 const sentBucket = (s?: string) => { const v = (s || '').toLowerCase(); if (/posit|happy|great|delight/.test(v)) return 'Positive'; if (/negat|risk|churn|frustrat/.test(v)) return 'Negative'; if (/neutral|stable|mixed/.test(v)) return 'Neutral'; return '' }
 const kindTone = (t?: string) => { const v = (t || '').toLowerCase(); if (/complaint|churn/.test(v)) return 'bg-red-500/15 text-red-400'; if (/risk|escalat/.test(v)) return 'bg-orange-500/15 text-orange-300'; return 'bg-mav-line text-mav-muted' }
@@ -382,14 +391,14 @@ export default function CriticalEscalations() {
           details={critDetails(rows, 'Every client on the board in this department, whatever its status')} />
         <KPICard tone="red" label="Open" value={String(openCount)} sub="nobody has triaged it"
           details={critDetails(cardRows.open, 'Clients nobody has triaged yet — days counted from the first flag')} />
-        <KPICard tone="amber" label="Unresolved" value={String(unresolvedCount)} sub="looked at, still broken"
-          info="Amber, not red and not green: an Unresolved escalation is still live — it stays in the list and keeps counting, here and on the Clients board — but someone has already worked it."
-          details={critDetails(cardRows.unresolved, 'Looked at and still broken — days counted from the first flag')} />
+        <KPICard tone="amber" label="Lost" value={String(unresolvedCount)} sub="client lost over it"
+          info="The escalation is not sitting unresolved — the client went over it. Amber rather than red keeps it apart from Open, which is an escalation nobody has triaged yet. A Lost client keeps counting here and on the Clients board: it is the outcome worth remembering longest."
+          details={critDetails(cardRows.unresolved, 'Clients lost over an escalation — days counted from the first flag')} />
         <KPICard tone="green" label="Resolved" value={String(resolvedCount)} sub="marked fixed / positive"
           details={critDetails(cardRows.resolved, 'Marked fixed or positive', true)} />
       </KPIRow>
 
-      <SectionTitle info={<>One entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="font-semibold">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-400">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-400">Unresolved</span> when you have looked and it is still broken — that keeps it as live risk here <em>and</em> on the Clients board, and separates it from the ones nobody has picked up yet. Use <span className="font-semibold">Not an issue</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.</>}>
+      <SectionTitle info={<>One entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="font-semibold">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-400">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-400">Lost</span> when the client went over this escalation — that keeps it counting here <em>and</em> on the Clients board, and separates a client we lost from the ones nobody has picked up yet. Use <span className="font-semibold">Not an issue</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.</>}>
         How this works
       </SectionTitle>
 
@@ -428,13 +437,13 @@ export default function CriticalEscalations() {
         onChange={setStatus}
         items={[
           { id: 'open', label: 'Open', count: tabCount('open') },
-          { id: 'unresolved', label: 'Unresolved', count: tabCount('unresolved') },
+          { id: 'unresolved', label: 'Lost', count: tabCount('unresolved') },
           { id: 'resolved', label: 'Resolved', count: tabCount('resolved') },
           { id: 'all', label: 'All', count: scoped.length },
         ]} />
 
       <FilterBar right={<>
-        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{filtered.length} clients · {openCount} open · {unresolvedCount} unresolved</span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-mav-muted">{filtered.length} clients · {openCount} open · {unresolvedCount} lost</span>
         {(q || geo.length > 0 || from || to || status !== 'all') && <button onClick={() => { setQ(''); setGeo([]); setFrom(''); setTo(''); setStatus('all') }} className={btnSecondary}>✕ Clear all</button>}
       </>}>
         {mine.canScope && (
@@ -541,9 +550,9 @@ export default function CriticalEscalations() {
                         <RowMenu disabled={b} items={[
                           ...(!resolved ? [
                             { label: 'Positive', run: () => setStatusOf(r, 'positive') },
-                            ...(r.status !== 'unresolved' ? [{ label: 'Unresolved', title: 'Looked at, still broken — keeps it as live risk here and on Clients', run: () => setStatusOf(r, 'unresolved') }] : []),
+                            ...(r.status !== 'unresolved' ? [{ label: 'Lost', title: 'The client went over this escalation — keeps it counting here and on Clients', run: () => setStatusOf(r, 'unresolved') }] : []),
                           ] : [
-                            { label: 'Unresolved', title: 'Closed too early — it is still broken', run: () => setStatusOf(r, 'unresolved') },
+                            { label: 'Lost', title: 'Closed too early — we lost the client over it', run: () => setStatusOf(r, 'unresolved') },
                           ]),
                           { label: 'Not an issue', kind: 'danger' as const, title: 'Not really our escalation — e.g. client frustrated for external reasons. Removes it from the list.', run: () => remove(r) },
                           { label: 'Open details', run: () => setSel(r) },
@@ -610,12 +619,12 @@ export default function CriticalEscalations() {
                 <div className="flex gap-2">
                   <button onClick={() => setStatusOf(sel_, 'fixed')} disabled={busy === key(sel_)} className={btnPrimary}>Mark fixed</button>
                   <button onClick={() => setStatusOf(sel_, 'positive')} disabled={busy === key(sel_)} className={btnSecondary}>Mark positive</button>
-                  {sel_.status !== 'unresolved' && <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Looked at, still broken — stays as live risk here and on Clients" className={btnSecondary}>Unresolved</button>}
+                  {sel_.status !== 'unresolved' && <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="The client went over this escalation — keeps counting here and on Clients" className={btnSecondary}>Lost</button>}
                 </div>
               ) : (
                 <div className="flex gap-2">
                   <button onClick={() => setStatusOf(sel_, 'open')} disabled={busy === key(sel_)} className={btnPrimary}>Reopen</button>
-                  <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Closed too early — it is still broken" className={btnSecondary}>Unresolved</button>
+                  <button onClick={() => setStatusOf(sel_, 'unresolved')} disabled={busy === key(sel_)} title="Closed too early — we lost the client over it" className={btnSecondary}>Lost</button>
                 </div>
               )}
               <div>

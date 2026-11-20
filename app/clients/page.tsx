@@ -610,12 +610,13 @@ export default function Clients() {
     const recentMajor = list.filter(e => (ym(e.tracking_date) >= cutoff) && /major|critical|high|sev/i.test(`${e.business_impact || ''} ${e.escalation_type || ''}`))
     // A negative signal stops counting once someone has ruled on it in Critical
     // Escalations — dismissed ("not our escalation") or closed out as fixed/positive.
-    // A thread marked Unresolved is in neither set, so it still counts: that is the
-    // whole point of the Unresolved tag.
+    // A thread marked Lost (stored as 'unresolved') is in neither set, so it still
+    // counts: that is the whole point of the tag.
     const judged = (s: EmailSignal) => !!s.thread_id && (verdicts.dismissed.has(s.thread_id) || verdicts.settled.has(s.thread_id))
     const negSigs = (sigByClient.get(c.company_name) || []).filter(s => (sentBucket(s.sentiment) === 'Negative' || /risk|escalat|churn/i.test(s.signal_type || '')) && !judged(s))
-    // Someone has looked at this client's escalation and it is STILL broken. Worth calling
-    // out in its own colour: it is not an untriaged alert, it is a standing promise to fix.
+    // The client was LOST over this escalation. Worth calling out in its own colour: it is
+    // not an untriaged alert, it is an outcome — the escalation ended and we did not keep
+    // the client. ('unresolved' is the stored value; the boards read Lost.)
     const unresolved = negSigs.some(s => !!s.thread_id && verdicts.unresolved.has(s.thread_id))
     const posSigs = (sigByClient.get(c.company_name) || []).filter(s => sentBucket(s.sentiment) === 'Positive')
     const posFbTbl = posFbByClient.get(c.company_name) || []
@@ -645,7 +646,7 @@ export default function Clients() {
         if (gap) { level = 'Watch'; reasons.push(`no new booking since ${monLabel(lb)} — contract may be winding down`) }
       }
     }
-    if (unresolved) { level = level || 'Watch'; reasons.unshift('escalation marked Unresolved — looked at, still broken') }
+    if (unresolved) { level = level || 'Watch'; reasons.unshift('client lost over an escalation') }
     // A revenue collapse stands on its own — it applies even to a "recovered" client,
     // because a happy client who has stopped spending is still a client walking away.
     const dip = dipByClient.get(norm(c.company_name))
@@ -988,7 +989,7 @@ export default function Clients() {
   // The health rule, word for word. It was a paragraph above the table that everybody
   // scrolled past; it now sits behind the ⓘ on the list heading, one hover away.
   const healthInfo = (
-    <><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">Unresolved</span> there keeps counting and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</>
+    <><span className="text-red-300">At risk</span> = &gt;2 escalations in a month or a major escalation in the last 2 months. <span className="text-orange-300">Watch</span> = email-sensed frustration, an older escalation, a contract winding down (no recent booking), or a <span className="text-orange-300">revenue dip</span> — billing halved or worse across the last two completed months on a client who was spending at least $2,000. A dip is a spend signal, not a mood one: a perfectly happy client can show it, which is why it is worth catching early. Positive feedback logged in the escalation report (tagged &ldquo;Not an escalation&rdquo;) is excluded from risk and shown in green. The health filter holds two different things: <span className="text-red-300">At risk / Watch — live</span> is worked out here from escalations, email tone and booking gaps, while <span className="text-red-300">At risk — recorded</span> is the sentiment stored on the client record. A negative email signal stops counting in either once it is dismissed or closed out on <span className="text-red-300">Critical Escalations</span>; one tagged <span className="text-amber-300">Lost</span> there — the client went over it — keeps counting, and the client is highlighted in amber here. Risk is date-aware: if a client&rsquo;s <span className="text-green-300">latest</span> sentiment event is positive feedback that came <em>after</em> their last escalation, they count as recovered and show green. Click a row for the full picture. Click column headers to sort.</>
   )
   // Quick-view pills, the reference page's style: tinted when on.
   const pill = (on: boolean, onCls = 'bg-mav-fill text-black border-mav-yellow font-medium') =>
@@ -1020,7 +1021,7 @@ export default function Clients() {
           info=">2 escalations in a month or a major escalation in the last 2 months. A client whose latest sentiment event is positive feedback after their last escalation counts as recovered instead."
           details={clientDetails(byStatus.get('At risk') || [], 'Clients worked out as At risk, with the reasons')} />
         <KPICard tone="amber" label="Watch" value={statCount('Watch').toLocaleString()} sub="live, worked out here"
-          info="Email-sensed frustration, an older escalation, a contract winding down (no recent booking), an escalation marked Unresolved, or a revenue dip."
+          info="Email-sensed frustration, an older escalation, a contract winding down (no recent booking), a client marked Lost over an escalation, or a revenue dip."
           details={clientDetails(byStatus.get('Watch') || [], 'Clients worked out as Watch, with the reasons')} />
         <KPICard tone="green" label="Positive" value={statCount('Positive').toLocaleString()} sub="recovered or praised"
           details={clientDetails(byStatus.get('Positive') || [], 'Clients who recovered or were praised')} />
@@ -1149,13 +1150,13 @@ export default function Clients() {
               {pageRows.map(c => {
                 const r = riskOf(c); const st = r.level || sentBucket(c.sentiment); const nc = (sigByClient.get(c.company_name) || []).length
                 const act = activityOf(c); const isRecent = !!act.last && act.last >= recentCutoff
-                // Amber wins over the risk tint: an Unresolved tag is a human's call and
+                // Amber wins over the risk tint: a Lost tag is a human's call and
                 // should be findable by eye when scanning the list.
                 const rowBg = r.unresolved ? 'bg-amber-500/10' : r.level === 'At risk' ? 'bg-red-500/5' : r.level === 'Watch' ? 'bg-orange-500/5' : c.ai_focus ? 'bg-mav-yellow/5' : ''
                 return (
                   <tr key={c.company_name} onClick={() => setSelC(c)} className={`border-b border-mav-line/60 hover:bg-mav-dark/40 cursor-pointer ${rowBg}`}>
-                    <td className="px-3 py-2.5"><span className={`inline-block w-2 h-2 rounded-full ${r.unresolved ? 'bg-amber-400' : dotCls(st)}`} title={r.unresolved ? 'Escalation marked Unresolved on Critical Escalations' : undefined} /></td>
-                    <td className="px-3 py-2.5">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="Someone looked at this client's escalation and it is still broken">Unresolved</span>}{r.dip && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-semibold whitespace-nowrap" title={`${fmtUsd(r.dip.prior)} → ${fmtUsd(r.dip.last)} (${dipWindow})`}>{r.dip.stopped ? 'Billing stopped' : `Revenue −${r.dip.dropPct}%`}</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
+                    <td className="px-3 py-2.5"><span className={`inline-block w-2 h-2 rounded-full ${r.unresolved ? 'bg-amber-400' : dotCls(st)}`} title={r.unresolved ? 'Marked Lost on Critical Escalations — the client went over an escalation' : undefined} /></td>
+                    <td className="px-3 py-2.5">{displayName(c.company_name)}{r.unresolved && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold whitespace-nowrap" title="This client was lost over an escalation">Lost</span>}{r.dip && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-semibold whitespace-nowrap" title={`${fmtUsd(r.dip.prior)} → ${fmtUsd(r.dip.last)} (${dipWindow})`}>{r.dip.stopped ? 'Billing stopped' : `Revenue −${r.dip.dropPct}%`}</span>}{c.ai_focus && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-mav-yellow/20 text-mav-yellow font-semibold whitespace-nowrap">AI</span>}{c.website && <div className="text-xs text-mav-muted">{c.website}</div>}</td>
                     {revCols.on('industry') && <td className="px-3 py-2.5 text-mav-muted whitespace-nowrap">{c.industry || '—'}</td>}
                     {revCols.on('geo') && <td className="px-3 py-2.5 text-mav-muted">{c.geo}</td>}
                     {revCols.on('owner') && <td className="px-3 py-2.5 text-mav-muted">
@@ -1439,7 +1440,7 @@ export default function Clients() {
                 <button onClick={() => setSelC(null)} className="text-mav-muted hover:text-mav-fg text-2xl leading-none">×</button>
               </div>
 
-              {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.unresolved ? 'border-amber-500/50 bg-amber-500/10 text-amber-300' : r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.unresolved ? 'Unresolved' : r.level === 'At risk' ? 'At risk' : 'Watch'}:</span> {r.reasons.join(' · ')}</div>}
+              {r.level && <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${r.unresolved ? 'border-amber-500/50 bg-amber-500/10 text-amber-300' : r.level === 'At risk' ? 'border-red-500/40 bg-red-500/10 text-red-300' : 'border-orange-500/40 bg-orange-500/10 text-orange-300'}`}><span className="font-semibold">{r.unresolved ? 'Lost' : r.level === 'At risk' ? 'At risk' : 'Watch'}:</span> {r.reasons.join(' · ')}</div>}
 
               {!r.level && r.recovered && <div className="mb-4 rounded-lg border border-green-500/40 bg-green-500/10 text-green-300 px-3 py-2 text-sm"><span className="font-semibold">Recovered:</span> {r.recoveryNote}</div>}
 

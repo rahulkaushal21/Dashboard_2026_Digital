@@ -768,7 +768,9 @@ export async function getEmailSignals(): Promise<EmailSignal[]> { return (await 
 // someone had already dismissed as "not our escalation" one screen away.
 //   settled   — thread marked fixed or the client turned positive: real, and over.
 //   dismissed — "Not an issue": never ours to begin with, so it should leave no trace.
-// A thread marked 'unresolved' appears in NEITHER set: it is still live risk.
+// A thread marked 'unresolved' appears in NEITHER set: it is still live risk. That is the
+// tag the boards print as LOST — the client went over the escalation. The stored value
+// keeps its old name on purpose so no data has to move; only the label changed.
 export async function getEscalationVerdicts(): Promise<{ dismissed: Set<string>; settled: Set<string>; unresolved: Set<string> }> {
   const empty = { dismissed: new Set<string>(), settled: new Set<string>(), unresolved: new Set<string>() }
   if (!supabase) return empty
@@ -953,7 +955,9 @@ export async function getCriticalEscalations(): Promise<CriticalEscalation[]> {
   return [...groups.values()].sort((a, b) => (a.status === b.status ? (b.last_flagged_date || '').localeCompare(a.last_flagged_date || '') : RANK[a.status] - RANK[b.status]))
 }
 // Mark ALL of a client's escalation threads. They stay in the list either way.
-// 'unresolved' is the deliberate middle: someone looked and it is still broken.
+// 'unresolved' is the deliberate middle, shown to humans as LOST: the escalation ended
+// with the client leaving. The stored value is unchanged — see statusLabel in
+// app/critical-escalations/page.tsx.
 export async function markEscalationStatus(threadIds: string[], status: 'open' | 'unresolved' | 'fixed' | 'positive', opts?: { actor?: string; note?: string }): Promise<boolean> {
   if (!supabase || !threadIds.length) return false
   const { error } = await supabase.rpc('mark_escalations_status', { p_thread_ids: threadIds, p_status: status, p_actor: opts?.actor ?? null, p_note: opts?.note ?? null })
