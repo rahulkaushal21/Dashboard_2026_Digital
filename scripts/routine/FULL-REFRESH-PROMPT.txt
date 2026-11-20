@@ -371,7 +371,7 @@ Vendors never tracked: granth.info, granth.in, atharvasystem.com.
     work, HubSpot CMS/CRM = HUB, banners and landing pages = LP. Being cc'd on a Web PM's thread does not
     count (Terrace Boating: Maitri's deal, Nitin and Madhav appear elsewhere in the window). Only fill a BLANK
     department; never overwrite one a person set. A deal labelled LP/HUB and not yet Won is in LP/HUB even
-    with a Web PM on it (Andersondd, PM Gagandeep Singh; migration 185). (Pratik, 19 Nov 2026.)
+    with a Web PM on it (Andersondd, PM Gagandeep Singh; migration 188). (Pratik, 19 Nov 2026.)
   - Refresh the department copy before you finish. The Opportunities page reads opportunity_dept_mv,
     which only refreshes at :52 each hour, so a deal you create is missing from it and shows under All but
     under neither LP/HUB nor WEB until then. After step 7, run

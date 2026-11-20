@@ -1,4 +1,4 @@
--- 185 — a deal labelled LP or HUB is in LP/HUB, whoever the PM is
+-- 188 — a deal labelled LP or HUB is in LP/HUB, whoever the PM is
 --
 -- Pratik, 19 Nov 2026: choosing LP/HUB in the business-unit switch did not show the LP/HUB
 -- team's new deals, although All did.
