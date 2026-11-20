@@ -833,11 +833,36 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
     // invoice writes one line for the lot; the others are won, and book nothing.
     .eq("won", true).not("confirmed_by", "is", null).is("rolled_into", null)
     // ORDER MATTERS NOW. The writer matches rows by position, so an unordered read would
-    // shuffle this block every run and rewrite every row of it for no reason.
+    // shuffle this block every run and rewrite every row of it for no reason. Read by id
+    // for a stable base, then sorted by month below.
     .order("id", { ascending: true });
   if (oe) throw new Error("opportunities: " + oe.message);
 
-  for (const o of opps || []) {
+  // The month a line belongs to, as the Month-Year cell will print it. Recurring entries
+  // are added in one month FOR another, so source_date leads there - the same rule the
+  // row builder below uses, and it has to be the same rule, or a line would sort into one
+  // month and then print another.
+  const monthKeyOf = (o: any) =>
+    s(o.origin === "recurring" ? (o.source_date || o.confirmed_at) : (o.confirmed_at || o.source_date)).slice(0, 7);
+
+  // Sorted by month, because id order is the order deals were ENTERED, and that is not
+  // the order they happened: a retainer added in October for November, or a deal
+  // confirmed late and back-booked, put a stray Oct-2026 in the middle of November and
+  // the tab stopped reading in month order at exactly the point people look first - the
+  // bottom. The sheet rows above are in month order too (migration 189).
+  //
+  // Still fully deterministic, which is what the warning above is about: ties break on
+  // id, so the same data produces the same block every run and nothing is rewritten for
+  // no reason.
+  const oppRows = [...(opps || [])].sort((a: any, b: any) => {
+    const ma = monthKeyOf(a), mb = monthKeyOf(b);
+    // A line with no date at all sorts last rather than first, where it would read as the
+    // oldest work on the tab.
+    if (ma !== mb) return (ma ? ma : "9999-99") < (mb ? mb : "9999-99") ? -1 : 1;
+    return Number(a.id) - Number(b.id);
+  });
+
+  for (const o of oppRows) {
     const row = new Array(headers.length).fill("");
     const put = (i: number, v: string) => { if (i >= 0) row[i] = v; };
     // A recurring entry is added in one month FOR another; source_date holds the month it
