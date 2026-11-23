@@ -152,6 +152,15 @@ function monthFromSheetDate(v: string): string {
   return mo === undefined ? "" : `${MONS[mo]}-${m[3]}`;
 }
 
+// "11-Sep-2026" -> "Sep 2026 Week 2", the same arithmetic as sheetWeek below but reading
+// a source row's own Start Date cell rather than an ISO date from the database.
+function weekFromSheetDate(v: string): string {
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec((v || "").trim());
+  if (!m) return "";
+  const mo = MON_INDEX[m[2].toLowerCase()];
+  return mo === undefined ? "" : `${MONS[mo]} ${m[3]} Week ${Math.ceil(Number(m[1]) / 7)}`;
+}
+
 // "Sep 2026 Week 3". Read off the sheet's own rows rather than assumed: the week runs
 // from the START DATE, not the confirmation date, and the boundaries are days 1-7, 8-14,
 // 15-21, 22-end — a plain ceil(day/7), not ISO week numbering, which would disagree with
@@ -628,6 +637,9 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
   // not read from the `col` map the dashboard block builds further down.
   const monthCol = indexOfHeader(headers, "Month-Year");
   const confCol = indexOfHeader(headers, "Confirmation Date");
+  // Week Start and the Start Date it is computed from, for the same reason.
+  const weekCol = indexOfHeader(headers, "Week Start");
+  const startCol = indexOfHeader(headers, "Start Date");
 
   const deletions = await readDeletions(sb);
   // Applied on every row, both the sheet-origin ones and the dashboard-origin ones, so a
@@ -766,12 +778,33 @@ async function buildRevenue(sb: any, tok: string | null, sheetId: string): Promi
           }
         }
       }
-      // A source line with no Month-Year gets it from its own Confirmation Date, and the
-      // nameless trailing column keeps repeating whatever Month-Year says — the same rule
-      // the dashboard block below already follows. Only ever fills a BLANK: a month
-      // somebody typed is theirs, even where it disagrees with the date beside it.
+      // MONTH-YEAR is a judgement and only ever gets filled when BLANK: work closed at the
+      // end of one month is often billed in the next, and that call is a human's, even
+      // where the month disagrees with the Confirmation Date beside it. A blank, though,
+      // is nobody's call — it just leaves the line's money outside every monthly report —
+      // so it is derived from the row's own Confirmation Date.
       if (monthCol >= 0 && !row[monthCol] && confCol >= 0) row[monthCol] = monthFromSheetDate(row[confCol]);
-      if (trailingMonth >= 0 && !row[trailingMonth] && monthCol >= 0) row[trailingMonth] = row[monthCol];
+
+      // THE OTHER TWO ARE NOT JUDGEMENTS, so they are corrected rather than filled.
+      //
+      // The nameless trailing column duplicates Month-Year and means nothing else, and
+      // Week Start is arithmetic on Start Date — the dashboard block below computes both
+      // exactly this way. When a copy differs from the thing it copies, it is wrong.
+      //
+      // And they were. 77 rows carried a trailing month that disagreed with Month-Year
+      // and 111 a Week Start from the wrong month entirely: HunterHunter - Umbraco,
+      // confirmed and started 11 Sep 2026, read "Mar 2026 Week 2" and "Mar-2026" beside a
+      // Month-Year of Sep-2026. They are copy-paste leftovers from the hand-typed sheet,
+      // always in the same shape — the trailing column agreeing with the stale Week Start
+      // rather than with Month-Year, which is how a row cloned from an older one looks.
+      //
+      // Start Date missing: Week Start is left exactly as it is. Deriving nothing from
+      // nothing would blank a cell somebody filled in.
+      if (trailingMonth >= 0 && monthCol >= 0 && row[monthCol]) row[trailingMonth] = row[monthCol];
+      if (weekCol >= 0 && startCol >= 0) {
+        const w = weekFromSheetDate(row[startCol]);
+        if (w) row[weekCol] = w;
+      }
       const ref = `raw:${r.row_index}`;
       row[refCol] = ref;
       keepInvoice(row, ref);
