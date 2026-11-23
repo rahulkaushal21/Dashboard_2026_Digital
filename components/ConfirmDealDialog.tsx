@@ -282,6 +282,10 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
         const guess = new Set<string>()
         if (!serviceType.trim()) { setServiceType(VOCAB_FALLBACK.service_type[0]); guess.add('serviceType') }
         if (!deliveryType.trim()) { setDeliveryType(VOCAB_FALLBACK.delivery_type[0]); guess.add('deliveryType') }
+        // A logo the sheet has never carried is New business. This is the only moment
+        // that is true of them: the NEXT deal on this client, whoever sells it, is a
+        // repeat — see the Repeat default below.
+        if (!businessType.trim()) { setBusinessType('New'); guess.add('businessType') }
         setAssumed(guess)
         return
       }
@@ -302,6 +306,15 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
       fill('projectType', projectType, d.project_type, setProjectType)
       fill('salesPerson', salesPerson, d.sales_person, setSalesPerson)
       fill('pmOwner', pmOwner, d.pc_sme, setPmOwner)
+      // The sheet already carries this client, so this is not their first deal and the
+      // business type is Repeat — whoever closed it and whatever the deal arrived
+      // tagged as. Rahul, 23 Nov 2026, on BOLT Marketing: the first line is New, won by
+      // NBD (Nevilson), and once the account passes to an account manager (Saquib) the
+      // rest are Repeat. Three BOLT lines confirmed the same day disagreed with each
+      // other, two New and one Repeat, which is what an un-defaulted required field
+      // produces. Not taken from the client's own last row, which would just copy
+      // whatever that one happened to say.
+      fill('businessType', businessType, 'Repeat', setBusinessType)
       // Currency is prefilled ONLY where the deal carries none at all. 'USD' in the form
       // may be a real decision or merely the default, and the two are indistinguishable
       // once loaded — switching a genuinely-USD deal to the client's last currency would
