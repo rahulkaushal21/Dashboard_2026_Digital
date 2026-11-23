@@ -11,7 +11,7 @@ import {
 import { currentEmail, isManagerView } from '@/lib/access'
 import {
   SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL,
-  VOCAB_FALLBACK, RETAINER_SHAPED_TYPES, normBusinessType,
+  VOCAB_FALLBACK, RETAINER_SHAPED_TYPES, normBusinessType, defaultExpertFor,
 } from '@/lib/deal-fields'
 import { isNbdOwner } from '@/lib/nbd'
 
@@ -252,6 +252,18 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
   useEffect(() => { getSheetVocab().then(setVocab) }, [])
   useEffect(() => { getPickList('expert').then(setExperts); getContractors().then(setContractors) }, [])
 
+  // Expert follows the department when nobody has been named. Asking for it without
+  // offering the obvious answer is how a required field becomes a thing people type
+  // anything into: six departments, one owner each, and the picker still open if this
+  // deal is the exception. Only ever fills a BLANK — a name already on the deal is
+  // somebody's decision about THIS project.
+  useEffect(() => {
+    if (!expert.trim()) {
+      const d = defaultExpertFor(serviceDept)
+      if (d) setExpert(d)
+    }
+  }, [serviceDept, expert])
+
   // Prefill from the client's own history — but only where the deal itself is silent.
   // A value already on the deal is what somebody decided about THIS project; the sheet
   // only knows what was true of the last one, so it must never overwrite.
@@ -337,6 +349,16 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     need('Delivery type', !!deliveryType.trim())
     need('Account manager', !!salesPerson.trim())
     need('PM owner', !!pmOwner.trim())
+    // Required from 23 Nov 2026, at Rahul's instruction, because the sheet had holes in
+    // all three: 68 rows with no account manager, 135 with no expert, and 15 with no
+    // business type (plus a "$600" and four "Direct"/"Agency" that had drifted in from
+    // the column next door). A column that is optional at entry is a column somebody
+    // reconstructs a year later from the mail, which is what this cost.
+    //
+    // Expert is checked for a value, not against the picker's list: Contractor and a new
+    // joiner are both legitimate and neither is worth blocking a confirmation over.
+    need('Business type', !!businessType.trim())
+    need('Expert', !!expert.trim())
     need('Start date', !!startDate)
     // A delivery date BEFORE the start date is not a late project, it is an impossible
     // one, and it lands on the Actions page as overdue the moment it is saved. 2x
@@ -355,7 +377,7 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     return m
   }, [deal.company_name, amt, currency, quoteDate, serviceDept, projectType, serviceType,
       technology, clientName, clientType, geo, deliveryType, salesPerson, pmOwner,
-      startDate, deliveryDate, expert, outsourcePrice, contractorName])
+      startDate, deliveryDate, expert, businessType, outsourcePrice, contractorName])
 
   const ready = missing.length === 0
 

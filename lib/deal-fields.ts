@@ -92,6 +92,32 @@ export const VOCAB_FALLBACK: Record<SheetVocabField, string[]> = {
  * sheet rows are left exactly as they are: rewriting 3,218 rows of somebody else's tab to
  * tidy a word is not a change this dashboard should make on its own.
  */
+/**
+ * Who delivery sits with for a department, when nobody has been named yet.
+ *
+ * Set by Rahul on 23 Nov 2026, and NOT the historical majority — that was checked first
+ * and disagrees for three of the six. Since July 2026 WEB-UK is Rahul Kumar at 52% (a
+ * third of it Contractor), WEB-US is Gagandeep Singh at 43% with Harshal at 10%, and
+ * LP/HUB are Harshvardhan Sharma at ~89%; neither Pratik nor Hiren appears in the column
+ * at all. These names are who is ACCOUNTABLE for the department now, which no amount of
+ * history can tell you. Do not "correct" them back towards the majority.
+ *
+ * A DEFAULT, not a lock: it fills the field when it is empty and the person confirming
+ * can pick anyone else, including Contractor. The database carries the same map as a
+ * backstop (migration 195) so a row created by the email scan, which never opens this
+ * form, is not left blank.
+ */
+export const DEPT_EXPERT_DEFAULT: Record<string, string> = {
+  'WEB-AU': 'KS',
+  'WEB-UK': 'Rahul Kumar',
+  'WEB-US': 'Harshal Mehuriya',
+  'LP': 'Pratik Bhatt',
+  'HUB': 'Pratik Bhatt',
+  'AI & Automation': 'Rahul Kaushal',
+}
+export const defaultExpertFor = (dept?: string | null): string =>
+  DEPT_EXPERT_DEFAULT[(dept || '').trim()] || ''
+
 export const normBusinessType = (v?: string | null) => {
   const t = (v || '').trim().toLowerCase()
   if (!t) return ''
