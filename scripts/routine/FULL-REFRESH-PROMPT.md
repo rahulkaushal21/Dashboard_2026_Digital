@@ -986,6 +986,47 @@ both with a reason, and no sweep.
   feedback again, not an escalation; Market Veep "Client was looking from wrong report" (Pratik) is the
   client side. Merges: 9 by people (Rahul K 6, Nitin 2, Maitri 1). Escalations fixed: 0. Feedback: 3.
 
+### Week of 16 – 23 Nov 2026 (read Mon 23 Nov)
+Nitin 85 actions, Madhav 41, Paryusha 19, Rahul Jain 19, Krunal 18, everyone else under 10 (Pratik 2, counted
+apart). 117 of the edits are the new **Edit** button on the Opportunities page (Nitin 60, Madhav 40, ledger
+editor 35 more). Hand-created deals: 7. Dismissals: 3. Fixed escalations: 5, none with a note. Feedback: 0.
+
+- **One person closed 30 deals in one hour: Paryusha, 19 Nov 09:00, USD 101,113, 24 of the 30 with no reason.**
+  Report it as one decision, not 30. 19 of the 30 are Telfer Digital (WHC Phase 1 and 2 USD 32,200, AI
+  Translation plugin 8,650, two case-calculator rows 3,360 each, and the JCB maintenance lines), the rest are
+  Plan9 (2, including the GBP 1,950 new-client row), BPL Marketing (2), Fabrik (2), 6th Man Digital (USD 22,135),
+  Monsoon Consulting (4,200), G&J Peck and two blank leads. Two of the 30 were the recurring-line
+  duplicates the 18 Nov rule is about (3290409 JCB Maintainence USD 3,125 and 2225684 Maintainence Sep'26
+  USD 3,000), so closing them is the clean-up the user asked for. Nitin closed 4 more (USD 7,325) the same
+  morning with no reason. **Rule unchanged: a sweep gets one reason naming the sweep. Do not re-open any of
+  these because a thread revives; raise a new row on the new thread.**
+- **A department-scope dismissal is a new kind.** Rahul K dismissed the YLP Legal / Convello escalation
+  (signal 803, 19 Nov) with "This is not from Web department, its majorly for SEO/SEM". Convello's complaint
+  was paid-ads conversion tracking, which sits with the SEO/SEM team even though a Web PM answered it.
+  **Rule: before writing a Negative or At Risk signal, ask whether the work being complained about is Web
+  (build, theme, plugin, hosting, forms) or SEO/SEM/paid media. Paid-ads tracking, campaigns and ranking are
+  the other team's. Say so in the pulse and write no signal.** The other two dismissals are known kinds:
+  Sprung "client didn't complete the process" (the cause is theirs) and Big Gun Digital "pricing pushback".
+- **What the Edit button is being used for tells us what the scan leaves blank.** By edit count:
+  service_type 69, delivery_type 68, client_type 68, contact_email 61, project_type 54, technology 34, value
+  24, service_dept 22, business_type 19, sales_person 13. The first four are the same on almost every row, so
+  they are being filled from the client's history by hand. **Rule: when you create a row for a client that
+  has a Won row, copy `service_type`, `delivery_type`, `client_type` and `contact_email` from that client's
+  latest Won row. Only when blank, never over an edit, and never `technology` or `geo` from an email body
+  (that rule stands).** Check `manual_fields` before an update, as already written above.
+- **Seven hand-created deals, none of them an unforced miss of ours.** Telfer Digital x3 (Livelink renewal
+  USD 90, Optavo fleet National Account 1,150, JCB MEA 6 maintenance 750, all booked Won at once by Paryusha)
+  and two of them have no mail at all in the window, so they arrive by another channel. Fabrik breadcrumb
+  (USD 50, mail 17 Nov), Melbourne Social Co "Attn CTRL FAQ page" (AUD, mail 14 Nov) and the Optavo fleet
+  thread (mail 16 Nov) did have mail the scan did not raise. Hy-Tec form updates (Art One, AUD 185) and the
+  Sambucol GBP 180 were approvals the scan was a run behind on again. **JCB MEA 6 website Maintainence at USD
+  750 is a recurring-line shape: if it repeats next month it must roll forward, not be raised.**
+- **Merges: 11 events, 7 by people, none with a reason.** Nitin did 1 merge and 3 unmerges on 20 Nov, Paryusha
+  3 unmerges on 19 Nov, Gaurav 1 (Brandtech Plus), Gagandeep 1 (Big Up Marketing). Two of the merges are the
+  routine's own (BOLT Branded Coolers into 3336641, RoseRx returning-page). An unmerge with no reason after a
+  merge is the person disagreeing with a merge; read it before merging the same pair again.
+- **Escalations fixed: 5, with a resolution note: 0.** Fifth week running.
+
 ## Cost — what actually drives it
 Storage and hosting are not the expense; **email text read through the model is.**
 Measured 30 Jul 2026: DB 113 MB, ~465 KB per dashboard page load (gzipped), ~96 edge
