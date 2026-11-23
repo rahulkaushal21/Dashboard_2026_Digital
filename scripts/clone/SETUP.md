@@ -174,14 +174,26 @@ already expects (read the top of each `index.ts`).
 ```bash
 supabase link --project-ref <new-ref>
 
-supabase functions deploy gmail-ingest     --no-verify-jwt
-supabase functions deploy sheet-sync       --no-verify-jwt
-supabase functions deploy sync-web-revenue --no-verify-jwt
-supabase functions deploy sheet-ingest     --no-verify-jwt
+supabase functions deploy gmail-ingest     --no-verify-jwt --yes
+supabase functions deploy sheet-sync       --no-verify-jwt --yes
+supabase functions deploy sync-web-revenue --no-verify-jwt --yes
+supabase functions deploy sheet-ingest     --no-verify-jwt --yes
 ```
 
 `--no-verify-jwt` is required on all four: they authenticate on their token, not
 on a Supabase JWT. Without it every call returns 401.
+
+`--yes` is required from CLI v3 (Nov 2026), which asks before changing a hosted
+project and defaults to no. Without a terminal to answer in — a script, CI, or an
+agent running the command — the deploy fails with HostedMutationConsentRequiredError
+and nothing is changed. `SUPABASE_YES=1` in the shell does the same job; the CLI
+deliberately refuses to read it from `.env`, so consent cannot be committed to a repo
+by accident. On v2 the flag is unknown and the command fails, so pin the version in
+any pipeline (`v2.stable` is 2.122.1) rather than letting it float.
+
+Verify a deploy rather than trusting it: `supabase functions download <name>` into a
+scratch directory and diff it against the repo. It is also the check to run BEFORE a
+deploy, to see whether anything was ever changed on the server that is not in git.
 
 ---
 
