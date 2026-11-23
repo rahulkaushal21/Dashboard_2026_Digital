@@ -371,7 +371,7 @@ Vendors never tracked: granth.info, granth.in, atharvasystem.com.
     work, HubSpot CMS/CRM = HUB, banners and landing pages = LP. Being cc'd on a Web PM's thread does not
     count (Terrace Boating: Maitri's deal, Nitin and Madhav appear elsewhere in the window). Only fill a BLANK
     department; never overwrite one a person set. A deal labelled LP/HUB and not yet Won is in LP/HUB even
-    with a Web PM on it (Andersondd, PM Gagandeep Singh; migration 188). (Pratik, 19 Nov 2026.)
+    with a Web PM on it (Andersondd, PM Gagandeep Singh; migration 193). (Pratik, 19 Nov 2026.)
   - Refresh the department copy before you finish. The Opportunities page reads opportunity_dept_mv,
     which only refreshes at :52 each hour, so a deal you create is missing from it and shows under All but
     under neither LP/HUB nor WEB until then. After step 7, run
@@ -575,7 +575,7 @@ Write two things per row, through the write guard
   week. Not "improve communication". If the learning does not support any, write an empty
   array rather than inventing one — a made-up action step is worse than none, because
   somebody will be asked about it.
-  Write "Team to ...", not "PM to ...". Corrected by the user on 23 Nov 2026, on the MGS
+  Write "Team to …", not "PM to …". Corrected by the user on 23 Nov 2026, on the MGS
   Marketing learning, where all four steps opened "PM to". An escalation is the team's to
   own: updates, 2FA, monitoring and an account-wide audit are not one person's to carry,
   and hanging them on the PM reads as blame for something that was nobody's job in the

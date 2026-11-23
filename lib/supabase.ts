@@ -2783,6 +2783,9 @@ export interface SheetRowEdits {
   project_id?: string; quote_id?: string; expert?: string
   contractor_name?: string; outsource_currency?: string; outsource_price?: number | null
   delivery_status?: string; start_date?: string | null; delivery_date?: string | null
+  /** The day the deal was confirmed (YYYY-MM-DD). Dashboard lines only: on a sheet line it is
+   *  the sheet's own cell. Moving it into another month moves the booking month with it. */
+  confirmed_on?: string | null
   internal_delivery?: string | null; internal_hrs?: number | null; actual_hrs?: number | null
   integration?: string; invoice_no?: string; invoice_currency?: string; invoice_amount?: number | null
   /** The eight dropdowns (144). On a sheet line these go into the overlay beside the
@@ -2814,7 +2817,8 @@ export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): 
 /** Save to whichever side of the ledger this row came from. */
 export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
   if (row.source === 'raw') {
-    const { local_value, currency, pm_owner, month, sales_person, company_name, ...rest } = f
+    // confirmed_on is dropped, not refused: the dialog shows it read-only on a sheet line.
+    const { local_value, currency, pm_owner, month, sales_person, company_name, confirmed_on: _ignored, ...rest } = f
     const touched = (local_value != null && local_value !== row.local_value)
       || (currency !== undefined && currency !== (row.currency || 'USD'))
       || (pm_owner !== undefined && pm_owner.trim() !== (row.pm_owner || '').trim())
@@ -2824,7 +2828,21 @@ export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{
     if (touched) return { ok: false, error: 'This line comes from the old sheet; its value, owner, month, AM and agency are what the sheet recorded and cannot be changed here.' }
     return updateSheetRowFields(row.source_id, rest)   // source_id is the sheet's row number
   }
-  return updateProjectFields(row.source_id, f)
+  const saved = await updateProjectFields(row.source_id, f)
+  if (!saved.ok) return saved
+  // Last, because moving the month in the save above puts confirmed_at on the 1st, and this
+  // then puts it on the day that was typed.
+  if (f.confirmed_on && f.confirmed_on !== (row.confirmed_at || '').slice(0, 10)) {
+    return setConfirmationDate(row.source_id, f.confirmed_on)
+  }
+  return saved
+}
+
+/** Put a confirmed deal's confirmation date on a particular day. Logged; owner or admin only. */
+export async function setConfirmationDate(id: number, date: string): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase || !id) return { ok: false, error: 'Supabase not configured' }
+  const { error } = await supabase.rpc('set_confirmation_date', { p_id: id, p_date: date })
+  return error ? { ok: false, error: error.message } : { ok: true }
 }
 
 /**

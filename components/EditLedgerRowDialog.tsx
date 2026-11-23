@@ -126,6 +126,10 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const [projectId, setProjectId] = useState(row.project_id || '')
   const [quoteId, setQuoteId] = useState(row.quote_id || '')
   const [status, setStatus] = useState(row.delivery_status || '')
+  // The day it was confirmed. Month is derived from it, so on a dashboard line the two are
+  // kept in step below. On a sheet line it is the sheet's own cell and is shown read-only.
+  const origConfirmed = (row.confirmed_at || '').slice(0, 10)
+  const [confirmedOn, setConfirmedOn] = useState(origConfirmed)
   const [startDate, setStartDate] = useState((row.start_date || '').slice(0, 10))
   const [deliveryDate, setDeliveryDate] = useState((row.delivery_date || '').slice(0, 10))
   const [internalDelivery, setInternalDelivery] = useState((row.internal_delivery || '').slice(0, 10))
@@ -187,7 +191,10 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
     const res = await saveLedgerRow(row, {
       // The booking's own fields go only where they can change; a sheet line sends none.
       ...(fixed ? {} : {
-        local_value: num(value), currency, pm_owner: pmOwner, month: month || null,
+        local_value: num(value), currency, pm_owner: pmOwner,
+        // A changed confirmation date decides the month, so the two can never disagree.
+        month: (confirmedOn && confirmedOn !== origConfirmed ? confirmedOn.slice(0, 7) : month) || null,
+        confirmed_on: confirmedOn && confirmedOn !== origConfirmed ? confirmedOn : null,
         sales_person: salesPerson, company_name: agency,
       }),
       // The eight go to both sides. A sheet line's land in the overlay; `fixed` does not
@@ -332,6 +339,11 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
                 the 8 pre-April sheet rows whose original spreadsheet cell was empty.
                 Refusing to save an invoice number on a 2025 line because of a date
                 nobody has is friction with no defect behind it. Rahul, 3 Nov 2026. */}
+            <F label="Confirmation date"
+              hint={fixed ? 'From the old sheet; change it there.' : 'The day it was confirmed. Moving it into another month moves the booking month too.'}>
+              <input type="date" className={ctl} value={confirmedOn} disabled={fixed} readOnly={fixed}
+                onChange={e => { setConfirmedOn(e.target.value); if (e.target.value) setMonth(e.target.value.slice(0, 7)) }} />
+            </F>
             <F label="Start date"><input type="date" className={ctl} value={startDate} onChange={e => setStartDate(e.target.value)} /></F>
             <F label="Delivery date"><input type="date" className={ctl} value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} /></F>
             <F label="Internal delivery"><input type="date" className={ctl} value={internalDelivery} onChange={e => setInternalDelivery(e.target.value)} /></F>
