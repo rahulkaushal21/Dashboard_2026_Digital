@@ -988,6 +988,12 @@ export interface EscalationLearning {
   first_repeat?: string | null
   last_repeat?: string | null
   repeat_threads?: string[] | null
+  /** The most recent of those escalations, in its OWN words — so the card can show what
+   *  happened rather than declaring the lesson broken. A client's later escalation is
+   *  often a different problem on the same account; see migration 190. */
+  last_repeat_summary?: string | null
+  last_repeat_subject?: string | null
+  last_repeat_signal?: string | null
   still_escalating: boolean
   summary_pending: boolean
 }

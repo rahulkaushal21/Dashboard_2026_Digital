@@ -161,10 +161,33 @@ function LearningBox({ companyName, learning, mayWrite, onSaved }: {
           <div className="mt-2 text-[11px] text-mav-muted">Summary and action steps pending — written at the next refresh.</div>
         )}
 
+        {/* A later escalation on the same client, NOT a verdict on the lesson.
+          *
+          * This block used to end "The lesson has not held", in red, on the strength of
+          * any undismissed escalation raised after the learning was written. It cannot
+          * know that. MGS Marketing is the case that showed it: a lesson about a hacked,
+          * out-of-date WordPress breaking mobile checkout, marked as broken by a later
+          * escalation asking why half of recent orders showed as cancelled on PayPal.
+          * Same client, same shop, different problem — and four people were told their
+          * lesson had failed on the evidence of something it was never about.
+          *
+          * So the card states what it knows (this client escalated again, when, and in
+          * the escalation's own words) and leaves the judgement to the reader. Amber, not
+          * red: it is a thing to go and look at, not a failure already established. */}
         {learning.still_escalating && (
-          <div className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-2.5 py-2 text-xs text-red-300">
-            Escalated {learning.repeats_since === 1 ? 'once' : `${learning.repeats_since} times`} since this was written
-            {learning.last_repeat ? `, most recently ${fmtDay(learning.last_repeat)}` : ''}. The lesson has not held.
+          <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-200">
+            <span className="font-semibold">
+              Escalated {learning.repeats_since === 1 ? 'once' : `${learning.repeats_since} times`} since this was written
+              {learning.last_repeat ? `, most recently ${fmtDay(learning.last_repeat)}` : ''}.
+            </span>
+            {(learning.last_repeat_summary || learning.last_repeat_subject) && (
+              <span className="block mt-1 text-amber-200/90">
+                Most recent: {learning.last_repeat_summary || learning.last_repeat_subject}
+              </span>
+            )}
+            <span className="block mt-1 text-amber-200/70">
+              Same client, not necessarily the same problem — read it before taking this as a lesson that did not hold.
+            </span>
           </div>
         )}
       </>) : null}

@@ -551,10 +551,17 @@ Write two things per row, through the write guard
 - ai_summary — one or two sentences: the CAUSE underneath, not a retelling of the
   incident. The person reading it already knows what happened; they want to know what it
   was really about.
-- ai_actions — a text[] of concrete steps, each one something a named person could do
-  this week. Not "improve communication". If the learning does not support any, write an
-  empty array rather than inventing one — a made-up action step is worse than none,
-  because somebody will be asked about it.
+- ai_actions — a text[] of concrete steps, each one something that could be done this
+  week. Not "improve communication". If the learning does not support any, write an empty
+  array rather than inventing one — a made-up action step is worse than none, because
+  somebody will be asked about it.
+  Write "Team to ...", not "PM to ...". Corrected by the user on 23 Nov 2026, on the MGS
+  Marketing learning, where all four steps opened "PM to". An escalation is the team's to
+  own: updates, 2FA, monitoring and an account-wide audit are not one person's to carry,
+  and hanging them on the PM reads as blame for something that was nobody's job in the
+  first place. Name a specific role only where the step genuinely belongs to it and no
+  one else — "Developer to use relative links", "Account manager to name one contact" —
+  and never the PM as the catch-all owner.
 - ai_at = now(), ai_by = the model name.
 
 Read the escalations, not just the learning. Join critical_escalations on
