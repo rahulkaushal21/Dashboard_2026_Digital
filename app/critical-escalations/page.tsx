@@ -382,24 +382,55 @@ export default function CriticalEscalations() {
     patch(r, { status: settled ? 'resolved' : st, resolved_at: settled ? new Date().toISOString() : undefined, resolved_by: settled ? (currentEmail() || undefined) : undefined })
   }
 
-  async function remove(r: CriticalEscalation) {
-    const many = r.count > 1 ? ` (${r.count} threads)` : ''
-    if (!window.confirm(`Remove ${r.company_name}${many} from Critical Escalations?\n\nUse this when it isn't really our escalation — e.g. the client is frustrated for external reasons, not a problem from our side. It's removed from the list (the email signals are preserved). To mark a genuine one as resolved instead, use “Mark fixed / positive” — that keeps it in the list.`)) return
-    // REQUIRED, and Cancel means cancel. This is the only record of why a client's
-    // escalation left the board — the signals stay in the database, but nothing else
-    // ever says why somebody decided it was not ours. It also feeds what the review
-    // learns: "quote decline, not a critical escalation" is how the next one gets
-    // classified correctly in the first place.
-    const reason = askReason({
-      question: `Why isn't ${r.company_name} our escalation?\n\ne.g. "external frustration, not our issue" or "quote decline, not an escalation".`,
-      required: true,
-    })
+  // A thread nobody has settled. 'open' is untriaged; 'fixed', 'positive' and 'unresolved'
+  // (shown as Lost) are all decisions somebody made and recorded.
+  const isLive = (it: { status?: string }) => (it.status || 'open') === 'open'
+
+  /** Dismiss specific threads, then reload so the client's row reflects what is left. */
+  async function removeThreads(r: CriticalEscalation, ids: string[], what: string, why: string) {
+    if (!window.confirm(what)) return
+    // REQUIRED, and Cancel means cancel. This is the only record of why an escalation
+    // left the board — the signals stay in the database, but nothing else ever says why
+    // somebody decided it was not ours. It also feeds what the review learns: "quote
+    // decline, not a critical escalation" is how the next one gets classified correctly
+    // in the first place.
+    const reason = askReason({ question: why, required: true })
     if (reason === null) return
     setBusy(key(r))
-    const done = await dismissEscalation(r.threadIds, { actor: currentEmail() || undefined, reason })
-    setBusy(null)
-    if (!done) { alert('Could not remove it — please try again.'); return }
-    setRows(prev => prev.filter(x => key(x) !== key(r))); setSel(null)
+    const done = await dismissEscalation(ids, { actor: currentEmail() || undefined, reason })
+    if (!done) { setBusy(null); alert('Could not remove it — please try again.'); return }
+    // Re-read rather than patching the row by hand: dropping a thread changes the
+    // client's count, its rolled-up status and its latest date, and those rules live in
+    // getCriticalEscalations. Recomputing them here is how the two quietly disagree.
+    const fresh = await getCriticalEscalations()
+    setRows(fresh); setSel(null); setBusy(null)
+  }
+
+  // "Not an issue" on the CLIENT row — which is a roll-up of every escalation they have
+  // ever had, so it must not take the settled ones with it.
+  //
+  // It used to. MGS Marketing offered "Remove MGS Marketing (8 threads)" when the thing
+  // that was not an escalation was one new mail about PayPal; the other six were threads
+  // somebody had marked fixed, and that is the record of work we actually did. Removing
+  // them would have erased the client's whole escalation history to dismiss today's
+  // false alarm. Now only the untriaged threads go, and the fixed ones stay exactly as
+  // they were marked.
+  //
+  // Where NOTHING is open, the row is settled history and the button can only mean the
+  // whole thing was a false alarm, so it takes all of them — and says so first.
+  async function remove(r: CriticalEscalation) {
+    const live = r.items.filter(isLive)
+    const ids = live.length ? live.map(i => i.thread_id) : r.threadIds
+    const keep = r.count - ids.length
+    const scope = ids.length === r.count
+      ? (r.count > 1 ? `all ${r.count} threads` : 'this escalation')
+      : `${ids.length} open ${ids.length === 1 ? 'thread' : 'threads'}`
+    const kept = keep > 0
+      ? `\n\nThe ${keep} already marked fixed, positive or Lost stay on the board — they are the record of what was done.`
+      : ''
+    await removeThreads(r, ids,
+      `Remove ${scope} for ${r.company_name} from Critical Escalations?${kept}\n\nUse this when it isn't really our escalation — e.g. the client is frustrated for external reasons, not a problem from our side. The email signals are preserved. To mark a genuine one as resolved instead, use “Mark fixed / positive” — that keeps it in the list.`,
+      `Why isn't this ${r.company_name} escalation ours?\n\ne.g. "external frustration, not our issue" or "quote decline, not an escalation".`)
   }
 
   return (
@@ -421,7 +452,7 @@ export default function CriticalEscalations() {
           details={critDetails(cardRows.resolved, 'Marked fixed or positive', true)} />
       </KPIRow>
 
-      <SectionTitle info={<>One entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="font-semibold">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-400">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-400">Lost</span> when the client went over this escalation — that keeps it counting here <em>and</em> on the Clients board, and separates a client we lost from the ones nobody has picked up yet. Use <span className="font-semibold">Not an issue</span> only for a false alarm; a removed or resolved escalation also stops counting against the client on the Clients page.</>}>
+      <SectionTitle info={<>One entry per client (all their escalation threads roll up together). Every escalation is captured automatically and <span className="font-semibold">kept</span> — it never disappears on its own. When the client comes back positive, click <span className="text-green-400">Mark fixed / positive</span> so the &ldquo;was escalated → now solved&rdquo; history stays visible. Mark it <span className="text-amber-400">Lost</span> when the client went over this escalation — that keeps it counting here <em>and</em> on the Clients board, and separates a client we lost from the ones nobody has picked up yet. Use <span className="font-semibold">Not an issue</span> only for a false alarm — it removes the client&rsquo;s <em>untriaged</em> threads and leaves anything already marked fixed, positive or Lost exactly as it is; open a client to remove a single thread. A removed or resolved escalation also stops counting against the client on the Clients page.</>}>
         How this works
       </SectionTitle>
 
@@ -624,6 +655,22 @@ export default function CriticalEscalations() {
                     </div>
                   )}
                   {it.source_subject && <div className="mt-2 text-[11px] text-mav-muted">Subject: {it.source_subject}{it.client_email ? ` · ${it.client_email}` : ''}</div>}
+                  {/* Per-thread, because "this one was not an escalation" is usually about
+                      ONE mail. The row-level button can only act on all the untriaged
+                      threads at once, which is still too blunt when a client has two open
+                      and only the newer one is a false alarm. Offered only on untriaged
+                      threads: a thread somebody marked fixed is a decision, and unpicking
+                      it is what Reopen is for. */}
+                  {isLive(it) && sel_.count > 1 && (
+                    <button
+                      onClick={() => removeThreads(sel_, [it.thread_id],
+                        `Remove this one escalation (${it.first_flagged_date ? fmtDay(it.first_flagged_date) : 'undated'}${it.source_subject ? ` · ${it.source_subject}` : ''}) for ${sel_.company_name}?\n\nThe client's other ${sel_.count - 1} ${sel_.count - 1 === 1 ? 'thread stays' : 'threads stay'} exactly as they are.`,
+                        `Why isn't this one ours?\n\ne.g. "external frustration, not our issue" or "a question, not an escalation".`)}
+                      disabled={busy === key(sel_)}
+                      className="mt-2 text-[11px] text-red-400/80 hover:text-red-300 underline underline-offset-2 disabled:opacity-50">
+                      Not an issue — remove just this one
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
