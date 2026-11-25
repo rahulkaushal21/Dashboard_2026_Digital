@@ -9,17 +9,16 @@
 -- numbers into Web's — and nothing on screen looks wrong, because the row is complete.
 -- Only somebody who knows who works where can see it.
 --
--- TWO fixes, because there are two different failures here.
+-- A refusal at the point of writing. The dialogs already block it (deptPersonConflict in
+-- lib/deal-fields.ts), but the dialogs are not the only way a row is written: the email
+-- scan inserts opportunities directly and never opens one.
 --
--- 1. pm_directory.team. web_pm_department (060) answers "which team is this PM on" from
---    the directory FIRST and from their delivery history only as a fallback. For these
---    two the history is the wrong teacher — Nitin Mishra is PC/SME on 78 WEB-US sheet
---    rows and expert on 79, which are the rows being corrected — so the directory has to
---    say it outright or the fallback keeps filing them under Web.
---
--- 2. A refusal at the point of writing. The dialogs already block it (deptPersonConflict
---    in lib/deal-fields.ts), but the dialogs are not the only way a row is written: the
---    email scan inserts opportunities directly and never opens one.
+-- NOT a directory problem, which was the first guess and was wrong. pm_directory already
+-- had both of them on team 'LP/HUB', so web_pm_department (060) was answering correctly
+-- the whole time and never fell back to their delivery history. The rows themselves were
+-- simply wrong: somebody picked, or the scan guessed, a Web department on a row whose PM
+-- is an LP/HUB person. Nothing to repair in the directory; the pm_directory update below
+-- is left in as a no-op guard for a project restored from an older dump.
 --
 -- An explicit LIST, not a rule derived from web_pm_department, which would refuse any
 -- PM whose history disagrees with the row — Gagandeep Singh picking up one WEB-UK job is
@@ -52,9 +51,10 @@ on conflict (person) do nothing;
 revoke all on public.dept_person_rules from anon, authenticated;
 grant select on public.dept_person_rules to anon, authenticated;
 
--- Say it in the directory too, so every page that asks web_pm_department gets LP/HUB
--- instead of the majority of their mis-filed history. Only where the person is already
--- in the directory: adding somebody to pm_directory has other consequences.
+-- Already true on this project (checked 25 Nov 2026); kept so a restore from an older
+-- dump cannot leave web_pm_department falling back to their mis-filed history. Only
+-- where the person is already in the directory: adding somebody to pm_directory has
+-- other consequences.
 update public.pm_directory
    set team = 'LP/HUB'
  where lower(btrim(name)) in ('nitin mishra', 'madhav maheshwari')
@@ -82,3 +82,17 @@ end $$;
 create trigger check_dept_person
   before insert or update on public.opportunities
   for each row execute function public.check_dept_person();
+
+-- APPLIED 25 Nov 2026, with the live rows fixed first so nothing was left in violation:
+--   6 open opportunities carried the combination, all unwon, none booked revenue.
+--   5 were settled by the client's own history and corrected — AssetWorks, Martecg,
+--   omadahealth and WEBITEERS to HUB, Kovach Marketing to LP.
+--   1 is left for a human: 3328619, Dare to be Different, "Proposal for adding
+--   structured data", PM Nitin Mishra, department WEB-UK — and that client's three
+--   booked lines are all WEB-UK. Person and client disagree, so which field is wrong is
+--   a question, not a derivation. Until it is answered the trigger refuses any edit to
+--   that row, which is the point.
+--
+-- The 79 sheet rows carrying the same combination (WEB-US, Aug 2024 - Apr 2026, $100k)
+-- are deliberately NOT touched. They are booked history, and re-filing them would move
+-- $100k between two teams' past numbers on the strength of a rule written in Nov 2026.
