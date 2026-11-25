@@ -11,7 +11,7 @@ import {
 import { currentEmail, isManagerView } from '@/lib/access'
 import {
   SERVICE_DEPTS, CURRENCIES, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL,
-  VOCAB_FALLBACK, RETAINER_SHAPED_TYPES, normBusinessType, defaultExpertFor,
+  VOCAB_FALLBACK, RETAINER_SHAPED_TYPES, normBusinessType, defaultExpertFor, deptPersonConflict,
 } from '@/lib/deal-fields'
 import { isNbdOwner } from '@/lib/nbd'
 
@@ -372,6 +372,14 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
     // joiner are both legitimate and neither is worth blocking a confirmation over.
     need('Business type', !!businessType.trim())
     need('Expert', !!expert.trim())
+    // An LP/HUB person on a Web department. Rahul found these on the project sheet on
+    // 25 Nov 2026 and corrected them by hand; the department is what the Business Unit
+    // switch splits on, so an LP delivery filed as WEB-US moves money between two teams'
+    // totals and nothing on screen looks wrong. The message names the person and the
+    // department rather than saying "invalid", because the fix is one of the two and the
+    // person confirming has to know which.
+    const clash = deptPersonConflict(serviceDept, pmOwner, expert)
+    need(clash || '', !clash)
     need('Start date', !!startDate)
     // A delivery date BEFORE the start date is not a late project, it is an impossible
     // one, and it lands on the Actions page as overdue the moment it is saved. 2x

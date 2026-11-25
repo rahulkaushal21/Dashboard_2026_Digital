@@ -107,6 +107,56 @@ export const VOCAB_FALLBACK: Record<SheetVocabField, string[]> = {
  * backstop (migration 195) so a row created by the email scan, which never opens this
  * form, is not left blank.
  */
+/**
+ * People whose work is only ever LP or HUB, and never a Web department.
+ *
+ * Rahul found rows on the project sheet where Nitin Mishra or Madhav Maheshwari were the
+ * PC/SME or the expert while Service Department said WEB-AU, WEB-UK or WEB-US, and fixed
+ * them by hand on 25 Nov 2026. The department is not cosmetic — it is what the Business
+ * Unit switch splits on and what every per-team total is grouped by — so an LP delivery
+ * filed under WEB-US moves money between two teams' numbers.
+ *
+ * The check is a BLOCK, not a nudge, because the wrong value is invisible once saved: the
+ * row looks complete and only a person who knows who works where can spot it.
+ *
+ * Add somebody here only when they genuinely never take Web work. Aliases exist because
+ * the sheet writes short names ("Manvi", "Nevilson"), and a BARE FIRST NAME is listed
+ * only where exactly one person in the book carries it — same trap as the NBD list, where
+ * three Kaustubhs and two Rahuls make a bare first name dangerous. There is one Madhav
+ * and one Nitin today; check before adding another.
+ */
+export const LP_HUB_ONLY: ReadonlyArray<{ name: string; aliases: readonly string[] }> = [
+  { name: 'Nitin Mishra', aliases: ['nitin mishra', 'nitin'] },
+  { name: 'Madhav Maheshwari', aliases: ['madhav maheshwari', 'madhav'] },
+]
+
+/** The LP/HUB-only person among these names, if any. */
+export const lpHubOnlyPerson = (...who: (string | null | undefined)[]): string | null => {
+  for (const w of who) {
+    const t = (w || '').trim().toLowerCase()
+    if (!t) continue
+    const hit = LP_HUB_ONLY.find(p => p.aliases.includes(t))
+    if (hit) return hit.name
+  }
+  return null
+}
+
+/**
+ * null when the row is fine; otherwise the one-line reason it is not.
+ *
+ * A blank department is NOT a conflict — that is a missing field, and it already has its
+ * own check. This one only fires when a department is set and contradicts the person.
+ */
+export const deptPersonConflict = (
+  dept: string | null | undefined, ...who: (string | null | undefined)[]
+): string | null => {
+  const person = lpHubOnlyPerson(...who)
+  if (!person) return null
+  const d = (dept || '').trim()
+  if (!d || d === 'LP' || d === 'HUB') return null
+  return `${person} works LP/HUB — ${d} is wrong for this row`
+}
+
 export const DEPT_EXPERT_DEFAULT: Record<string, string> = {
   'WEB-AU': 'KS',
   'WEB-UK': 'Rahul Kumar',

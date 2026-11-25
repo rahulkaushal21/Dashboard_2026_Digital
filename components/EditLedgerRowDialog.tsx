@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { saveLedgerRow, getPickList, getContractors, listDirectory, listAms, canonicalAm, getSheetVocab, CONTRACTOR, type LedgerRow, type Contractor, type DirectoryMember, type AmMember, type SheetVocab } from '@/lib/supabase'
-import { CURRENCIES, SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK, normBusinessType } from '@/lib/deal-fields'
+import { CURRENCIES, SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK, normBusinessType , deptPersonConflict } from '@/lib/deal-fields'
 
 // The columns somebody fills in AFTER the deal is won.
 //
@@ -179,7 +179,14 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
   const contractorMissing = expert === CONTRACTOR && claimsCost && !contractorName.trim()
     && (outsource !== origCost || origContractor !== '')
 
+  // The same rule the confirm dialog runs: an LP/HUB-only person cannot sit on a Web
+  // department. Checked here too because THIS is the dialog the correction was made in —
+  // the rows Rahul fixed on 25 Nov 2026 were already on the sheet, so a gate that only
+  // guards new confirmations would let the next edit put one back.
+  const deptClash = deptPersonConflict(serviceDept, pmOwner, expert)
+
   const save = async () => {
+    if (deptClash) { setError(`${deptClash}. Set the department to LP or HUB, or put the right person on it.`); return }
     if (contractorMissing) {
       setError('Choose the contractor before saving a cost against them. A contractor cost with no name on it cannot be reconciled against anybody’s invoice.')
       return
@@ -402,8 +409,10 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
         </div>
 
         <div className="px-5 py-3 border-t border-mav-line flex items-center justify-between gap-3">
-          <span className={`text-[11px] ${contractorMissing ? 'text-red-300' : 'text-mav-fg/60'}`}>
-            {contractorMissing
+          <span className={`text-[11px] ${contractorMissing || deptClash ? 'text-red-300' : 'text-mav-fg/60'}`}>
+            {deptClash
+              ? `${deptClash} — set LP or HUB, or change the person.`
+              : contractorMissing
               ? 'Name the contractor before saving this cost.'
               : fixed
               ? 'Value, owner, month, AM and agency come from the old sheet and are changed there.'
@@ -411,7 +420,7 @@ export default function EditLedgerRowDialog({ row, onClose, onSaved }: {
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="rounded-full border border-mav-yellow/50 text-mav-yellow hover:bg-mav-yellow/10 px-3 py-1.5 text-xs transition-colors">Cancel</button>
-            <button onClick={save} disabled={saving || contractorMissing}
+            <button onClick={save} disabled={saving || contractorMissing || !!deptClash}
               className="rounded-full bg-mav-fill text-black font-semibold px-4 py-2 text-sm disabled:opacity-40 hover:brightness-95 transition">
               {saving ? 'Saving…' : 'Save'}
             </button>
