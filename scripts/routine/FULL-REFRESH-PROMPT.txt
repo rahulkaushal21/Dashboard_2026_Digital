@@ -372,6 +372,16 @@ Vendors never tracked: granth.info, granth.in, atharvasystem.com.
     count (Terrace Boating: Maitri's deal, Nitin and Madhav appear elsewhere in the window). Only fill a BLANK
     department; never overwrite one a person set. A deal labelled LP/HUB and not yet Won is in LP/HUB even
     with a Web PM on it (Andersondd, PM Gagandeep Singh; migration 193). (Pratik, 19 Nov 2026.)
+  - The CLIENT does not decide the department; the deal's owner does. Rahul, 25 Nov 2026: "few clients
+    are in both the Web and LP/Hub department, it's just divided by who owns the deal - Nitin or Madhav, or
+    other PMs which are under Rahul Kaushal". So a client's booked history is NOT evidence of a new deal's
+    department, and this is how the rule above was broken six times in Oct-Nov 2026: every one of those rows
+    had Nitin or Madhav as PM and a Web department taken from the client. Dare to be Different has three
+    booked WEB-UK lines AND a HubSpot schema job of Nitin's, and both are correct. The DATABASE now refuses
+    the combination (migration 197, dept_person_rules + trigger check_dept_person on opportunities), so an
+    insert or update that puts Nitin or Madhav on a WEB-* row fails with "Nitin Mishra works LP/HUB -
+    WEB-US is wrong for this row". That is the rule biting, not a bug: fix the department, or put the right
+    PM on it. LP or HUB between the two is decided by the work, as above.
   - Refresh the department copy before you finish. The Opportunities page reads opportunity_dept_mv,
     which only refreshes at :52 each hour, so a deal you create is missing from it and shows under All but
     under neither LP/HUB nor WEB until then. After step 7, run

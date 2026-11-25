@@ -130,6 +130,16 @@ export const LP_HUB_ONLY: ReadonlyArray<{ name: string; aliases: readonly string
   { name: 'Madhav Maheshwari', aliases: ['madhav maheshwari', 'madhav'] },
 ]
 
+/**
+ * The departments an LP/HUB-only person's deals may sit in.
+ *
+ * Rahul, 25 Nov 2026: "few clients are in both the Web and LP/Hub department, it's just
+ * divided by who owns the deal". So the CLIENT does not decide the department and their
+ * history must not be used to set it — Dare to be Different has three booked WEB-UK
+ * lines and an open HubSpot schema job owned by Nitin Mishra, and both are right.
+ */
+export const LP_HUB_DEPTS = ['LP', 'HUB'] as const
+
 /** The LP/HUB-only person among these names, if any. */
 export const lpHubOnlyPerson = (...who: (string | null | undefined)[]): string | null => {
   for (const w of who) {

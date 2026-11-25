@@ -302,7 +302,19 @@ export default function ConfirmDealDialog({ deal, onClose, onConfirmed, alsoBill
       fill('serviceType', serviceType, d.service_type, setServiceType)
       fill('deliveryType', deliveryType, d.delivery_type, setDeliveryType)
       fill('technology', technology, d.technology, setTechnology)
-      fill('serviceDept', serviceDept, d.service_dept, setServiceDept)
+      // Service department comes from the client's history EXCEPT where the deal's owner
+      // settles it. A client can sit in both Web and LP/HUB — Rahul, 25 Nov 2026: "few
+      // clients are in both, it's just divided by who owns the deal" — so for a deal
+      // owned by somebody who only works LP/HUB, the client's last Web project is the
+      // wrong answer, confidently given. Dare to be Different has three booked WEB-UK
+      // lines and an open HubSpot job of Nitin's; prefilling WEB-UK there is how one of
+      // these gets saved wrong without anybody typing it.
+      //
+      // Their own default is used instead, and only when the field is still empty — the
+      // picker is open and a person can still choose.
+      if (!deptPersonConflict(d.service_dept, pmOwner || d.pc_sme, expert)) {
+        fill('serviceDept', serviceDept, d.service_dept, setServiceDept)
+      }
       fill('projectType', projectType, d.project_type, setProjectType)
       fill('salesPerson', salesPerson, d.sales_person, setSalesPerson)
       fill('pmOwner', pmOwner, d.pc_sme, setPmOwner)
