@@ -32,9 +32,15 @@ export const SERVICE_DEPTS = ['LP', 'HUB', 'WEB-AU', 'WEB-UK', 'WEB-US', 'AI & A
  */
 export const CURRENCIES = ['USD', 'AUD', 'NZD', 'GBP', 'EUR', 'CAD', 'SGD', 'INR', 'AED'] as const
 
-/** Engagement model — what kind of work it is. Spelling matches the revenue sheet. */
+/**
+ * Engagement model — what kind of work it is.
+ *
+ * 'Maintenance', not the sheet's old 'Maintanance': the misspelling was corrected everywhere
+ * on 26 Nov 2026 (migration 198), in the data and in this list. Do not put it back to match
+ * the Google Sheet's own dropdown; fix that dropdown instead.
+ */
 export const PROJECT_TYPES = [
-  'New Development', 'Ad-hoc', 'Maintanance', 'Additional Pages',
+  'New Development', 'Ad-hoc', 'Maintenance', 'Additional Pages',
   'Dedicated', 'Partial Dedicated', 'Ballpark',
 ] as const
 

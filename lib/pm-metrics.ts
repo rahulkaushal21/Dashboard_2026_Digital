@@ -27,7 +27,7 @@ export const isOpen = (o: Opportunity) => !isWon(o) && !isLost(o)
  *
  * NOT the Business Type column — that marks new *client* vs repeat client, and
  * only 74 rows carry "New" against 432 here. The other Project Types (Ad-hoc,
- * Maintanance, Additional Pages, Ballpark, Dedicated) are existing-account work
+ * Maintenance, Additional Pages, Ballpark, Dedicated) are existing-account work
  * and are excluded, which is what the Q2C% for PM tab does.
  */
 export const isNewDevQuote = (q: Quote) => norm(q.project_type).includes('new')

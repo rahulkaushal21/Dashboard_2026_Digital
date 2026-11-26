@@ -376,6 +376,11 @@ or a portal rather than mail.
 >     so an insert or update that puts Nitin or Madhav on a `WEB-*` row fails with "Nitin Mishra works LP/HUB
 >     — WEB-US is wrong for this row". That is the rule biting, not a bug: fix the department, or put the
 >     right PM on it. LP or HUB between the two is decided by the work, as above.
+>   - **Project type is spelled `Maintenance`.** The old sheet's `Maintanance` was a misspelling, corrected in
+>     every table, the ledger and the dropdowns on 26 Nov 2026 (migration 198, Pratik). Write `Maintenance`, never
+>     the old word, on any row you create, and do not copy a project type out of an old sheet line without
+>     checking the spelling. The valid list is: New Development, Ad-hoc, Maintenance, Additional Pages, Dedicated,
+>     Partial Dedicated, Ballpark.
 >   - **Refresh the department copy before you finish.** The Opportunities page reads `opportunity_dept_mv`,
 >     which only refreshes at :52 each hour, so a deal you create is missing from it and shows under All but
 >     under neither LP/HUB nor WEB until then. After step 7, run

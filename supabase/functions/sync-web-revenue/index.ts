@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
     // what a client buys, not just which department billed them.
     const cTech = idx(["technology"]);
     // The sheet's "Project Type" — Dedicated / Partial Dedicated / Ad-hoc /
-    // New Development / Maintanance / Additional Pages. `bookings` already
+    // New Development / Maintenance / Additional Pages. `bookings` already
     // carried this; web_revenue needs it so the Clients page can split a
     // client's billing by engagement model against the same numbers every
     // other page shows.

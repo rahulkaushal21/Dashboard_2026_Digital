@@ -14,7 +14,7 @@ import {
 // Colours for the engagement-model split, shared with the client tab.
 const MODEL_COLOR: Record<string, string> = {
   'Dedicated': '#FFDB2D', 'Partial Dedicated': '#f59e0b', 'New Development': '#3b82f6',
-  'Maintanance': '#10b981', 'Ad-hoc': '#a855f7', 'Additional Pages': '#0284c7', 'Change Request': '#f43f5e',
+  'Maintenance': '#10b981', 'Ad-hoc': '#a855f7', 'Additional Pages': '#0284c7', 'Change Request': '#f43f5e',
 }
 const colorFor = (m: string) => MODEL_COLOR[m] || '#9ca3af'
 
