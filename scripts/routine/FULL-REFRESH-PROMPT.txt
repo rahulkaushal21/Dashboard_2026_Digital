@@ -389,6 +389,9 @@ Vendors never tracked: granth.info, granth.in, atharvasystem.com.
     Partial Dedicated, Ballpark.
     The Web, Hub & LP tab's old lines are written from the sheet_raw capture, so a spelling fix has to be made
     there too (migration 199), then sheet-writer forced; the writer rewrites only the rows that differ.
+    Since migration 200 the database itself corrects any known misspelling of Maintenance on the way in, in
+    every table and in the capture, so a re-run or an old import cannot bring it back (trigger
+    zz_fix_maintenance_spelling). Do not remove it.
   - Refresh the department copy before you finish. The Opportunities page reads opportunity_dept_mv,
     which only refreshes at :52 each hour, so a deal you create is missing from it and shows under All but
     under neither LP/HUB nor WEB until then. After step 7, run
