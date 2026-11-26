@@ -13,7 +13,7 @@ import { isAwaitingDelivery } from '@/lib/actions'
 import MultiSelect from '@/components/MultiSelect'
 import ColumnPicker, { useColumns, type ColumnDef } from '@/components/ColumnPicker'
 import Link from 'next/link'
-import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getLastOkSync, getSheetVocab, type SheetVocab, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion } from '@/lib/supabase'
+import { getProjectLedger, copyRowToMonth, saveLedgerRow, canEditLedgerRow, getDirectoryMember, getLastOkSync, getSheetVocab, type SheetVocab, type DirectoryMember, type SheetRowEdits, type LedgerRow, deleteLedgerRow, restoreLedgerRow, getLedgerDeletions, getPossibleDoubleCounts, type DoubleCount, clearReadCache, ledgerFingerprint, type LedgerDeletion, SHEET_PUSHED } from '@/lib/supabase'
 import { SERVICE_DEPTS, PROJECT_TYPES, GEOS, GEO_SHEET_LABEL, VOCAB_FALLBACK, countsAsRevenue } from '@/lib/deal-fields'
 import EditLedgerRowDialog from '@/components/EditLedgerRowDialog'
 import { getStoredProfile, currentEmail, isManagerView } from '@/lib/access'
@@ -271,6 +271,19 @@ export default function ProjectLedger() {
   const [target, setTarget] = useState(nextMonth)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
+  // What happened to the Google Sheet after the last change. Kept apart from `status`, which
+  // says what happened to the change itself, so one message never hides the other.
+  const [sheetNote, setSheetNote] = useState('')
+  useEffect(() => {
+    const heard = (e: Event) => {
+      const how = (e as CustomEvent<string>).detail
+      setSheetNote(how === 'sent' ? 'Sending to the Google Sheet now. It should appear within about a minute.'
+        : how === 'queued' ? 'The Google Sheet is being written. Your change follows in the next few minutes.'
+        : 'Saved. It could not be sent to the Google Sheet now, so it goes with the next scheduled update at :17 or :47.')
+    }
+    window.addEventListener(SHEET_PUSHED, heard)
+    return () => window.removeEventListener(SHEET_PUSHED, heard)
+  }, [])
   const [errors, setErrors] = useState<string[]>([])
   // The last removal, said out loud. The row leaves the table the moment the reload
   // lands, which on a quiet page is the same as nothing having happened — the prompt
@@ -929,6 +942,7 @@ export default function ProjectLedger() {
       )}
 
       {status && <div className="mb-3 rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-2 text-xs text-green-300">{status}</div>}
+      {sheetNote && <div role="status" className="mb-3 rounded-lg border border-mav-yellow/50 bg-mav-yellow/10 px-3 py-2 text-xs text-mav-fg/85">{sheetNote}</div>}
       {removed && (
         <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 flex flex-wrap items-center gap-x-3 gap-y-1">
           <span><span className="font-semibold">Removed:</span> {removed.what}. It no longer counts anywhere; the hourly writer marks it Deleted in the spreadsheet.</span>

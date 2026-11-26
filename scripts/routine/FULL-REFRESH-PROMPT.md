@@ -32,6 +32,10 @@ working as designed, not an incident. Read this table before writing a word abou
 (:17/:47), `sql-appscript` and `esc-appscript` (hourly at :49 — these two are the Apps Scripts
 that still exist), `lnd-sync` (hourly at :23), `rebuild-clients-hourly` (:22).
 
+**Extra `sheet-writer` runs outside :17/:47 are normal since 26 Nov 2026** (migration 201): a Project Sheet edit
+calls `request_sheet_push()` and the sheet is written straight away. `sheet-push-flush` (every minute) only sends a
+push that had to wait for a running writer. Do not report either as a fault.
+
 Disabled pg_cron jobs: 1, 2, 7, 10. **DELETED (gone from `cron.job` entirely): 3 and 5**,
 unscheduled 7 Oct 2026 — see step 1. That leaves 12 active. Confirm with
 `select jobid, jobname, active from cron.job order by jobid;` rather than guessing.

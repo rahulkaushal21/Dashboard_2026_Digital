@@ -1990,6 +1990,7 @@ export async function deleteLedgerRow(rowKey: string, fingerprint: string, reaso
   const { error } = await supabase.rpc('delete_ledger_row', {
     p_row_key: rowKey, p_fingerprint: fingerprint, p_reason: reason || null,
   })
+  if (!error) void requestSheetPush()
   return error ? { ok: false, error: error.message } : { ok: true }
 }
 /**
@@ -2007,6 +2008,7 @@ export async function getLedgerDeletions(): Promise<LedgerDeletion[]> {
 export async function restoreLedgerRow(rowKey: string): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase not configured' }
   const { error } = await supabase.rpc('restore_ledger_row', { p_row_key: rowKey })
+  if (!error) void requestSheetPush()
   return error ? { ok: false, error: error.message } : { ok: true }
 }
 
@@ -2374,6 +2376,7 @@ export async function copyRowToMonth(source: string, id: number, month: string, 
     const m = /still missing:\s*(.+)$/.exec(error.message)
     return { error: error.message, missing: m ? m[1].split(',').map(x => x.trim()) : undefined }
   }
+  void requestSheetPush()
   return { id: Number(data) }
 }
 
@@ -2814,8 +2817,34 @@ export async function updateSheetRowFields(rowIndex: number, f: SheetRowEdits): 
   return error ? { ok: false, error: error.message } : { ok: true }
 }
 
+/** Fired after a project-sheet change is on its way to the Google Sheet, so the page can say so. */
+export const SHEET_PUSHED = 'sheet-pushed'
+
+/**
+ * Ask for the Google Sheet to be written now rather than at the next :17 or :47.
+ *
+ * Called after a project-sheet change has saved, and only then. The database decides whether to
+ * send it at once or hold it for the run already going (migration 201), because two runs at the
+ * same moment could add the same new line twice. A push that fails costs nothing but time: the
+ * change is already saved and the scheduled run will carry it, so this never fails the save.
+ */
+export async function requestSheetPush(): Promise<void> {
+  if (!supabase) return
+  const { data, error } = await supabase.rpc('request_sheet_push')
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(SHEET_PUSHED, { detail: error ? 'failed' : String(data) }))
+  }
+}
+
 /** Save to whichever side of the ledger this row came from. */
 export async function saveLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
+  const res = await writeLedgerRow(row, f)
+  // Not awaited: the save is done, and the person should not wait on Google.
+  if (res.ok) void requestSheetPush()
+  return res
+}
+
+async function writeLedgerRow(row: LedgerRow, f: SheetRowEdits): Promise<{ ok: boolean; error?: string }> {
   if (row.source === 'raw') {
     // confirmed_on is dropped, not refused: the dialog shows it read-only on a sheet line.
     const { local_value, currency, pm_owner, month, sales_person, company_name, confirmed_on: _ignored, ...rest } = f
