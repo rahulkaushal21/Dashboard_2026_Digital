@@ -515,6 +515,33 @@ or a portal rather than mail.
 > flag was a stale false positive and rejected that twice in half an hour — that is an
 > escalation regardless of whether we believe the site is clean.
 >
+> **6b. Cross-sell — judge it in the SAME pass as the mail, every run.** Cross Sell is the
+> one page nothing fills by itself. `cross_sells` is hand-written on purpose (migration 176:
+> no column anywhere says "a PM sold this", and joining "we mailed them, then they bought"
+> credits a campaign with every retainer that was already running). The consequence is that
+> **a pitch nobody writes down is a pitch the page says never happened.** All 38 rows on it
+> were typed in one sitting on 18 Nov 2026 and it stood still for the nine days after. This
+> step exists to stop that.
+>   - **While you are reading mail in steps 3 and 4, flag PM-opened pitches as you pass them.**
+>     A mail a PM sent FIRST, to a client who had not asked: an advisory, an audit, a proposal,
+>     a plan, a chase on their own unanswered quote. Write it down in that pass — you are
+>     already in the thread, and nothing will bring you back to it.
+>   - **`cross_sell_queue` is NOT a substitute, and cannot be.** The finder only pairs a PM's
+>     mail with a booking that lands in the 60 days after it, so it can only ever surface
+>     pitches that were BOUGHT. A pitch that was made and not bought — `status='open'`, which
+>     is 11 of the 38 rows on the page today — is invisible to it, and reaches the page only
+>     if you write it while reading the thread. Do not report an empty queue as "no cross-sell
+>     this period"; it means no PITCH-THEN-BOOKING pair, which is a different sentence.
+>   - **Clear the queue as well, every run** — see **Cross-sell — clear the queue, every run**
+>     further down this file for the judgement, the three places a row can go, and the retainer
+>     trap that is the whole difficulty. Read it before writing anything.
+>   - **Chase the open ones.** A `status='open'` row older than ~30 days has been answered by
+>     now, one way or the other. Check the thread: booked (move it to closed with the figure),
+>     declined, or gone quiet. Say which in the pulse.
+>   - **Report it in the pulse every run, even when it is nil** — added (closed / open),
+>     dismissed, and queue cleared. "No new cross-sell this run" is the line that tells the
+>     user the step was done rather than skipped.
+>
 > **7. Integrity & dedup sweep (stop refresh-twins).** Fix and report:
 >   - email rows duplicating a sheet deal (same client; delete the email row, sheet wins);
 >   - blank `company_name`; gist saying "Client: unknown"; scrambled enrichment (gist "Client:"
@@ -1088,7 +1115,9 @@ source `gmail-backfill-classify` so the live freshness clock stays clean.
 ## Cross-sell — clear the queue, every run
 
 `cross_sell_queue` is business a PM opened from their OWN mailbox that nobody has judged
-yet. The refresh chain refills it; **you empty it**. The page shows answers, never the
+yet. The refresh chain refills it; **you empty it**. **It is only half the job** — it pairs a
+PM's mail with a booking inside 60 days, so it finds pitches that were BOUGHT and never sees
+a pitch that was not. The unbought ones are caught in step 6b, while the mail is being read. The page shows answers, never the
 queue, so a row left unjudged is simply invisible — it does not sit there looking at
 anybody.
 
@@ -1136,7 +1165,7 @@ unit switch. Judging a row removes it from the queue immediately.
 | Forecast | `web_revenue` + `quotes` (computed in-page) | nothing — live on load |
 | Client-name merges | `client_aliases` kind='merge' | 1 `canonicalise_client_names()` |
 | Freshness clock | `sync_runs` | 8 heartbeat |
-| Cross Sell | `cross_sells` (+ `cross_sell_dismissals`) | this step, from `cross_sell_queue` |
+| Cross Sell | `cross_sells` (+ `cross_sell_dismissals`) | **6b**, while reading the mail — plus the queue step below |
 
 ## Tokens (keep private, never echo)
 sheet-sync `syncWebHubLP_8f3a91` · scan-api `scanApiHub_5d9c31` · ingest `ingestWebHub_a7c2e9`
